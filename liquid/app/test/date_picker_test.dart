@@ -154,16 +154,49 @@ void main() {
     expect(written(), isEmpty);
   });
 
-  testWidgets('⇥ keeps the day and selects the next cell', (tester) async {
+  testWidgets('⇥ writes the day typed and selects the next cell', (
+    tester,
+  ) async {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'r1');
     await key(tester, LogicalKeyboardKey.arrowDown);
     await key(tester, LogicalKeyboardKey.tab);
     expect(picker, findsNothing);
-    expect(written(), isEmpty);
+    expect(written(), [('r1', '2026-11-02')]);
     // The next cell, Category, opens its options.
     await key(tester, LogicalKeyboardKey.enter);
     expect(find.byKey(const Key('select picker')), findsOneWidget);
+  });
+
+  testWidgets('⇥ on a text that is no day stays, saying so', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await open(tester, 'r1');
+    await tester.enterText(inPicker(find.byType(TextField)), 'soon');
+    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.tab);
+    expect(picker, findsOneWidget);
+    expect(kit.inTable(find.text('“soon” is no date.')), findsOneWidget);
+    expect(written(), isEmpty);
+  });
+
+  testWidgets('a click outside writes the day typed, and drops a text that is '
+      'no day', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await open(tester, 'r1');
+    await tester.enterText(inPicker(find.byType(TextField)), '2026-10-15');
+    await tester.pumpAndSettle();
+    await tester.tapAt(const Offset(1300, 850));
+    await tester.pumpAndSettle();
+    expect(picker, findsNothing);
+    expect(written(), [('r1', '2026-10-15')]);
+    await open(tester, 'r2');
+    await tester.enterText(inPicker(find.byType(TextField)), 'soon');
+    await tester.pumpAndSettle();
+    await tester.tapAt(const Offset(1300, 850));
+    await tester.pumpAndSettle();
+    expect(picker, findsNothing);
+    expect(kit.inTable(find.text('“soon” is no date.')), findsNothing);
+    expect(written(), [('r1', '2026-10-15')]);
   });
 
   testWidgets('an empty date cell opens on today\'s month', (tester) async {

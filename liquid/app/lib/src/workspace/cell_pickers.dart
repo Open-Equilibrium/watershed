@@ -298,9 +298,9 @@ DateTime? parseDay(String typed, String locale) {
 }
 
 /// A date cell's picker (approved Table View mockups, section 4): its field holds the day
-/// as typed, a calendar below shows its month. ↑↓ choose the day after or before, ⏎ writes
-/// what is typed, a click on a day writes it, and Clear empties the cell; esc closes it and
-/// keeps the value, ⇥ keeps it and goes on.
+/// as typed, a calendar below shows its month. ↑↓ choose the day after or before, ⏎, ⇥ and
+/// a click outside write what is typed, a click on a day writes it, and Clear empties the
+/// cell; esc closes it and keeps the value.
 class DatePicker extends StatefulWidget {
   const DatePicker({
     super.key,
@@ -509,8 +509,8 @@ class _DatePickerState extends State<DatePicker> {
                         child: Text(
                           DateFormat.yMMMM(widget.locale).format(_month),
                           style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
+                            fontSize: WsMetrics.fsCompact,
+                            fontWeight: WsMetrics.fwMedium,
                           ),
                         ),
                       ),

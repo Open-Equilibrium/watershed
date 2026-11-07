@@ -196,8 +196,9 @@ class CellSelection extends ChangeNotifier {
         .then<void>((_) {}, onError: (Object _) {});
   }
 
-  /// Writes `day` into the selected date cell, or empties it, and closes the picker.
-  void pickDay(DateTime? day) {
+  /// Writes `day` into the selected date cell, or empties it, and closes the picker;
+  /// with `stay`, the selection takes the keys again.
+  void pickDay(DateTime? day, {bool stay = true}) {
     if (_target case (final row, final field, final cell)) {
       final stored = day == null ? null : storedDays.format(day);
       final kept = stored == null
@@ -213,18 +214,28 @@ class CellSelection extends ChangeNotifier {
         );
       }
     }
-    closePick();
+    closePick(stay: stay);
   }
 
   /// ⏎ in a date picker writes the day typed, or empties the cell when nothing is; a text
-  /// that is no day stays, saying so.
-  void enterDay() {
+  /// that is no day stays, saying so, and answers false.
+  bool enterDay({bool stay = true}) {
     final typed = pickText.text;
-    if (typed.trim().isEmpty) return pickDay(null);
     final day = parseDay(typed, days);
-    if (day != null) return pickDay(day);
-    error = '“$typed” is no date.';
-    _changed();
+    if (typed.trim().isNotEmpty && day == null) {
+      error = '“$typed” is no date.';
+      _changed();
+      return false;
+    }
+    pickDay(day, stay: stay);
+    return true;
+  }
+
+  /// A click outside a picker closes it; a date picker writes the day typed first, as
+  /// leaving an editor keeps the edit, and drops a text that is no day.
+  void leavePick() {
+    if (picked?.kind == BridgeFieldKind.date && enterDay(stay: false)) return;
+    closePick(stay: false);
   }
 
   /// Closes the picker and keeps the cell as it is; with `stay`, the selection takes the
@@ -237,8 +248,10 @@ class CellSelection extends ChangeNotifier {
     if (stay) cellsFocus.requestFocus();
   }
 
-  /// ⇥ in the picker keeps the value and selects the next or, going back, previous cell.
+  /// ⇥ in the picker keeps the value and selects the next or, going back, previous cell;
+  /// a date picker writes the day typed first, and one that is no day stays, saying so.
   void tabFromPick(bool back) {
+    if (picked?.kind == BridgeFieldKind.date && !enterDay()) return;
     closePick();
     _tab(back: back);
   }

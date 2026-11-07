@@ -320,7 +320,7 @@ class _TableBlockState extends State<TableBlock> {
           ),
           child: TapRegion(
             groupId: _pick,
-            onTapOutside: (_) => _cells.closePick(stay: false),
+            onTapOutside: (_) => _cells.leavePick(),
             // A click in the picker beside its field keeps the field's keys.
             child: TextFieldTapRegion(
               child: date
