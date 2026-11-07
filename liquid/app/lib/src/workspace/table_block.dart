@@ -169,26 +169,35 @@ class _TableBlockState extends State<TableBlock> {
     ).listen((_) => unawaited(_read()), onError: _report);
   }
 
-  /// The Page's scroll, which moves the Table and so closes what hangs under it.
+  /// The Page's scroll and the window's size, which move the Table and so close what
+  /// hangs under it, as Flutter's menus close.
   ScrollPosition? _pageScroll;
+  Size? _window;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final window = MediaQuery.sizeOf(context);
+    if (_window != null && window != _window) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _moved();
+      });
+    }
+    _window = window;
     final scroll = Scrollable.maybeOf(context)?.position;
     if (scroll == _pageScroll) return;
-    _pageScroll?.removeListener(_pageScrolled);
-    _pageScroll = scroll?..addListener(_pageScrolled);
+    _pageScroll?.removeListener(_moved);
+    _pageScroll = scroll?..addListener(_moved);
   }
 
-  void _pageScrolled() {
+  void _moved() {
     if (_panel.isShowing) _panel.hide();
     _cells.closePick();
   }
 
   @override
   void dispose() {
-    _pageScroll?.removeListener(_pageScrolled);
+    _pageScroll?.removeListener(_moved);
     // A composition still open is written as it stands.
     _write();
     _state.finishing.remove(_typed);
@@ -245,9 +254,9 @@ class _TableBlockState extends State<TableBlock> {
     }
   }
 
-  /// A select cell's picker, under the cell, which a click outside closes.
+  /// A select cell's picker, under the cell or above it, which a click outside closes.
   final _pick = OverlayPortalController();
-  final _pickAnchor = LayerLink();
+  final _pickCell = GlobalKey();
 
   Future<String> _addOption(BridgeField field, String name, int color) async {
     final added = await widget.views.write(
@@ -267,27 +276,36 @@ class _TableBlockState extends State<TableBlock> {
   Widget _picker(BuildContext context) {
     final field = _cells.picked;
     if (field == null) return const SizedBox.shrink();
-    return Align(
-      alignment: Alignment.topLeft,
-      child: CompositedTransformFollower(
-        link: _pickAnchor,
-        showWhenUnlinked: false,
-        targetAnchor: Alignment.bottomLeft,
-        offset: const Offset(0, WsMetrics.space1),
-        child: TapRegion(
-          groupId: _pick,
-          onTapOutside: (_) => _cells.closePick(stay: false),
-          // A click in the picker beside its filter keeps the filter's keys.
-          child: TextFieldTapRegion(
-            child: SelectPicker(
-              field: field,
-              text: _cells.pickText,
-              onPick: _cells.pick,
-              onCreate: _cells.create,
-              onClose: _cells.closePick,
-              onTab: _cells.tabFromPick,
-              onKeys: (keys) => _cells.pickKeys = keys,
-            ),
+    final cell = _pickCell.currentContext?.findRenderObject() as RenderBox?;
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (cell == null || !cell.hasSize || overlay == null) {
+      // The cell takes its place in this frame; the picker then hangs from it.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() {});
+      });
+      return const SizedBox.shrink();
+    }
+    return CustomSingleChildLayout(
+      delegate: PickerLayout(
+        MatrixUtils.transformRect(
+          cell.getTransformTo(overlay),
+          Offset.zero & cell.size,
+        ),
+      ),
+      child: TapRegion(
+        groupId: _pick,
+        onTapOutside: (_) => _cells.closePick(stay: false),
+        // A click in the picker beside its filter keeps the filter's keys.
+        child: TextFieldTapRegion(
+          child: SelectPicker(
+            field: field,
+            text: _cells.pickText,
+            onPick: _cells.pick,
+            onCreate: _cells.create,
+            onClose: _cells.closePick,
+            onTab: _cells.tabFromPick,
+            onKeys: (keys) => _cells.pickKeys = keys,
           ),
         ),
       ),
@@ -773,10 +791,7 @@ class _TableBlockState extends State<TableBlock> {
               groupId: _pick,
               // Nor does it take the keys from the picker's filter.
               child: TextFieldTapRegion(
-                child: CompositedTransformTarget(
-                  link: _pickAnchor,
-                  child: tapped,
-                ),
+                child: KeyedSubtree(key: _pickCell, child: tapped),
               ),
             );
           }

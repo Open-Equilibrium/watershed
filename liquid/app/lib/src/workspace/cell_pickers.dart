@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -55,7 +57,10 @@ class SelectPicker extends StatefulWidget {
 class _SelectPickerState extends State<SelectPicker> {
   TextEditingController get _text => widget.text;
   late final _focus = FocusNode(debugLabel: 'Select picker', onKeyEvent: _key);
+  final _list = ScrollController();
   var _chosen = 0;
+
+  static const _itemHeight = 30.0;
 
   @override
   void initState() {
@@ -68,13 +73,27 @@ class _SelectPickerState extends State<SelectPicker> {
     });
   }
 
-  void _filtered() => setState(() => _chosen = 0);
+  void _filtered() => _choose(0);
+
+  /// Chooses the option at `index` and scrolls the list to keep it in view.
+  void _choose(int index) {
+    setState(() => _chosen = index);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_list.hasClients) return;
+      final position = _list.position;
+      final top = _chosen * _itemHeight;
+      final bottom = top + _itemHeight - position.viewportDimension;
+      if (top < position.pixels) position.jumpTo(top);
+      if (bottom > position.pixels) position.jumpTo(bottom);
+    });
+  }
 
   @override
   void dispose() {
     _text.removeListener(_filtered);
     widget.onKeys?.call(null);
     _focus.dispose();
+    _list.dispose();
     super.dispose();
   }
 
@@ -108,7 +127,7 @@ class _SelectPickerState extends State<SelectPicker> {
       case LogicalKeyboardKey.arrowDown || LogicalKeyboardKey.arrowUp:
         if (_count == 0) break;
         final by = event.logicalKey == LogicalKeyboardKey.arrowDown ? 1 : -1;
-        setState(() => _chosen = (_chosen + by) % _count);
+        _choose((_chosen + by) % _count);
       case LogicalKeyboardKey.enter || LogicalKeyboardKey.numpadEnter:
         if (event is! KeyRepeatEvent) _take(_chosen);
       case LogicalKeyboardKey.escape:
@@ -131,7 +150,7 @@ class _SelectPickerState extends State<SelectPicker> {
         behavior: HitTestBehavior.opaque,
         onTap: () => _take(index),
         child: Container(
-          height: 30,
+          height: _itemHeight,
           padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
           alignment: Alignment.centerLeft,
           decoration: BoxDecoration(
@@ -172,55 +191,65 @@ class _SelectPickerState extends State<SelectPicker> {
                 decoration: const InputDecoration.collapsed(hintText: null),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.all(WsMetrics.space2),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      WsMetrics.space3,
-                      WsMetrics.space1,
-                      WsMetrics.space3,
-                      2,
-                    ),
-                    child: Text(
-                      'Choose an option or create one',
-                      style: TextStyle(
-                        fontSize: WsMetrics.fsSmall,
-                        color: ws.textFaint,
+            // The options scroll in the height the picker has.
+            Flexible(
+              child: Padding(
+                padding: const EdgeInsets.all(WsMetrics.space2),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        WsMetrics.space3,
+                        WsMetrics.space1,
+                        WsMetrics.space3,
+                        2,
+                      ),
+                      child: Text(
+                        'Choose an option or create one',
+                        style: TextStyle(
+                          fontSize: WsMetrics.fsSmall,
+                          color: ws.textFaint,
+                        ),
                       ),
                     ),
-                  ),
-                  for (var index = 0; index < options.length; index++)
-                    item(
-                      index,
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: OptionTag(options[index]),
-                      ),
-                    ),
-                  if (_creates)
-                    item(
-                      options.length,
-                      Row(
-                        children: [
-                          const Text('Create'),
-                          const SizedBox(width: WsMetrics.space2),
-                          Flexible(
-                            child: OptionTag(
-                              BridgeOption(
-                                id: '',
-                                name: _typed,
-                                color: nextColor(widget.field),
+                    Flexible(
+                      child: ListView.builder(
+                        controller: _list,
+                        shrinkWrap: true,
+                        itemExtent: _itemHeight,
+                        itemCount: _count,
+                        itemBuilder: (context, index) => index < options.length
+                            ? item(
+                                index,
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: OptionTag(options[index]),
+                                ),
+                              )
+                            : item(
+                                index,
+                                Row(
+                                  children: [
+                                    const Text('Create'),
+                                    const SizedBox(width: WsMetrics.space2),
+                                    Flexible(
+                                      child: OptionTag(
+                                        BridgeOption(
+                                          id: '',
+                                          name: _typed,
+                                          color: nextColor(widget.field),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
-                          ),
-                        ],
                       ),
                     ),
-                ],
+                  ],
+                ),
               ),
             ),
           ],
@@ -228,4 +257,41 @@ class _SelectPickerState extends State<SelectPicker> {
       ),
     );
   }
+}
+
+/// Places a select cell's picker under the cell, or above it when only there it fits,
+/// in the window's height; the picker's list scrolls in what it gets.
+class PickerLayout extends SingleChildLayoutDelegate {
+  PickerLayout(this.cell);
+
+  /// The cell, where the picker's overlay lays it out.
+  final Rect cell;
+
+  static const _gap = WsMetrics.space1;
+  static const _margin = WsMetrics.space2;
+
+  double _below(Size window) => window.height - cell.bottom - _gap - _margin;
+  double get _above => cell.top - _gap - _margin;
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
+      BoxConstraints.loose(
+        Size(
+          constraints.maxWidth,
+          math.max(0, math.max(_below(constraints.biggest), _above)),
+        ),
+      );
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) {
+    final below = _below(size);
+    final above = childSize.height > below && _above > below;
+    return Offset(
+      math.max(0, math.min(cell.left, size.width - childSize.width)),
+      above ? cell.top - _gap - childSize.height : cell.bottom + _gap,
+    );
+  }
+
+  @override
+  bool shouldRelayout(PickerLayout old) => old.cell != cell;
 }

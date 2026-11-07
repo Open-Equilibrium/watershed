@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 
 import 'table_kit.dart';
@@ -197,4 +198,73 @@ void main() {
       expect(chosen(), [('r1', 'home')]);
     },
   );
+
+  testWidgets(
+    'many options scroll inside the window and ↓ keeps the chosen in view',
+    (tester) async {
+      await kit.show(tester, [
+        TablePart(
+          expenses,
+          fields: [
+            for (final field in expenseFields)
+              field.id == 'category'
+                  ? BridgeField(
+                      id: 'category',
+                      name: 'Category',
+                      kind: BridgeFieldKind.select,
+                      options: [
+                        for (var number = 1; number <= 60; number++)
+                          BridgeOption(
+                            id: 'o$number',
+                            name: 'Option $number',
+                            color: number % 10,
+                          ),
+                      ],
+                    )
+                  : field,
+          ],
+        ),
+      ]);
+      await open(tester, 'r1');
+      final window = tester.getRect(find.byType(MaterialApp));
+      expect(window.contains(tester.getRect(picker).bottomLeft), isTrue);
+      for (var step = 0; step < 39; step++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      }
+      await tester.pumpAndSettle();
+      final chosenRect = tester.getRect(inPicker(find.text('Option 40')));
+      expect(tester.getRect(picker).contains(chosenRect.center), isTrue);
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(chosen(), [('r1', 'o40')]);
+    },
+  );
+
+  testWidgets(
+    'a select cell near the window bottom opens its options above it',
+    (tester) async {
+      await kit.show(tester, [TablePart(expenses)]);
+      final bottom = tester.getRect(cell('r1', 'category')).bottom;
+      await tester.binding.setSurfaceSize(Size(1400, bottom + 40));
+      await tester.pumpAndSettle();
+      await open(tester, 'r1');
+      final rect = tester.getRect(picker);
+      expect(
+        rect.bottom,
+        lessThanOrEqualTo(tester.getRect(cell('r1', 'category')).top),
+      );
+      expect(rect.top, greaterThanOrEqualTo(0));
+    },
+  );
+
+  testWidgets('resizing the window closes a select cell\'s options', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await open(tester, 'r1');
+    tester.view.physicalSize = tester.view.physicalSize / 2;
+    addTearDown(tester.view.resetPhysicalSize);
+    await tester.pumpAndSettle();
+    expect(picker, findsNothing);
+    expect(chosen(), isEmpty);
+  });
 }
