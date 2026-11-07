@@ -277,7 +277,7 @@ DateFormat shownDays(String locale) => DateFormat.yMMMd(locale);
 /// How the core stores a day (ADR-0242).
 final storedDays = DateFormat('yyyy-MM-dd', 'en_US');
 
-/// The day typed in the person's region's short form, as cells show it, or as the core
+/// The day typed in the person's region's short form, as cells show it or as the core
 /// stores it, with a year of four digits; none for anything else, such as a year of two.
 DateTime? parseDay(String typed, String locale) {
   for (final format in [
