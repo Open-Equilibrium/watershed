@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -138,9 +140,11 @@ void main() {
     WidgetTester tester,
     List<_Part> parts, {
     bool app = false,
+    void Function()? before,
   }) async {
     await tester.binding.setSurfaceSize(const Size(1400, 900));
     fake = FakeWorkspace();
+    before?.call();
     workspace = WorkspaceState(fake);
     await workspace.start();
     page = workspace.open.value!.page;
@@ -172,7 +176,7 @@ void main() {
             name: 'Expenses',
             fields: fields,
           );
-          fake.rows[added.block!] = rows;
+          fake.rows[added.block!] = [...rows];
         case _Unknown(:final boundary):
           final views = fake.views[page] ??= [];
           final at = after == null
@@ -539,5 +543,487 @@ void main() {
       isEmpty,
       reason: 'the run ends at the Table, which is never read as text',
     );
+  });
+
+  Iterable<BridgeMutation> applied(BridgeMutationKind kind) =>
+      fake.applied.where((applied) => applied.kind == kind);
+
+  testWidgets('+ New adds a row after the last one and shows it', (
+    tester,
+  ) async {
+    await show(tester, [
+      _Table([for (var number = 1; number <= 20; number++) _named(number)]),
+    ]);
+    await tester.tap(inTable(find.text('New')));
+    await tester.pumpAndSettle();
+    final add = applied(BridgeMutationKind.addRow).single;
+    expect((add.last, add.after), (true, null), reason: 'the core places it');
+    final table = fake.views[page]!.single.block;
+    expect(fake.rows[table], hasLength(21));
+    expect(inTable(find.text('21 rows')), findsOneWidget);
+    final rows = tester.widget<ListView>(find.byKey(const Key('table rows')));
+    expect(rows.controller!.offset, rows.controller!.position.maxScrollExtent);
+    expect(rows.controller!.offset, greaterThan(0));
+  });
+
+  testWidgets('+ New in an empty Table adds its first row', (tester) async {
+    await show(tester, [const _Table([])]);
+    expect(inTable(find.textContaining('rows')), findsNothing);
+    await tester.tap(inTable(find.text('New')));
+    await tester.pumpAndSettle();
+    expect(applied(BridgeMutationKind.addRow).single.last, isTrue);
+    expect(inTable(find.text('1 row')), findsOneWidget);
+  });
+
+  final panel = find.byKey(const Key('field panel'));
+
+  testWidgets(
+    '+ in the header adds a field of the chosen kind after the last',
+    (tester) async {
+      await show(tester, [_Table(_expenses)]);
+      await tester.tap(inTable(find.byKey(const Key('add field'))));
+      await tester.pumpAndSettle();
+      expect(panel, findsOneWidget);
+      for (final kind in ['Text', 'Number', 'Select', 'Date', 'Checkbox']) {
+        expect(
+          find.descendant(of: panel, matching: find.text(kind)),
+          findsOneWidget,
+          reason: kind,
+        );
+      }
+      await tester.enterText(
+        find.descendant(of: panel, matching: find.byType(TextField)),
+        'Tip',
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      final added = applied(BridgeMutationKind.addField).single;
+      expect(added.last, isTrue);
+      expect(added.text, 'Tip');
+      expect(added.fieldKind, BridgeFieldKind.number);
+      expect(panel, findsNothing);
+      expect(inTable(find.text('Tip')), findsOneWidget);
+      final sideways = tester
+          .widget<SingleChildScrollView>(
+            inTable(find.byType(SingleChildScrollView)),
+          )
+          .controller!;
+      expect(sideways.offset, greaterThan(0), reason: 'the new field shows');
+      expect(sideways.offset, sideways.position.maxScrollExtent);
+    },
+  );
+
+  testWidgets('a field without a name takes its kind\'s, and a click adds it', (
+    tester,
+  ) async {
+    await show(tester, [_Table(_expenses)]);
+    await tester.tap(inTable(find.byKey(const Key('add field'))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(of: panel, matching: find.text('Date')));
+    await tester.pumpAndSettle();
+    final added = applied(BridgeMutationKind.addField).single;
+    expect(added.text, 'Date');
+    expect(added.fieldKind, BridgeFieldKind.date);
+    expect(panel, findsNothing);
+  });
+
+  testWidgets('esc closes the field panel and adds nothing', (tester) async {
+    await show(tester, [_Table(_expenses)]);
+    await tester.tap(inTable(find.byKey(const Key('add field'))));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(panel, findsNothing);
+    expect(applied(BridgeMutationKind.addField), isEmpty);
+  });
+
+  testWidgets('⏎ pressed again while a field is added adds it once', (
+    tester,
+  ) async {
+    await show(tester, [_Table(_expenses)]);
+    await tester.tap(inTable(find.byKey(const Key('add field'))));
+    await tester.pumpAndSettle();
+    final gate = fake.gate = Completer<void>();
+    fake.gatedKinds = {BridgeMutationKind.addField};
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    fake.gate = null;
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(applied(BridgeMutationKind.addField), hasLength(1));
+  });
+
+  testWidgets(
+    'a refused field keeps the panel open, a click outside closes it',
+    (tester) async {
+      await show(tester, [_Table(_expenses)]);
+      await tester.tap(inTable(find.byKey(const Key('add field'))));
+      await tester.pumpAndSettle();
+      fake.refuseKinds = {BridgeMutationKind.addField};
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(panel, findsOneWidget);
+      expect(workspace.problem.value, isNotNull);
+      await tester.tapAt(const Offset(1300, 850));
+      await tester.pumpAndSettle();
+      expect(panel, findsNothing);
+    },
+  );
+
+  testWidgets('a Table without fields offers + to add one', (tester) async {
+    await show(tester, [_Table(_expenses, fields: const [])]);
+    await tester.tap(inTable(find.byKey(const Key('add field'))));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(applied(BridgeMutationKind.addField).single.last, isTrue);
+    expect(inTable(find.text('Text')), findsOneWidget);
+  });
+
+  testWidgets('two quick + New add both rows last', (tester) async {
+    await show(tester, [_Table(_expenses)]);
+    final gate = fake.gate = Completer<void>();
+    fake.gatedKinds = {BridgeMutationKind.addRow};
+    await tester.tap(inTable(find.text('New')));
+    await tester.pump();
+    await tester.tap(inTable(find.text('New')));
+    await tester.pump();
+    fake.gate = null;
+    gate.complete();
+    await tester.pumpAndSettle();
+    final table = fake.rows[fake.views[page]!.single.block]!;
+    expect(table, hasLength(4));
+    expect(applied(BridgeMutationKind.addRow).map((add) => add.last), [
+      true,
+      true,
+    ]);
+    expect(table.take(2).map((row) => row.id), ['r1', 'r2']);
+  });
+
+  testWidgets('scrolling a Table sideways closes its field panel', (
+    tester,
+  ) async {
+    await show(tester, [
+      _Table(
+        _expenses,
+        fields: [
+          ..._fields,
+          for (var number = 1; number < 10; number++)
+            BridgeField(
+              id: 'f$number',
+              name: 'Field $number',
+              kind: BridgeFieldKind.text,
+              options: const [],
+            ),
+        ],
+      ),
+    ]);
+    final sideways = tester
+        .widget<SingleChildScrollView>(
+          inTable(find.byType(SingleChildScrollView)),
+        )
+        .controller!;
+    sideways.jumpTo(sideways.position.maxScrollExtent);
+    await tester.pumpAndSettle();
+    await tester.tap(inTable(find.byKey(const Key('add field'))));
+    await tester.pumpAndSettle();
+    expect(panel, findsOneWidget);
+    sideways.jumpTo(0);
+    await tester.pumpAndSettle();
+    expect(panel, findsNothing);
+  });
+
+  testWidgets('a quick second + New shows its own row', (tester) async {
+    await show(tester, [
+      _Table([for (var number = 1; number <= 20; number++) _named(number)]),
+    ]);
+    // The first add's read waits until the second add is on its way.
+    final reads = fake.deferred = [];
+    fake.deferredKinds = {BridgeQueryKind.database};
+    await tester.tap(inTable(find.text('New')));
+    await tester.pump();
+    fake.deferred = null;
+    final gate = fake.gate = Completer<void>();
+    fake.gatedKinds = {BridgeMutationKind.addRow};
+    await tester.tap(inTable(find.text('New')));
+    await tester.pump();
+    for (final read in reads) {
+      read.complete();
+    }
+    await tester.pumpAndSettle();
+    expect(inTable(find.text('21 rows')), findsOneWidget);
+    fake.gate = null;
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(inTable(find.text('22 rows')), findsOneWidget);
+    final rows = tester.widget<ListView>(find.byKey(const Key('table rows')));
+    expect(rows.controller!.offset, (22 - 10) * 34.0);
+  });
+
+  testWidgets('a field removed before it was read leaves + working', (
+    tester,
+  ) async {
+    await show(tester, [_Table(_expenses)]);
+    final table = fake.views[page]!.single.block;
+    final reads = fake.deferred = [];
+    fake.deferredKinds = {BridgeQueryKind.database};
+    Future<void> add() async {
+      await tester.tap(inTable(find.byKey(const Key('add field'))));
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+    }
+
+    await add();
+    // Another device removes it before this one read it.
+    fake.databases[table] = const BridgeDatabase(
+      name: 'Expenses',
+      fields: _fields,
+    );
+    fake.putRows(page, table, [...fake.rows[table]!]);
+    await tester.pump();
+    fake.deferred = null;
+    for (final read in reads) {
+      read.complete();
+    }
+    await tester.pumpAndSettle();
+    await add();
+    expect(workspace.problem.value, isNull);
+    expect(fake.databases[table]!.fields, hasLength(6));
+  });
+
+  testWidgets(
+    'a row removed elsewhere while + New is read leaves + New working',
+    (tester) async {
+      await show(tester, [_Table(_expenses)]);
+      final table = fake.views[page]!.single.block;
+      final reads = fake.deferred = [];
+      fake.deferredKinds = {BridgeQueryKind.database};
+      await tester.tap(inTable(find.text('New')));
+      await tester.pump();
+      // Before this device reads its new row, another one removes the first row.
+      fake.rows[table]!.removeAt(0);
+      fake.deferred = null;
+      for (final read in reads) {
+        read.complete();
+      }
+      await tester.pumpAndSettle();
+      expect(inTable(find.text('2 rows')), findsOneWidget);
+      // A later change, then the other device removes the row this one added.
+      fake.putRows(page, table, [...fake.rows[table]!]);
+      await tester.pumpAndSettle();
+      fake.putRows(page, table, [fake.rows[table]!.first]);
+      await tester.pumpAndSettle();
+      await tester.tap(inTable(find.text('New')));
+      await tester.pumpAndSettle();
+      expect(workspace.problem.value, isNull);
+      expect(fake.rows[table], hasLength(2));
+    },
+  );
+
+  testWidgets(
+    'a field added from a reopened panel is added, and that panel stays',
+    (tester) async {
+      await show(tester, [_Table(_expenses)]);
+      Future<void> open() async {
+        await tester.tap(inTable(find.byKey(const Key('add field'))));
+        await tester.pumpAndSettle();
+      }
+
+      await open();
+      final gate = fake.gate = Completer<void>();
+      fake.gatedKinds = {BridgeMutationKind.addField};
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      await open();
+      fake.gate = null;
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(panel, findsOneWidget, reason: 'the reopened panel stays');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      final fields = fake.databases[fake.views[page]!.single.block]!.fields;
+      expect(fields, hasLength(7));
+    },
+  );
+
+  testWidgets('a field added while another is on its way is added too', (
+    tester,
+  ) async {
+    await show(tester, [_Table(_expenses)]);
+    Future<void> open() async {
+      await tester.tap(inTable(find.byKey(const Key('add field'))));
+      await tester.pumpAndSettle();
+    }
+
+    await open();
+    final gate = fake.gate = Completer<void>();
+    fake.gatedKinds = {BridgeMutationKind.addField};
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    await open();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    fake.gate = null;
+    gate.complete();
+    await tester.pumpAndSettle();
+    final fields = fake.databases[fake.views[page]!.single.block]!.fields;
+    expect(fields, hasLength(7));
+    expect(panel, findsNothing);
+  });
+
+  testWidgets('+, + New and the field kinds are announced as buttons', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await show(tester, [_Table(_expenses)]);
+    expect(
+      tester.getSemantics(inTable(find.byKey(const Key('add field')))),
+      matchesSemantics(label: 'Add field', isButton: true, hasTapAction: true),
+    );
+    expect(
+      tester.getSemantics(inTable(find.text('New'))),
+      matchesSemantics(label: 'New', isButton: true, hasTapAction: true),
+    );
+    await tester.tap(inTable(find.byKey(const Key('add field'))));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getSemantics(
+        find.descendant(of: panel, matching: find.text('Text')),
+      ),
+      matchesSemantics(
+        label: 'Text',
+        isButton: true,
+        hasTapAction: true,
+        hasSelectedState: true,
+        isSelected: true,
+      ),
+    );
+    semantics.dispose();
+  });
+
+  testWidgets(
+    'a row this device added and one removed elsewhere leave the rows '
+    'where the person reads',
+    (tester) async {
+      await show(tester, [
+        _Table([for (var number = 1; number <= 20; number++) _named(number)]),
+      ]);
+      final table = fake.views[page]!.single.block;
+      final reads = fake.deferred = [];
+      fake.deferredKinds = {BridgeQueryKind.database};
+      await tester.tap(inTable(find.text('New')));
+      await tester.pump();
+      // Another device removes a row before this one reads its new one.
+      fake.rows[table]!.removeAt(0);
+      fake.deferred = null;
+      for (final read in reads) {
+        read.complete();
+      }
+      await tester.pumpAndSettle();
+      final rows = tester
+          .widget<ListView>(find.byKey(const Key('table rows')))
+          .controller!;
+      rows.jumpTo(0);
+      await tester.pumpAndSettle();
+      // Later, another device adds a row.
+      fake.putRows(page, table, [...fake.rows[table]!, _named(99)]);
+      await tester.pumpAndSettle();
+      expect(rows.offset, 0, reason: 'the rows stay where the person reads');
+    },
+  );
+
+  testWidgets('the field panel closes when + leaves the view', (tester) async {
+    await show(tester, [_Table(_expenses)]);
+    final table = fake.views[page]!.single.block;
+    await tester.tap(inTable(find.byKey(const Key('add field'))));
+    await tester.pumpAndSettle();
+    expect(panel, findsOneWidget);
+    // Another device adds a field, which pushes + out of view.
+    fake.databases[table] = const BridgeDatabase(
+      name: 'Expenses',
+      fields: [
+        ..._fields,
+        BridgeField(
+          id: 'shop',
+          name: 'Shop',
+          kind: BridgeFieldKind.text,
+          options: [],
+        ),
+      ],
+    );
+    fake.putRows(page, table, [...fake.rows[table]!]);
+    await tester.pumpAndSettle();
+    expect(panel, findsNothing);
+  });
+
+  testWidgets(
+    'a reopened field panel stays while the field it pushes + out with '
+    'is added',
+    (tester) async {
+      await show(tester, [_Table(_expenses)]);
+      Future<void> open() async {
+        await tester.tap(inTable(find.byKey(const Key('add field'))));
+        await tester.pumpAndSettle();
+      }
+
+      await open();
+      final gate = fake.gate = Completer<void>();
+      fake.gatedKinds = {BridgeMutationKind.addField};
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      await open();
+      // The field's change and read arrive before the add's answer.
+      final answered = fake.answered = Completer<void>();
+      fake.gate = null;
+      gate.complete();
+      await tester.pumpAndSettle();
+      fake.answered = null;
+      answered.complete();
+      await tester.pumpAndSettle();
+      expect(panel, findsOneWidget);
+    },
+  );
+
+  testWidgets('a refused field crossed by one added elsewhere closes the panel '
+      'whose + left', (tester) async {
+    await show(tester, [_Table(_expenses)]);
+    final table = fake.views[page]!.single.block;
+    await tester.tap(inTable(find.byKey(const Key('add field'))));
+    await tester.pumpAndSettle();
+    final gate = fake.gate = Completer<void>();
+    fake.gatedKinds = {BridgeMutationKind.addField};
+    fake.refuseKinds = {BridgeMutationKind.addField};
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    // Another device adds a field, which pushes + out of view.
+    fake.databases[table] = const BridgeDatabase(
+      name: 'Expenses',
+      fields: [
+        ..._fields,
+        BridgeField(
+          id: 'shop',
+          name: 'Shop',
+          kind: BridgeFieldKind.text,
+          options: [],
+        ),
+      ],
+    );
+    fake.putRows(page, table, [...fake.rows[table]!]);
+    await tester.pumpAndSettle();
+    fake.gate = null;
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(workspace.problem.value, isNotNull);
+    expect(panel, findsNothing);
   });
 }

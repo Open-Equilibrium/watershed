@@ -9,6 +9,7 @@ import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'field_panel.dart';
 import 'follow.dart';
 import 'page_views.dart';
 import 'windowed_list.dart';
@@ -21,6 +22,9 @@ const _footerHeight = 30.0;
 
 /// The narrowest the first field gets; it takes the width the others leave.
 const _firstWidth = 200.0;
+
+/// The column after the last field, with + for a new one.
+const _addWidth = 40.0;
 
 double _width(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.text => 180,
@@ -77,14 +81,6 @@ String _formats(Locale locale, bool Function(String) exists) {
       'en_US';
 }
 
-IconData _icon(BridgeFieldKind kind) => switch (kind) {
-  BridgeFieldKind.text => LucideIcons.text,
-  BridgeFieldKind.number => LucideIcons.hash,
-  BridgeFieldKind.select => LucideIcons.circleChevronDown,
-  BridgeFieldKind.date => LucideIcons.calendar,
-  BridgeFieldKind.checkbox => LucideIcons.squareCheck,
-};
-
 /// A Table on its Page, as the approved Table View mockups show it: its name, a header of
 /// its fields, its rows, read in windows and scrolling inside a fixed height, and their
 /// count. Fields wider than the reading column scroll sideways with the first field in
@@ -118,6 +114,34 @@ class _TableBlockState extends State<TableBlock> {
     kept: 5,
   );
   final _sideways = ScrollController();
+  final _down = ScrollController();
+
+  /// The field panel + opens, under that +.
+  final _panel = OverlayPortalController();
+  final _plus = LayerLink();
+
+  /// After + New the rows scroll to their end on a read begun once every row add on its
+  /// way returned; the Table starts that read itself, so it holds the rows added.
+  var _rowAdded = false;
+  int _rowsWriting = 0;
+  int _readsAtRowAdd = 0;
+
+  /// The field the last add made, shown once a read holds it.
+  String? _fieldAdded;
+
+  /// The reads started when the last field add returned; a later one without it means
+  /// the field went elsewhere.
+  int _readsAtFieldAdd = 0;
+
+  /// Times the field panel opened, so an add closes only the panel it came from.
+  int _panelOpened = 0;
+
+  /// Field adds on their way; + they push out of view comes back with the scroll to them.
+  int _fieldsWriting = 0;
+
+  /// Whether to scroll to the last row or field once the next build laid it out.
+  var _toLastRow = false;
+  var _toLastField = false;
   StreamSubscription<BridgeChange>? _followed;
 
   /// The name as typed; a name changed elsewhere shows unless the person is typing one.
@@ -145,6 +169,8 @@ class _TableBlockState extends State<TableBlock> {
   void initState() {
     super.initState();
     _rows.addListener(_changed);
+    // A sideways scroll moves + away from the field panel, which closes.
+    _sideways.addListener(_closePanel);
     _name.addListener(_typed);
     _state.finishing.add(_typed);
     _nameFocus.addListener(_left);
@@ -177,13 +203,99 @@ class _TableBlockState extends State<TableBlock> {
     widget.views.caret.removeListener(_takeCaret);
     _rows.dispose();
     _sideways.dispose();
+    _down.dispose();
     _name.dispose();
     _nameFocus.dispose();
     super.dispose();
   }
 
+  void _panelOutOfView() {
+    if (!_panel.isShowing || _fieldsWriting > 0) return;
+    // Checked once laid out, after any scroll to a new field, which brings + back.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_sideways.hasClients) return;
+      final position = _sideways.position;
+      if (position.pixels <= position.maxScrollExtent - _addWidth) {
+        _closePanel();
+      }
+    });
+  }
+
+  void _closePanel() {
+    if (_panel.isShowing && !_showingField) _panel.hide();
+  }
+
+  /// While the Table scrolls to a new field itself, which moves + along with the panel.
+  var _showingField = false;
+
   void _changed() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  /// + New adds a row last, which the core places as it applies the write (ADR-0247),
+  /// and shows it.
+  Future<void> _addRow() async {
+    _rowsWriting++;
+    try {
+      await widget.views.write(
+        mutation(
+          BridgeMutationKind.addRow,
+          page: _page,
+          block: _block,
+          last: true,
+        ),
+        const [],
+      );
+      _rowAdded = true;
+    } on Object catch (error) {
+      _report(error);
+    } finally {
+      _rowsWriting--;
+      _readsAtRowAdd = _reads;
+      if (_rowAdded && _rowsWriting == 0 && mounted) unawaited(_read());
+    }
+  }
+
+  void _togglePanel() {
+    if (_panel.isShowing) return _panel.hide();
+    _panelOpened++;
+    _panel.show();
+  }
+
+  /// Adds a field last (ADR-0247) and shows it once a read holds it; a refused one keeps
+  /// the panel open.
+  Future<void> _addField(String name, BridgeFieldKind kind) async {
+    final opened = _panelOpened;
+    final BridgeApplied added;
+    _fieldsWriting++;
+    try {
+      added = await widget.views.write(
+        mutation(
+          BridgeMutationKind.addField,
+          page: _page,
+          block: _block,
+          text: name,
+          fieldKind: kind,
+          last: true,
+        ),
+        const [],
+      );
+    } finally {
+      _fieldsWriting--;
+      // + may have left the view meanwhile; the header checks again.
+      if (mounted && _panel.isShowing) setState(() {});
+    }
+    if (!mounted) return;
+    if (opened == _panelOpened) _panel.hide();
+    if (_database?.fields.any((field) => field.id == added.field) ?? false) {
+      setState(() => _toLastField = true);
+    } else {
+      // A read begun now holds the field, or it went elsewhere.
+      _fieldAdded = added.field;
+      _readsAtFieldAdd = _reads;
+      unawaited(_read());
+    }
   }
 
   void _report(Object error) {
@@ -269,16 +381,34 @@ class _TableBlockState extends State<TableBlock> {
         query: query(BridgeQueryKind.database, page: _page, block: _block),
       );
       if (!mounted || read != _reads) return;
+      if (_fieldAdded case final field?) {
+        // A read that holds it shows it; one begun after the add without it means the
+        // field went elsewhere, so there is nothing to show.
+        if (answer.database?.fields.any((shown) => shown.id == field) ??
+            false) {
+          _fieldAdded = null;
+          _toLastField = true;
+        } else if (read > _readsAtFieldAdd) {
+          _fieldAdded = null;
+        }
+      }
       if (clean && views.pending(_block) == 0 && sent == views.sent(_block)) {
         _readSent = sent;
         if (!_nameFocus.hasFocus) _show(answer.database?.name ?? '');
       }
       setState(() => _database = answer.database);
     } on Object catch (error) {
+      // What an add made is not shown later by surprise.
+      if (read > _readsAtRowAdd) _rowAdded = false;
+      if (read > _readsAtFieldAdd) _fieldAdded = null;
       _report(error);
       return;
     }
     await _rows.reread();
+    if (mounted && _rowAdded && _rowsWriting == 0 && read > _readsAtRowAdd) {
+      _rowAdded = false;
+      setState(() => _toLastRow = true);
+    }
   }
 
   @override
@@ -289,77 +419,129 @@ class _TableBlockState extends State<TableBlock> {
     final numbers = _formats(locale, NumberFormat.localeExists);
     final days = _formats(locale, DateFormat.localeExists);
     final count = _rows.count ?? 0;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: WsMetrics.space3),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            height: 32,
-            child: Row(
-              children: [
-                Icon(LucideIcons.table, size: 16, color: ws.textFaint),
-                const SizedBox(width: WsMetrics.space3),
-                Expanded(
-                  child: TextField(
-                    controller: _name,
-                    focusNode: _nameFocus,
-                    style: TextStyle(
-                      fontSize: WsMetrics.fsProse,
-                      fontWeight: WsMetrics.fwSemibold,
-                      color: ws.text,
-                    ),
-                    decoration: InputDecoration.collapsed(
-                      hintText: 'Untitled',
-                      hintStyle: TextStyle(color: ws.textFaint),
+    if (_toLastRow || _toLastField) {
+      final (down, sideways) = (_toLastRow, _toLastField);
+      _toLastRow = _toLastField = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        // The rows' end follows from their fixed height.
+        if (down && _down.hasClients) {
+          _down.jumpTo(
+            (count - math.min(count, _shownRows)) * WsMetrics.rowTable,
+          );
+        }
+        if (sideways && _sideways.hasClients) {
+          _showingField = true;
+          _sideways.jumpTo(_sideways.position.maxScrollExtent);
+          _showingField = false;
+        }
+      });
+    }
+    // The field panel opens under +, and clicking it or + keeps it open.
+    return OverlayPortal(
+      controller: _panel,
+      overlayChildBuilder: (context) => Align(
+        alignment: Alignment.topLeft,
+        child: CompositedTransformFollower(
+          link: _plus,
+          showWhenUnlinked: false,
+          targetAnchor: Alignment.bottomRight,
+          followerAnchor: Alignment.topRight,
+          offset: const Offset(0, WsMetrics.space1),
+          child: TapRegion(
+            groupId: _panel,
+            onTapOutside: (_) => _panel.hide(),
+            child: FieldPanel(onAdd: _addField, onClose: _panel.hide),
+          ),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: WsMetrics.space3),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              height: 32,
+              child: Row(
+                children: [
+                  Icon(LucideIcons.table, size: 16, color: ws.textFaint),
+                  const SizedBox(width: WsMetrics.space3),
+                  Expanded(
+                    child: TextField(
+                      controller: _name,
+                      focusNode: _nameFocus,
+                      style: TextStyle(
+                        fontSize: WsMetrics.fsProse,
+                        fontWeight: WsMetrics.fwSemibold,
+                        color: ws.text,
+                      ),
+                      decoration: InputDecoration.collapsed(
+                        hintText: 'Untitled',
+                        hintStyle: TextStyle(color: ws.textFaint),
+                      ),
                     ),
                   ),
-                ),
-              ],
-            ),
-          ),
-          if (database != null)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-              child: Container(
-                foregroundDecoration: BoxDecoration(
-                  border: Border.all(color: ws.border),
-                  borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // A Table may lose all its fields, as when another device removes
-                    // them; its rows still count.
-                    if (database.fields.isNotEmpty)
-                      LayoutBuilder(
-                        builder: (context, constraints) => _grid(
-                          database.fields,
-                          constraints.maxWidth,
-                          NumberFormat.decimalPattern(numbers),
-                          DateFormat.yMMMd(days),
-                        ),
-                      ),
-                    if (count > 0)
-                      Container(
-                        height: _footerHeight,
-                        color: ws.subtle,
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          '${NumberFormat.decimalPattern(numbers).format(count)} '
-                          '${count == 1 ? 'row' : 'rows'}',
-                          style: TextStyle(
-                            fontSize: WsMetrics.fsCompact,
-                            color: ws.textFaint,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
+                ],
               ),
             ),
-        ],
+            if (database != null)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+                child: Container(
+                  foregroundDecoration: BoxDecoration(
+                    border: Border.all(color: ws.border),
+                    borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // A Table may lose all its fields, as when another device removes
+                      // them; its rows still count.
+                      if (database.fields.isEmpty)
+                        Container(
+                          height: _headerHeight,
+                          color: ws.subtle,
+                          alignment: Alignment.centerRight,
+                          child: SizedBox(
+                            width: _addWidth,
+                            child: _AddField(
+                              link: _plus,
+                              panel: _panel,
+                              onTap: _togglePanel,
+                            ),
+                          ),
+                        )
+                      else
+                        LayoutBuilder(
+                          builder: (context, constraints) => _grid(
+                            database.fields,
+                            constraints.maxWidth,
+                            NumberFormat.decimalPattern(numbers),
+                            DateFormat.yMMMd(days),
+                          ),
+                        ),
+                      _NewRow(onTap: () => unawaited(_addRow())),
+                      if (count > 0)
+                        Container(
+                          height: _footerHeight,
+                          color: ws.subtle,
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            '${NumberFormat.decimalPattern(numbers).format(count)} '
+                            '${count == 1 ? 'row' : 'rows'}',
+                            style: TextStyle(
+                              fontSize: WsMetrics.fsCompact,
+                              color: ws.textFaint,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -372,7 +554,10 @@ class _TableBlockState extends State<TableBlock> {
     DateFormat days,
   ) {
     final ws = context.ws;
-    final rest = [for (final field in fields.skip(1)) _width(field.kind)];
+    final rest = [
+      for (final field in fields.skip(1)) _width(field.kind),
+      _addWidth,
+    ];
     final others = rest.fold(0.0, (sum, width) => sum + width);
     final first = math.max(_firstWidth, width - others);
     final widths = [first, ...rest];
@@ -413,6 +598,7 @@ class _TableBlockState extends State<TableBlock> {
       required double height,
       required Color? color,
       required Widget Function(int index) cell,
+      VoidCallback? addOutOfView,
     }) => ListenableBuilder(
       listenable: _sideways,
       builder: (context, _) {
@@ -449,6 +635,7 @@ class _TableBlockState extends State<TableBlock> {
         while (to < widths.length && starts[to] < offset + width) {
           to++;
         }
+        if (to < widths.length) addOutOfView?.call();
         return Stack(
           children: [
             Row(
@@ -486,17 +673,25 @@ class _TableBlockState extends State<TableBlock> {
                 child: line(
                   height: _headerHeight,
                   color: ws.subtle,
-                  cell: (index) => Row(
-                    children: [
-                      Icon(
-                        _icon(fields[index].kind),
-                        size: 14,
-                        color: ws.textFaint,
-                      ),
-                      const SizedBox(width: WsMetrics.space2),
-                      Flexible(child: _text(fields[index].name)),
-                    ],
-                  ),
+                  // The field panel follows +, so it closes once + is out of view.
+                  addOutOfView: _panelOutOfView,
+                  cell: (index) => index == fields.length
+                      ? _AddField(
+                          link: _plus,
+                          panel: _panel,
+                          onTap: _togglePanel,
+                        )
+                      : Row(
+                          children: [
+                            Icon(
+                              fieldKindIcon(fields[index].kind),
+                              size: 14,
+                              color: ws.textFaint,
+                            ),
+                            const SizedBox(width: WsMetrics.space2),
+                            Flexible(child: _text(fields[index].name)),
+                          ],
+                        ),
                 ),
               ),
             ),
@@ -504,6 +699,7 @@ class _TableBlockState extends State<TableBlock> {
               height: math.min(count, _shownRows) * WsMetrics.rowTable,
               child: ListView.builder(
                 key: const Key('table rows'),
+                controller: _down,
                 itemCount: count,
                 itemExtent: WsMetrics.rowTable,
                 itemBuilder: (context, index) {
@@ -521,6 +717,9 @@ class _TableBlockState extends State<TableBlock> {
                       height: WsMetrics.rowTable,
                       color: ws.canvas,
                       cell: (index) {
+                        if (index == fields.length) {
+                          return const SizedBox.shrink();
+                        }
                         final field = fields[index];
                         return Align(
                           alignment: switch (field.kind) {
@@ -544,6 +743,79 @@ class _TableBlockState extends State<TableBlock> {
 
   static Widget _text(String text, {TextStyle? style}) =>
       Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: style);
+}
+
+/// + after the last field, which opens the field panel.
+class _AddField extends StatelessWidget {
+  const _AddField({
+    required this.link,
+    required this.panel,
+    required this.onTap,
+  });
+
+  final LayerLink link;
+  final OverlayPortalController panel;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => CompositedTransformTarget(
+    link: link,
+    child: TapRegion(
+      groupId: panel,
+      child: Semantics(
+        button: true,
+        label: 'Add field',
+        child: GestureDetector(
+          key: const Key('add field'),
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Center(
+            child: Icon(
+              LucideIcons.plus,
+              size: 14,
+              color: context.ws.textMuted,
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+/// + New under the last row, which adds a row there.
+class _NewRow extends StatelessWidget {
+  const _NewRow({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return Semantics(
+      button: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
+          height: WsMetrics.rowTable,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          child: Row(
+            children: [
+              Icon(LucideIcons.plus, size: 14, color: ws.textFaint),
+              const SizedBox(width: WsMetrics.space2),
+              Text(
+                'New',
+                style: TextStyle(
+                  fontSize: WsMetrics.fsCompact,
+                  color: ws.textFaint,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// An option as a colored tag; its color number picks one of the ten tag colors, wrapping.

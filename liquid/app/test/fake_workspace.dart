@@ -59,6 +59,16 @@ class FakeWorkspace implements LiquidWorkspace {
 
   @override
   Future<BridgeApplied> apply({required BridgeMutation mutation}) async {
+    final applied = await _apply(mutation);
+    await answered?.future;
+    return applied;
+  }
+
+  /// Holds each answer after its write applied and its changes went out, until it
+  /// completes, as the bridge may answer after them.
+  Completer<void>? answered;
+
+  Future<BridgeApplied> _apply(BridgeMutation mutation) async {
     if (gatedKinds?.contains(mutation.kind) ?? true) await gate?.future;
     if (delay case final delay?) await Future<void>.delayed(delay());
     if (refuse case final refused?) throw refused;
@@ -211,6 +221,51 @@ class FakeWorkspace implements LiquidWorkspace {
           BridgeResource(kind: BridgeResourceKind.views, page: mutation.page),
         );
         return BridgeApplied(action: _id());
+      case BridgeMutationKind.addRow:
+        final table = rows[mutation.block]!;
+        // The core refuses a row to go after one it does not have.
+        if (mutation.after case final after?
+            when !table.any((row) => row.id == after)) {
+          throw 'not found';
+        }
+        final row = BridgeRow(id: _id(), cells: const []);
+        table.insert(
+          mutation.last
+              ? table.length
+              : mutation.after == null
+              ? 0
+              : table.indexWhere((row) => row.id == mutation.after) + 1,
+          row,
+        );
+        _changed(_blockResource(mutation));
+        return BridgeApplied(action: _id(), row: row.id);
+      case BridgeMutationKind.addField:
+        final database = databases[mutation.block]!;
+        final fields = [...database.fields];
+        if (mutation.after case final after?
+            when !fields.any((field) => field.id == after)) {
+          throw 'not found';
+        }
+        final field = BridgeField(
+          id: _id(),
+          name: mutation.text!,
+          kind: mutation.fieldKind!,
+          options: const [],
+        );
+        fields.insert(
+          mutation.last
+              ? fields.length
+              : mutation.after == null
+              ? 0
+              : fields.indexWhere((field) => field.id == mutation.after) + 1,
+          field,
+        );
+        databases[mutation.block!] = BridgeDatabase(
+          name: database.name,
+          fields: fields,
+        );
+        _changed(_blockResource(mutation));
+        return BridgeApplied(action: _id(), field: field.id);
       case BridgeMutationKind.renameDatabase:
         final database = databases[mutation.block]!;
         databases[mutation.block!] = BridgeDatabase(
