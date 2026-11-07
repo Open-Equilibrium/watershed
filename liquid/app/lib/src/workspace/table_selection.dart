@@ -32,8 +32,10 @@ class CellSelection extends ChangeNotifier {
   final int Function() rowCount;
   final List<BridgeField> Function() fields;
 
-  /// Sets a row's cell of a field.
-  final void Function(BridgeRow row, BridgeField field, BridgeCell cell) write;
+  /// Sets a row's cell of a field; a refused write completes with its error, which the
+  /// Page shows.
+  final Future<void> Function(BridgeRow row, BridgeField field, BridgeCell cell)
+  write;
 
   /// Scrolls a cell, as row and field positions, into view.
   final void Function(int row, int field) reveal;
@@ -179,6 +181,9 @@ class CellSelection extends ChangeNotifier {
 
   void _startEdit(String text) {
     _edited = _target;
+    // A selected cell scrolled out of view comes back to be edited.
+    final (row, field) = selected!;
+    reveal(row, field);
     edit.value = TextEditingValue(
       text: text,
       selection: TextSelection.collapsed(offset: text.length),
@@ -216,7 +221,7 @@ class CellSelection extends ChangeNotifier {
     } else {
       cell = _cell(BridgeCellKind.text, text: typed);
     }
-    if (typed != _shown(field.kind, before)) write(row, field, cell);
+    if (typed != _shown(field.kind, before)) _write(row, field, cell);
     _endEdit(stay: stay);
     return true;
   }
@@ -249,8 +254,17 @@ class CellSelection extends ChangeNotifier {
     final at = (row.id, field.id);
     final checked = !(_ticks[at] ?? cell?.checked ?? false);
     _ticks[at] = checked;
-    write(row, field, _cell(BridgeCellKind.checkbox, checked: checked));
+    write(row, field, _cell(BridgeCellKind.checkbox, checked: checked)).then(
+      (_) {},
+      // A refused tick is forgotten, so the next click flips what is stored.
+      onError: (Object _) {
+        if (_ticks[at] == checked) _ticks.remove(at);
+      },
+    );
   }
+
+  void _write(BridgeRow row, BridgeField field, BridgeCell cell) =>
+      write(row, field, cell).then<void>((_) {}, onError: (Object _) {});
 
   /// Forgets the ticks a read now shows, looking only at the rows read.
   void read(int? Function(String row) rowIndex) =>
@@ -287,11 +301,14 @@ class CellSelection extends ChangeNotifier {
   KeyEventResult _cellKey(FocusNode _, KeyEvent event) {
     if (event is KeyUpEvent) return KeyEventResult.ignored;
     if (editing) {
-      // Typing that comes before the editor takes the keys goes into it.
-      final typed = event.character;
-      if (editFocus.hasFocus || typed == null || !_printable(typed)) {
-        return KeyEventResult.ignored;
+      if (editFocus.hasFocus) return KeyEventResult.ignored;
+      // Until the editor takes the keys, ⏎, ⇥ and esc act on the edit as there, and
+      // typing goes into it.
+      if (_editKey(editFocus, event) == KeyEventResult.handled) {
+        return KeyEventResult.handled;
       }
+      final typed = event.character;
+      if (typed == null || !_printable(typed)) return KeyEventResult.ignored;
       edit.value = TextEditingValue(
         text: edit.text + typed,
         selection: TextSelection.collapsed(offset: edit.text.length + 1),
@@ -324,7 +341,7 @@ class CellSelection extends ChangeNotifier {
         if (event is! KeyRepeatEvent) _toggle(row, field, cell);
       case LogicalKeyboardKey.backspace || LogicalKeyboardKey.delete:
         if (cell != null && cell.kind != BridgeCellKind.empty) {
-          write(row, field, _cell(BridgeCellKind.empty));
+          _write(row, field, _cell(BridgeCellKind.empty));
         }
       default:
         // Typing replaces a text or number cell.

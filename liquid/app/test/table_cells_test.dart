@@ -359,4 +359,38 @@ void main() {
     await tester.pumpAndSettle();
     expect(written().map((write) => write.$3.checked), [true, false, true]);
   });
+
+  testWidgets('an edit of a cell scrolled out of view brings it back', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      TablePart([
+        for (var number = 1; number <= 30; number++) namedRow(number),
+      ]),
+    ]);
+    await tester.tap(cell('r2', 'name'));
+    await tester.pumpAndSettle();
+    final rows = tester
+        .widget<ListView>(find.byKey(const Key('table rows')))
+        .controller!;
+    rows.jumpTo(rows.position.maxScrollExtent);
+    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(editor(), findsOneWidget);
+    tester.testTextInput.enterText('Second');
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(written(), [('r2', 'name', text('Second'))]);
+  });
+
+  testWidgets('a refused tick leaves the next click ticking', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    kit.fake.refuseKinds = {BridgeMutationKind.setCell};
+    await tester.tap(cell('r2', 'paid'));
+    await tester.pumpAndSettle();
+    expect(kit.workspace.problem.value, isNotNull);
+    kit.fake.refuseKinds = {};
+    await tester.tap(cell('r2', 'paid'));
+    await tester.pumpAndSettle();
+    expect(written().single.$3.checked, isTrue);
+  });
 }

@@ -276,21 +276,18 @@ class _TableBlockState extends State<TableBlock> {
     }
   }
 
-  void _setCell(BridgeRow row, BridgeField field, BridgeCell cell) => unawaited(
-    widget.views
-        .write(
-          mutation(
-            BridgeMutationKind.setCell,
-            page: _page,
-            block: _block,
-            row: row.id,
-            field: field.id,
-            cell: cell,
-          ),
-          const [],
-        )
-        .then<void>((_) {}, onError: (Object _) {}),
-  );
+  Future<void> _setCell(BridgeRow row, BridgeField field, BridgeCell cell) =>
+      widget.views.write(
+        mutation(
+          BridgeMutationKind.setCell,
+          page: _page,
+          block: _block,
+          row: row.id,
+          field: field.id,
+          cell: cell,
+        ),
+        const [],
+      );
 
   /// Scrolls a cell into view, below and beside the first field.
   void _reveal(int row, int field) =>
