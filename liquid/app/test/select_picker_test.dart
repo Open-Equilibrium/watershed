@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -125,5 +126,38 @@ void main() {
           .text,
       'ho',
     );
+  });
+
+  testWidgets(
+    'a second click on the picked cell leaves the options the keys',
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+    (tester) async {
+      await kit.show(tester, [TablePart(expenses)]);
+      await open(tester, 'r1');
+      await tester.tap(cell('r1', 'category'), kind: PointerDeviceKind.mouse);
+      await tester.pumpAndSettle();
+      expect(picker, findsOneWidget);
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(chosen(), [('r1', 'home')]);
+    },
+  );
+
+  testWidgets('scrolling the Table closes the options', (tester) async {
+    await kit.show(tester, [
+      TablePart([
+        ...expenses,
+        for (var number = 3; number <= 30; number++) namedRow(number),
+      ]),
+    ]);
+    await open(tester, 'r1');
+    expect(picker, findsOneWidget);
+    final rows = tester
+        .widget<ListView>(find.byKey(const Key('table rows')))
+        .controller!;
+    rows.jumpTo(rows.position.maxScrollExtent);
+    await tester.pumpAndSettle();
+    expect(picker, findsNothing);
+    expect(chosen(), isEmpty);
   });
 }

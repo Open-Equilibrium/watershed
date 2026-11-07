@@ -61,6 +61,9 @@ class CellSelection extends ChangeNotifier {
   var picking = false;
   final pickText = TextEditingController();
 
+  /// The open picker's keys: ↑↓, ⏎, esc and ⇥.
+  KeyEventResult Function(KeyEvent event)? pickKeys;
+
   /// The selected row's and field's identities, which the selection follows when rows or
   /// fields change elsewhere.
   String? _rowId;
@@ -120,6 +123,9 @@ class CellSelection extends ChangeNotifier {
 
   /// A click selects a cell, a second one edits text and numbers, and a checkbox ticks.
   void tap(int row, int field) {
+    // A click on the picked cell leaves its picker open.
+    if (picking && selected == (row, field)) return;
+    closePick(stay: false);
     // A click in the edited cell, beside its text, leaves the edit as it is.
     if (editing && selected == (row, field)) return;
     if (editing && !commit(stay: false)) return;
@@ -390,7 +396,10 @@ class CellSelection extends ChangeNotifier {
   KeyEventResult _cellKey(FocusNode _, KeyEvent event) {
     if (event is KeyUpEvent) return KeyEventResult.ignored;
     if (picking) {
-      // Typing that comes before the picker takes the keys filters it.
+      // Until the picker takes the keys, its own keys act as there, and typing filters it.
+      if (pickKeys?.call(event) == KeyEventResult.handled) {
+        return KeyEventResult.handled;
+      }
       final typed = event.character;
       if (typed == null || !_printable(typed)) return KeyEventResult.ignored;
       pickText.value = TextEditingValue(

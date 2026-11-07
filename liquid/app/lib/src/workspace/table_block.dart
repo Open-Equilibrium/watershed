@@ -142,7 +142,10 @@ class _TableBlockState extends State<TableBlock> {
     super.initState();
     _rows.addListener(_changed);
     // A sideways scroll moves + away from the field panel, which closes.
-    _sideways.addListener(_closePanel);
+    _sideways
+      ..addListener(_closePanel)
+      ..addListener(_scrolled);
+    _down.addListener(_scrolled);
     _name.addListener(_typed);
     _state.finishing.add(_typed);
     _state.finishing.add(_cells.finish);
@@ -200,11 +203,17 @@ class _TableBlockState extends State<TableBlock> {
   }
 
   void _closePanel() {
-    if (_panel.isShowing && !_showingField) _panel.hide();
+    if (_panel.isShowing && !_scrollingItself) _panel.hide();
   }
 
-  /// While the Table scrolls to a new field itself, which moves + along with the panel.
-  var _showingField = false;
+  /// While the Table scrolls itself, to a new row or field or to reveal a cell, which
+  /// moves + and a picker's cell along.
+  var _scrollingItself = false;
+
+  /// The person scrolling the rows closes a select cell's picker, as its cell moves away.
+  void _scrolled() {
+    if (!_scrollingItself) _cells.closePick();
+  }
 
   void _changed() {
     if (!mounted) return;
@@ -257,6 +266,7 @@ class _TableBlockState extends State<TableBlock> {
             onCreate: _cells.create,
             onClose: _cells.closePick,
             onTab: _cells.tabFromPick,
+            onKeys: (keys) => _cells.pickKeys = keys,
           ),
         ),
       ),
@@ -345,6 +355,7 @@ class _TableBlockState extends State<TableBlock> {
   void _reveal(int row, int field) =>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
+        _scrollingItself = true;
         if (_down.hasClients) {
           final top = row * WsMetrics.rowTable;
           final view = _down.position.viewportDimension;
@@ -354,16 +365,17 @@ class _TableBlockState extends State<TableBlock> {
             _down.jumpTo(top + WsMetrics.rowTable - view);
           }
         }
+        _scrollingItself = false;
         if (_sideways.hasClients && field > 0 && field + 1 < _starts.length) {
           final view = _sideways.position.viewportDimension;
           final (left, right) = (_starts[field], _starts[field + 1]);
-          _showingField = true;
+          _scrollingItself = true;
           if (left < _sideways.offset + _first) {
             _sideways.jumpTo(left - _first);
           } else if (right > _sideways.offset + view) {
             _sideways.jumpTo(right - view);
           }
-          _showingField = false;
+          _scrollingItself = false;
         }
       });
 
@@ -509,14 +521,16 @@ class _TableBlockState extends State<TableBlock> {
         if (!mounted) return;
         // The rows' end follows from their fixed height.
         if (down && _down.hasClients) {
+          _scrollingItself = true;
           _down.jumpTo(
             (count - math.min(count, _shownRows)) * WsMetrics.rowTable,
           );
+          _scrollingItself = false;
         }
         if (sideways && _sideways.hasClients) {
-          _showingField = true;
+          _scrollingItself = true;
           _sideways.jumpTo(_sideways.position.maxScrollExtent);
-          _showingField = false;
+          _scrollingItself = false;
         }
       });
     }
@@ -733,9 +747,12 @@ class _TableBlockState extends State<TableBlock> {
           if (picking?.call(index) ?? false) {
             return TapRegion(
               groupId: _pick,
-              child: CompositedTransformTarget(
-                link: _pickAnchor,
-                child: tapped,
+              // Nor does it take the keys from the picker's filter.
+              child: TextFieldTapRegion(
+                child: CompositedTransformTarget(
+                  link: _pickAnchor,
+                  child: tapped,
+                ),
               ),
             );
           }

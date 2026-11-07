@@ -30,6 +30,7 @@ class SelectPicker extends StatefulWidget {
     required this.onCreate,
     required this.onClose,
     required this.onTab,
+    this.onKeys,
   });
 
   final BridgeField field;
@@ -44,6 +45,9 @@ class SelectPicker extends StatefulWidget {
   /// ⇥ or, going back, ⇧⇥.
   final ValueChanged<bool> onTab;
 
+  /// Takes the picker's keys while it is open, for keys that reach the cell first.
+  final void Function(KeyEventResult Function(KeyEvent event)? keys)? onKeys;
+
   @override
   State<SelectPicker> createState() => _SelectPickerState();
 }
@@ -57,6 +61,7 @@ class _SelectPickerState extends State<SelectPicker> {
   void initState() {
     super.initState();
     _text.addListener(_filtered);
+    widget.onKeys?.call((event) => _key(_focus, event));
     // The filter takes the keys, also while the cell had them.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focus.requestFocus();
@@ -68,6 +73,7 @@ class _SelectPickerState extends State<SelectPicker> {
   @override
   void dispose() {
     _text.removeListener(_filtered);
+    widget.onKeys?.call(null);
     _focus.dispose();
     super.dispose();
   }
