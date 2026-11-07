@@ -204,7 +204,10 @@ class _TableBlockState extends State<TableBlock> {
 
   void _changed() {
     if (!mounted) return;
-    _cells.relocate((id) => _rows.indexWhere((row) => row.id == id));
+    int? rowIndex(String id) => _rows.indexWhere((row) => row.id == id);
+    _cells
+      ..relocate(rowIndex)
+      ..read(rowIndex);
     setState(() {});
   }
 

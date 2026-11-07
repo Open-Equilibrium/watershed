@@ -36,7 +36,12 @@ void main() {
     checked: false,
   );
 
-  Finder editor() => kit.inTable(find.byKey(const Key('cell editor')));
+  Finder editor() => kit.inTable(
+    find.descendant(
+      of: find.byKey(const Key('cell editor')),
+      matching: find.byType(TextField),
+    ),
+  );
 
   testWidgets('a click selects a cell and ⌫ clears it', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
@@ -271,6 +276,10 @@ void main() {
     expect(tester.widget<TextField>(editor()).controller!.text, '7');
     expect(tester.widget<TextField>(editor()).focusNode!.hasFocus, isTrue);
     expect(written(), isEmpty);
+    // Typing still reaches the editor.
+    tester.testTextInput.enterText('78');
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(written().single.$3.number, 78);
   });
 
   testWidgets('an edit of the last row ends when it is removed elsewhere', (
@@ -314,5 +323,40 @@ void main() {
     await tester.pumpAndSettle();
     expect(written(), [('r2', 'name', text('Power'))]);
     expect(kit.workspace.problem.value, isNull);
+  });
+
+  testWidgets('an edit keeps taking keys after its row moves', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    final table = kit.fake.views[kit.page]!.single.block;
+    await tester.tap(cell('r2', 'name'));
+    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.enter);
+    // Another device removes the first row, so the edited one moves up.
+    kit.fake.putRows(kit.page, table, [kit.fake.rows[table]![1]]);
+    await tester.pumpAndSettle();
+    tester.testTextInput.enterText('Power');
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(written(), [('r2', 'name', text('Power'))]);
+  });
+
+  testWidgets('quick clicks and a held Space tick a checkbox once each', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    final reads = kit.fake.deferred = [];
+    kit.fake.deferredKinds = {BridgeQueryKind.database};
+    await tester.tap(cell('r2', 'paid'));
+    await tester.pump();
+    await tester.tap(cell('r2', 'paid'));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+    kit.fake.deferred = null;
+    for (final read in reads) {
+      read.complete();
+    }
+    await tester.pumpAndSettle();
+    expect(written().map((write) => write.$3.checked), [true, false, true]);
   });
 }

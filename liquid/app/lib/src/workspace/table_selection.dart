@@ -62,6 +62,13 @@ class CellSelection extends ChangeNotifier {
     onKeyEvent: _cellKey,
   );
 
+  /// Keeps the editor, its text input included, when its cell is built elsewhere, as when
+  /// its row moves or the Table scrolls sideways.
+  final _editorKey = GlobalKey(debugLabel: 'Cell editor');
+
+  /// Ticks written and not yet read back, by row and field, so quick toggles each flip.
+  final _ticks = <(String, String), bool>{};
+
   /// Why the edited value was refused, shown under the Table until it is fixed.
   String? error;
 
@@ -238,11 +245,22 @@ class CellSelection extends ChangeNotifier {
     bool checked = false,
   }) => BridgeCell(kind: kind, text: text, number: number, checked: checked);
 
-  void _toggle(BridgeRow row, BridgeField field, BridgeCell? cell) => write(
-    row,
-    field,
-    _cell(BridgeCellKind.checkbox, checked: !(cell?.checked ?? false)),
-  );
+  void _toggle(BridgeRow row, BridgeField field, BridgeCell? cell) {
+    final at = (row.id, field.id);
+    final checked = !(_ticks[at] ?? cell?.checked ?? false);
+    _ticks[at] = checked;
+    write(row, field, _cell(BridgeCellKind.checkbox, checked: checked));
+  }
+
+  /// Forgets the ticks a read now shows, looking only at the rows read.
+  void read(int? Function(String row) rowIndex) =>
+      _ticks.removeWhere((at, checked) {
+        final index = rowIndex(at.$1);
+        final row = index == null ? null : rowAt(index);
+        if (row == null) return false;
+        final cell = row.cells.where((cell) => cell.field == at.$2).firstOrNull;
+        return (cell?.value.checked ?? false) == checked;
+      });
 
   /// ⏎ keeps the edit and selects the cell, ⇥ keeps it and selects the next one, esc
   /// undoes it; the rest is typing.
@@ -302,7 +320,8 @@ class CellSelection extends ChangeNotifier {
         clear();
         leave();
       case LogicalKeyboardKey.space when field.kind == BridgeFieldKind.checkbox:
-        _toggle(row, field, cell);
+        // A held Space ticks once.
+        if (event is! KeyRepeatEvent) _toggle(row, field, cell);
       case LogicalKeyboardKey.backspace || LogicalKeyboardKey.delete:
         if (cell != null && cell.kind != BridgeCellKind.empty) {
           write(row, field, _cell(BridgeCellKind.empty));
@@ -354,9 +373,10 @@ class CellSelection extends ChangeNotifier {
 
   /// The edited cell's text field.
   Widget editor(BuildContext context, BridgeField field) => Align(
+    key: const Key('cell editor'),
     alignment: Alignment.centerLeft,
     child: TextField(
-      key: const Key('cell editor'),
+      key: _editorKey,
       controller: edit,
       focusNode: editFocus,
       textAlign: field.kind == BridgeFieldKind.number
