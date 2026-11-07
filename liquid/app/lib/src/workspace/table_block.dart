@@ -9,6 +9,7 @@ import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'cell_pickers.dart';
 import 'field_panel.dart';
 import 'table_cells.dart';
 import 'table_selection.dart';
@@ -97,6 +98,7 @@ class _TableBlockState extends State<TableBlock> {
     leave: _leave,
     // Also from dispose, so after the frame, when the Page may show it.
     report: (problem) => scheduleMicrotask(() => _state.report(problem)),
+    addOption: _addOption,
   )..addListener(_changed);
 
   /// The grid's geometry as last built, to reveal a cell.
@@ -140,7 +142,10 @@ class _TableBlockState extends State<TableBlock> {
     super.initState();
     _rows.addListener(_changed);
     // A sideways scroll moves + away from the field panel, which closes.
-    _sideways.addListener(_closePanel);
+    _sideways
+      ..addListener(_closePanel)
+      ..addListener(_scrolled);
+    _down.addListener(_scrolled);
     _name.addListener(_typed);
     _state.finishing.add(_typed);
     _state.finishing.add(_cells.finish);
@@ -164,8 +169,36 @@ class _TableBlockState extends State<TableBlock> {
     ).listen((_) => unawaited(_read()), onError: _report);
   }
 
+  /// The Page's scroll and the window's size, which move the Table and so close what
+  /// hangs under it, as Flutter's menus close.
+  ScrollPosition? _pageScroll;
+  Size? _window;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final window = MediaQuery.sizeOf(context);
+    if (_window != null && window != _window) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _moved();
+      });
+    }
+    _window = window;
+    final scroll = Scrollable.maybeOf(context)?.position;
+    if (scroll == _pageScroll) return;
+    _pageScroll?.removeListener(_moved);
+    _pageScroll = scroll?..addListener(_moved);
+  }
+
+  void _moved() {
+    if (_scrollingItself) return _replacePick();
+    if (_panel.isShowing) _panel.hide();
+    _cells.closePick();
+  }
+
   @override
   void dispose() {
+    _pageScroll?.removeListener(_moved);
     // A composition still open is written as it stands.
     _write();
     _state.finishing.remove(_typed);
@@ -198,11 +231,26 @@ class _TableBlockState extends State<TableBlock> {
   }
 
   void _closePanel() {
-    if (_panel.isShowing && !_showingField) _panel.hide();
+    if (_panel.isShowing && !_scrollingItself) _panel.hide();
   }
 
-  /// While the Table scrolls to a new field itself, which moves + along with the panel.
-  var _showingField = false;
+  /// While the Table scrolls itself, to a new row or field or to reveal a cell, which
+  /// moves + and a picker's cell along.
+  var _scrollingItself = false;
+
+  /// The person scrolling the rows closes a select cell's picker, as its cell moves away.
+  void _scrolled() {
+    _scrollingItself ? _replacePick() : _cells.closePick();
+  }
+
+  /// Chooses the picker's side and room again once the Table is laid out, after the
+  /// Table moved its cell.
+  void _replacePick() {
+    if (!_cells.picking) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() {});
+    });
+  }
 
   void _changed() {
     if (!mounted) return;
@@ -210,6 +258,91 @@ class _TableBlockState extends State<TableBlock> {
     _cells
       ..relocate(rowIndex)
       ..read(rowIndex);
+    setState(() {});
+    _replacePick();
+    if (_cells.picking != _pick.isShowing) {
+      _cells.picking ? _pick.show() : _pick.hide();
+    }
+  }
+
+  /// A select cell's picker, under the cell or above it, which a click outside closes.
+  final _pick = OverlayPortalController();
+  final _pickAnchor = LayerLink();
+  final _pickCell = GlobalKey();
+
+  Future<String> _addOption(BridgeField field, String name, int color) async {
+    final added = await widget.views.write(
+      mutation(
+        BridgeMutationKind.addOption,
+        page: _page,
+        block: _block,
+        field: field.id,
+        text: name,
+        color: color,
+      ),
+      const [],
+    );
+    return added.option!;
+  }
+
+  Widget _picker(BuildContext context) {
+    final field = _cells.picked;
+    if (field == null) return const SizedBox.shrink();
+    final cell = _pickCell.currentContext?.findRenderObject() as RenderBox?;
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    // The picker shows once its cell is laid out, which tells so.
+    if (cell == null || !cell.hasSize || overlay == null) {
+      return const SizedBox.shrink();
+    }
+    // It hangs under the cell, or above it when all options do not fit under it and
+    // there is more room above; they scroll in the room it has.
+    final top = cell.localToGlobal(Offset.zero, ancestor: overlay).dy;
+    final below =
+        overlay.size.height - top - cell.size.height - 2 * WsMetrics.space1;
+    final above = top - 2 * WsMetrics.space1;
+    final up =
+        SelectPicker.heightFor(field.options.length) > below && above > below;
+    return Align(
+      alignment: Alignment.topLeft,
+      child: CompositedTransformFollower(
+        link: _pickAnchor,
+        showWhenUnlinked: false,
+        targetAnchor: up ? Alignment.topLeft : Alignment.bottomLeft,
+        followerAnchor: up ? Alignment.bottomLeft : Alignment.topLeft,
+        offset: Offset(0, up ? -WsMetrics.space1 : WsMetrics.space1),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: math.max(0, up ? above : below),
+          ),
+          child: TapRegion(
+            groupId: _pick,
+            onTapOutside: (_) => _cells.closePick(stay: false),
+            // A click in the picker beside its filter keeps the filter's keys.
+            child: TextFieldTapRegion(
+              child: SelectPicker(
+                field: field,
+                text: _cells.pickText,
+                onPick: _cells.pick,
+                onCreate: _cells.create,
+                onClose: _cells.closePick,
+                onTab: _cells.tabFromPick,
+                onKeys: (keys) => _cells.pickKeys = keys,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Brings the picked cell into the Page's view, as an editor's caret does, and shows
+  /// its picker.
+  void _placed() {
+    if (!mounted || !_cells.picking) return;
+    _scrollingItself = true;
+    _pickCell.currentContext?.findRenderObject()?.showOnScreen();
+    _scrollingItself = false;
     setState(() {});
   }
 
@@ -295,6 +428,7 @@ class _TableBlockState extends State<TableBlock> {
   void _reveal(int row, int field) =>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
+        _scrollingItself = true;
         if (_down.hasClients) {
           final top = row * WsMetrics.rowTable;
           final view = _down.position.viewportDimension;
@@ -304,16 +438,17 @@ class _TableBlockState extends State<TableBlock> {
             _down.jumpTo(top + WsMetrics.rowTable - view);
           }
         }
+        _scrollingItself = false;
         if (_sideways.hasClients && field > 0 && field + 1 < _starts.length) {
           final view = _sideways.position.viewportDimension;
           final (left, right) = (_starts[field], _starts[field + 1]);
-          _showingField = true;
+          _scrollingItself = true;
           if (left < _sideways.offset + _first) {
             _sideways.jumpTo(left - _first);
           } else if (right > _sideways.offset + view) {
             _sideways.jumpTo(right - view);
           }
-          _showingField = false;
+          _scrollingItself = false;
         }
       });
 
@@ -459,14 +594,16 @@ class _TableBlockState extends State<TableBlock> {
         if (!mounted) return;
         // The rows' end follows from their fixed height.
         if (down && _down.hasClients) {
+          _scrollingItself = true;
           _down.jumpTo(
             (count - math.min(count, _shownRows)) * WsMetrics.rowTable,
           );
+          _scrollingItself = false;
         }
         if (sideways && _sideways.hasClients) {
-          _showingField = true;
+          _scrollingItself = true;
           _sideways.jumpTo(_sideways.position.maxScrollExtent);
-          _showingField = false;
+          _scrollingItself = false;
         }
       });
     }
@@ -484,113 +621,122 @@ class _TableBlockState extends State<TableBlock> {
           child: TapRegion(
             groupId: _panel,
             onTapOutside: (_) => _panel.hide(),
-            child: FieldPanel(onAdd: _addField, onClose: _panel.hide),
+            // A click in the panel beside its field keeps the field's keys.
+            child: TextFieldTapRegion(
+              child: FieldPanel(onAdd: _addField, onClose: _panel.hide),
+            ),
           ),
         ),
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: WsMetrics.space3),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            SizedBox(
-              height: 32,
-              child: Row(
-                children: [
-                  Icon(LucideIcons.table, size: 16, color: ws.textFaint),
-                  const SizedBox(width: WsMetrics.space3),
-                  Expanded(
-                    child: TextField(
-                      controller: _name,
-                      focusNode: _nameFocus,
-                      style: TextStyle(
-                        fontSize: WsMetrics.fsProse,
-                        fontWeight: WsMetrics.fwSemibold,
-                        color: ws.text,
-                      ),
-                      decoration: InputDecoration.collapsed(
-                        hintText: 'Untitled',
-                        hintStyle: TextStyle(color: ws.textFaint),
+      child: OverlayPortal(
+        controller: _pick,
+        overlayChildBuilder: _picker,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: WsMetrics.space3),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                height: 32,
+                child: Row(
+                  children: [
+                    Icon(LucideIcons.table, size: 16, color: ws.textFaint),
+                    const SizedBox(width: WsMetrics.space3),
+                    Expanded(
+                      child: TextField(
+                        controller: _name,
+                        focusNode: _nameFocus,
+                        style: TextStyle(
+                          fontSize: WsMetrics.fsProse,
+                          fontWeight: WsMetrics.fwSemibold,
+                          color: ws.text,
+                        ),
+                        decoration: InputDecoration.collapsed(
+                          hintText: 'Untitled',
+                          hintStyle: TextStyle(color: ws.textFaint),
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            if (database != null)
-              Focus(
-                focusNode: _cells.cellsFocus,
-                // The keys of a selected cell, without a node of its own for readers.
-                includeSemantics: false,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-                  child: Container(
-                    foregroundDecoration: BoxDecoration(
-                      border: Border.all(color: ws.border),
-                      borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        // A Table may lose all its fields, as when another device removes
-                        // them; its rows still count.
-                        if (database.fields.isEmpty)
-                          Container(
-                            height: _headerHeight,
-                            color: ws.subtle,
-                            alignment: Alignment.centerRight,
-                            child: SizedBox(
-                              width: _addWidth,
-                              child: _AddField(
-                                link: _plus,
-                                panel: _panel,
-                                onTap: _togglePanel,
+              if (database != null)
+                Focus(
+                  focusNode: _cells.cellsFocus,
+                  // The keys of a selected cell, without a node of its own for readers.
+                  includeSemantics: false,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+                    child: Container(
+                      foregroundDecoration: BoxDecoration(
+                        border: Border.all(color: ws.border),
+                        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // A Table may lose all its fields, as when another device removes
+                          // them; its rows still count.
+                          if (database.fields.isEmpty)
+                            Container(
+                              height: _headerHeight,
+                              color: ws.subtle,
+                              alignment: Alignment.centerRight,
+                              child: SizedBox(
+                                width: _addWidth,
+                                child: _AddField(
+                                  link: _plus,
+                                  panel: _panel,
+                                  onTap: _togglePanel,
+                                ),
+                              ),
+                            )
+                          else
+                            LayoutBuilder(
+                              builder: (context, constraints) => _grid(
+                                database.fields,
+                                constraints.maxWidth,
+                                NumberFormat.decimalPattern(numbers),
+                                DateFormat.yMMMd(days),
                               ),
                             ),
-                          )
-                        else
-                          LayoutBuilder(
-                            builder: (context, constraints) => _grid(
-                              database.fields,
-                              constraints.maxWidth,
-                              NumberFormat.decimalPattern(numbers),
-                              DateFormat.yMMMd(days),
-                            ),
-                          ),
-                        _NewRow(onTap: () => unawaited(_addRow())),
-                        if (count > 0)
-                          Container(
-                            height: _footerHeight,
-                            color: ws.subtle,
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              '${NumberFormat.decimalPattern(numbers).format(count)} '
-                              '${count == 1 ? 'row' : 'rows'}',
-                              style: TextStyle(
-                                fontSize: WsMetrics.fsCompact,
-                                color: ws.textFaint,
+                          _NewRow(onTap: () => unawaited(_addRow())),
+                          if (count > 0)
+                            Container(
+                              height: _footerHeight,
+                              color: ws.subtle,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                              ),
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                '${NumberFormat.decimalPattern(numbers).format(count)} '
+                                '${count == 1 ? 'row' : 'rows'}',
+                                style: TextStyle(
+                                  fontSize: WsMetrics.fsCompact,
+                                  color: ws.textFaint,
+                                ),
                               ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            // A value refused in place says why, under the Table (approved mockups).
-            if (_cells.error case final error?)
-              Padding(
-                padding: const EdgeInsets.only(top: WsMetrics.space2),
-                child: Text(
-                  error,
-                  style: TextStyle(
-                    fontSize: WsMetrics.fsSmall,
-                    color: ws.danger,
+              // A value refused in place says why, under the Table (approved mockups).
+              if (_cells.error case final error?)
+                Padding(
+                  padding: const EdgeInsets.only(top: WsMetrics.space2),
+                  child: Text(
+                    error,
+                    style: TextStyle(
+                      fontSize: WsMetrics.fsSmall,
+                      color: ws.danger,
+                    ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -637,6 +783,7 @@ class _TableBlockState extends State<TableBlock> {
       void Function(int index)? onTap,
       Key? Function(int index)? keyOf,
       bool Function(int index)? editing,
+      bool Function(int index)? picking,
     }) => ListenableBuilder(
       listenable: _sideways,
       builder: (context, _) {
@@ -672,6 +819,23 @@ class _TableBlockState extends State<TableBlock> {
             onTap: () => onTap(index),
             child: box,
           );
+          // The picker hangs under its cell, and a click in it is no click outside.
+          if (picking?.call(index) ?? false) {
+            return TapRegion(
+              groupId: _pick,
+              // Nor does it take the keys from the picker's filter.
+              child: TextFieldTapRegion(
+                child: _PickedCell(
+                  onPlaced: _placed,
+                  child: CompositedTransformTarget(
+                    key: _pickCell,
+                    link: _pickAnchor,
+                    child: tapped,
+                  ),
+                ),
+              ),
+            );
+          }
           // A click in the edited cell beside its text is no click outside the editor.
           return editing?.call(index) ?? false
               ? TextFieldTapRegion(child: tapped)
@@ -780,6 +944,9 @@ class _TableBlockState extends State<TableBlock> {
                               }
                             },
                       mark: (index) => _cells.mark(context, rowIndex, index),
+                      picking: (index) =>
+                          _cells.picking &&
+                          _cells.selected == (rowIndex, index),
                       editing: (index) =>
                           _cells.editing &&
                           _cells.selected == (rowIndex, index),
@@ -885,4 +1052,28 @@ class _NewRow extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The cell a select picker hangs from, which tells once it is first laid out.
+class _PickedCell extends StatefulWidget {
+  const _PickedCell({required this.onPlaced, required this.child});
+
+  final VoidCallback onPlaced;
+  final Widget child;
+
+  @override
+  State<_PickedCell> createState() => _PickedCellState();
+}
+
+class _PickedCellState extends State<_PickedCell> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onPlaced();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
