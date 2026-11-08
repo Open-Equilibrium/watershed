@@ -357,13 +357,15 @@ class ActionDialog extends StatelessWidget {
                       ),
                     ),
                   ),
-                  // Long labels wrap below each other rather than overflow.
+                  // Cancel left and the main action, listed first, right, as macOS and
+                  // Material place them; long labels wrap below each other, the main
+                  // action on top, rather than overflow.
                   OverflowBar(
-                    alignment: MainAxisAlignment.spaceBetween,
+                    alignment: MainAxisAlignment.end,
                     spacing: WsMetrics.space3,
                     overflowSpacing: WsMetrics.space3,
+                    overflowDirection: VerticalDirection.up,
                     children: [
-                      ...actions,
                       SecondaryButton(
                         label:
                             dismiss ?? (actions.isEmpty ? 'Close' : 'Cancel'),
@@ -372,6 +374,7 @@ class ActionDialog extends StatelessWidget {
                             ? () => Navigator.of(context).pop(cancelled)
                             : null,
                       ),
+                      ...actions.reversed,
                     ],
                   ),
                 ],
