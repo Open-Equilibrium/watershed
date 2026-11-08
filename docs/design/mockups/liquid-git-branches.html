@@ -85,6 +85,8 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
 .dlg h4{margin:0;font-size:16px;line-height:22px;font-weight:600}
 .dlg p{margin:0;color:var(--ws-text-muted);line-height:20px}
 .dlg .acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.dlg .acts .sp{flex:1}
+/* Liquid's questions show Cancel left and the main action right; the markup lists the main action first, as the app does (database-table mockup, Decisions of 2026-11-08). */
+.dlg .acts{flex-direction:row-reverse;justify-content:flex-start}.dlg .acts .sp{display:none}
 .flist{border-radius:8px;background:var(--ws-subtle);padding:6px;display:flex;flex-direction:column;gap:1px}
 .frow{display:flex;gap:8px;align-items:center;min-height:26px;padding:0 6px;border-radius:6px;font-size:13px}
 .frow code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}

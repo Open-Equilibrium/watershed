@@ -35,4 +35,5 @@ References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 - Filters dim what does not match instead of hiding it; a range set with the timeline's handles limits the list to its steps.
 - A step's kind has one shape and color everywhere: the Kind tags, the timeline and the session tree.
 - A choice of one among a few options uses the shared segments as the [closeout mockups](mockups/liquid-closeout.html) draw them, framed and the same in every view; older mockups that draw it otherwise are superseded.
+- A question puts Cancel on the left and its main action on the right, its other actions between them, as macOS and Material place them; older mockups list the main action first in their markup and show it this way ([decided](mockups/liquid-database-table.html) on 2026-11-08).
 - Automations, History, Page history and Settings open as a dialog over the current Page or Source, and closing it shows that Page again; the Settings page that replaced the main area in older mockups is superseded.
