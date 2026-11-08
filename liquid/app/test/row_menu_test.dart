@@ -306,4 +306,35 @@ void main() {
       moreOrLessEquals(tester.getCenter(handle).dy, epsilon: 1),
     );
   });
+
+  testWidgets('scrolling the Page or resizing the window closes the menu', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      TablePart(expenses),
+      for (var number = 0; number < 40; number++) TextPart('Line $number'),
+    ]);
+    mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: const Offset(1300, 850));
+    addTearDown(mouse.removePointer);
+    await openMenu(tester, 'r1');
+    tester
+        .state<ScrollableState>(
+          find
+              .descendant(
+                of: find.byType(CustomScrollView),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        )
+        .position
+        .jumpTo(100);
+    await tester.pumpAndSettle();
+    expect(menu, findsNothing);
+    await openMenu(tester, 'r1');
+    tester.view.physicalSize = tester.view.physicalSize / 2;
+    addTearDown(tester.view.resetPhysicalSize);
+    await tester.pumpAndSettle();
+    expect(menu, findsNothing);
+  });
 }
