@@ -231,4 +231,28 @@ void main() {
     await tester.pumpAndSettle();
     expect(renamed().last, ('amount', 'Sum'));
   });
+
+  testWidgets('a name typed before Delete field stays when the question is '
+      'cancelled', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await open(tester, 'Category');
+    await type(tester, 'Kind');
+    await tester.tap(inMenu(find.text('Delete field')));
+    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.escape);
+    expect(kit.applied(BridgeMutationKind.removeField), isEmpty);
+    expect(renamed(), [('category', 'Kind')]);
+  });
+
+  testWidgets('typing after ↓ goes back to the name, which ⏎ keeps', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await open(tester, 'Category');
+    await key(tester, LogicalKeyboardKey.arrowDown);
+    await type(tester, 'Kind');
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(dialog, findsNothing);
+    expect(renamed(), [('category', 'Kind')]);
+  });
 }

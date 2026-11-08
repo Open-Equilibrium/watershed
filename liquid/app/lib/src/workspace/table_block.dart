@@ -445,6 +445,10 @@ class _TableBlockState extends State<TableBlock> {
     final name = _menuName.text.trim();
     if (field == null || name.isEmpty || name == _menuOpened) return;
     _menuOpened = name;
+    _renameField(field, name);
+  }
+
+  void _renameField(String field, String name) {
     widget.views
         .write(
           mutation(
@@ -461,12 +465,19 @@ class _TableBlockState extends State<TableBlock> {
         }, onError: (Object _) {});
   }
 
-  /// Delete field asks first, then deletes the field and its values.
+  /// Delete field asks first, then deletes the field and its values; a name typed is kept
+  /// when the question is cancelled.
   Future<void> _deleteField() async {
     final field = _fieldOf(_menuField);
+    final (name, opened) = (_menuName.text.trim(), _menuOpened);
     _closeFieldMenu(drop: true);
     if (field == null) return;
-    if (!await confirmDeleteField(context, field, _rows.count ?? 0)) return;
+    if (!await confirmDeleteField(context, field, _rows.count ?? 0)) {
+      if (mounted && name.isNotEmpty && name != opened) {
+        _renameField(field.id, name);
+      }
+      return;
+    }
     if (!mounted) return;
     await widget.views
         .write(

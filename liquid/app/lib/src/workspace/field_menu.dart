@@ -44,14 +44,21 @@ class _FieldMenuState extends State<FieldMenu> {
   @override
   void initState() {
     super.initState();
+    widget.name.addListener(_typed);
     // The name takes the keys, also while a cell had them.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focus.requestFocus();
     });
   }
 
+  /// Typing goes back to the name, which ⏎ then keeps.
+  void _typed() {
+    if (_deleting) setState(() => _deleting = false);
+  }
+
   @override
   void dispose() {
+    widget.name.removeListener(_typed);
     _focus.dispose();
     super.dispose();
   }
