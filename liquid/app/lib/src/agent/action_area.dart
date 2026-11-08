@@ -2,21 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../controls.dart';
-import '../rust/api/session.dart';
 import '../session/session_state.dart';
 import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
-import 'approval_card.dart';
 import 'question_card.dart';
 import 'start_page.dart';
 
 /// Height of the input area; it never changes, so nothing above it moves (guidelines, patterns).
 const double actionAreaHeight = 150;
 
-/// The input area at the bottom of every tab: the composer, or in its place an approval or a
-/// question waiting for the user. Once it is answered, the keys go back to the composer.
+/// The input area at the bottom of every tab: the composer, or in its place a question waiting
+/// for the user. Once it is answered, the keys go back to the composer.
 class ActionArea extends StatefulWidget {
   const ActionArea({
     super.key,
@@ -38,19 +36,19 @@ class ActionArea extends StatefulWidget {
 }
 
 class _ActionAreaState extends State<ActionArea> {
-  /// Whether a card was shown when the requests last changed.
+  /// Whether a card was shown when the question last changed.
   bool _asking = false;
 
   @override
   void initState() {
     super.initState();
     _asking = widget.state.asking;
-    widget.state.requests.addListener(_changed);
+    widget.state.question.addListener(_changed);
   }
 
   @override
   void dispose() {
-    widget.state.requests.removeListener(_changed);
+    widget.state.question.removeListener(_changed);
     super.dispose();
   }
 
@@ -70,31 +68,19 @@ class _ActionAreaState extends State<ActionArea> {
     return SizedBox(
       height: actionAreaHeight,
       child: ValueListenableBuilder(
-        valueListenable: state.approval,
-        builder: (context, approval, _) {
-          if (approval != null) {
-            return ApprovalCard(
-              key: ValueKey(approval.id),
-              request: approval,
-              state: state,
-            );
-          }
-          return ValueListenableBuilder(
-            valueListenable: state.question,
-            builder: (context, question, _) => question != null
-                ? QuestionCard(
-                    key: ValueKey(question.id),
-                    request: question,
-                    state: state,
-                  )
-                : Composer(
-                    state: state,
-                    controller: widget.composer,
-                    focusNode: widget.composerFocus,
-                    project: widget.project,
-                  ),
-          );
-        },
+        valueListenable: state.question,
+        builder: (context, question, _) => question != null
+            ? QuestionCard(
+                key: ValueKey(question.id),
+                request: question,
+                state: state,
+              )
+            : Composer(
+                state: state,
+                controller: widget.composer,
+                focusNode: widget.composerFocus,
+                project: widget.project,
+              ),
       ),
     );
   }
@@ -190,13 +176,10 @@ class Composer extends StatelessWidget {
                   Expanded(
                     child: Row(
                       children: [
-                        if (starting) ...[
+                        if (starting)
                           Flexible(
                             child: StartChips(state: state, project: project),
                           ),
-                          const SizedBox(width: WsMetrics.space2),
-                        ],
-                        ModeChip(state: state),
                       ],
                     ),
                   ),
@@ -303,123 +286,6 @@ class _QueueChips extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-/// Chooses how much the agent may do without asking (ADR-0188).
-class ModeChip extends StatelessWidget {
-  const ModeChip({super.key, required this.state});
-
-  final SessionState state;
-
-  static const labels = {
-    BridgeApprovalMode.ask: 'Ask',
-    BridgeApprovalMode.allowEdits: 'Allow edits',
-    BridgeApprovalMode.fullAccess: 'Full access',
-  };
-
-  /// What each mode lets the agent do, and what Allow edits risks (approved mockup, ADR-0206).
-  static const _explained = {
-    BridgeApprovalMode.ask: (
-      'Asks before every call that is not read-only.',
-      null,
-    ),
-    BridgeApprovalMode.allowEdits: (
-      'Changes files without asking.',
-      'Any file you can change, including settings that run commands, such as Git settings '
-          'Liquid uses for the diff.',
-    ),
-    BridgeApprovalMode.fullAccess: ('Runs every call without asking.', null),
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    return ValueListenableBuilder(
-      valueListenable: state.mode,
-      builder: (context, mode, _) => PopupMenuButton<BridgeApprovalMode>(
-        tooltip: 'Approval mode',
-        initialValue: mode,
-        onSelected: state.setMode,
-        itemBuilder: (context) => [
-          for (final entry in labels.entries)
-            PopupMenuItem(
-              value: entry.key,
-              child: _ModeItem(
-                name: entry.value,
-                explained: _explained[entry.key]!,
-              ),
-            ),
-        ],
-        child: Container(
-          height: 28,
-          padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
-          decoration: BoxDecoration(
-            border: Border.all(color: context.ws.borderStrong),
-            borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(LucideIcons.shield, size: 13, color: context.ws.textMuted),
-              const SizedBox(width: WsMetrics.space1),
-              Text(
-                labels[mode]!,
-                style: TextStyle(
-                  color: context.ws.textMuted,
-                  fontSize: WsMetrics.fsCompact,
-                ),
-              ),
-              const SizedBox(width: WsMetrics.space1),
-              Icon(
-                LucideIcons.chevronDown,
-                size: 13,
-                color: context.ws.textFaint,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// One mode in the mode menu: its name, what it does and, for Allow edits, its risk.
-class _ModeItem extends StatelessWidget {
-  const _ModeItem({required this.name, required this.explained});
-
-  final String name;
-  final (String, String?) explained;
-
-  @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    final (description, risk) = explained;
-    final small = TextStyle(fontSize: WsMetrics.fsSmall, color: ws.textMuted);
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 280),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(name, style: const TextStyle(fontWeight: WsMetrics.fwMedium)),
-          Text(description, style: small),
-          if (risk != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(LucideIcons.triangleAlert, size: 12, color: ws.warning),
-                  const SizedBox(width: WsMetrics.space1),
-                  Expanded(
-                    child: Text(risk, style: small.copyWith(color: ws.warning)),
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
     );
   }
 }

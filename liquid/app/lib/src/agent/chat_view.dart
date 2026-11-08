@@ -233,7 +233,7 @@ class ItemTile extends StatelessWidget {
           'Thinking',
           style: TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall),
         ),
-        _ => ToolRow(item: item, state: state),
+        _ => ToolRow(item: item),
       },
     );
   }
@@ -241,34 +241,28 @@ class ItemTile extends StatelessWidget {
 
 /// A tool call: its state, tool and target, and its outcome.
 class ToolRow extends StatelessWidget {
-  const ToolRow({super.key, required this.item, required this.state});
+  const ToolRow({super.key, required this.item});
 
   final ItemView item;
-  final SessionState state;
 
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    return ListenableBuilder(
-      listenable: Listenable.merge([state.approval, item.outcome]),
-      builder: (context, _) {
-        final approval = state.approval.value;
-        final outcome = item.outcome.value;
-        final waiting = outcome == null && approval?.approval?.item == item.id;
+    return ValueListenableBuilder(
+      valueListenable: item.outcome,
+      builder: (context, outcome, _) {
         final (mark, markColor) = switch (outcome) {
           (failed: true, durationMs: _, lines: _) => (LucideIcons.x, ws.danger),
           (failed: false, durationMs: _, lines: _) => (
             LucideIcons.check,
             ws.success,
           ),
-          null when waiting => (LucideIcons.clock, ws.warning),
           null => (LucideIcons.loader, ws.textFaint),
         };
         // A file change shows its lines (approved mockup), other tools how long they ran.
         final lines = outcome?.lines;
         final trailing = [
-          if (waiting) TextSpan(text: 'waiting for approval'),
-          if (!waiting && lines != null)
+          if (lines != null)
             ...toneSpans(
               ws,
               lineParts(
@@ -276,14 +270,14 @@ class ToolRow extends StatelessWidget {
                 lines.removed > 0 ? lines.removed : null,
               ),
             )
-          else if (!waiting && outcome?.durationMs != null)
+          else if (outcome?.durationMs != null)
             TextSpan(text: formatDuration(outcome!.durationMs!)),
         ];
         return Container(
           height: 32,
           padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
           decoration: BoxDecoration(
-            color: waiting ? ws.warningSubtle : ws.subtle,
+            color: ws.subtle,
             borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
           ),
           child: Row(
@@ -293,7 +287,7 @@ class ToolRow extends StatelessWidget {
               Text(
                 item.tool ?? '',
                 style: TextStyle(
-                  color: waiting ? ws.warning : ws.textMuted,
+                  color: ws.textMuted,
                   fontSize: WsMetrics.fsCompact,
                 ),
               ),
@@ -309,7 +303,7 @@ class ToolRow extends StatelessWidget {
               Text.rich(
                 TextSpan(children: trailing),
                 style: TextStyle(
-                  color: waiting ? ws.warning : ws.textMuted,
+                  color: ws.textMuted,
                   fontSize: WsMetrics.fsSmall,
                 ),
               ),

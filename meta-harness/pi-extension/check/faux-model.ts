@@ -1,6 +1,5 @@
 // A scripted model for the manual check with real pi; it needs no network or credentials.
-// The first prompt runs one command that writes a file, the second tries another; the check
-// allows the first and rejects the second.
+// The first prompt runs one command that writes a file, the second one that writes nothing.
 import {
   fauxAssistantMessage,
   fauxProvider,
@@ -16,10 +15,10 @@ export default function fauxModel(pi: ExtensionAPI): void {
     fauxAssistantMessage([
       fauxThinking("Plan it."),
       fauxText("Running it."),
-      fauxToolCall("bash", { command: "echo approved-run > run.txt" }),
+      fauxToolCall("bash", { command: "echo first-run > run.txt" }),
     ]),
     fauxAssistantMessage("Done."),
-    fauxAssistantMessage([fauxToolCall("bash", { command: "echo rejected-run" })]),
+    fauxAssistantMessage([fauxToolCall("bash", { command: "echo second-run" })]),
     fauxAssistantMessage("Understood."),
   ]);
   pi.registerProvider(faux.provider);

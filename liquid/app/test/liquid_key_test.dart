@@ -81,13 +81,14 @@ void main() {
       backend.controller.add(event(BridgeEventKind.turnStarted));
       backend.controller.add(
         event(
-          BridgeEventKind.requestOpened,
+          BridgeEventKind.userInputRequested,
           request: const BridgeRequest(
-            id: 'a1',
-            approval: BridgeApproval(
-              kind: BridgeRequestKind.commandExecution,
-              tool: 'bash',
-              text: 'git push',
+            id: 'q1',
+            question: BridgeQuestion(
+              kind: BridgeQuestionKind.editor,
+              title: 'Commit message',
+              detail: 'draft',
+              options: [],
             ),
           ),
         ),
@@ -146,31 +147,32 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft, platform: 'macos');
   });
 
-  testWidgets('⇪⏎ on an approval allows for the session, not once as well', (
+  testWidgets('⇪⏎ on an editor question answers once, without a new line', (
     tester,
   ) async {
     await show(tester, ShortcutSettings.liquidKey());
     backend.controller.add(event(BridgeEventKind.turnStarted));
     backend.controller.add(
       event(
-        BridgeEventKind.requestOpened,
+        BridgeEventKind.userInputRequested,
         request: const BridgeRequest(
-          id: 'a1',
-          approval: BridgeApproval(
-            kind: BridgeRequestKind.commandExecution,
-            tool: 'bash',
-            text: 'git push',
+          id: 'q1',
+          question: BridgeQuestion(
+            kind: BridgeQuestionKind.editor,
+            title: 'Commit message',
+            detail: 'draft',
+            options: [],
           ),
         ),
       ),
     );
     await tester.pumpAndSettle();
-    // An approval takes keys once it could be read.
+    // A question takes keys once it could be read.
     await tester.pump(const Duration(milliseconds: 500));
 
     await liquid(tester, LogicalKeyboardKey.enter);
-    expect(backend.calls.where((call) => call.startsWith('decide')), [
-      'decide a1 allowSession',
+    expect(backend.calls.where((call) => call.startsWith('answer')), [
+      'answer q1 draft',
     ]);
   });
 

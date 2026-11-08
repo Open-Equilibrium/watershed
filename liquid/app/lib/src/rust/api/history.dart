@@ -133,9 +133,6 @@ enum BridgeEntryKind {
   /// A change of the system prompt or tools.
   system,
 
-  /// The user's decision on a tool call.
-  approval,
-
   /// An extension's entry.
   custom,
 
@@ -202,9 +199,6 @@ class BridgeRecord {
   /// The file a successful file change changed.
   final String? changedFile;
 
-  /// An approval's decision.
-  final BridgeDecision? decision;
-
   /// Milliseconds from the branch's first entry to the start.
   final PlatformInt64 startMs;
 
@@ -232,8 +226,7 @@ class BridgeRecord {
   /// What a tool call did.
   final BridgeToolOutcome outcome;
 
-  /// Characters the step adds to the model's context: its prompt, response or tool result;
-  /// none for an approval.
+  /// Characters the step adds to the model's context: its prompt, response or tool result.
   final PlatformInt64 addedChars;
 
   const BridgeRecord({
@@ -244,7 +237,6 @@ class BridgeRecord {
     required this.detail,
     required this.target,
     this.changedFile,
-    this.decision,
     required this.startMs,
     this.durationMs,
     this.firstTokenMs,
@@ -266,7 +258,6 @@ class BridgeRecord {
       detail.hashCode ^
       target.hashCode ^
       changedFile.hashCode ^
-      decision.hashCode ^
       startMs.hashCode ^
       durationMs.hashCode ^
       firstTokenMs.hashCode ^
@@ -290,7 +281,6 @@ class BridgeRecord {
           detail == other.detail &&
           target == other.target &&
           changedFile == other.changedFile &&
-          decision == other.decision &&
           startMs == other.startMs &&
           durationMs == other.durationMs &&
           firstTokenMs == other.firstTokenMs &&
@@ -313,9 +303,6 @@ enum BridgeRecordKind {
 
   /// A tool call and its result.
   tool,
-
-  /// The wait for the user's approval of a tool call.
-  approval,
 }
 
 /// One file a revert would change.

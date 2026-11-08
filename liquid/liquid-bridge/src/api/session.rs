@@ -13,7 +13,7 @@ use meta_harness_core::{
 use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
 
-use crate::api::events::{BridgeDecision, BridgeEvent, BridgeQueue};
+use crate::api::events::{BridgeEvent, BridgeQueue};
 use crate::api::history::{
     BridgeChangesState, BridgeContextDetail, BridgeHistory, BridgeRevertPlan, BridgeRunningAgent,
     BridgeTranscript, BridgeTurn, BridgeTurnChanges,
@@ -77,17 +77,6 @@ pub struct BridgeModel {
     pub context_window: Option<i64>,
 }
 
-/// How much an agent may do without asking.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BridgeApprovalMode {
-    /// Ask for every call that is not read-only.
-    Ask,
-    /// Also allow file changes without asking.
-    AllowEdits,
-    /// Allow every call.
-    FullAccess,
-}
-
 /// A running agent session; dropping it kills the agent.
 #[flutter_rust_bridge::frb(opaque)]
 pub struct AgentSession {
@@ -129,7 +118,7 @@ impl AgentSession {
         let _runtime = RUNTIME.enter();
         let (mut session, mut receiver) = Session::start(&command)
             .map_err(|error| format!("could not run {}: {error}", command.program.display()))?;
-        // Without the extension pi runs tool calls without asking, so the agent must confirm
+        // Without the extension a turn runs without its checkpoints, so the agent must confirm
         // it within a time limit; dropping the session ends the agent.
         let (gate, mut early) = RUNTIME.block_on(ready(&mut session, &mut receiver));
         match gate {
@@ -692,11 +681,10 @@ impl AgentSession {
     }
 
     // The calls below wait for nothing but pi and run on flutter_rust_bridge's async runtime,
-    // so calls waiting on a slow project or a hung agent in its thread pool never hold up a
-    // decision, Stop or quitting.
+    // so calls waiting on a slow project or a hung agent in its thread pool never hold up an
+    // answer, Stop or quitting.
 
-    /// Aborts the running turn; open approvals are withdrawn and questions dismissed, so the
-    /// agent can stop.
+    /// Aborts the running turn; open questions are dismissed, so the agent can stop.
     pub async fn abort(&self) -> Result<(), String> {
         let pending = open(&mut *self.session.lock().await)?
             .abort()
@@ -713,20 +701,6 @@ impl AgentSession {
             .await
             .map_err(describe)?
             .into())
-    }
-
-    /// Changes which tool calls need the user's approval.
-    pub async fn set_approval_mode(&self, mode: BridgeApprovalMode) -> Result<(), String> {
-        open(&mut *self.session.lock().await)?.set_approval_mode(mode.into());
-        Ok(())
-    }
-
-    /// Answers an approval request.
-    pub async fn decide(&self, request: String, decision: BridgeDecision) -> Result<(), String> {
-        open(&mut *self.session.lock().await)?
-            .decide(&RequestId(request), decision.into())
-            .await
-            .map_err(describe)
     }
 
     /// Answers a selection, input or editor question with text.

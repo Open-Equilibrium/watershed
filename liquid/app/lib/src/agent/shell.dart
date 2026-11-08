@@ -104,7 +104,7 @@ class _AgentShellState extends State<AgentShell> {
     _hideWhitespace();
     if (widget.state case final state?) {
       state.draft.addListener(_applyDraft);
-      state.requests.addListener(_requestsChanged);
+      state.question.addListener(_questionChanged);
       unawaited(state.loadStart());
       state.git.watch();
     }
@@ -131,7 +131,7 @@ class _AgentShellState extends State<AgentShell> {
 
   Future<void> _askProfile() async {
     final profile = await askProfile(context);
-    // An approval or a question closed it before a choice; it asks again once they are done.
+    // A question closed it before a choice; it asks again once it is answered.
     if (profile == null) return;
     await _shortcuts.update(_shortcuts.value.choose(profile));
   }
@@ -142,10 +142,9 @@ class _AgentShellState extends State<AgentShell> {
     if (!_settings.value) _focus.requestFocus();
   }
 
-  /// An approval or a question closes Settings and any menu or dialog, which would cover it
-  /// or take the keys meant for it; once none is left, a first start asks for the profile
-  /// again.
-  void _requestsChanged() {
+  /// A question closes Settings and any menu or dialog, which would cover it or take the keys
+  /// meant for it; once none is left, a first start asks for the profile again.
+  void _questionChanged() {
     if (widget.state!.asking) {
       _settings.value = false;
       Navigator.of(context).popUntil((route) => route.isFirst);
@@ -179,7 +178,7 @@ class _AgentShellState extends State<AgentShell> {
     widget.workspace?.open.removeListener(_pageOpened);
     _lifecycle.dispose();
     widget.state?.draft.removeListener(_applyDraft);
-    widget.state?.requests.removeListener(_requestsChanged);
+    widget.state?.question.removeListener(_questionChanged);
     _composer.dispose();
     _composerFocus.dispose();
     _tab.dispose();

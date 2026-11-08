@@ -1,9 +1,9 @@
 use serde_json::{Map, Value};
 
 use crate::{
-    AgentEvent, ChangedLines, EditChange, EditPreview, EntryKind, History, ItemDetail, ItemId,
-    ItemKind, ItemStatus, NotificationLevel, PiAdapter, RecordKind, RequestId, RequestKind,
-    SessionTree, TreeNode, TurnId, Usage, UserInput,
+    AgentEvent, ChangedLines, EntryKind, History, ItemDetail, ItemId, ItemKind, ItemStatus,
+    NotificationLevel, PiAdapter, RecordKind, RequestId, SessionTree, TreeNode, TurnId, Usage,
+    UserInput,
 };
 
 const TURN: TurnId = TurnId(1);
@@ -344,245 +344,6 @@ fn translates_extension_questions_and_display_updates() {
 }
 
 #[test]
-fn turns_watershed_approval_questions_into_requests() {
-    let events = translate(&[
-        r#"{"type":"extension_ui_request","id":"a1","method":"select","title":"watershed.approval {\"tool\":\"bash\",\"arguments\":{\"command\":\"npm test\"},\"readOnly\":false,\"builtin\":true,\"session\":\"s1\"}","options":["allow-once","allow-session","reject","allow-auto"]}"#,
-        r#"{"type":"extension_ui_request","id":"a2","method":"select","title":"watershed.approval {\"tool\":\"write\",\"arguments\":{},\"readOnly\":false,\"builtin\":true}","options":[]}"#,
-        r#"{"type":"extension_ui_request","id":"a3","method":"select","title":"watershed.approval {\"tool\":\"read\",\"arguments\":{\"path\":\"a\"},\"readOnly\":true}","options":[]}"#,
-        // An extension's own write is no file change Allow edits may run.
-        r#"{"type":"extension_ui_request","id":"a5","method":"select","title":"watershed.approval {\"tool\":\"write\",\"arguments\":{},\"readOnly\":false}","options":[]}"#,
-        // Nor is an extension's bash a shell command whose other arguments may stay hidden.
-        r#"{"type":"extension_ui_request","id":"a6","method":"select","title":"watershed.approval {\"tool\":\"bash\",\"arguments\":{\"command\":\"ls\",\"script\":\"rm -rf ~\"},\"readOnly\":false}","options":[]}"#,
-        // An extension's tool name cannot hide characters either.
-        r#"{"type":"extension_ui_request","id":"a4","method":"select","title":"watershed.approval {\"tool\":\"safe\\u202e\",\"arguments\":{},\"readOnly\":false}","options":[]}"#,
-    ]);
-    let opened =
-        |id: &str, kind, tool: &str, arguments: &str, read_only| AgentEvent::RequestOpened {
-            request: RequestId(id.to_owned()),
-            kind,
-            tool: tool.to_owned(),
-            arguments: arguments.to_owned(),
-            text: if id == "a1" { "npm test" } else { arguments }.to_owned(),
-            read_only,
-            session: (id == "a1").then(|| "s1".to_owned()),
-            item: None,
-            edit: None,
-        };
-    assert_eq!(
-        events,
-        [
-            opened(
-                "a1",
-                RequestKind::CommandExecutionApproval,
-                "bash",
-                r#"{"command":"npm test"}"#,
-                false
-            ),
-            opened("a2", RequestKind::FileChangeApproval, "write", "{}", false),
-            opened(
-                "a3",
-                RequestKind::ToolApproval,
-                "read",
-                r#"{"path":"a"}"#,
-                true
-            ),
-            opened("a5", RequestKind::ToolApproval, "write", "{}", false),
-            opened(
-                "a6",
-                RequestKind::ToolApproval,
-                "bash",
-                r#"{"command":"ls","script":"rm -rf ~"}"#,
-                false
-            ),
-            opened("a4", RequestKind::ToolApproval, "safe<U+202E>", "{}", false),
-        ]
-    );
-}
-
-#[test]
-fn shows_an_edit_as_its_path_and_its_removed_and_added_lines() {
-    let ask = |id: &str, tool: &str, arguments: &str, builtin: bool| {
-        format!(
-            r#"{{"type":"extension_ui_request","id":"{id}","method":"select","title":"watershed.approval {{\"tool\":\"{tool}\",\"arguments\":{arguments},\"readOnly\":false,\"builtin\":{builtin}}}","options":[]}}"#
-        )
-    };
-    let records = [
-        ask(
-            "e1",
-            "edit",
-            r#"{\"path\":\"src/a.ts\",\"edits\":[{\"oldText\":\"a\\nb\",\"newText\":\"c\"},{\"oldText\":\"x\",\"newText\":\"y\\u202e\"}]}"#,
-            true,
-        ),
-        // pi hands its tool only `edits` arrays; any other shape shows as it is.
-        ask(
-            "e2",
-            "edit",
-            r#"{\"path\":\"p\",\"edits\":{\"oldText\":\"o\",\"newText\":\"n\"}}"#,
-            true,
-        ),
-        ask(
-            "e3",
-            "edit",
-            r#"{\"path\":\"p\",\"edits\":\"[{\\\"oldText\\\":\\\"o\\\",\\\"newText\\\":\\\"n\\\"}]\"}"#,
-            true,
-        ),
-        ask(
-            "e4",
-            "edit",
-            r#"{\"path\":\"p\",\"oldText\":\"o\",\"newText\":\"n\"}"#,
-            true,
-        ),
-        ask(
-            "e5",
-            "write",
-            r#"{\"path\":\"new\\u202e.ts\",\"content\":\"one\\ntwo\"}"#,
-            true,
-        ),
-        // An extension's edit shows all of its arguments instead.
-        ask(
-            "e6",
-            "edit",
-            r#"{\"path\":\"p\",\"oldText\":\"o\",\"newText\":\"n\"}"#,
-            false,
-        ),
-    ];
-    let events = translate(&records.iter().map(String::as_str).collect::<Vec<_>>());
-    let change = |removed: &str, added: &str| EditChange {
-        removed: removed.to_owned(),
-        added: added.to_owned(),
-    };
-    let previews: Vec<_> = events
-        .iter()
-        .map(|event| match event {
-            AgentEvent::RequestOpened { edit, .. } => edit.clone(),
-            other => panic!("an approval opens a request: {other:?}"),
-        })
-        .collect();
-    assert_eq!(
-        previews,
-        [
-            Some(EditPreview {
-                path: "src/a.ts".to_owned(),
-                writes_to: None,
-                changes: vec![change("a\nb", "c"), change("x", "y<U+202E>")],
-                whole_file: false,
-            }),
-            None,
-            None,
-            None,
-            // A write replaces whatever the file held.
-            Some(EditPreview {
-                path: "new<U+202E>.ts".to_owned(),
-                writes_to: None,
-                changes: vec![change("", "one\ntwo")],
-                whole_file: true,
-            }),
-            None,
-        ]
-    );
-}
-
-#[test]
-fn shows_an_edit_s_carriage_returns_as_the_line_breaks_pi_writes() {
-    let ask = |id: &str, tool: &str, arguments: &str| {
-        format!(
-            r#"{{"type":"extension_ui_request","id":"{id}","method":"select","title":"watershed.approval {{\"tool\":\"{tool}\",\"arguments\":{arguments},\"readOnly\":false,\"builtin\":true}}","options":[]}}"#
-        )
-    };
-    let records = [
-        ask(
-            "e1",
-            "edit",
-            r#"{\"path\":\"p\",\"edits\":[{\"oldText\":\"a\\r\\nb\\rc\",\"newText\":\"d\\r\"}]}"#,
-        ),
-        // pi's write keeps them, so they stay written out.
-        ask(
-            "e2",
-            "write",
-            r#"{\"path\":\"p\",\"content\":\"one\\r\\ntwo\\r\"}"#,
-        ),
-    ];
-    let events = translate(&records.iter().map(String::as_str).collect::<Vec<_>>());
-    let changes: Vec<_> = events
-        .iter()
-        .map(|event| match event {
-            AgentEvent::RequestOpened {
-                edit: Some(edit), ..
-            } => edit.changes.clone(),
-            other => panic!("an approval opens a request with its edit: {other:?}"),
-        })
-        .collect();
-    let change = |removed: &str, added: &str| EditChange {
-        removed: removed.to_owned(),
-        added: added.to_owned(),
-    };
-    assert_eq!(
-        changes,
-        [
-            vec![change("a\nb\nc", "d\n")],
-            vec![change("", "one<U+000D>\ntwo<U+000D>")],
-        ]
-    );
-}
-
-#[test]
-fn names_the_file_a_change_writes_to_as_the_extension_resolved_it() {
-    let ask = |id: &str, writes_to: &str| {
-        format!(
-            r#"{{"type":"extension_ui_request","id":"{id}","method":"select","title":"watershed.approval {{\"tool\":\"write\",\"arguments\":{{\"path\":\"@~/.zshrc\",\"content\":\"\"}},\"readOnly\":false,\"builtin\":true{writes_to}}}","options":[]}}"#
-        )
-    };
-    let records = [
-        ask("w1", r#",\"writesTo\":\"/Users/me/.zshrc\""#),
-        // A character that could reorder the line is written out, as in the path.
-        ask("w2", r#",\"writesTo\":\"/Users/me/\\u202e.zshrc\""#),
-        // The extension names no file for a plain path inside the project.
-        ask("w3", ""),
-    ];
-    let events = translate(&records.iter().map(String::as_str).collect::<Vec<_>>());
-    let written: Vec<_> = events
-        .iter()
-        .map(|event| match event {
-            AgentEvent::RequestOpened {
-                edit: Some(edit), ..
-            } => edit.writes_to.clone(),
-            other => panic!("an approval opens a request with its edit: {other:?}"),
-        })
-        .collect();
-    assert_eq!(
-        written,
-        [
-            Some("/Users/me/.zshrc".to_owned()),
-            Some("/Users/me/<U+202E>.zshrc".to_owned()),
-            None
-        ]
-    );
-}
-
-#[test]
-fn ties_an_approval_to_the_call_it_asks_about() {
-    // pi starts each call of a response, then asks about it before running it, so an earlier
-    // call of the same tool can still be running.
-    let events = translate(&[
-        r#"{"type":"agent_start"}"#,
-        r#"{"type":"tool_execution_start","toolCallId":"c1","toolName":"bash","args":{"command":"ls"}}"#,
-        r#"{"type":"tool_execution_start","toolCallId":"c2","toolName":"bash","args":{"command":"pwd"}}"#,
-        r#"{"type":"extension_ui_request","id":"a2","method":"select","title":"watershed.approval {\"tool\":\"bash\",\"arguments\":{\"command\":\"pwd\"},\"readOnly\":false,\"toolCallId\":\"c2\"}","options":[]}"#,
-    ]);
-    let items: Vec<_> = events
-        .iter()
-        .filter_map(|event| match event {
-            AgentEvent::ItemStarted { item, .. } => Some(*item),
-            _ => None,
-        })
-        .collect();
-    let Some(AgentEvent::RequestOpened { item, .. }) = events.last() else {
-        panic!("the approval opens a request: {events:?}");
-    };
-    assert_eq!(*item, Some(items[1]), "the second call's item");
-}
-
-#[test]
 fn reports_what_each_model_request_used_and_how_it_ended() {
     let events = translate(&[
         r#"{"type":"agent_start"}"#,
@@ -627,7 +388,7 @@ fn builds_the_session_tree_from_flat_entries() {
           {"type":"message","id":"e2","parentId":"e1","message":{"role":"assistant","content":[{"type":"thinking","thinking":"hm"},{"type":"text","text":"I'll look first."}]}},
           {"type":"message","id":"e3","parentId":"e2","message":{"role":"toolResult","toolName":"read","content":[]}},
           {"type":"label","id":"l1","parentId":"e2","targetId":"e2","label":"A"},
-          {"type":"custom","id":"e4","parentId":"l1","customType":"watershed.approval","data":{"tool":"bash","decision":"reject"}},
+          {"type":"custom","id":"e4","parentId":"l1","customType":"acme.note","data":{}},
           {"type":"label","id":"l2","parentId":"e4","targetId":"e2","label":"A2"},
           {"type":"model_change","id":"e5","parentId":"l2"}],
           "leafId":"l2"}"#,
@@ -665,7 +426,7 @@ fn builds_the_session_tree_from_flat_entries() {
                     Some("A2")
                 ),
                 node("e3", Some("e2"), EntryKind::ToolResult, "read", None),
-                node("e4", Some("e2"), EntryKind::Approval, "bash", None),
+                node("e4", Some("e2"), EntryKind::Custom, "", None),
                 node("e5", Some("e4"), EntryKind::Other, "", None),
             ],
             leaf: Some("e4".to_owned()),
@@ -888,14 +649,10 @@ fn reports_extension_errors_as_notifications() {
 
 #[test]
 fn shows_invisible_and_reordering_characters_in_what_a_call_shows() {
-    use crate::pi::{call_target, call_text, changed_path};
-    // Right-to-left override, zero-width space, carriage return and NUL; line breaks and tabs
-    // stay.
+    use crate::pi::{call_target, changed_path};
+    // Right-to-left override, zero-width space and carriage return; the target is the first
+    // line.
     let command = r#"{"command":"rm -rf /\u202egnp.txt\u200b\r\n\techo\u0000"}"#;
-    assert_eq!(
-        call_text(RequestKind::CommandExecutionApproval, command),
-        "rm -rf /<U+202E>gnp.txt<U+200B><U+000D>\n\techo<U+0000>"
-    );
     assert_eq!(
         call_target(command),
         "rm -rf /<U+202E>gnp.txt<U+200B><U+000D>"
@@ -906,23 +663,11 @@ fn shows_invisible_and_reordering_characters_in_what_a_call_shows() {
         changed_path("edit", &edit).as_deref(),
         Some("a<U+2066>b.rs")
     );
-    assert_eq!(
-        call_text(RequestKind::FileChangeApproval, &edit),
-        r#"{"oldText":"x<U+2028>y","path":"a<U+2066>b.rs"}"#,
-        "other tools show their arguments"
-    );
     // Characters Unicode lets renderers ignore: variation selectors, fillers, joiners and tags.
     let ignorable = r#"{"command":"rm\ufe0f \u3164-\u115f\u034f\u17b4\u180b\udb40\udd00"}"#;
     assert_eq!(
-        call_text(RequestKind::CommandExecutionApproval, ignorable),
+        call_target(ignorable),
         "rm<U+FE0F> <U+3164>-<U+115F><U+034F><U+17B4><U+180B><U+E0100>"
-    );
-    assert_eq!(
-        call_text(
-            RequestKind::CommandExecutionApproval,
-            r#"{"command":"ls -la"}"#
-        ),
-        "ls -la"
     );
 }
 
@@ -946,8 +691,7 @@ fn shows_tool_names_with_hiding_characters_written_out() {
         r#"{"entries":[
           {"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Lint"}},
           {"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"lint\u202e\n","arguments":{}}]}},
-          {"type":"custom","id":"p1","parentId":"a1","customType":"watershed.approval","data":{"toolCallId":"c1","tool":"lint\u202e\n","decision":"allow-once"}},
-          {"type":"message","id":"r1","parentId":"p1","message":{"role":"toolResult","toolCallId":"c1","toolName":"lint\u202e\n","content":[]}}
+          {"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"c1","toolName":"lint\u202e\n","content":[]}}
         ],"leafId":"r1"}"#,
     )
     .expect("JSON");
@@ -966,11 +710,7 @@ fn shows_tool_names_with_hiding_characters_written_out() {
         .filter(|record| record.label.starts_with("lint"))
         .map(|record| record.label)
         .collect();
-    assert_eq!(
-        steps,
-        ["lint<U+202E><U+000A>", "lint<U+202E><U+000A>"],
-        "approval and call"
-    );
+    assert_eq!(steps, ["lint<U+202E><U+000A>"]);
 }
 
 #[test]

@@ -45,17 +45,17 @@ class _StatusBarState extends State<StatusBar> {
   @override
   void initState() {
     super.initState();
-    widget.state.requests.addListener(_asked);
+    widget.state.question.addListener(_asked);
   }
 
   @override
   void dispose() {
-    widget.state.requests.removeListener(_asked);
+    widget.state.question.removeListener(_asked);
     _listFocus.dispose();
     super.dispose();
   }
 
-  /// The list would cover an approval or a question in the input area.
+  /// The list would cover a question in the input area.
   void _asked() {
     if (widget.state.asking) _list.hide();
   }

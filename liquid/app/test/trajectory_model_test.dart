@@ -9,7 +9,7 @@ import 'fake_backend.dart';
 
 void main() {
   group('session graph', () {
-    // e1 prompt → e2 response → p1 approval → e3 tool result → e4 response (tip A)
+    // e1 prompt → e2 response → e3 tool result → e4 response (tip A)
     //                         ↘ b1 prompt → b2 response (tip B)
     //                         ↘ c1 prompt (tip C, labelled)
     final tree = [
@@ -23,8 +23,7 @@ void main() {
       ),
       node('t1', 'e1', BridgeEntryKind.custom),
       node('e2', 't1', BridgeEntryKind.assistant, preview: 'I will look.'),
-      node('p1', 'e2', BridgeEntryKind.approval, preview: 'bash'),
-      node('e3', 'p1', BridgeEntryKind.toolResult, preview: 'bash'),
+      node('e3', 'e2', BridgeEntryKind.toolResult, preview: 'bash'),
       node('e4', 'e3', BridgeEntryKind.assistant, preview: 'Done.', at: 26900),
       node('b1', 'e2', BridgeEntryKind.user, preview: 'Use a token bucket'),
       node('b2', 'b1', BridgeEntryKind.assistant, preview: 'Ok.', at: 19500),
@@ -41,17 +40,16 @@ void main() {
         [
           ('e1', 0, null, 1),
           ('e2', 0, 0, 2),
-          ('p1', 0, 1, 3),
-          ('e3', 0, 2, 4),
-          ('e4', 0, 3, 5),
+          ('e3', 0, 1, 3),
+          ('e4', 0, 2, 4),
           ('b1', 1, 1, 3),
-          ('b2', 1, 5, 4),
+          ('b2', 1, 4, 4),
           ('c1', 2, 1, 3),
         ],
         reason: 'the step numbers match the ledger of each branch',
       );
       expect(graph.lanes, 3);
-      expect([graph.rows[0].turn, graph.rows[5].turn], [1, 2]);
+      expect([graph.rows[0].turn, graph.rows[4].turn], [1, 2]);
     });
 
     test(
@@ -154,8 +152,8 @@ void main() {
           messageChars: messages,
           newSincePrevious: const [],
         );
-    // A prompt, request 1 (1000 tokens for 4000 characters), an approval, a tool result,
-    // request 2 (3100 tokens for 12400 characters) and a prompt no request read yet.
+    // A prompt, request 1 (1000 tokens for 4000 characters), a tool result, request 2 (3100
+    // tokens for 12400 characters) and a prompt no request read yet.
     final records = [
       record('u1', 1, BridgeRecordKind.user, 'Fix it', 0, added: 400),
       record(
@@ -168,7 +166,6 @@ void main() {
         context: request(2000, 1600, 400),
         added: 200,
       ),
-      record('p1', 1, BridgeRecordKind.approval, 'bash', 20),
       record('t1', 1, BridgeRecordKind.tool, 'bash', 30, added: 8000),
       record(
         'm2',
@@ -200,7 +197,6 @@ void main() {
           (1000, true, 100, false),
           // A response adds its output to the request it answered.
           (1050, false, 50, true),
-          (1050, false, 0, true),
           (3100, true, 2000, false),
           (3120, false, 20, true),
           (3130, false, 10, false),
@@ -250,16 +246,16 @@ void main() {
     test('names the request that read each step', () {
       expect(
         [for (var i = 0; i < records.length; i++) requestOf(records, i)],
-        [1, 1, 4, 4, 4, null],
+        [1, 1, 3, 3, null],
         reason:
             'a response is its own request; other steps go into the next one',
       );
-      expect(requestNumber(records, 4), 2);
+      expect(requestNumber(records, 3), 2);
     });
 
     test('splits a request into its parts', () {
       final parts = requestParts(
-        records[4],
+        records[3],
         detail: const BridgeContextDetail(
           sections: [
             BridgeContextPart(name: 'preamble', chars: 1200),
@@ -344,8 +340,7 @@ void main() {
         duration: 3400,
         firstToken: 900,
       ),
-      record('a1', 1, BridgeRecordKind.approval, 'bash', 3600, duration: 9400),
-      record('e3', 1, BridgeRecordKind.tool, 'bash', 13000, duration: 6800),
+      record('e3', 1, BridgeRecordKind.tool, 'bash', 3600, duration: 9400),
     ];
 
     test('places steps on the real time axis or in equal slots', () {
@@ -356,8 +351,7 @@ void main() {
         ],
         [
           (OverviewLane.model, 100.0, 3500.0, 1000.0),
-          (OverviewLane.you, 3600.0, 13000.0, null),
-          (OverviewLane.tools, 13000.0, 19800.0, null),
+          (OverviewLane.tools, 3600.0, 13000.0, null),
         ],
       );
       expect(
@@ -365,10 +359,10 @@ void main() {
           for (final segment in segments(records, equalWidth: true))
             (segment.index, segment.start, segment.end),
         ],
-        [(1, 1.0, 2.0), (2, 2.0, 3.0), (3, 3.0, 4.0)],
+        [(1, 1.0, 2.0), (2, 2.0, 3.0)],
       );
-      expect(span(records, equalWidth: false), 19800);
-      expect(span(records, equalWidth: true), 4);
+      expect(span(records, equalWidth: false), 13000);
+      expect(span(records, equalWidth: true), 3);
     });
 
     test('finds the steps a focused range overlaps', () {
@@ -376,12 +370,10 @@ void main() {
         false,
         true,
         true,
-        false,
       ]);
       expect(inRange(records, (0.5, 1.5), equalWidth: true), [
         true,
         true,
-        false,
         false,
       ]);
     });

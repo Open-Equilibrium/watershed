@@ -164,7 +164,7 @@ fn session() -> (Value, String) {
 }
 
 /// Appends one turn as pi and Watershed's extension store it: a prompt, a response with a tool
-/// call, an approval, the tool result and a final response, with their timing entries.
+/// call, the tool result and a final response, with their timing entries.
 fn push_turn(
     entries: &mut Vec<Value>,
     id: &str,
@@ -196,10 +196,6 @@ fn push_turn(
     push(
         "a",
         json!({"type":"message","message":{"role":"assistant","model":"faux-1","stopReason":"toolUse","usage":{"input":6140,"output":820,"cacheRead":0,"cacheWrite":0,"reasoning":214,"cost":{"total":0.02}},"content":[{"type":"text","text":"I'll run the tests."},{"type":"toolCall","id":format!("{id}c"),"name":"bash","arguments":{"command":"npm test -- login"}}]}}),
-    );
-    push(
-        "p",
-        json!({"type":"custom","customType":"watershed.approval","data":{"toolCallId":format!("{id}c"),"tool":"bash","decision":"allow-once","waitedMs":1200}}),
     );
     push(
         "tt",

@@ -412,9 +412,7 @@ class StepRow extends StatelessWidget {
             style: figures,
           ),
           Text(
-            record.kind == BridgeRecordKind.approval
-                ? ''
-                : '${level.addedExact ? '' : '≈'}+${formatCompact(level.added)}',
+            '${level.addedExact ? '' : '≈'}+${formatCompact(level.added)}',
             style: figures,
           ),
           track,

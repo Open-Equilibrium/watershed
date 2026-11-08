@@ -69,14 +69,13 @@ ContextTrack contextTrack(List<BridgeRecord> records) {
   void estimate() {
     var level = base;
     for (var i = since; i < levels.length; i++) {
-      final approval = records[i].kind == BridgeRecordKind.approval;
-      final added = approval ? 0 : (records[i].addedChars * ratio).round();
+      final added = (records[i].addedChars * ratio).round();
       level += added;
       levels[i] = ContextLevel(
         level,
         exact: false,
         added: added,
-        addedExact: approval,
+        addedExact: false,
       );
     }
   }
@@ -91,10 +90,7 @@ ContextTrack contextTrack(List<BridgeRecord> records) {
     estimate();
     final measured = promptTokens(usage);
     for (var i = levels.length - 1; i >= since; i--) {
-      final kind = records[i].kind;
-      if (kind == BridgeRecordKind.approval) {
-        levels[i] = ContextLevel(measured, exact: false);
-      } else if (kind != BridgeRecordKind.message) {
+      if (records[i].kind != BridgeRecordKind.message) {
         levels[i] = ContextLevel(
           measured,
           exact: true,

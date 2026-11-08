@@ -59,7 +59,6 @@ class FilterBar extends StatelessWidget {
                     (BridgeRecordKind.message, 'Model'),
                     (BridgeRecordKind.tool, 'Tools'),
                     (BridgeRecordKind.user, 'You'),
-                    (BridgeRecordKind.approval, 'Approvals'),
                   ])
                     _Chip(
                       label: label,

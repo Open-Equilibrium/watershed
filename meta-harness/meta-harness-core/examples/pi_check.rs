@@ -1,6 +1,6 @@
-//! Manual check of the core against real pi: the approval extension is loaded, two turns with a
-//! scripted model in a Git project, one allowed command that writes a file and one rejected
-//! command, both turns' checkpoints and the first turn's changes, the branch tree and Trajectory,
+//! Manual check of the core against real pi: Watershed's extension is loaded, two turns with a
+//! scripted model in a Git project, one command that writes a file and one that writes nothing,
+//! both turns' checkpoints and the first turn's changes, the branch tree and Trajectory,
 //! a branch at the second prompt, the state, then the history again after reopening the session
 //! file, a new session and the way back.
 //! Run from the repository root:
@@ -15,8 +15,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use meta_harness_core::{
-    AgentCommand, AgentEvent, Checkpoint, Decision, Phase, RecordKind, Session, SessionEvent,
-    Whitespace,
+    AgentCommand, AgentEvent, Checkpoint, Phase, RecordKind, Session, SessionEvent, Whitespace,
 };
 
 const WAIT: Duration = Duration::from_secs(30);
@@ -134,7 +133,7 @@ async fn check() {
     let command = pi(&dir, None);
     let (mut session, mut events) = Session::start(&command).expect("pi starts");
     session
-        .require_gate()
+        .require_extension()
         .await
         .expect("Watershed's extension is loaded");
     session
@@ -144,7 +143,6 @@ async fn check() {
         .accepted()
         .await
         .expect("prompt accepted");
-    let mut decisions = [Decision::AllowOnce, Decision::Reject].into_iter();
     let mut turns = 0;
     while let Some(event) = tokio::time::timeout(WAIT, events.recv())
         .await
@@ -152,19 +150,6 @@ async fn check() {
     {
         match &event {
             SessionEvent::Agent(AgentEvent::ContentDelta { .. }) => {}
-            SessionEvent::Agent(AgentEvent::RequestOpened {
-                request,
-                tool,
-                arguments,
-                ..
-            }) => {
-                let decision = decisions.next().expect("two approvals");
-                println!("approval: {tool} {arguments} -> {decision:?}");
-                session
-                    .decide(request, decision)
-                    .await
-                    .expect("decision sent");
-            }
             SessionEvent::Agent(AgentEvent::TurnCompleted { .. }) => {
                 println!("{event:?}");
                 turns += 1;
@@ -197,7 +182,7 @@ async fn check() {
                     .await
                     .expect("the first turn's changes");
                 println!("first turn changed: {changes:?}");
-                assert_eq!(changes.len(), 1, "the allowed command wrote run.txt");
+                assert_eq!(changes.len(), 1, "the first command wrote run.txt");
                 let tree = history.tree();
                 println!("tree: {} entries, leaf {:?}", tree.nodes.len(), tree.leaf);
                 let records = history.trajectory(None).records;

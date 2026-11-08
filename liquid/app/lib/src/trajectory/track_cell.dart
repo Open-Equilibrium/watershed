@@ -46,7 +46,7 @@ class TrackCell extends StatelessWidget {
   /// The model's context window, when known.
   final int? window;
 
-  /// Whether the row draws a bar; turn lines and approvals only let the line pass.
+  /// Whether the row draws a bar; turn lines only let the line pass.
   final bool bar;
   final bool collapsed;
 

@@ -44,7 +44,7 @@ pub(crate) async fn ready(
 ) -> (Option<Result<(), CommandError>>, Vec<SessionEvent>) {
     let mut early = Vec::new();
     // Boxed rather than `pin!`, which flutter_rust_bridge's code generator cannot parse.
-    let mut check = Box::pin(session.require_gate());
+    let mut check = Box::pin(session.require_extension());
     let mut limit = Box::pin(tokio::time::sleep(START_TIMEOUT));
     let gate = std::future::poll_fn(|context| {
         if let Poll::Ready(gate) = check.as_mut().poll(context) {

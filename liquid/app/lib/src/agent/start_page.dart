@@ -23,13 +23,6 @@ class StartPage extends StatelessWidget {
   final SessionState state;
   final SessionInfo info;
 
-  /// What each approval mode means, as the greeting says it.
-  static const _modes = {
-    BridgeApprovalMode.ask: 'Ask before changes',
-    BridgeApprovalMode.allowEdits: 'Edits without asking',
-    BridgeApprovalMode.fullAccess: 'Full access',
-  };
-
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
@@ -45,13 +38,7 @@ class StartPage extends StatelessWidget {
               ?.copyWith(fontWeight: WsMetrics.fwSemibold),
         ),
         const SizedBox(height: WsMetrics.space2),
-        ValueListenableBuilder(
-          valueListenable: state.mode,
-          builder: (context, mode, _) => Text(
-            '${info.harness} on ${info.device} · ${_modes[mode]}',
-            style: faint,
-          ),
-        ),
+        Text('${info.harness} on ${info.device}', style: faint),
         // The list sits above the input area and scrolls when the window is short.
         Expanded(
           child: Align(

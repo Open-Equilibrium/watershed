@@ -789,7 +789,6 @@ class _TrajectoryViewState extends State<TrajectoryView> {
         for (final (label, lane) in [
           ('Model', OverviewLane.model),
           ('Tools', OverviewLane.tools),
-          ('You', OverviewLane.you),
         ])
           OverviewTrack(label, [
             for (final segment in steps)
@@ -995,11 +994,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
                           : null,
                       level: track.levels[step],
                       trackWidth: trackWidth,
-                      track: cell(
-                        index,
-                        track.levels[step],
-                        bar: records[step].kind != BridgeRecordKind.approval,
-                      ),
+                      track: cell(index, track.levels[step]),
                       selected: records[step].entry == _selected,
                       onTap: () {
                         _focus.requestFocus();

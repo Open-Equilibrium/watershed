@@ -20,10 +20,6 @@ pub enum BridgeEventKind {
     ItemCompleted,
     /// `step` with usage, stop reason and error.
     ModelRequestCompleted,
-    /// `request` with its approval.
-    RequestOpened,
-    /// `request` id.
-    RequestResolved,
     /// `request` with its question.
     UserInputRequested,
     /// `request` id.
@@ -53,7 +49,7 @@ pub struct BridgeEvent {
     pub item: Option<BridgeItem>,
     /// The model request.
     pub step: Option<BridgeStep>,
-    /// The approval request or question.
+    /// The question.
     pub request: Option<BridgeRequest>,
     /// Text whose meaning the kind defines.
     pub text: Option<String>,
@@ -145,70 +141,8 @@ pub struct BridgeUsage {
 pub struct BridgeRequest {
     /// The request id.
     pub id: String,
-    /// The tool call awaiting approval.
-    pub approval: Option<BridgeApproval>,
     /// The question awaiting an answer.
     pub question: Option<BridgeQuestion>,
-}
-
-/// What an approval request asks to allow.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BridgeRequestKind {
-    /// Running a shell command.
-    CommandExecution,
-    /// Changing project files.
-    FileChange,
-    /// Calling any other tool.
-    Tool,
-}
-
-/// A tool call awaiting approval.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BridgeApproval {
-    /// What the call would do.
-    pub kind: BridgeRequestKind,
-    /// The tool name.
-    pub tool: String,
-    /// The whole call the user decides on, such as a shell command.
-    pub text: String,
-    /// The id of the call's item in the chat, when known.
-    pub item: Option<i64>,
-    /// What a file change does, when pi's own `edit` or `write` asks; the card shows it as
-    /// removed and added lines.
-    pub edit: Option<BridgeEdit>,
-}
-
-/// A file change as its approval shows it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BridgeEdit {
-    /// The file, as the agent gave it.
-    pub path: String,
-    /// The file pi changes, when the path does not say so plainly.
-    pub writes_to: Option<String>,
-    /// The replacements in order; a write is one change that adds its whole content.
-    pub changes: Vec<BridgeEditChange>,
-    /// Whether the change replaces whatever the file holds, as a write does.
-    pub whole_file: bool,
-}
-
-/// One replacement in a file.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BridgeEditChange {
-    /// The text it removes.
-    pub removed: String,
-    /// The text it adds.
-    pub added: String,
-}
-
-/// The user's answer to an approval request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BridgeDecision {
-    /// Allow this call only.
-    AllowOnce,
-    /// Allow this shell command, or this tool, for the rest of the session.
-    AllowSession,
-    /// Block this call.
-    Reject,
 }
 
 /// What kind of question an agent extension asks.

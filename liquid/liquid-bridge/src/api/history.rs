@@ -1,6 +1,6 @@
 //! A session's stored history for the Trajectory tab: its branch tree and Trajectories.
 
-use crate::api::events::{BridgeDecision, BridgeItemKind, BridgeUsage};
+use crate::api::events::{BridgeItemKind, BridgeUsage};
 
 /// The session's branch tree and the requested Trajectories.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,8 +45,6 @@ pub enum BridgeEntryKind {
     ToolResult,
     /// A change of the system prompt or tools.
     System,
-    /// The user's decision on a tool call.
-    Approval,
     /// An extension's entry.
     Custom,
     /// Anything else.
@@ -79,8 +77,6 @@ pub struct BridgeRecord {
     pub target: String,
     /// The file a successful file change changed.
     pub changed_file: Option<String>,
-    /// An approval's decision.
-    pub decision: Option<BridgeDecision>,
     /// Milliseconds from the branch's first entry to the start.
     pub start_ms: i64,
     /// How long it took, when measured.
@@ -99,8 +95,7 @@ pub struct BridgeRecord {
     pub context: Option<BridgeStepContext>,
     /// What a tool call did.
     pub outcome: BridgeToolOutcome,
-    /// Characters the step adds to the model's context: its prompt, response or tool result;
-    /// none for an approval.
+    /// Characters the step adds to the model's context: its prompt, response or tool result.
     pub added_chars: i64,
 }
 
@@ -128,8 +123,6 @@ pub enum BridgeRecordKind {
     Message,
     /// A tool call and its result.
     Tool,
-    /// The wait for the user's approval of a tool call.
-    Approval,
 }
 
 /// What the agent sent to the model for one request.

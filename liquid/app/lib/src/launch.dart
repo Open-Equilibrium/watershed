@@ -28,7 +28,8 @@ String projectName(String project) =>
 
 /// Starts pi for the project the environment names; the start page then begins or continues a
 /// session.
-/// Without Watershed's pi extension there would be no approvals, so the app refuses to start pi.
+/// Without Watershed's pi extension a turn would have no checkpoints, so the app refuses to start
+/// pi.
 Future<Launch> launchFromEnvironment(
   Map<String, String> environment, {
   BranchBases? bases,

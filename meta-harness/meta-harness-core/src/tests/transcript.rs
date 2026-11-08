@@ -8,8 +8,7 @@ const SESSION: &str = r#"{"entries":[
   {"type":"model_change","id":"s0","parentId":null},
   {"type":"message","id":"u1","parentId":"s0","message":{"role":"user","content":"Run the tests"}},
   {"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Plan."},{"type":"text","text":"Running them."},{"type":"toolCall","id":"c1","name":"bash","arguments":{"command":"npm test"}}]}},
-  {"type":"custom","id":"p1","parentId":"a1","customType":"watershed.approval","data":{"toolCallId":"c1","tool":"bash","decision":"allow-once","waitedMs":10}},
-  {"type":"custom","id":"t1","parentId":"p1","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"c1","durationMs":900}},
+  {"type":"custom","id":"t1","parentId":"a1","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"c1","durationMs":900}},
   {"type":"message","id":"r1","parentId":"t1","message":{"role":"toolResult","toolCallId":"c1","toolName":"bash","isError":true,"content":[{"type":"text","text":"1 failed"}]}},
   {"type":"message","id":"a2","parentId":"r1","message":{"role":"assistant","content":[{"type":"text","text":"One test fails."}]}},
   {"type":"message","id":"b1","parentId":"u1","message":{"role":"user","content":"Only lint"}}
@@ -51,7 +50,7 @@ fn rebuilds_the_chat_of_the_current_branch_page_by_page() {
             more: false,
             start: Some("s0".to_owned()),
         },
-        "approvals, timing and other branches stay out"
+        "timing and other branches stay out"
     );
 
     let latest = history.transcript(None, 3);
@@ -60,7 +59,7 @@ fn rebuilds_the_chat_of_the_current_branch_page_by_page() {
         (1, true),
         "the newest three entries hold only the final answer"
     );
-    let earlier = history.transcript(Some("p1"), 3);
+    let earlier = history.transcript(Some("t1"), 3);
     assert_eq!(
         earlier,
         Transcript {
@@ -82,7 +81,7 @@ fn rebuilds_the_chat_of_the_current_branch_page_by_page() {
         (0, true, Some("t1")),
         "a page without chat items still tells where the next one ends"
     );
-    assert_eq!(history.transcript(Some("t1"), 2).items.len(), 3);
+    assert_eq!(history.transcript(Some("t1"), 1).items.len(), 3);
 }
 
 #[test]

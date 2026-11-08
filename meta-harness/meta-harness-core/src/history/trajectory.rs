@@ -285,21 +285,6 @@ impl<'a> Projection<'a> {
                 duration_ms,
             } => self.request_timing = Some((*first_token_ms, *duration_ms)),
             Body::ToolTiming { call, duration_ms } => self.calls.ended(call, (at, *duration_ms)),
-            Body::Approval {
-                tool,
-                decision,
-                waited_ms,
-            } => self.records.push(TrajectoryRecord {
-                decision: pi::decision(decision),
-                ..row(
-                    id,
-                    self.turn,
-                    RecordKind::Approval,
-                    tool.clone(),
-                    at.saturating_sub(waited_ms.unwrap_or(0)),
-                    *waited_ms,
-                )
-            }),
             Body::System(change) => self.system(change),
             Body::User { text, chars } => {
                 self.turn += 1;
@@ -445,7 +430,6 @@ fn row(
         detail: String::new(),
         target: String::new(),
         changed_file: None,
-        decision: None,
         start_ms,
         duration_ms,
         first_token_ms: None,

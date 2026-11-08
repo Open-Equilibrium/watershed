@@ -19,7 +19,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::{ChangedLines, Decision, Frame, ItemKind, LineFramer, SessionTree, Usage};
+use crate::{ChangedLines, Frame, ItemKind, LineFramer, SessionTree, Usage};
 use entry::Entry;
 
 /// A session's stored entries. The session keeps them and reads only the entries added since;
@@ -147,8 +147,6 @@ pub enum RecordKind {
     Message,
     /// A tool call and its result.
     Tool,
-    /// The time a tool call waited for the user's approval.
-    Approval,
 }
 
 /// What the agent sent to the model for one request.
@@ -187,8 +185,6 @@ pub struct TrajectoryRecord {
     pub target: String,
     /// The file a successful file change changed.
     pub changed_file: Option<String>,
-    /// An approval's decision.
-    pub decision: Option<Decision>,
     /// Milliseconds from the branch's first entry to the start.
     pub start_ms: u64,
     /// How long it took, when measured.
@@ -207,8 +203,7 @@ pub struct TrajectoryRecord {
     pub context: Option<StepContext>,
     /// What a tool call did.
     pub outcome: ToolOutcome,
-    /// Characters the step adds to the model's context: its prompt, response or tool result;
-    /// none for an approval.
+    /// Characters the step adds to the model's context: its prompt, response or tool result.
     pub added_chars: usize,
 }
 

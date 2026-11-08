@@ -15,11 +15,11 @@ void main() {
 
       expect(keys.bindings(Command.newSession), [liquidN, commandN]);
       expect(keys.label(Command.newSession), '⇪N');
-      expect(keys.label(Command.allowSession), '⇪⏎');
+      expect(keys.label(Command.answerEditor), '⇪⏎');
       expect(keys.menu(Command.newSession), commandN);
       // Platform standards and keys without ⌘ stay as they are.
       expect(keys.label(Command.settings), '⌘,');
-      expect(keys.label(Command.reject), 'esc');
+      expect(keys.label(Command.dismissQuestion), 'esc');
       expect(keys.label(Command.queue), '⌥⏎');
     },
   );
@@ -56,9 +56,12 @@ void main() {
     expect(keys.conflict(Command.focusInput, liquidN), Command.newSession);
     // The ⌘ variant that keeps working conflicts too.
     expect(keys.conflict(Command.focusInput, commandN), Command.newSession);
-    // esc stops a run in the input area and rejects in an approval.
+    // esc stops a run in the input area and dismisses a question.
     expect(
-      keys.conflict(Command.reject, const Keys(LogicalKeyboardKey.escape)),
+      keys.conflict(
+        Command.dismissQuestion,
+        const Keys(LogicalKeyboardKey.escape),
+      ),
       isNull,
     );
     expect(keys.conflict(Command.newSession, liquidN), isNull);
@@ -84,7 +87,7 @@ void main() {
     expect(off.profile, Profile.custom);
     expect(off.base, Profile.liquidKey);
     expect(off.bindings(Command.newSession), [commandN]);
-    expect(off.label(Command.allowSession), '⌘⏎');
+    expect(off.label(Command.answerEditor), '⌘⏎');
 
     final on = ShortcutSettings.standard().withLiquidKey(true);
     expect(on.base, Profile.standard);
@@ -141,8 +144,11 @@ void main() {
       'typing',
     );
     expect(
-      reserved(Command.reject, const Keys(LogicalKeyboardKey.pageDown)),
-      'Scroll the call',
+      reserved(
+        Command.dismissQuestion,
+        const Keys(LogicalKeyboardKey.arrowDown),
+      ),
+      'Move through options',
     );
     expect(
       reserved(Command.branch, const Keys(LogicalKeyboardKey.keyX)),

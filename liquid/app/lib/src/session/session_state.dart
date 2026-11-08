@@ -56,7 +56,6 @@ class SessionState {
   final SessionBackend _backend;
   late final StreamSubscription<BridgeEvent> _subscription;
   final Map<int, ItemView> _byId = {};
-  final List<BridgeRequest> _approvals = [];
   final List<BridgeRequest> _questions = [];
   bool _turnActive = false;
 
@@ -66,23 +65,19 @@ class SessionState {
   /// Requests that ended before they were reported, which Stop can cause; they never show.
   final Set<String> _endedUnseen = {};
 
-  void _end(List<BridgeRequest> open, String id) {
+  void _end(String id) {
     _answered.remove(id);
-    final before = open.length;
-    open.removeWhere((request) => request.id == id);
-    if (open.length == before) _endedUnseen.add(id);
+    final before = _questions.length;
+    _questions.removeWhere((request) => request.id == id);
+    if (_questions.length == before) _endedUnseen.add(id);
   }
 
   final status = ValueNotifier(RunStatus.idle);
   final items = ValueNotifier<List<ItemView>>(const []);
-  final approval = ValueNotifier<BridgeRequest?>(null);
   final question = ValueNotifier<BridgeRequest?>(null);
 
-  /// Notifies when an approval or a question opens or ends.
-  late final Listenable requests = Listenable.merge([approval, question]);
-
-  /// Whether an approval or a question waits for the user.
-  bool get asking => approval.value != null || question.value != null;
+  /// Whether a question waits for the user.
+  bool get asking => question.value != null;
 
   final widgets = ValueNotifier<Map<String, List<String>>>(const {});
   final statuses = ValueNotifier<Map<String, String>>(const {});
@@ -98,7 +93,6 @@ class SessionState {
   Timer? _fade;
   final totals = ValueNotifier(const SessionTotals());
   final failure = ValueNotifier<String?>(null);
-  final mode = ValueNotifier(BridgeApprovalMode.ask);
 
   /// Messages waiting for the running agent.
   final queue = ValueNotifier(const BridgeQueue(steering: [], followUp: []));
@@ -355,16 +349,6 @@ class SessionState {
     }
   }
 
-  /// Changes which tool calls wait for the user.
-  Future<void> setMode(BridgeApprovalMode next) async {
-    await _backend.setApprovalMode(next);
-    mode.value = next;
-  }
-
-  /// Answers the approval `request`.
-  Future<void> decide(String request, BridgeDecision decision) =>
-      _reply(request, () => _backend.decide(request, decision));
-
   /// Answers the question `request` with text or a selected option.
   Future<void> answerText(String request, String text) =>
       _reply(request, () => _backend.answerText(request, text));
@@ -381,7 +365,7 @@ class SessionState {
   /// Sends one answer to `request` while it is open, so a key on a card that is closing never
   /// answers the request behind it, nor the same one twice.
   Future<void> _reply(String request, Future<void> Function() send) async {
-    final open = [..._approvals, ..._questions].any((it) => it.id == request);
+    final open = _questions.any((it) => it.id == request);
     if (!open || !_answered.add(request)) return;
     try {
       await send();
@@ -879,19 +863,12 @@ class SessionState {
             when event.step!.stopReason != 'aborted' && !_stopping) {
           notify(BridgeLevel.error, 'The model request failed: $error');
         }
-      case BridgeEventKind.requestOpened:
-        if (!_endedUnseen.remove(event.request!.id)) {
-          _approvals.add(event.request!);
-        }
-      case BridgeEventKind.requestResolved:
-        _end(_approvals, event.request!.id);
-        stored.value++;
       case BridgeEventKind.userInputRequested:
         if (!_endedUnseen.remove(event.request!.id)) {
           _questions.add(event.request!);
         }
       case BridgeEventKind.userInputResolved:
-        _end(_questions, event.request!.id);
+        _end(event.request!.id);
       case BridgeEventKind.widgetChanged:
         final lines = event.display!.lines;
         final next = {...widgets.value};
@@ -930,18 +907,15 @@ class SessionState {
           _failed(event.text);
         }
         // A gone agent asks nothing more; its open cards cannot be answered.
-        _approvals.clear();
         _questions.clear();
-        approval.value = null;
         question.value = null;
         status.value = event.success == true && failure.value == null
             ? RunStatus.exited
             : RunStatus.failed;
         return;
     }
-    approval.value = _approvals.firstOrNull;
     question.value = _questions.firstOrNull;
-    status.value = _approvals.isNotEmpty || _questions.isNotEmpty
+    status.value = _questions.isNotEmpty
         ? RunStatus.waitingForYou
         : _turnActive
         ? RunStatus.running

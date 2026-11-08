@@ -1,17 +1,16 @@
 //! Conversions between the core's model and the types Dart receives.
 
 use meta_harness_core::{
-    AgentEvent, ApprovalMode, ChangeStatus, CommandError, ContextDetail, ContextMessage,
-    ContextPart, Decision, EntryKind, FileChange, ItemDetail, ItemKind, ItemStatus,
-    MAX_RECORD_BYTES, Model, NotificationLevel, Queue, RecordKind, RequestKind, RevertFile,
-    SessionEvent, StepContext, StoredSession, ToolOutcome, Trajectory, TrajectoryRecord,
-    Transcript, TranscriptItem, TreeNode, TurnCheckpoints, Usage, UserInput, visible_name,
+    AgentEvent, ChangeStatus, CommandError, ContextDetail, ContextMessage, ContextPart, EntryKind,
+    FileChange, ItemDetail, ItemKind, ItemStatus, MAX_RECORD_BYTES, Model, NotificationLevel,
+    Queue, RecordKind, RevertFile, SessionEvent, StepContext, StoredSession, ToolOutcome,
+    Trajectory, TrajectoryRecord, Transcript, TranscriptItem, TreeNode, TurnCheckpoints, Usage,
+    UserInput, visible_name,
 };
 
 use crate::api::events::{
-    BridgeApproval, BridgeChangeStatus, BridgeDecision, BridgeDisplay, BridgeEdit,
-    BridgeEditChange, BridgeEvent, BridgeEventKind, BridgeFileChange, BridgeItem, BridgeItemKind,
-    BridgeLevel, BridgeQuestion, BridgeQuestionKind, BridgeQueue, BridgeRequest, BridgeRequestKind,
+    BridgeChangeStatus, BridgeDisplay, BridgeEvent, BridgeEventKind, BridgeFileChange, BridgeItem,
+    BridgeItemKind, BridgeLevel, BridgeQuestion, BridgeQuestionKind, BridgeQueue, BridgeRequest,
     BridgeStep, BridgeUsage,
 };
 use crate::api::history::{
@@ -19,7 +18,7 @@ use crate::api::history::{
     BridgeRecordKind, BridgeRevertFile, BridgeStepContext, BridgeToolOutcome, BridgeTrajectory,
     BridgeTranscript, BridgeTranscriptItem, BridgeTreeNode, BridgeTurn,
 };
-use crate::api::session::{BridgeApprovalMode, BridgeModel, BridgeStoredSession};
+use crate::api::session::{BridgeModel, BridgeStoredSession};
 
 /// Describes a failed command for Dart.
 pub(crate) fn describe(error: CommandError) -> String {
@@ -31,8 +30,8 @@ pub(crate) fn describe(error: CommandError) -> String {
             "the agent's answer exceeded {} MiB and was skipped",
             MAX_RECORD_BYTES / (1024 * 1024)
         ),
-        CommandError::Ungated => {
-            "Watershed's pi extension is not loaded, so tool calls would run without asking"
+        CommandError::ExtensionMissing => {
+            "Watershed's pi extension is not loaded, so turns would run without checkpoints"
                 .to_owned()
         }
     }
@@ -65,7 +64,6 @@ impl From<TreeNode> for BridgeTreeNode {
                 EntryKind::Assistant => BridgeEntryKind::Assistant,
                 EntryKind::ToolResult => BridgeEntryKind::ToolResult,
                 EntryKind::System => BridgeEntryKind::System,
-                EntryKind::Approval => BridgeEntryKind::Approval,
                 EntryKind::Custom => BridgeEntryKind::Custom,
                 EntryKind::Other => BridgeEntryKind::Other,
             },
@@ -95,13 +93,11 @@ impl From<TrajectoryRecord> for BridgeRecord {
                 RecordKind::User => BridgeRecordKind::User,
                 RecordKind::Message => BridgeRecordKind::Message,
                 RecordKind::Tool => BridgeRecordKind::Tool,
-                RecordKind::Approval => BridgeRecordKind::Approval,
             },
             label: record.label,
             detail: record.detail,
             target: record.target,
             changed_file: record.changed_file,
-            decision: record.decision.map(Into::into),
             start_ms: int(record.start_ms),
             duration_ms: record.duration_ms.map(int),
             first_token_ms: record.first_token_ms.map(int),
@@ -267,36 +263,6 @@ impl From<RevertFile> for BridgeRevertFile {
     }
 }
 
-impl From<BridgeApprovalMode> for ApprovalMode {
-    fn from(mode: BridgeApprovalMode) -> Self {
-        match mode {
-            BridgeApprovalMode::Ask => Self::Ask,
-            BridgeApprovalMode::AllowEdits => Self::AllowEdits,
-            BridgeApprovalMode::FullAccess => Self::FullAccess,
-        }
-    }
-}
-
-impl From<BridgeDecision> for Decision {
-    fn from(decision: BridgeDecision) -> Self {
-        match decision {
-            BridgeDecision::AllowOnce => Self::AllowOnce,
-            BridgeDecision::AllowSession => Self::AllowSession,
-            BridgeDecision::Reject => Self::Reject,
-        }
-    }
-}
-
-impl From<Decision> for BridgeDecision {
-    fn from(decision: Decision) -> Self {
-        match decision {
-            Decision::AllowOnce => Self::AllowOnce,
-            Decision::AllowSession => Self::AllowSession,
-            Decision::Reject => Self::Reject,
-        }
-    }
-}
-
 impl From<ItemKind> for BridgeItemKind {
     fn from(kind: ItemKind) -> Self {
         match kind {
@@ -306,16 +272,6 @@ impl From<ItemKind> for BridgeItemKind {
             ItemKind::CommandExecution => Self::CommandExecution,
             ItemKind::FileChange => Self::FileChange,
             ItemKind::DynamicToolCall => Self::DynamicToolCall,
-        }
-    }
-}
-
-impl From<RequestKind> for BridgeRequestKind {
-    fn from(kind: RequestKind) -> Self {
-        match kind {
-            RequestKind::CommandExecutionApproval => Self::CommandExecution,
-            RequestKind::FileChangeApproval => Self::FileChange,
-            RequestKind::ToolApproval => Self::Tool,
         }
     }
 }
@@ -347,11 +303,7 @@ fn item(id: u64) -> BridgeItem {
 }
 
 fn request(id: String) -> BridgeRequest {
-    BridgeRequest {
-        id,
-        approval: None,
-        question: None,
-    }
+    BridgeRequest { id, question: None }
 }
 
 fn display(key: String) -> BridgeDisplay {
@@ -451,43 +403,6 @@ impl From<AgentEvent> for BridgeEvent {
                     error,
                 }),
                 ..event(Kind::ModelRequestCompleted)
-            },
-            AgentEvent::RequestOpened {
-                request: id,
-                kind,
-                tool,
-                text,
-                item,
-                edit,
-                ..
-            } => BridgeEvent {
-                request: Some(BridgeRequest {
-                    approval: Some(BridgeApproval {
-                        kind: kind.into(),
-                        tool,
-                        text,
-                        item: item.map(|item| int(item.0)),
-                        edit: edit.map(|edit| BridgeEdit {
-                            path: edit.path,
-                            writes_to: edit.writes_to,
-                            changes: edit
-                                .changes
-                                .into_iter()
-                                .map(|change| BridgeEditChange {
-                                    removed: change.removed,
-                                    added: change.added,
-                                })
-                                .collect(),
-                            whole_file: edit.whole_file,
-                        }),
-                    }),
-                    ..request(id.0)
-                }),
-                ..event(Kind::RequestOpened)
-            },
-            AgentEvent::RequestResolved { request: id, .. } => BridgeEvent {
-                request: Some(request(id.0)),
-                ..event(Kind::RequestResolved)
             },
             AgentEvent::UserInputRequested { request: id, input } => {
                 let (kind, title, detail, options) = match input {

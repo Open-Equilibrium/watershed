@@ -14,13 +14,12 @@ import 'worktrees.dart';
 
 // These functions are ignored because they are not marked as `pub`: `answer`, `branch_turns`, `checkpoint_ids`, `checkpoint`, `checkpoints_of`, `left_unreverted`, `open`, `session_dir`, `shown`, `stored_session`, `turn_of`, `unread`, `whitespace`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Open`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `forward`, `launch`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>>
 abstract class AgentSession implements RustOpaqueInterface {
-  /// Aborts the running turn; open approvals are withdrawn and questions dismissed, so the
-  /// agent can stop.
+  /// Aborts the running turn; open questions are dismissed, so the agent can stop.
   Future<void> abort();
 
   /// Answers a confirmation question.
@@ -67,12 +66,6 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// The selected model as `provider/id`.
   Future<String?> currentModel();
-
-  /// Answers an approval request.
-  Future<void> decide({
-    required String request,
-    required BridgeDecision decision,
-  });
 
   /// Deletes the session stored in `path`, a session of this project in pi's session
   /// directory other than the open one, with its checkpoints first; refused while an agent
@@ -178,9 +171,6 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// The file pi stores the open session in, unless it keeps the session in memory.
   Future<String?> sessionFile();
-
-  /// Changes which tool calls need the user's approval.
-  Future<void> setApprovalMode({required BridgeApprovalMode mode});
 
   /// Selects the model the next requests use.
   Future<void> setModel({required String provider, required String id});
@@ -293,18 +283,6 @@ abstract class AgentSession implements RustOpaqueInterface {
     required String mergeBase,
     required String headCommit,
   });
-}
-
-/// How much an agent may do without asking.
-enum BridgeApprovalMode {
-  /// Ask for every call that is not read-only.
-  ask,
-
-  /// Also allow file changes without asking.
-  allowEdits,
-
-  /// Allow every call.
-  fullAccess,
 }
 
 /// A session with checkpoints in the project's repository.
