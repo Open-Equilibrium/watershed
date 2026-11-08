@@ -239,6 +239,13 @@ class FakeWorkspace implements LiquidWorkspace {
         );
         _changed(_blockResource(mutation));
         return BridgeApplied(action: _id(), row: row.id);
+      case BridgeMutationKind.removeRow:
+        final table = rows[mutation.block]!;
+        final at = table.indexWhere((row) => row.id == mutation.row);
+        if (at < 0) throw 'not found';
+        table.removeAt(at);
+        _changed(_blockResource(mutation));
+        return BridgeApplied(action: _id());
       case BridgeMutationKind.addField:
         final database = databases[mutation.block]!;
         final fields = [...database.fields];
@@ -379,8 +386,6 @@ class FakeWorkspace implements LiquidWorkspace {
           BridgeResource(kind: BridgeResourceKind.views, page: mutation.page),
         );
         return BridgeApplied(action: _id(), block: view.block, view: view.id);
-      default:
-        throw UnimplementedError('${mutation.kind}');
     }
   }
 

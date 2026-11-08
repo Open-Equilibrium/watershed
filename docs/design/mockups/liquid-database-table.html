@@ -140,7 +140,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   </section>
   <section>
     <h3 class="sec">5 · Field and row menus</h3>
-    <p class="sub">Clicking a field's header opens its menu: rename it in place, or delete it. ⏎, a click outside or anything else that closes the menu keeps the new name, esc drops it, and an empty name keeps the old one; ↑↓ choose Delete field, which the pointer only shows, and typing goes back to the name. A field removed elsewhere closes its menu; a rename elsewhere leaves it open. Deleting a field asks first, since its whole column goes, saying “It holds no values yet.” or “Its value in 1 row goes with it.” for fewer rows; ⏎ deletes and esc cancels. A row's handle opens its menu: insert a row above or below, or delete it without asking; the handle's + inserts a row below, ⌥ and + one above, as in Notion.</p>
+    <p class="sub">Clicking a field's header opens its menu: rename it in place, or delete it. ⏎, a click outside or anything else that closes the menu keeps the new name, esc drops it, and an empty name keeps the old one; ↑↓ choose Delete field, which the pointer only shows, and typing goes back to the name. A field removed elsewhere closes its menu; a rename elsewhere leaves it open. Deleting a field asks first, since its whole column goes, saying “It holds no values yet.” or “Its value in 1 row goes with it.” for fewer rows; ⏎ deletes and esc cancels. A row's handle opens its menu: insert a row above or below, or delete it without asking; the handle's + inserts a row below, ⌥ and + one above, as in Notion. As in macOS menus, the pointer and ↑↓ share the row menu's choice, wrapping, ⏎ takes it and esc closes it; nothing is selected after an insert, as after + New.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-menus" data-w="1040"></div></div></div>
     <div class="stage" style="margin-top:12px"><div class="scaler"><div class="win" id="w-delete" data-w="1040"></div></div></div>
   </section>
@@ -206,10 +206,11 @@ h4.qh{margin:14px 0 6px;font-size:13px}
       <li>Liquid holds a table's cell writes not yet read back, so quick toggles flip; written values show when they are read back (ADR-0248).</li>
       <li>The field menu keeps a new name however it closes, but for esc, as leaving an editor keeps the edit; the question before deleting a field takes ⏎ to delete, as Liquid's other questions do; a row handle's + inserts below, as in Notion.</li>
       <li>A date picker works as section 4 says: its ↑↓ step as macOS date fields do, it takes the three day forms with four-digit years and no shorter ones, ⇥ and a click outside keep the day typed as leaving an editor keeps the edit, and a click on a day writes and closes as a select picker's option does.</li>
-      <li>Pickers, the field panel and the field menu close when what they hang from moves (a scroll, a window resize, a change elsewhere), as Flutter's menus do, rather than locking the Page's scroll as Notion does; section 4 says where a picker opens.</li>
+      <li>Pickers, the field panel and the field and row menus close when what they hang from moves (a scroll, a window resize, a change elsewhere), as Flutter's menus do, rather than locking the Page's scroll as Notion does; section 4 says where a picker opens.</li>
     </ol>
     <h4 class="qh">Decided on 2026-11-08</h4>
     <ol class="qs">
+      <li>The row menu works as macOS menus do, as section 5 says; keys to insert and delete rows on a selected cell follow with their own mockup.</li>
       <li>The question before deleting a field is Liquid's shared question; all its questions move to Cancel on the left and the action on the right, as section 5 shows and as macOS and Material place them, in a change of their own.</li>
     </ol>
   </section>
