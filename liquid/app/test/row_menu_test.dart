@@ -213,4 +213,33 @@ void main() {
       moreOrLessEquals(tester.getCenter(cell('r2', 'name')).dy, epsilon: 1),
     );
   });
+
+  testWidgets('a handle gone under the pointer no longer holds later rows\' '
+      'handles', (tester) async {
+    await show(tester, 2);
+    await openMenu(tester, 'r1');
+    // The pointer stays on ⋮⋮ while ↑ ⏎ deletes the row.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(kit.applied(BridgeMutationKind.removeRow).single.row, 'r1');
+    await hover(tester, tester.getCenter(cell('r3', 'date')));
+    expect(handle, findsOneWidget);
+    await hover(tester, const Offset(1300, 850));
+    expect(handle, findsNothing);
+  });
+
+  testWidgets('a hovered row moving away from the pointer drops its handle', (
+    tester,
+  ) async {
+    await show(tester);
+    await openMenu(tester, 'r1');
+    await hover(tester, tester.getCenter(cell('r2', 'date')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(kit.applied(BridgeMutationKind.removeRow).single.row, 'r1');
+    // r2 moved up; the pointer now rests below the rows.
+    expect(handle, findsNothing);
+  });
 }

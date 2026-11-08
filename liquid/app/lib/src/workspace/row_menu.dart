@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -207,4 +209,40 @@ class _RowMenuState extends State<RowMenu> {
       ),
     );
   }
+}
+
+/// A region that tells when the pointer enters it and leaves it, also when it goes from
+/// under the pointer, which Flutter's MouseRegion does not tell, so no hover outlives what
+/// was hovered.
+class HoverRegion extends StatefulWidget {
+  const HoverRegion({super.key, required this.onHover, required this.child});
+
+  final ValueChanged<bool> onHover;
+  final Widget child;
+
+  @override
+  State<HoverRegion> createState() => _HoverRegionState();
+}
+
+class _HoverRegionState extends State<HoverRegion> {
+  var _hovered = false;
+
+  void _hover(bool hovered) {
+    _hovered = hovered;
+    widget.onHover(hovered);
+  }
+
+  @override
+  void dispose() {
+    // Told after the frame that removed it, not while it is built.
+    if (_hovered) scheduleMicrotask(() => widget.onHover(false));
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    onEnter: (_) => _hover(true),
+    onExit: (_) => _hover(false),
+    child: widget.child,
+  );
 }

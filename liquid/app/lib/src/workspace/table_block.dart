@@ -309,6 +309,7 @@ class _TableBlockState extends State<TableBlock> {
   }
 
   void _hoverRow(String row, bool hovered) {
+    if (!mounted) return;
     setState(() {
       if (hovered) {
         _pointerRow = row;
@@ -322,6 +323,7 @@ class _TableBlockState extends State<TableBlock> {
   }
 
   void _hoverHandle(bool hovered) {
+    if (!mounted) return;
     setState(() => _handleHovered = hovered);
     _showHandle();
   }
@@ -391,9 +393,8 @@ class _TableBlockState extends State<TableBlock> {
       link: _handleAnchor,
       showWhenUnlinked: false,
       followerAnchor: Alignment.topRight,
-      child: MouseRegion(
-        onEnter: (_) => _hoverHandle(true),
-        onExit: (_) => _hoverHandle(false),
+      child: HoverRegion(
+        onHover: _hoverHandle,
         child: TapRegion(
           groupId: _rowMenu,
           child: RowHandle(
@@ -1345,10 +1346,9 @@ class _TableBlockState extends State<TableBlock> {
                   if (row == null) return shown;
                   // A hovered row shows its handle (section 5).
                   // Keyed by row, so a row moving under a still pointer is entered anew.
-                  return MouseRegion(
+                  return HoverRegion(
                     key: ValueKey('row ${row.id}'),
-                    onEnter: (_) => _hoverRow(row.id, true),
-                    onExit: (_) => _hoverRow(row.id, false),
+                    onHover: (hovered) => _hoverRow(row.id, hovered),
                     child: shown,
                   );
                 },
