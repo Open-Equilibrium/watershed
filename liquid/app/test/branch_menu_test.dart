@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
@@ -49,6 +51,37 @@ void main() {
       await tester.pumpAndSettle();
       expect(await result, 'cancelled');
     }
+  });
+
+  testWidgets('a question puts Cancel left and its main action right', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: const Scaffold(body: SizedBox()),
+      ),
+    );
+    final context = tester.element(find.byType(Scaffold));
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (_) => const ActionDialog(
+          title: 'Keep these changes?',
+          actions: [Text('Commit'), Text('Branch')],
+          children: [Text('Choose an action.')],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    double left(String label) => tester.getRect(find.text(label)).left;
+    expect(left('Cancel'), lessThan(left('Branch')));
+    expect(left('Branch'), lessThan(left('Commit')));
+    final dialog = tester.getRect(find.byType(Dialog));
+    expect(
+      tester.getRect(find.text('Commit')).right,
+      greaterThan(dialog.center.dx),
+    );
   });
 
   Future<void> show(
