@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -206,3 +208,141 @@ Future<bool> confirmDeleteField(
       ),
     ) ??
     false;
+
+/// A Table's field menu and what it writes (approved Table View mockups, section 5): it
+/// opens under a field's header, keeps a typed name however it closes but for esc, also
+/// when the Table goes or Liquid quits, and asks before Delete field.
+class FieldMenus extends ChangeNotifier {
+  FieldMenus({
+    required this.fieldOf,
+    required this.rename,
+    required this.remove,
+    required this.confirm,
+  });
+
+  /// The Table's field of an identity, as last read.
+  final BridgeField? Function(String? id) fieldOf;
+
+  /// Renames or removes a field; a refused write shows on the Page.
+  final void Function(String field, String name) rename;
+  final Future<void> Function(String field) remove;
+
+  /// Asks before a field and its values go.
+  final Future<bool> Function(BridgeField field) confirm;
+
+  final overlay = OverlayPortalController();
+  final anchor = LayerLink();
+
+  /// The field whose menu is open.
+  String? open;
+
+  /// The name typed in the menu, which closing it keeps unless esc drops it, and the name
+  /// it opened with or last wrote.
+  final name = TextEditingController();
+  String _opened = '';
+
+  /// A field and the name typed in its menu before Delete field, kept while the question
+  /// is open, so quitting or the Table going meanwhile still writes it.
+  (String, String)? _asking;
+
+  var _disposed = false;
+
+  /// A click on a field's header opens its menu, or closes it when open.
+  void toggle(BridgeField field) {
+    final wasOpen = open == field.id;
+    close();
+    if (wasOpen) return;
+    name.value = TextEditingValue(
+      text: field.name,
+      selection: TextSelection.collapsed(offset: field.name.length),
+    );
+    _opened = field.name;
+    open = field.id;
+    overlay.show();
+    notifyListeners();
+  }
+
+  /// Closes the menu and renames the field as typed, unless `drop`.
+  void close({bool drop = false}) {
+    if (open == null) return;
+    if (!drop) renameTyped();
+    open = null;
+    overlay.hide();
+    notifyListeners();
+  }
+
+  /// Renames the menu's field as typed, unless the name is empty or as the menu opened
+  /// with it, so a rename elsewhere meanwhile stays; also as the Table goes or Liquid
+  /// quits.
+  void renameTyped() {
+    if (_asking case (final field, final typed)) {
+      _asking = null;
+      rename(field, typed);
+    }
+    final field = open;
+    final typed = name.text.trim();
+    if (field == null || typed.isEmpty || typed == _opened) return;
+    _opened = typed;
+    rename(field, typed);
+  }
+
+  /// Delete field asks first, then deletes the field and its values; a name typed is kept
+  /// when the question is cancelled.
+  Future<void> delete() async {
+    final field = fieldOf(open);
+    final typed = name.text.trim();
+    if (field != null && typed.isNotEmpty && typed != _opened) {
+      _asking = (field.id, typed);
+    }
+    close(drop: true);
+    if (field == null) return;
+    final confirmed = await confirm(field);
+    final asked = _asking;
+    _asking = null;
+    if (!confirmed) {
+      if (asked case (final id, final kept) when !_disposed) rename(id, kept);
+      return;
+    }
+    if (!_disposed) await remove(field.id);
+  }
+
+  /// A field gone elsewhere takes its menu along.
+  void read() {
+    if (open != null && fieldOf(open) == null) close(drop: true);
+  }
+
+  /// The open menu, under its field's header.
+  Widget view(BuildContext context) {
+    final field = fieldOf(open);
+    if (field == null) return const SizedBox.shrink();
+    return Align(
+      alignment: Alignment.topLeft,
+      child: CompositedTransformFollower(
+        link: anchor,
+        showWhenUnlinked: false,
+        targetAnchor: Alignment.bottomLeft,
+        offset: const Offset(0, WsMetrics.space1),
+        child: TapRegion(
+          groupId: overlay,
+          onTapOutside: (_) => close(),
+          // A click in the menu beside its name keeps the name's keys.
+          child: TextFieldTapRegion(
+            child: FieldMenu(
+              field: field,
+              name: name,
+              onClose: close,
+              onDelete: () => unawaited(delete()),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    name.dispose();
+    super.dispose();
+  }
+}
