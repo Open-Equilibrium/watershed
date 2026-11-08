@@ -213,6 +213,8 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
         key: const Key('first-line'),
         controller: _first,
         focusNode: _firstFocus,
+        // The caret stays where Liquid puts it; desktop Flutter would select all on focus.
+        selectAllOnFocus: false,
         // Until the Page's earlier queue is done, nothing can be typed.
         readOnly: !_views.ready.value,
         style: TextStyle(
