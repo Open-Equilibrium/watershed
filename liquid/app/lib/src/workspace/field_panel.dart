@@ -135,6 +135,8 @@ class _FieldPanelState extends State<FieldPanel> {
               child: TextField(
                 controller: _name,
                 focusNode: _focus,
+                // The caret stays where Liquid puts it; desktop Flutter would select all on focus.
+                selectAllOnFocus: false,
                 style: TextStyle(fontSize: WsMetrics.fsUi, color: ws.text),
                 decoration: InputDecoration.collapsed(
                   hintText: 'Field name',

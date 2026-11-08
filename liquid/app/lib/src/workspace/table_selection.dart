@@ -587,6 +587,8 @@ class CellSelection extends ChangeNotifier {
       key: _editorKey,
       controller: edit,
       focusNode: editFocus,
+      // The caret stays where Liquid puts it; desktop Flutter would select all on focus.
+      selectAllOnFocus: false,
       textAlign: field.kind == BridgeFieldKind.number
           ? TextAlign.right
           : TextAlign.start,
