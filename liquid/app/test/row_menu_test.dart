@@ -256,4 +256,27 @@ void main() {
     await tester.pumpAndSettle();
     expect(menu, findsNothing);
   });
+
+  testWidgets('a menu closed by its row moving leaves the handle on the '
+      'pointer\'s row', (tester) async {
+    await show(tester);
+    final table = kit.fake.views[kit.page]!.single.block;
+    await openMenu(tester, 'r2');
+    await hover(tester, tester.getCenter(cell('r1', 'date')));
+    // Another device adds a row between them.
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.addRow,
+        page: kit.page,
+        block: table,
+        after: 'r1',
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(menu, findsNothing);
+    expect(
+      tester.getCenter(handle).dy,
+      moreOrLessEquals(tester.getCenter(cell('r1', 'name')).dy, epsilon: 1),
+    );
+  });
 }

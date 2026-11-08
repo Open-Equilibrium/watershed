@@ -274,6 +274,7 @@ class _TableBlockState extends State<TableBlock> {
     // A row gone elsewhere takes its handle and menu along.
     if (_menuRow case final row? when rowIndex(row) != _menuAt) {
       _menuRow = null;
+      _handleRow = _pointerRow ?? _handleRow;
       _rowMenu.hide();
       _showHandle();
     }
