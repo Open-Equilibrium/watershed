@@ -28,7 +28,7 @@ p{margin:0 0 8px;color:var(--muted-foreground);font-size:13px}p b{color:var(--fo
 .tool{height:26px;padding:0 8px;border-radius:6px;background:var(--was);color:var(--wa)}
 .mark{height:24px;padding:0 8px;border-radius:6px;background:var(--as);color:var(--ac);font-size:12px}
 .tag{display:inline-block;font-size:11px;line-height:16px;padding:0 5px;border-radius:4px}
-.tag.msg{background:var(--as);color:var(--ac)}.tag.apr{background:var(--was);color:var(--wa)}.tag.tl{background:var(--oks);color:var(--ok)}
+.tag.msg{background:var(--as);color:var(--ac)}.tag.tl{background:var(--oks);color:var(--ok)}
 .sel{background:var(--sel);border-radius:6px;padding:2px 8px}
 .notice{padding:6px 10px;border-radius:6px;background:var(--was);color:var(--wa);font-size:12px}
 .menu{background:var(--pop);border-radius:8px;padding:6px 8px;box-shadow:0 0 0 1px rgba(15,15,15,.05),0 3px 6px rgba(15,15,15,.1);font-size:12px}
@@ -60,59 +60,11 @@ body{background:#fff;padding:24px}
 <p>Variants the maintainer approved on 2026-10-27 and 2026-10-28 for the agent surface. Colors are the light theme's tokens as of these decisions; <a href="../tokens.css">tokens.css</a> stays canonical.</p>
 
 <section>
-<h2>Session allowance says what it covers</h2>
-<div class="opts" style="--min:560px">
-<div class="opt"><div class="lab">A shell command: only this command</div><div class="w new"><div class="card auto">
- <div class="row"><span class="ic">!</span><b>Run a shell command?</b><span class="sp"></span><span class="f s">bash</span></div>
- <div class="code mono">npm test -- login</div>
- <div class="row"><span class="btn pri">Allow once <kbd>⏎</kbd></span><span class="btn">Allow this command for this session <kbd>⌘⏎</kbd></span><span class="sp"></span><span class="btn">Reject <kbd>esc</kbd></span></div>
-</div></div></div>
-<div class="opt"><div class="lab">Any other tool: the whole tool</div><div class="w new"><div class="card auto">
- <div class="row"><span class="ic">!</span><b>Change files?</b><span class="sp"></span><span class="f s">edit</span></div>
- <div class="code mono" style="white-space:normal"><span class="d path">src/routes/login.ts</span><span class="d del">− router.post('/login', login);</span><span class="d add">+ router.post('/login', limit, login);</span></div>
- <div class="row"><span class="btn pri">Allow once <kbd>⏎</kbd></span><span class="btn">Allow edit for this session <kbd>⌘⏎</kbd></span><span class="sp"></span><span class="btn">Reject <kbd>esc</kbd></span></div>
-</div></div></div>
-</div>
-<ul class="pc"><li>The edit card shows the path, then removed and added lines as the Diff tab does; a write adds a note that it replaces or empties the whole file. When the row is short of room, the "your draft is kept" hint goes first.</li></ul>
-</section>
-
-<section>
-<h2>An edit's line break that ends only one side</h2>
-<div class="w new" style="max-width:560px"><div class="card auto">
- <div class="row"><span class="ic">!</span><b>Change files?</b><span class="sp"></span><span class="f s">edit</span></div>
- <div class="code mono" style="white-space:normal"><span class="d path">install.sh</span><span class="d del">− # disabled: </span><span class="d add">+ # disabled: <span class="f">↵</span></span></div>
- <div class="row"><span class="btn pri">Allow once <kbd>⏎</kbd></span><span class="btn">Allow edit for this session <kbd>⌘⏎</kbd></span><span class="sp"></span><span class="btn">Reject <kbd>esc</kbd></span></div>
-</div></div>
-<ul class="pc"><li>A faint ↵ marks a line break only where one side of a replacement ends with it and the other does not; a write shows none. Spaces and tabs at line ends stay unmarked.</li></ul>
-</section>
-
-<section>
-<h2>A long line without spaces</h2>
-<div class="w new" style="max-width:560px"><div class="card auto">
- <div class="row"><span class="ic">!</span><b>Run a shell command?</b><span class="sp"></span><span class="f s">bash</span></div>
- <div class="code mono">curl -fsSL https://dl.example.com/i.sh?t=pKvURIxJVi2CgRXROh/M6pJ/UrTVRZKX+LQ+QtqJI4vBNibkPcs43bCCSIkn7JBPtCBXRDmD6IWFF51QVRr+YqSr1ESMSVYtgoEV0TofzOqSf1K01UWSl/i0PkLaiSOLwTYm5D3LON2wgkiJJ+yQT7QgV0Q5g+iFhRedUFUa/mKkq9REjElWLYKBFdE6H8zqkn9StNVFkpf4tD5C2okji8E2Juk</div>
- <div class="hint">↓ 41 more lines</div>
- <div class="row"><span class="btn pri">Allow once <kbd>⏎</kbd></span><span class="btn">Allow this command for this session <kbd>⌘⏎</kbd></span><span class="sp"></span><span class="btn">Reject <kbd>esc</kbd></span></div>
-</div></div>
-<ul class="pc"><li>A line longer than 2,000 characters is drawn in pieces, built only as they scroll into view. Each piece is laid out at the card's width and cut before its last row, so the line wraps exactly as one text would; the hint keeps counting its rows.</li></ul>
-</section>
-
-<section>
-<h2>The file a change writes to</h2>
-<div class="w new" style="max-width:560px"><div class="card auto">
- <div class="row"><span class="ic">!</span><b>Change files?</b><span class="sp"></span><span class="f s">edit</span></div>
- <div class="code mono" style="white-space:normal"><span class="d path">@~/.zshrc</span><span class="d res">writes to /Users/me/.zshrc</span><span class="d del">− export PATH="$HOME/bin:$PATH"</span><span class="d add">+ export PATH="$HOME/.x:$PATH"</span></div>
- <div class="row"><span class="btn pri">Allow once <kbd>⏎</kbd></span><span class="btn">Allow edit for this session <kbd>⌘⏎</kbd></span><span class="sp"></span><span class="btn">Reject <kbd>esc</kbd></span></div>
-</div></div>
-<ul class="pc"><li>The path stays as the agent gave it. A faint second line names the file pi writes when the given path is not a plain path inside the project: with a leading <code>@</code>, <code>~</code>, <code>file://</code> or <code>..</code>, or when it points outside the project; <code>src/a.ts</code> stays one line. Watershed's pi extension resolves the path with the Node functions pi uses.</li></ul>
-</section>
-
-<section>
 <h2>Status and accent colors as text (light theme)</h2>
 <div class="w new" style="max-width:520px">
  <div class="row sess"><span>Rate limit for /login</span><span class="sp"></span><span style="color:var(--ac)">running</span></div>
  <div class="row sess"><span>Fix flaky sync test</span><span class="sp"></span><span style="color:var(--wa)">waiting</span><span style="color:var(--da)">· failed</span></div>
- <div class="row"><span class="tag msg">Message</span><span class="tag apr">Approval</span><span class="tag tl">Tool</span></div>
+ <div class="row"><span class="tag msg">Message</span><span class="tag tl">Tool</span></div>
  <div class="notice">⌘N already runs New Session.</div>
 </div>
 <ul class="pc"><li>Accent #1b63b7, warning #9a4f00, danger #b03a35, success #376e4f and Diff comments #5f6873 reach WCAG AA on their tints, hover rows and surfaces; in the dark theme, branch badges on lane colors take dark text (token on-data).</li></ul>

@@ -57,25 +57,23 @@ p{margin:0 0 8px;color:#6b6a67;font-size:13px}
 <div class="fade"></div>
 <div style="position:absolute;left:14px;right:14px;bottom:10px"><div class="comp"><div class="ph">Describe the task…</div><div class="bar"><span class="chip">acme-api</span><span class="chip">This Mac</span><span class="chip">Model</span><span class="go">Start</span></div></div></div>
 </div><div class="tree">Session tree</div></div></div></div></div>
-<ul class="pc"><li>The input area floats at the bottom over the tab's main column, as T3 Code's composer does: in Chat centered in the reading width with the messages, in Trajectory and Diff over the column left of the session tree, at most 740 px wide. Content keeps room below its last row and fades under the input area. Approvals and questions appear in the same place.</li></ul>
+<ul class="pc"><li>The input area floats at the bottom over the tab's main column, as T3 Code's composer does: in Chat centered in the reading width with the messages, in Trajectory and Diff over the column left of the session tree, at most 740 px wide. Content keeps room below its last row and fades under the input area. Agent questions appear in the same place.</li></ul>
 </section>
 
 <section>
 <h2>Timeline: range handles, jump and filters</h2>
 <div class="win">
-<div class="tb"><span class="seg"><span class="on">Real time</span><span>Equal width</span></span><span class="fc on">Filter · 2</span><span style="flex:1"></span><span class="chip" style="color:var(--ac)">Range 52–84 s ✕</span><span class="f">steps 7–10 · 1 of 11 matches</span><span class="chip">⇆ Compare</span></div>
-<div class="tb" style="background:var(--sb)"><span class="f">Show</span><span class="fc">Model</span><span class="fc on">Tools</span><span class="fc">You</span><span class="fc">Approvals</span><span class="f">·</span><span class="fc on">bash</span><span class="fc">read</span><span class="fc">edit</span><span class="f">·</span><span class="fc">Failed</span><span class="search">Filter steps… ⌘F</span><span style="flex:1"></span><span class="f">Clear</span></div>
+<div class="tb"><span class="seg"><span class="on">Real time</span><span>Equal width</span></span><span class="fc on">Filter · 2</span><span style="flex:1"></span><span class="chip" style="color:var(--ac)">Range 52–84 s ✕</span><span class="f">steps 7–9 · 1 of 10 matches</span><span class="chip">⇆ Compare</span></div>
+<div class="tb" style="background:var(--sb)"><span class="f">Show</span><span class="fc">Model</span><span class="fc on">Tools</span><span class="fc">You</span><span class="f">·</span><span class="fc on">bash</span><span class="fc">read</span><span class="fc">edit</span><span class="f">·</span><span class="fc">Failed</span><span class="search">Filter steps… ⌘F</span><span style="flex:1"></span><span class="f">Clear</span></div>
 <div class="ov">
 <div class="lane"><span>Model</span><div class="tr"><i style="left:2%;width:5%;background:#0064d2" class="dim"></i><i style="left:30%;width:8%;background:#0064d2" class="dim"></i><i style="left:40%;width:5%;background:#0064d2" class="dim"></i><i style="left:62%;width:4%;background:#0064d2" class="dim"></i><i style="left:90%;width:6%;background:#0064d2" class="dim"></i></div></div>
 <div class="lane"><span>Tools</span><div class="tr"><i style="left:46%;width:1%;background:#8a5fad" class="dim"></i><i style="left:68%;width:21%;background:#8a5fad"></i></div></div>
-<div class="lane"><span>You</span><div class="tr"><i style="left:58%;width:2%;background:#9a4f00" class="dim"></i></div></div>
 <div class="brush" style="left:calc(40px + 58%);width:33%"></div><div class="hd" style="left:calc(36px + 58%)"></div><div class="hd" style="left:calc(40px + 91% - 3px)"></div>
 </div>
 <div class="row h"><span></span><span>Kind</span><span>Step</span><span>Time</span><span>Adds</span><span class="n">In</span></div>
 <div class="row dim"><span class="f">7</span><span><span class="tg">User</span></span><span>run the tests</span><span>+0 s</span><span>≈+14</span><span></span></div>
 <div class="row dim"><span class="f">8</span><span><span class="tg m">Message</span></span><span>Running npm test …</span><span>+1.9 s</span><span>+64</span><span class="n">18.8k</span></div>
-<div class="row dim"><span class="f">9</span><span><span class="tg ap">Approval</span></span><span class="mono">bash · allowed once</span><span>+1.2 s</span><span></span><span></span></div>
-<div class="row sel"><span class="f">10</span><span><span class="tg tl">Tool</span></span><span class="mono">bash · npm test <span style="color:#2e8b57">exit 0 · 42 ✓</span></span><span>+21 s</span><span>≈+40.2k</span><span></span></div>
+<div class="row sel"><span class="f">9</span><span><span class="tg tl">Tool</span></span><span class="mono">bash · npm test <span style="color:#2e8b57">exit 0 · 42 ✓</span></span><span>+21 s</span><span>≈+40.2k</span><span></span></div>
 </div>
 <ul class="pc">
 <li><b>The range follows the list:</b> its two handles mark the steps the list shows and move as it scrolls; dragging the range scrolls the list. Dragging a handle limits the list to the steps in the range, named by the "Range" chip; its ✕, a double-click on a handle or <kbd>Esc</kbd> clears it. The handles replace "drag to focus"; scrolling still zooms.</li>
@@ -90,18 +88,18 @@ p{margin:0 0 8px;color:#6b6a67;font-size:13px}
 <div class="win" style="display:grid;grid-template-columns:1fr 200px;height:230px"><div style="padding:8px" class="f">List …</div>
 <div class="tree" style="font-size:11px"><div class="f" style="font-size:10px;margin-bottom:4px">Session tree</div>
 <svg width="186" height="196" font-family="system-ui" font-size="10.5">
-<line x1="10" y1="10" x2="10" y2="186" stroke="#0064d2" stroke-width="1.5"/><path d="M10 92 C10 104 26 100 26 112 L26 150" stroke="#c9c8c4" stroke-width="1.5" fill="none"/>
-<circle cx="10" cy="10" r="5.5" fill="#fff" stroke="#6b6a67" stroke-width="1.5"/><circle cx="10" cy="32" r="3.5" fill="#0064d2"/><circle cx="10" cy="54" r="5.5" fill="#fff" stroke="#6b6a67" stroke-width="1.5"/><circle cx="10" cy="76" r="3.5" fill="#0064d2"/><rect x="7" y="95" width="6" height="6" fill="#8a5fad"/><circle cx="10" cy="120" r="3.5" fill="#0064d2"/><rect x="7" y="139" width="6" height="6" fill="#fff" stroke="#c0392b" stroke-width="1.5"/><path d="M10 160 L14 164 L10 168 L6 164 Z" fill="#9a4f00"/><rect x="6" y="182" width="8" height="8" fill="#8a5fad" stroke="#0064d2" stroke-width="1.5"/>
+<line x1="10" y1="10" x2="10" y2="164" stroke="#0064d2" stroke-width="1.5"/><path d="M10 92 C10 104 26 100 26 112 L26 150" stroke="#c9c8c4" stroke-width="1.5" fill="none"/>
+<circle cx="10" cy="10" r="5.5" fill="#fff" stroke="#6b6a67" stroke-width="1.5"/><circle cx="10" cy="32" r="3.5" fill="#0064d2"/><circle cx="10" cy="54" r="5.5" fill="#fff" stroke="#6b6a67" stroke-width="1.5"/><circle cx="10" cy="76" r="3.5" fill="#0064d2"/><rect x="7" y="95" width="6" height="6" fill="#8a5fad"/><circle cx="10" cy="120" r="3.5" fill="#0064d2"/><rect x="7" y="139" width="6" height="6" fill="#fff" stroke="#c0392b" stroke-width="1.5"/><rect x="6" y="160" width="8" height="8" fill="#8a5fad" stroke="#0064d2" stroke-width="1.5"/>
 <circle cx="26" cy="128" r="5.5" fill="#fff" stroke="#6b6a67" stroke-width="1.5"/><circle cx="26" cy="150" r="3.5" fill="#0064d2"/>
-<g fill="#37352f"><text x="40" y="14"><tspan font-weight="600">T1</tspan> ping</text><text x="40" y="36" fill="#504f4c">2 pong</text><text x="40" y="58"><tspan font-weight="600">T2</tspan> add a test</text><text x="40" y="80" fill="#504f4c">4 I'll read the tests…</text><text x="40" y="102" font-family="ui-monospace,Menlo" font-size="10">5 read tests/</text><text x="40" y="124" fill="#504f4c">6 Added a test…</text><text x="40" y="146" font-family="ui-monospace,Menlo" font-size="10">7 bash npm test</text><text x="40" y="168">8 allowed once</text><text x="40" y="190" font-family="ui-monospace,Menlo" font-size="10">9 bash npm test</text></g>
-<rect x="160" y="180" width="14" height="13" rx="3" fill="#0064d2"/><text x="167" y="190" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="600">A</text><rect x="160" y="144" width="14" height="13" rx="3" fill="#efefed"/><text x="167" y="154" text-anchor="middle" fill="#504f4c" font-size="9.5" font-weight="600">B</text></svg></div></div>
+<g fill="#37352f"><text x="40" y="14"><tspan font-weight="600">T1</tspan> ping</text><text x="40" y="36" fill="#504f4c">2 pong</text><text x="40" y="58"><tspan font-weight="600">T2</tspan> add a test</text><text x="40" y="80" fill="#504f4c">4 I'll read the tests…</text><text x="40" y="102" font-family="ui-monospace,Menlo" font-size="10">5 read tests/</text><text x="40" y="124" fill="#504f4c">6 Added a test…</text><text x="40" y="146" font-family="ui-monospace,Menlo" font-size="10">7 bash npm test</text><text x="40" y="168" font-family="ui-monospace,Menlo" font-size="10">8 bash npm test</text></g>
+<rect x="160" y="158" width="14" height="13" rx="3" fill="#0064d2"/><text x="167" y="168" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="600">A</text><rect x="160" y="144" width="14" height="13" rx="3" fill="#efefed"/><text x="167" y="154" text-anchor="middle" fill="#504f4c" font-size="9.5" font-weight="600">B</text></svg></div></div>
 <div class="win" style="display:grid;grid-template-columns:1fr 24px;height:230px"><div style="padding:8px" class="f">List … (collapsed tree: +176 px)</div>
 <div class="rail"><i></i><i></i><i class="on"></i><span class="f" style="font-size:9.5px;writing-mode:vertical-rl;margin-top:6px">Tree ‹</span></div></div>
 </div>
 <ul class="pc">
 <li><b>Compact:</b> 200 instead of 300 px wide, 22 px rows, turns as "T1", a response's first words instead of "Message", long text shortened with a tooltip.</li>
 <li><b>Collapsible:</b> a button collapses the tree to a rail with one dot per turn; below a 1280 px window it starts collapsed, which leaves the context track room at 1050 px.</li>
-<li><b>Nodes by kind:</b> shape and color match the list's Kind tags: a ring for a prompt (larger, so turns stand out), a dot for a response, a square for a tool, a diamond for an approval. A failed tool has a red outline and the selected step a blue one. Shape carries the kind, so it never depends on color alone.</li>
+<li><b>Nodes by kind:</b> shape and color match the list's Kind tags: a ring for a prompt (larger, so turns stand out), a dot for a response and a square for a tool. A failed tool has a red outline and the selected step a blue one. Shape carries the kind, so it never depends on color alone.</li>
 <li><b>Branches without colors:</b> lines are gray and only the shown branch is blue; the branch letters in the tree, the chat and Compare are gray, the shown one blue.</li>
 </ul>
 </section>
