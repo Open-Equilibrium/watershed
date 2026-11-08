@@ -10,6 +10,7 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'cell_pickers.dart';
+import 'field_menu.dart';
 import 'field_panel.dart';
 import 'table_cells.dart';
 import 'table_selection.dart';
@@ -149,6 +150,7 @@ class _TableBlockState extends State<TableBlock> {
     _name.addListener(_typed);
     _state.finishing.add(_typed);
     _state.finishing.add(_cells.finish);
+    _state.finishing.add(_renameTyped);
     _nameFocus.addListener(_left);
     // Once every rename arrived, the name is read again.
     _settled = widget.views.settled
@@ -193,6 +195,7 @@ class _TableBlockState extends State<TableBlock> {
   void _moved() {
     if (_scrollingItself) return _replacePick();
     if (_panel.isShowing) _panel.hide();
+    _closeFieldMenu();
     _cells.closePick();
   }
 
@@ -210,6 +213,10 @@ class _TableBlockState extends State<TableBlock> {
     _down.dispose();
     _name.dispose();
     _nameFocus.dispose();
+    // A name typed in a field's menu is kept as it stands.
+    _renameTyped();
+    _state.finishing.remove(_renameTyped);
+    _menuName.dispose();
     // An edit still open is written as it stands.
     _cells.removeListener(_changed);
     _cells.finish();
@@ -231,7 +238,9 @@ class _TableBlockState extends State<TableBlock> {
   }
 
   void _closePanel() {
-    if (_panel.isShowing && !_scrollingItself) _panel.hide();
+    if (_scrollingItself) return;
+    if (_panel.isShowing) _panel.hide();
+    _closeFieldMenu();
   }
 
   /// While the Table scrolls itself, to a new row or field or to reveal a cell, which
@@ -386,8 +395,144 @@ class _TableBlockState extends State<TableBlock> {
 
   void _togglePanel() {
     if (_panel.isShowing) return _panel.hide();
+    _closeFieldMenu();
     _panelOpened++;
     _panel.show();
+  }
+
+  /// A field's menu, under its header, which a click outside closes (approved Table View
+  /// mockups, section 5).
+  final _fieldMenu = OverlayPortalController();
+  final _fieldAnchor = LayerLink();
+  String? _menuField;
+
+  /// The name typed in the field's menu, which closing it keeps unless esc drops it, and
+  /// the name it opened with or last wrote.
+  final _menuName = TextEditingController();
+  String _menuOpened = '';
+
+  BridgeField? _fieldOf(String? id) =>
+      _database?.fields.where((field) => field.id == id).firstOrNull;
+
+  /// A click on a field's header opens its menu, or closes it when open.
+  void _toggleFieldMenu(BridgeField field) {
+    final open = _menuField == field.id;
+    _closeFieldMenu();
+    if (open) return;
+    if (_panel.isShowing) _panel.hide();
+    _menuName.value = TextEditingValue(
+      text: field.name,
+      selection: TextSelection.collapsed(offset: field.name.length),
+    );
+    _menuOpened = field.name;
+    setState(() => _menuField = field.id);
+    _fieldMenu.show();
+  }
+
+  /// Closes the field's menu and renames the field as typed, unless `drop`.
+  void _closeFieldMenu({bool drop = false}) {
+    if (_menuField == null) return;
+    if (!drop) _renameTyped();
+    setState(() => _menuField = null);
+    _fieldMenu.hide();
+  }
+
+  /// Renames the menu's field as typed, unless the name is empty or as the menu opened
+  /// with it, so a rename elsewhere meanwhile stays; also as the Table goes or Liquid
+  /// quits.
+  void _renameTyped() {
+    if (_asking case (final field, final name)) {
+      _asking = null;
+      _renameField(field, name);
+    }
+    final field = _menuField;
+    final name = _menuName.text.trim();
+    if (field == null || name.isEmpty || name == _menuOpened) return;
+    _menuOpened = name;
+    _renameField(field, name);
+  }
+
+  void _renameField(String field, String name) {
+    widget.views
+        .write(
+          mutation(
+            BridgeMutationKind.renameField,
+            page: _page,
+            block: _block,
+            field: field,
+            text: name,
+          ),
+          const [],
+        )
+        .then((_) {
+          if (mounted) unawaited(_read());
+        }, onError: (Object _) {});
+  }
+
+  /// A field and the name typed in its menu before Delete field, kept while the question
+  /// is open, so quitting or the Table going meanwhile still writes it.
+  (String, String)? _asking;
+
+  /// Delete field asks first, then deletes the field and its values; a name typed is kept
+  /// when the question is cancelled.
+  Future<void> _deleteField() async {
+    final field = _fieldOf(_menuField);
+    final name = _menuName.text.trim();
+    if (field != null && name.isNotEmpty && name != _menuOpened) {
+      _asking = (field.id, name);
+    }
+    _closeFieldMenu(drop: true);
+    if (field == null) return;
+    final confirmed = await confirmDeleteField(context, field, _rows.count);
+    final asked = _asking;
+    _asking = null;
+    if (!confirmed) {
+      if (asked case (final id, final typed) when mounted) {
+        _renameField(id, typed);
+      }
+      return;
+    }
+    if (!mounted) return;
+    await widget.views
+        .write(
+          mutation(
+            BridgeMutationKind.removeField,
+            page: _page,
+            block: _block,
+            field: field.id,
+          ),
+          const [],
+        )
+        .then((_) {
+          if (mounted) unawaited(_read());
+        }, onError: (Object _) {});
+  }
+
+  Widget _fieldMenuView(BuildContext context) {
+    final field = _fieldOf(_menuField);
+    if (field == null) return const SizedBox.shrink();
+    return Align(
+      alignment: Alignment.topLeft,
+      child: CompositedTransformFollower(
+        link: _fieldAnchor,
+        showWhenUnlinked: false,
+        targetAnchor: Alignment.bottomLeft,
+        offset: const Offset(0, WsMetrics.space1),
+        child: TapRegion(
+          groupId: _fieldMenu,
+          onTapOutside: (_) => _closeFieldMenu(),
+          // A click in the menu beside its name keeps the name's keys.
+          child: TextFieldTapRegion(
+            child: FieldMenu(
+              field: field,
+              name: _menuName,
+              onClose: _closeFieldMenu,
+              onDelete: () => unawaited(_deleteField()),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   /// Adds a field last (ADR-0247) and shows it once a read holds it; a refused one keeps
@@ -577,6 +722,10 @@ class _TableBlockState extends State<TableBlock> {
         if (!_nameFocus.hasFocus) _show(answer.database?.name ?? '');
       }
       setState(() => _database = answer.database);
+      // A field gone elsewhere takes its menu along.
+      if (_menuField != null && _fieldOf(_menuField) == null) {
+        _closeFieldMenu(drop: true);
+      }
       _cells.relocate((id) => _rows.indexWhere((row) => row.id == id));
     } on Object catch (error) {
       // What an add made is not shown later by surprise.
@@ -644,113 +793,119 @@ class _TableBlockState extends State<TableBlock> {
         ),
       ),
       child: OverlayPortal(
-        controller: _pick,
-        overlayChildBuilder: _picker,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: WsMetrics.space3),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              SizedBox(
-                height: 32,
-                child: Row(
-                  children: [
-                    Icon(LucideIcons.table, size: 16, color: ws.textFaint),
-                    const SizedBox(width: WsMetrics.space3),
-                    Expanded(
-                      child: TextField(
-                        controller: _name,
-                        focusNode: _nameFocus,
-                        style: TextStyle(
-                          fontSize: WsMetrics.fsProse,
-                          fontWeight: WsMetrics.fwSemibold,
-                          color: ws.text,
-                        ),
-                        decoration: InputDecoration.collapsed(
-                          hintText: 'Untitled',
-                          hintStyle: TextStyle(color: ws.textFaint),
+        controller: _fieldMenu,
+        overlayChildBuilder: _fieldMenuView,
+        child: OverlayPortal(
+          controller: _pick,
+          overlayChildBuilder: _picker,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: WsMetrics.space3),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                  height: 32,
+                  child: Row(
+                    children: [
+                      Icon(LucideIcons.table, size: 16, color: ws.textFaint),
+                      const SizedBox(width: WsMetrics.space3),
+                      Expanded(
+                        child: TextField(
+                          controller: _name,
+                          focusNode: _nameFocus,
+                          style: TextStyle(
+                            fontSize: WsMetrics.fsProse,
+                            fontWeight: WsMetrics.fwSemibold,
+                            color: ws.text,
+                          ),
+                          decoration: InputDecoration.collapsed(
+                            hintText: 'Untitled',
+                            hintStyle: TextStyle(color: ws.textFaint),
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              if (database != null)
-                Focus(
-                  focusNode: _cells.cellsFocus,
-                  // The keys of a selected cell, without a node of its own for readers.
-                  includeSemantics: false,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-                    child: Container(
-                      foregroundDecoration: BoxDecoration(
-                        border: Border.all(color: ws.border),
-                        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          // A Table may lose all its fields, as when another device removes
-                          // them; its rows still count.
-                          if (database.fields.isEmpty)
-                            Container(
-                              height: _headerHeight,
-                              color: ws.subtle,
-                              alignment: Alignment.centerRight,
-                              child: SizedBox(
-                                width: _addWidth,
-                                child: _AddField(
-                                  link: _plus,
-                                  panel: _panel,
-                                  onTap: _togglePanel,
+                if (database != null)
+                  Focus(
+                    focusNode: _cells.cellsFocus,
+                    // The keys of a selected cell, without a node of its own for readers.
+                    includeSemantics: false,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+                      child: Container(
+                        foregroundDecoration: BoxDecoration(
+                          border: Border.all(color: ws.border),
+                          borderRadius: BorderRadius.circular(
+                            WsMetrics.radiusLg,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // A Table may lose all its fields, as when another device removes
+                            // them; its rows still count.
+                            if (database.fields.isEmpty)
+                              Container(
+                                height: _headerHeight,
+                                color: ws.subtle,
+                                alignment: Alignment.centerRight,
+                                child: SizedBox(
+                                  width: _addWidth,
+                                  child: _AddField(
+                                    link: _plus,
+                                    panel: _panel,
+                                    onTap: _togglePanel,
+                                  ),
+                                ),
+                              )
+                            else
+                              LayoutBuilder(
+                                builder: (context, constraints) => _grid(
+                                  database.fields,
+                                  constraints.maxWidth,
+                                  NumberFormat.decimalPattern(numbers),
+                                  shownDays(days),
                                 ),
                               ),
-                            )
-                          else
-                            LayoutBuilder(
-                              builder: (context, constraints) => _grid(
-                                database.fields,
-                                constraints.maxWidth,
-                                NumberFormat.decimalPattern(numbers),
-                                shownDays(days),
-                              ),
-                            ),
-                          _NewRow(onTap: () => unawaited(_addRow())),
-                          if (count > 0)
-                            Container(
-                              height: _footerHeight,
-                              color: ws.subtle,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                              ),
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                '${NumberFormat.decimalPattern(numbers).format(count)} '
-                                '${count == 1 ? 'row' : 'rows'}',
-                                style: TextStyle(
-                                  fontSize: WsMetrics.fsCompact,
-                                  color: ws.textFaint,
+                            _NewRow(onTap: () => unawaited(_addRow())),
+                            if (count > 0)
+                              Container(
+                                height: _footerHeight,
+                                color: ws.subtle,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                ),
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  '${NumberFormat.decimalPattern(numbers).format(count)} '
+                                  '${count == 1 ? 'row' : 'rows'}',
+                                  style: TextStyle(
+                                    fontSize: WsMetrics.fsCompact,
+                                    color: ws.textFaint,
+                                  ),
                                 ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-              // A value refused in place says why, under the Table (approved mockups).
-              if (_cells.error case final error?)
-                Padding(
-                  padding: const EdgeInsets.only(top: WsMetrics.space2),
-                  child: Text(
-                    error,
-                    style: TextStyle(
-                      fontSize: WsMetrics.fsSmall,
-                      color: ws.danger,
+                // A value refused in place says why, under the Table (approved mockups).
+                if (_cells.error case final error?)
+                  Padding(
+                    padding: const EdgeInsets.only(top: WsMetrics.space2),
+                    child: Text(
+                      error,
+                      style: TextStyle(
+                        fontSize: WsMetrics.fsSmall,
+                        color: ws.danger,
+                      ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -799,6 +954,7 @@ class _TableBlockState extends State<TableBlock> {
       Key? Function(int index)? keyOf,
       bool Function(int index)? editing,
       bool Function(int index)? picking,
+      bool Function(int index)? menu,
     }) => ListenableBuilder(
       listenable: _sideways,
       builder: (context, _) {
@@ -834,6 +990,17 @@ class _TableBlockState extends State<TableBlock> {
             onTap: () => onTap(index),
             child: box,
           );
+          // A field's menu hangs under its header, and a click on it is no click
+          // outside.
+          if (menu?.call(index) ?? false) {
+            return TapRegion(
+              groupId: _fieldMenu,
+              child: CompositedTransformTarget(
+                link: _fieldAnchor,
+                child: tapped,
+              ),
+            );
+          }
           // The picker hangs under its cell, and a click in it is no click outside.
           if (picking?.call(index) ?? false) {
             return TapRegion(
@@ -907,6 +1074,11 @@ class _TableBlockState extends State<TableBlock> {
                   color: ws.subtle,
                   // The field panel follows +, so it closes once + is out of view.
                   addOutOfView: _panelOutOfView,
+                  onTap: (index) {
+                    if (index < fields.length) _toggleFieldMenu(fields[index]);
+                  },
+                  menu: (index) =>
+                      index < fields.length && fields[index].id == _menuField,
                   cell: (index) => index == fields.length
                       ? _AddField(
                           link: _plus,
