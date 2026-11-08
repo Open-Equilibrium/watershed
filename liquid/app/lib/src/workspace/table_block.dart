@@ -272,6 +272,11 @@ class _TableBlockState extends State<TableBlock> {
       ..relocate(rowIndex)
       ..read(rowIndex);
     // A row gone elsewhere takes its handle and menu along.
+    if (_menuRow case final row? when rowIndex(row) != _menuAt) {
+      _menuRow = null;
+      _rowMenu.hide();
+      _showHandle();
+    }
     if (_pointerRow case final row? when rowIndex(row) == null) {
       _pointerRow = null;
     }
@@ -296,6 +301,10 @@ class _TableBlockState extends State<TableBlock> {
   final _rowMenuAnchor = LayerLink();
   String? _handleRow;
   String? _menuRow;
+
+  /// Where the menu's row was when the menu opened; a change elsewhere moving it closes
+  /// the menu, as other menus close when what they hang from moves.
+  int? _menuAt;
 
   /// The row the pointer is on, which the handle moves to once no menu holds it.
   String? _pointerRow;
@@ -330,7 +339,13 @@ class _TableBlockState extends State<TableBlock> {
 
   void _toggleRowMenu() {
     if (_menuRow != null) return _closeRowMenu();
-    setState(() => _menuRow = _handleRow);
+    final row = _handleRow;
+    setState(() {
+      _menuRow = row;
+      _menuAt = row == null
+          ? null
+          : _rows.indexWhere((shown) => shown.id == row);
+    });
     _rowMenu.show();
   }
 

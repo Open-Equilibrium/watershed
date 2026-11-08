@@ -242,4 +242,18 @@ void main() {
     // r2 moved up; the pointer now rests below the rows.
     expect(handle, findsNothing);
   });
+
+  testWidgets('a row moved by a change elsewhere closes its menu', (
+    tester,
+  ) async {
+    await show(tester);
+    final table = kit.fake.views[kit.page]!.single.block;
+    await openMenu(tester, 'r2');
+    // Another device adds a row first.
+    await kit.workspace.apply(
+      mutation(BridgeMutationKind.addRow, page: kit.page, block: table),
+    );
+    await tester.pumpAndSettle();
+    expect(menu, findsNothing);
+  });
 }
