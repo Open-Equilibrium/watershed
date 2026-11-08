@@ -52,7 +52,7 @@ flowchart TD
 
 ### Storage
 
-15. The local replica is SQLite in write-ahead-log mode, encrypted with SQLCipher, with FTS5 for PowerBar search (ADR-0237). Its key lives in the operating system's keystore, which on macOS releases it only to Liquid, and on Linux and Windows to any program of the user (ADR-0251); attachments are encrypted blobs outside the database (ADR-0228). SQL stays inside `liquid-storage` behind typed reads and writes, so no other crate depends on the engine and replacing it touches only that crate and a one-time migration.
+15. The local replica is SQLite in write-ahead-log mode, encrypted with SQLCipher, with FTS5 for PowerBar search (ADR-0237). Its key lives in the operating system's keystore (who may read it: [SECURITY.md](../../SECURITY.md#liquid-workspace-access--external-agent-edits), ADR-0251); attachments are encrypted blobs outside the database (ADR-0228). SQL stays inside `liquid-storage` behind typed reads and writes, so no other crate depends on the engine and replacing it touches only that crate and a one-time migration.
 
 ## Risks against the current V-Spec
 

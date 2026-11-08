@@ -12,7 +12,7 @@ Workspace/action layer:  Liquid
 
 ```text
 Flow Agent makes agent work repeatable.
-Meta-Harness makes agent work observable and governable.
+Meta-Harness makes agent work durable, observable and orchestrated across harnesses and devices.
 Liquid makes human and agent work visible, composable and reversible.
 ```
 
@@ -21,7 +21,7 @@ This file owns the integrated platform model. Per-product internals live in the 
 ## Independent products, compound value
 
 - **Flow Agent:** *Run repeatable, auditable AI-agent workflows from my CLI.*
-- **Meta-Harness:** *Control, observe, measure and govern agents on one host.*
+- **Meta-Harness:** *Orchestrate, observe and measure agents of any harness, durably across linked hosts.*
 - **Liquid:** *Let humans and agents build and safely co-edit a local-first workspace.*
 
 Each product works without the layers above it. Together they add normalized sessions, permissioned agent actions, cross-device workspace access and reversible human/agent collaboration.
@@ -35,7 +35,7 @@ Watershed is AGPL/free software: users can inspect, run, self-host, fork and ver
 Watershed is a monorepo, **not** a monolith. The products share `core` libraries and the versioned `proto` contract, but own separate processes and state.
 
 - **Flow Agent** is CLI-only and host-local. Humans, scripts, CI or a Meta-Harness on the same host use its public CLI/event surfaces. It has one global configuration authority and no project-local configuration discovery; project-specific behavior is an explicit Flow. Nothing reads its private session store.
-- **Meta-Harness** is a headless, host-scoped controller. It starts and controls only CLI agents on its own host, while authenticated clients may reach its public API remotely. Each instance owns its agent configurations, sessions, transcripts, agent schedules and AgentPulse metrics.
+- **Meta-Harness** is a headless, host-scoped controller. It starts and controls only CLI agents on its own host, while authenticated clients and linked hosts may reach its public API remotely, and it leaves each harness's behavior and governance unchanged (ADR-0249). Each instance owns its agent configurations, sessions, transcripts, agent schedules and AgentPulse metrics.
 - **Liquid** is a local-first workspace and app-building product. Every interactive client reads and writes its local replica. A central Sync Server coordinates replicas; an optional headless Liquid replica lets server-hosted agents use the same workspace action boundary while user devices are offline.
 
 Liquid is the only Watershed UI that controls agents. It projects one or more Meta-Harness instances into one experience while retaining each record's execution location, owner, freshness and command destination. A friendly location and session name hide infrastructure detail without inventing one global controller.

@@ -7,11 +7,11 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Platform** — Watershed as a whole: one AGPL/free-software AI-native work platform for reusable, measurable and reversible agent workflows, composed of three independently usable layers.
 - **Platform layer** — One independently usable part of the Watershed platform. There are three: execution, control and workspace/action.
 - **Execution layer** — Flow Agent's role: running repeatable, auditable agent workflows.
-- **Control layer** — Meta-Harness's role: controlling, observing, measuring and governing many agents.
+- **Control layer** — Meta-Harness's role: orchestrating, observing and measuring agents of any harness across linked hosts, leaving their governance to each harness.
 - **Workspace/action layer** — Liquid's role: human/agent workspace co-editing with reversible action history.
 - **Agent workflow** — A structured unit of AI-agent work that can be run, observed, measured and improved (in Flow Agent, realized as a Flow).
 - **Reversible agent action** — An attributed workspace mutation that can be inspected and reverted (see Action, Workspace action history).
-- **Wedge** — The first narrow adoption path used to validate and grow the platform. Flow Agent is the developer/open-source execution wedge, Meta-Harness the team/control/governance wedge, Liquid the long-term workspace/action wedge.
+- **Wedge** — The first narrow adoption path used to validate and grow the platform. Flow Agent is the developer/open-source execution wedge, Meta-Harness the orchestration wedge, Liquid the long-term workspace/action wedge.
 - **AGPL/free-software posture** — The project's commitment to transparent, inspectable, self-hostable software under the repository's `AGPL-3.0-only` license; not a proprietary/open-core monetization stance.
 - **Offline after provisioning** — The state in which installed Watershed binaries, approved model/runtime artifacts, required Global Flow configuration, one applicable Runtime binding and local-runtime readiness are already present, so the core local Flow, control and Workspace paths operate with network interfaces disabled. Requested remote-only actions fail visibly when unavailable; sync reports offline/stale state and waits resumably without blocking local work.
 - **Topic branch** — Short-lived Git branch for one logical change; can span multiple sessions and is PR'd back to `main`.
