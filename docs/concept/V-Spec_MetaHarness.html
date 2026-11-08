@@ -51,12 +51,15 @@ Liquid        = standalone native workspace / app-building product</code></pre>
           <li>agent adapter model;</li>
           <li>central configuration resolution;</li>
           <li>schedules;</li>
-          <li>event-driven agent triggers and orchestration;</li>
+          <li>event-driven agent triggers and orchestration of threads across harnesses, model providers and devices, including agents that start, message and steer other agents (<a href="#orchestration">orchestration</a>, ADR-0250);</li>
+<li>the four durability levels;</li>
+<li>materializing the harness configurations Liquid manages;</li>
+<li>monitoring and observability of harness sessions;</li>
           <li>event/transcript ingestion from agents;</li>
           <li>artifact/log/handoff indexing;</li>
           <li>AgentPulse metric computation;</li>
           <li>policy-gated configuration writes;</li>
-          <li>approval/audit flow for sensitive changes;</li>
+          <li>approval/audit flow for configuration changes;</li>
           <li>Git operations on agent projects for Liquid's Git integration;</li>
           <li>BYOA/API access for external agents and tools;</li>
           <li>host-local execution plus local-or-remote client surfaces.</li>
@@ -67,6 +70,7 @@ Liquid        = standalone native workspace / app-building product</code></pre>
           <li>PowerBar UX;</li>
           <li>the visual workspace model;</li>
           <li>Flow Agent runtime internals;</li>
+<li>governance inside a harness, such as tool approvals and sandboxes, which the harness brings and Meta-Harness neither adds nor changes (ADR-0249);</li>
           <li>agent execution on another host;</li>
           <li>a project VCS/history engine;</li>
           <li>a full separate rich GUI in the MVP.</li>
@@ -224,6 +228,15 @@ liquid integration
         <li>automated metric collection;</li>
         <li>policy-gated config-improvement proposals.</li>
       </ul>
+      <h3 id="orchestration">Agents orchestrating agents</h3>
+      <p>Accepted target (ADR-0250), with T3 Code as the model: an agent starts, messages, reads, steers and stops other threads across harnesses, model providers and linked devices. A Codex thread on a Mac can start a Claude Code subagent on a linked Windows 11 computer, whose Meta-Harness runs in WSL, talk with it and steer it.</p>
+      <ul>
+        <li><strong>Tools:</strong> Meta-Harness offers every session it starts its orchestration as MCP tools, as T3 Code offers its agents: list the linked hosts and the harnesses and models each offers; start a thread with a harness, model, host and first message as the caller's subagent; send it a message, also while it runs; read its messages and state; wait for its result; stop it; link a host by pairing.</li>
+        <li><strong>Execution:</strong> a call goes to the caller's own Meta-Harness, which forwards it to the linked host; that host starts and supervises the harness itself, so execution stays host-local and a process another host claims is refused.</li>
+        <li><strong>Subagents and messages:</strong> a subagent is a thread with its parent; each message is attributed to the thread that sent it, and the subagent's results reach the parent as messages, as T3 Code delivers a delegated task's result.</li>
+        <li><strong>Authority:</strong> a subagent's grant comes from its parent's grant and is never larger (ADR-0223); the person sees and stops every thread in Liquid.</li>
+        <li><strong>Linked hosts:</strong> paired over the authenticated remote connection (ADR-0185), as T3 Code links environments; each host keeps its own credentials.</li>
+      </ul>
     </div></section>
 
     <section id="durability" class="section"><h2>11. Durability</h2><div class="body">
@@ -245,7 +258,7 @@ liquid integration
         <li><strong>A · Switch the client:</strong> Meta-Harness runs as a service; Liquid on any device attaches over the authenticated remote connection (ADR-0185) and sees the same live session. The Workspace copy of the session record lets every device show its history without a connection.</li>
         <li><strong>B · Survive a crash:</strong> every harness event is journaled before Liquid shows it, in short group commits rather than once per token, and every tool intent before the tool runs. After a crash Meta-Harness restarts the harness with its session; pi's own reading tools and Tools declared replay-safe run again, any other tool reports "interrupted" to the model, which continues without a restart click. A model answer cut off mid-stream is requested again.</li>
         <li><strong>C · Move an agent:</strong> at a turn boundary another of the person's hosts takes the session over: the record from Liquid, the files from the Git checkpoint ref (ADR-0220), its own credentials and the person's grant (ADR-0223). The Sync Server gives the session to one host; two hosts continuing offline create two branches.</li>
-        <li><strong>D · Several hosts:</strong> linked Meta-Harness hosts hand each other tasks and messages and return results, as T3 Code's linked environments do; approvals stay with the host that runs the work. Running single tools on another host follows later.</li>
+        <li><strong>D · Several hosts:</strong> linked Meta-Harness hosts hand each other tasks and messages and return results, as T3 Code's linked environments do; a harness's own approvals stay with the host that runs the work. Running single tools on another host follows later.</li>
       </ul>
       <div style="overflow-x:auto">
       <table>
