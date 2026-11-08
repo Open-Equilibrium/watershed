@@ -231,11 +231,11 @@ liquid integration
       <h3 id="orchestration">Agents orchestrating agents</h3>
       <p>Accepted target (ADR-0250), with T3 Code as the model: an agent starts, messages, reads, steers and stops other threads across harnesses, model providers and linked devices. A Codex thread on a Mac can start a Claude Code subagent on a linked Windows 11 computer, whose Meta-Harness runs in WSL, talk with it and steer it.</p>
       <ul>
-        <li><strong>Tools:</strong> Meta-Harness offers every session it starts its orchestration as MCP tools, as T3 Code offers its agents: list the linked hosts and the harnesses and models each offers; start a thread with a harness, model, host and first message as the caller's subagent; send it a message, also while it runs; read its messages and state; wait for its result; stop it; link a host by pairing.</li>
+        <li><strong>Tools:</strong> Meta-Harness offers every session it starts its orchestration as MCP tools, as T3 Code offers its agents: list the linked hosts and the harnesses and models each offers; start a thread with a harness, model, host and first message as the caller's subagent; send it a message, also while it runs; read its messages and state; wait for its result; stop it; ask to link another host.</li>
         <li><strong>Execution:</strong> a call goes to the caller's own Meta-Harness, which forwards it to the linked host; that host starts and supervises the harness itself, so execution stays host-local and a process another host claims is refused.</li>
         <li><strong>Subagents and messages:</strong> a subagent is a thread with its parent; each message is attributed to the thread that sent it, and the subagent's results reach the parent as messages, as T3 Code delivers a delegated task's result.</li>
         <li><strong>Authority:</strong> a subagent's grant comes from its parent's grant and is never larger (ADR-0223); the person sees and stops every thread in Liquid.</li>
-        <li><strong>Linked hosts:</strong> paired over the authenticated remote connection (ADR-0185), as T3 Code links environments; each host keeps its own credentials.</li>
+        <li><strong>Linked hosts:</strong> paired over the authenticated remote connection (ADR-0185), as T3 Code links environments: an agent may only ask to link a host, and the person completes the pairing on that host; each host keeps its own credentials.</li>
       </ul>
     </div></section>
 
