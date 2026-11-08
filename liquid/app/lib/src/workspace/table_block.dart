@@ -151,7 +151,7 @@ class _TableBlockState extends State<TableBlock> {
     _name.addListener(_typed);
     _state.finishing.add(_typed);
     _state.finishing.add(_cells.finish);
-    _state.finishing.add(_renameTyped);
+    _state.finishing.add(_fieldMenus.renameTyped);
     _nameFocus.addListener(_left);
     // Once every rename arrived, the name is read again.
     _settled = widget.views.settled
@@ -196,8 +196,8 @@ class _TableBlockState extends State<TableBlock> {
   void _moved() {
     if (_scrollingItself) return _replacePick();
     if (_panel.isShowing) _panel.hide();
-    _closeFieldMenu();
-    _closeRowMenu();
+    _fieldMenus.close();
+    _rowHandles.closeMenu();
     _cells.closePick();
   }
 
@@ -216,9 +216,10 @@ class _TableBlockState extends State<TableBlock> {
     _name.dispose();
     _nameFocus.dispose();
     // A name typed in a field's menu is kept as it stands.
-    _renameTyped();
-    _state.finishing.remove(_renameTyped);
-    _menuName.dispose();
+    _fieldMenus.renameTyped();
+    _state.finishing.remove(_fieldMenus.renameTyped);
+    _fieldMenus.dispose();
+    _rowHandles.dispose();
     // An edit still open is written as it stands.
     _cells.removeListener(_changed);
     _cells.finish();
@@ -242,7 +243,7 @@ class _TableBlockState extends State<TableBlock> {
   void _closePanel() {
     if (_scrollingItself) return;
     if (_panel.isShowing) _panel.hide();
-    _closeFieldMenu();
+    _fieldMenus.close();
   }
 
   /// While the Table scrolls itself, to a new row or field or to reveal a cell, which
@@ -253,7 +254,7 @@ class _TableBlockState extends State<TableBlock> {
   void _scrolled() {
     if (_scrollingItself) return _replacePick();
     _cells.closePick();
-    _closeRowMenu();
+    _rowHandles.closeMenu();
   }
 
   /// Chooses the picker's side and room again once the Table is laid out, after the
@@ -271,23 +272,7 @@ class _TableBlockState extends State<TableBlock> {
     _cells
       ..relocate(rowIndex)
       ..read(rowIndex);
-    // A row gone elsewhere takes its handle and menu along.
-    if (_menuRow case final row? when rowIndex(row) != _menuAt) {
-      _menuRow = null;
-      _handleRow = _pointerRow ?? _handleRow;
-      _rowMenu.hide();
-      _showHandle();
-    }
-    if (_pointerRow case final row? when rowIndex(row) == null) {
-      _pointerRow = null;
-      _rowRegion = null;
-    }
-    if (_handleRow case final row? when rowIndex(row) == null) {
-      _handleRow = _pointerRow;
-      _menuRow = null;
-      _rowMenu.hide();
-      _showHandle();
-    }
+    _rowHandles.read();
     setState(() {});
     _replacePick();
     if (_cells.picking != _pick.isShowing) {
@@ -296,169 +281,31 @@ class _TableBlockState extends State<TableBlock> {
   }
 
   /// A hovered row's handle, left of the Table, and the row's menu (approved Table View
-  /// mockups, section 5); the handle stays while the pointer is on it or the menu is open.
-  final _handle = OverlayPortalController();
-  final _handleAnchor = LayerLink();
-  final _rowMenu = OverlayPortalController();
-  final _rowMenuAnchor = LayerLink();
-  String? _handleRow;
-  String? _menuRow;
-
-  /// Where the menu's row was when the menu opened; a change elsewhere moving it closes
-  /// the menu, as other menus close when what they hang from moves.
-  int? _menuAt;
-
-  /// The row the pointer is on, which the handle moves to once no menu holds it, and the
-  /// regions that told the pointer is on the row and on the handle.
-  String? _pointerRow;
-  Object? _rowRegion;
-  Object? _handleRegion;
-  bool get _handleHovered => _handleRegion != null;
-
-  void _showHandle() {
-    final show =
-        _handleRow != null &&
-        (_pointerRow == _handleRow || _handleHovered || _menuRow != null);
-    if (show != _handle.isShowing) show ? _handle.show() : _handle.hide();
-  }
-
-  void _hoverRow(String row, bool hovered, Object region) {
-    if (!mounted) return;
-    setState(() {
-      if (hovered) {
-        _pointerRow = row;
-        _rowRegion = region;
-      } else if (_rowRegion == region) {
-        _pointerRow = null;
-        _rowRegion = null;
-      }
-      // While a row's menu is open, its handle stays on that row.
-      if (_menuRow == null && _pointerRow != null) _handleRow = _pointerRow;
-    });
-    _showHandle();
-  }
-
-  void _hoverHandle(bool hovered, Object region) {
-    if (!mounted) return;
-    setState(() {
-      if (hovered) {
-        _handleRegion = region;
-      } else if (_handleRegion == region) {
-        _handleRegion = null;
-      }
-    });
-    _showHandle();
-  }
-
-  void _toggleRowMenu() {
-    if (_menuRow != null) return _closeRowMenu();
-    final row = _handleRow;
-    setState(() {
-      _menuRow = row;
-      _menuAt = row == null
-          ? null
-          : _rows.indexWhere((shown) => shown.id == row);
-    });
-    _rowMenu.show();
-  }
-
-  void _closeRowMenu() {
-    if (_menuRow == null) return;
-    setState(() {
-      _menuRow = null;
-      _handleRow = _pointerRow ?? _handleRow;
-    });
-    _rowMenu.hide();
-    _showHandle();
-  }
-
-  /// Inserts a row above or below `row`, which the core places next to it (ADR-0247).
-  Future<void> _insertRow(String? row, {required bool above}) async {
-    _closeRowMenu();
-    final index = row == null
-        ? null
-        : _rows.indexWhere((shown) => shown.id == row);
-    if (index == null) return;
-    var after = row;
-    if (above) {
-      after = index == 0 ? null : (await _rows.load(index - 1))?.id;
-      if (index > 0 && after == null) return;
-    }
-    await widget.views
-        .write(
-          mutation(
-            BridgeMutationKind.addRow,
-            page: _page,
-            block: _block,
-            after: after,
-          ),
-          const [],
-        )
-        .then((_) {}, onError: (Object _) {});
-  }
-
-  /// Delete row deletes the menu's row without asking (section 5).
-  void _deleteRow() {
-    final row = _menuRow;
-    _closeRowMenu();
-    if (row == null) return;
-    widget.views
-        .write(
-          mutation(
-            BridgeMutationKind.removeRow,
-            page: _page,
-            block: _block,
-            row: row,
-          ),
-          const [],
-        )
-        .then((_) {}, onError: (Object _) {});
-  }
-
-  Widget _handleView(BuildContext context) => Align(
-    alignment: Alignment.topLeft,
-    child: CompositedTransformFollower(
-      link: _handleAnchor,
-      showWhenUnlinked: false,
-      followerAnchor: Alignment.topRight,
-      child: HoverRegion(
-        onHover: _hoverHandle,
-        child: TapRegion(
-          groupId: _rowMenu,
-          child: RowHandle(
-            height: WsMetrics.rowTable,
-            onInsert: (above) =>
-                unawaited(_insertRow(_handleRow, above: above)),
-            menu: _rowMenuAnchor,
-            menuOpen: _menuRow != null,
-            onMenu: _toggleRowMenu,
-          ),
-        ),
+  /// mockups, section 5).
+  late final _rowHandles = RowHandles(
+    indexOf: (row) => _rows.indexWhere((shown) => shown.id == row),
+    idAt: (index) async => (await _rows.load(index))?.id,
+    insert: (after) => _writeRows(
+      mutation(
+        BridgeMutationKind.addRow,
+        page: _page,
+        block: _block,
+        after: after,
       ),
     ),
-  );
-
-  Widget _rowMenuView(BuildContext context) {
-    if (_menuRow == null) return const SizedBox.shrink();
-    return Align(
-      alignment: Alignment.topLeft,
-      child: CompositedTransformFollower(
-        link: _rowMenuAnchor,
-        showWhenUnlinked: false,
-        targetAnchor: Alignment.bottomLeft,
-        offset: const Offset(0, WsMetrics.space1),
-        child: TapRegion(
-          groupId: _rowMenu,
-          onTapOutside: (_) => _closeRowMenu(),
-          child: RowMenu(
-            onInsert: (above) => unawaited(_insertRow(_menuRow, above: above)),
-            onDelete: _deleteRow,
-            onClose: _closeRowMenu,
-          ),
-        ),
+    remove: (row) => _writeRows(
+      mutation(
+        BridgeMutationKind.removeRow,
+        page: _page,
+        block: _block,
+        row: row,
       ),
-    );
-  }
+    ),
+  )..addListener(_menusChanged);
+
+  /// Writes a change to rows; a refused one shows on the Page.
+  Future<void> _writeRows(BridgeMutation change) =>
+      widget.views.write(change, const []).then((_) {}, onError: (Object _) {});
 
   /// A select cell's picker, under the cell or above it, which a click outside closes.
   final _pick = OverlayPortalController();
@@ -581,144 +428,46 @@ class _TableBlockState extends State<TableBlock> {
 
   void _togglePanel() {
     if (_panel.isShowing) return _panel.hide();
-    _closeFieldMenu();
+    _fieldMenus.close();
     _panelOpened++;
     _panel.show();
   }
 
-  /// A field's menu, under its header, which a click outside closes (approved Table View
-  /// mockups, section 5).
-  final _fieldMenu = OverlayPortalController();
-  final _fieldAnchor = LayerLink();
-  String? _menuField;
-
-  /// The name typed in the field's menu, which closing it keeps unless esc drops it, and
-  /// the name it opened with or last wrote.
-  final _menuName = TextEditingController();
-  String _menuOpened = '';
-
-  BridgeField? _fieldOf(String? id) =>
-      _database?.fields.where((field) => field.id == id).firstOrNull;
-
-  /// A click on a field's header opens its menu, or closes it when open.
-  void _toggleFieldMenu(BridgeField field) {
-    final open = _menuField == field.id;
-    _closeFieldMenu();
-    if (open) return;
-    if (_panel.isShowing) _panel.hide();
-    _menuName.value = TextEditingValue(
-      text: field.name,
-      selection: TextSelection.collapsed(offset: field.name.length),
-    );
-    _menuOpened = field.name;
-    setState(() => _menuField = field.id);
-    _fieldMenu.show();
-  }
-
-  /// Closes the field's menu and renames the field as typed, unless `drop`.
-  void _closeFieldMenu({bool drop = false}) {
-    if (_menuField == null) return;
-    if (!drop) _renameTyped();
-    setState(() => _menuField = null);
-    _fieldMenu.hide();
-  }
-
-  /// Renames the menu's field as typed, unless the name is empty or as the menu opened
-  /// with it, so a rename elsewhere meanwhile stays; also as the Table goes or Liquid
-  /// quits.
-  void _renameTyped() {
-    if (_asking case (final field, final name)) {
-      _asking = null;
-      _renameField(field, name);
-    }
-    final field = _menuField;
-    final name = _menuName.text.trim();
-    if (field == null || name.isEmpty || name == _menuOpened) return;
-    _menuOpened = name;
-    _renameField(field, name);
-  }
-
-  void _renameField(String field, String name) {
-    widget.views
-        .write(
-          mutation(
-            BridgeMutationKind.renameField,
-            page: _page,
-            block: _block,
-            field: field,
-            text: name,
-          ),
-          const [],
-        )
-        .then((_) {
-          if (mounted) unawaited(_read());
-        }, onError: (Object _) {});
-  }
-
-  /// A field and the name typed in its menu before Delete field, kept while the question
-  /// is open, so quitting or the Table going meanwhile still writes it.
-  (String, String)? _asking;
-
-  /// Delete field asks first, then deletes the field and its values; a name typed is kept
-  /// when the question is cancelled.
-  Future<void> _deleteField() async {
-    final field = _fieldOf(_menuField);
-    final name = _menuName.text.trim();
-    if (field != null && name.isNotEmpty && name != _menuOpened) {
-      _asking = (field.id, name);
-    }
-    _closeFieldMenu(drop: true);
-    if (field == null) return;
-    final confirmed = await confirmDeleteField(context, field, _rows.count);
-    final asked = _asking;
-    _asking = null;
-    if (!confirmed) {
-      if (asked case (final id, final typed) when mounted) {
-        _renameField(id, typed);
-      }
-      return;
-    }
-    if (!mounted) return;
-    await widget.views
-        .write(
-          mutation(
-            BridgeMutationKind.removeField,
-            page: _page,
-            block: _block,
-            field: field.id,
-          ),
-          const [],
-        )
-        .then((_) {
-          if (mounted) unawaited(_read());
-        }, onError: (Object _) {});
-  }
-
-  Widget _fieldMenuView(BuildContext context) {
-    final field = _fieldOf(_menuField);
-    if (field == null) return const SizedBox.shrink();
-    return Align(
-      alignment: Alignment.topLeft,
-      child: CompositedTransformFollower(
-        link: _fieldAnchor,
-        showWhenUnlinked: false,
-        targetAnchor: Alignment.bottomLeft,
-        offset: const Offset(0, WsMetrics.space1),
-        child: TapRegion(
-          groupId: _fieldMenu,
-          onTapOutside: (_) => _closeFieldMenu(),
-          // A click in the menu beside its name keeps the name's keys.
-          child: TextFieldTapRegion(
-            child: FieldMenu(
-              field: field,
-              name: _menuName,
-              onClose: _closeFieldMenu,
-              onDelete: () => unawaited(_deleteField()),
-            ),
-          ),
+  /// A field's menu, under its header (approved Table View mockups, section 5).
+  late final _fieldMenus = FieldMenus(
+    fieldOf: (id) =>
+        _database?.fields.where((field) => field.id == id).firstOrNull,
+    rename: (field, name) => unawaited(
+      _writeField(
+        mutation(
+          BridgeMutationKind.renameField,
+          page: _page,
+          block: _block,
+          field: field,
+          text: name,
         ),
       ),
-    );
+    ),
+    remove: (field) => _writeField(
+      mutation(
+        BridgeMutationKind.removeField,
+        page: _page,
+        block: _block,
+        field: field,
+      ),
+    ),
+    confirm: (field) => confirmDeleteField(context, field, _rows.count),
+  )..addListener(_menusChanged);
+
+  /// Writes a change to a field and reads the Table again; a refused one shows on the
+  /// Page.
+  Future<void> _writeField(BridgeMutation change) =>
+      widget.views.write(change, const []).then((_) {
+        if (mounted) unawaited(_read());
+      }, onError: (Object _) {});
+
+  void _menusChanged() {
+    if (mounted) setState(() {});
   }
 
   /// Adds a field last (ADR-0247) and shows it once a read holds it; a refused one keeps
@@ -908,10 +657,7 @@ class _TableBlockState extends State<TableBlock> {
         if (!_nameFocus.hasFocus) _show(answer.database?.name ?? '');
       }
       setState(() => _database = answer.database);
-      // A field gone elsewhere takes its menu along.
-      if (_menuField != null && _fieldOf(_menuField) == null) {
-        _closeFieldMenu(drop: true);
-      }
+      _fieldMenus.read();
       _cells.relocate((id) => _rows.indexWhere((row) => row.id == id));
     } on Object catch (error) {
       // What an add made is not shown later by surprise.
@@ -959,11 +705,11 @@ class _TableBlockState extends State<TableBlock> {
     }
     // The field panel opens under +, and clicking it or + keeps it open.
     return OverlayPortal(
-      controller: _handle,
-      overlayChildBuilder: _handleView,
+      controller: _rowHandles.handle,
+      overlayChildBuilder: _rowHandles.handleView,
       child: OverlayPortal(
-        controller: _rowMenu,
-        overlayChildBuilder: _rowMenuView,
+        controller: _rowHandles.menu,
+        overlayChildBuilder: _rowHandles.menuView,
         child: OverlayPortal(
           controller: _panel,
           overlayChildBuilder: (context) => Align(
@@ -985,8 +731,8 @@ class _TableBlockState extends State<TableBlock> {
             ),
           ),
           child: OverlayPortal(
-            controller: _fieldMenu,
-            overlayChildBuilder: _fieldMenuView,
+            controller: _fieldMenus.overlay,
+            overlayChildBuilder: _fieldMenus.view,
             child: OverlayPortal(
               controller: _pick,
               overlayChildBuilder: _picker,
@@ -1195,9 +941,9 @@ class _TableBlockState extends State<TableBlock> {
           // outside.
           if (menu?.call(index) ?? false) {
             return TapRegion(
-              groupId: _fieldMenu,
+              groupId: _fieldMenus.overlay,
               child: CompositedTransformTarget(
-                link: _fieldAnchor,
+                link: _fieldMenus.anchor,
                 child: tapped,
               ),
             );
@@ -1284,10 +1030,13 @@ class _TableBlockState extends State<TableBlock> {
                   // The field panel follows +, so it closes once + is out of view.
                   addOutOfView: _panelOutOfView,
                   onTap: (index) {
-                    if (index < fields.length) _toggleFieldMenu(fields[index]);
+                    if (index >= fields.length) return;
+                    if (_panel.isShowing) _panel.hide();
+                    _fieldMenus.toggle(fields[index]);
                   },
                   menu: (index) =>
-                      index < fields.length && fields[index].id == _menuField,
+                      index < fields.length &&
+                      fields[index].id == _fieldMenus.open,
                   cell: (index) => index == fields.length
                       ? _AddField(
                           link: _plus,
@@ -1321,7 +1070,8 @@ class _TableBlockState extends State<TableBlock> {
                     for (final cell in row?.cells ?? const <BridgeFieldCell>[])
                       cell.field: cell.value,
                   };
-                  final hovered = row != null && row.id == _handleRow;
+                  final hovered =
+                      row != null && row.id == _rowHandles.handleRow;
                   final shown = DecoratedBox(
                     position: DecorationPosition.foreground,
                     decoration: BoxDecoration(
@@ -1329,10 +1079,10 @@ class _TableBlockState extends State<TableBlock> {
                     ),
                     child: line(
                       height: WsMetrics.rowTable,
-                      color: hovered && _handle.isShowing
+                      color: hovered && _rowHandles.handle.isShowing
                           ? ws.hover
                           : ws.canvas,
-                      handle: hovered ? _handleAnchor : null,
+                      handle: hovered ? _rowHandles.handleAnchor : null,
                       keyOf: (index) => row == null || index == fields.length
                           ? null
                           : ValueKey('cell ${row.id} ${fields[index].id}'),
@@ -1377,7 +1127,7 @@ class _TableBlockState extends State<TableBlock> {
                   return HoverRegion(
                     key: ValueKey('row ${row.id}'),
                     onHover: (hovered, region) =>
-                        _hoverRow(row.id, hovered, region),
+                        _rowHandles.hoverRow(row.id, hovered, region),
                     child: shown,
                   );
                 },

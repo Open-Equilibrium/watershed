@@ -247,3 +247,192 @@ class _HoverRegionState extends State<HoverRegion> {
     child: widget.child,
   );
 }
+
+/// A Table's row handle and row menu and what they write (approved Table View mockups,
+/// section 5): the handle follows the row under the pointer unless the menu holds it, and
+/// the menu closes when its row moves elsewhere.
+class RowHandles extends ChangeNotifier {
+  RowHandles({
+    required this.indexOf,
+    required this.idAt,
+    required this.insert,
+    required this.remove,
+  });
+
+  /// Where a row is among those read, or none.
+  final int? Function(String row) indexOf;
+
+  /// The row at a position, read if it is not.
+  final Future<String?> Function(int index) idAt;
+
+  /// Inserts a row after `after`, or first; a refused write shows on the Page.
+  final Future<void> Function(String? after) insert;
+
+  /// Deletes a row; a refused write shows on the Page.
+  final Future<void> Function(String row) remove;
+
+  final handle = OverlayPortalController();
+  final handleAnchor = LayerLink();
+  final menu = OverlayPortalController();
+  final menuAnchor = LayerLink();
+
+  /// The row the handle is on, and the row whose menu is open.
+  String? handleRow;
+  String? menuRow;
+
+  /// Where the menu's row was when the menu opened; a change elsewhere moving it closes
+  /// the menu, as other menus close when what they hang from moves.
+  int? _menuAt;
+
+  /// The row the pointer is on, which the handle moves to once no menu holds it, and the
+  /// regions that told the pointer is on the row and on the handle.
+  String? _pointerRow;
+  Object? _rowRegion;
+  Object? _handleRegion;
+
+  var _disposed = false;
+
+  void _show() {
+    final show =
+        handleRow != null &&
+        (_pointerRow == handleRow || _handleRegion != null || menuRow != null);
+    if (show != handle.isShowing) show ? handle.show() : handle.hide();
+  }
+
+  void _changed() {
+    _show();
+    notifyListeners();
+  }
+
+  void hoverRow(String row, bool hovered, Object region) {
+    if (_disposed) return;
+    if (hovered) {
+      _pointerRow = row;
+      _rowRegion = region;
+    } else if (_rowRegion == region) {
+      _pointerRow = null;
+      _rowRegion = null;
+    }
+    // While a row's menu is open, its handle stays on that row.
+    if (menuRow == null && _pointerRow != null) handleRow = _pointerRow;
+    _changed();
+  }
+
+  void hoverHandle(bool hovered, Object region) {
+    if (_disposed) return;
+    if (hovered) {
+      _handleRegion = region;
+    } else if (_handleRegion == region) {
+      _handleRegion = null;
+    }
+    _changed();
+  }
+
+  void toggleMenu() {
+    if (menuRow != null) return closeMenu();
+    menuRow = handleRow;
+    _menuAt = handleRow == null ? null : indexOf(handleRow!);
+    menu.show();
+    notifyListeners();
+  }
+
+  void closeMenu() {
+    if (menuRow == null) return;
+    menuRow = null;
+    handleRow = _pointerRow ?? handleRow;
+    menu.hide();
+    _changed();
+  }
+
+  /// Rows read again: a row moved elsewhere closes its menu, and a row gone takes its
+  /// handle along.
+  void read() {
+    if (menuRow case final row? when indexOf(row) != _menuAt) {
+      menuRow = null;
+      handleRow = _pointerRow ?? handleRow;
+      menu.hide();
+    }
+    if (_pointerRow case final row? when indexOf(row) == null) {
+      _pointerRow = null;
+      _rowRegion = null;
+    }
+    if (handleRow case final row? when indexOf(row) == null) {
+      handleRow = _pointerRow;
+      menuRow = null;
+      menu.hide();
+    }
+    _show();
+  }
+
+  /// Inserts a row above or below `row`, which the core places next to it (ADR-0247).
+  Future<void> insertNext(String? row, {required bool above}) async {
+    closeMenu();
+    final index = row == null ? null : indexOf(row);
+    if (index == null) return;
+    var after = row;
+    if (above) {
+      after = index == 0 ? null : await idAt(index - 1);
+      if (index > 0 && after == null) return;
+    }
+    if (!_disposed) await insert(after);
+  }
+
+  /// Delete row deletes the menu's row without asking (section 5).
+  void deleteRow() {
+    final row = menuRow;
+    closeMenu();
+    if (row != null) unawaited(remove(row));
+  }
+
+  /// The handle, left of its row's first field.
+  Widget handleView(BuildContext context) => Align(
+    alignment: Alignment.topLeft,
+    child: CompositedTransformFollower(
+      link: handleAnchor,
+      showWhenUnlinked: false,
+      followerAnchor: Alignment.topRight,
+      child: HoverRegion(
+        onHover: hoverHandle,
+        child: TapRegion(
+          groupId: menu,
+          child: RowHandle(
+            height: WsMetrics.rowTable,
+            onInsert: (above) => unawaited(insertNext(handleRow, above: above)),
+            menu: menuAnchor,
+            menuOpen: menuRow != null,
+            onMenu: toggleMenu,
+          ),
+        ),
+      ),
+    ),
+  );
+
+  /// The open menu, under ⋮⋮.
+  Widget menuView(BuildContext context) {
+    if (menuRow == null) return const SizedBox.shrink();
+    return Align(
+      alignment: Alignment.topLeft,
+      child: CompositedTransformFollower(
+        link: menuAnchor,
+        showWhenUnlinked: false,
+        targetAnchor: Alignment.bottomLeft,
+        offset: const Offset(0, WsMetrics.space1),
+        child: TapRegion(
+          groupId: menu,
+          onTapOutside: (_) => closeMenu(),
+          child: RowMenu(
+            onInsert: (above) => unawaited(insertNext(menuRow, above: above)),
+            onDelete: deleteRow,
+            onClose: closeMenu,
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+}
