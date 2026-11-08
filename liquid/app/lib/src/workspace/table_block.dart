@@ -272,8 +272,11 @@ class _TableBlockState extends State<TableBlock> {
       ..relocate(rowIndex)
       ..read(rowIndex);
     // A row gone elsewhere takes its handle and menu along.
+    if (_pointerRow case final row? when rowIndex(row) == null) {
+      _pointerRow = null;
+    }
     if (_handleRow case final row? when rowIndex(row) == null) {
-      _handleRow = null;
+      _handleRow = _pointerRow;
       _menuRow = null;
       _rowMenu.hide();
       _showHandle();
@@ -293,22 +296,27 @@ class _TableBlockState extends State<TableBlock> {
   final _rowMenuAnchor = LayerLink();
   String? _handleRow;
   String? _menuRow;
-  var _rowHovered = false;
+
+  /// The row the pointer is on, which the handle moves to once no menu holds it.
+  String? _pointerRow;
   var _handleHovered = false;
 
   void _showHandle() {
     final show =
         _handleRow != null &&
-        (_rowHovered || _handleHovered || _menuRow != null);
+        (_pointerRow == _handleRow || _handleHovered || _menuRow != null);
     if (show != _handle.isShowing) show ? _handle.show() : _handle.hide();
   }
 
   void _hoverRow(String row, bool hovered) {
     setState(() {
+      if (hovered) {
+        _pointerRow = row;
+      } else if (_pointerRow == row) {
+        _pointerRow = null;
+      }
       // While a row's menu is open, its handle stays on that row.
-      if (hovered && _menuRow == null) _handleRow = row;
-      // Leaving any row leaves the hovered one; entering the next comes after.
-      _rowHovered = hovered && row == _handleRow;
+      if (_menuRow == null && _pointerRow != null) _handleRow = _pointerRow;
     });
     _showHandle();
   }
@@ -326,7 +334,10 @@ class _TableBlockState extends State<TableBlock> {
 
   void _closeRowMenu() {
     if (_menuRow == null) return;
-    setState(() => _menuRow = null);
+    setState(() {
+      _menuRow = null;
+      _handleRow = _pointerRow ?? _handleRow;
+    });
     _rowMenu.hide();
     _showHandle();
   }

@@ -194,4 +194,23 @@ void main() {
     await hover(tester, const Offset(1300, 850));
     expect(handle, findsNothing);
   });
+
+  testWidgets('closing the menu over another row shows that row\'s handle', (
+    tester,
+  ) async {
+    await show(tester);
+    await openMenu(tester, 'r1');
+    await hover(tester, tester.getCenter(cell('r2', 'date')));
+    expect(
+      tester.getCenter(handle).dy,
+      moreOrLessEquals(tester.getCenter(cell('r1', 'name')).dy, epsilon: 1),
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(menu, findsNothing);
+    expect(
+      tester.getCenter(handle).dy,
+      moreOrLessEquals(tester.getCenter(cell('r2', 'name')).dy, epsilon: 1),
+    );
+  });
 }
