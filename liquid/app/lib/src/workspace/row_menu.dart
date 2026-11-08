@@ -267,6 +267,8 @@ class RowHandles extends ChangeNotifier {
 
   /// Inserts a row after `after`, or first; a refused write shows on the Page.
   final Future<void> Function(String? after) insert;
+
+  /// Deletes a row; a refused write shows on the Page.
   final Future<void> Function(String row) remove;
 
   final handle = OverlayPortalController();

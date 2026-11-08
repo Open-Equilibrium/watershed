@@ -24,7 +24,7 @@ class FieldMenu extends StatefulWidget {
 
   final BridgeField field;
 
-  /// The name as typed, kept by the Table so closing the menu any way keeps it.
+  /// The name as typed, kept by [FieldMenus] so closing the menu any way keeps it.
   final TextEditingController name;
 
   /// Closes the menu, keeping the name typed unless `drop`.
@@ -223,8 +223,10 @@ class FieldMenus extends ChangeNotifier {
   /// The Table's field of an identity, as last read.
   final BridgeField? Function(String? id) fieldOf;
 
-  /// Renames or removes a field; a refused write shows on the Page.
+  /// Renames a field; a refused write shows on the Page.
   final void Function(String field, String name) rename;
+
+  /// Deletes a field; a refused write shows on the Page.
   final Future<void> Function(String field) remove;
 
   /// Asks before a field and its values go.
