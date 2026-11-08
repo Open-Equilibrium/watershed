@@ -441,6 +441,10 @@ class _TableBlockState extends State<TableBlock> {
   /// with it, so a rename elsewhere meanwhile stays; also as the Table goes or Liquid
   /// quits.
   void _renameTyped() {
+    if (_asking case (final field, final name)) {
+      _asking = null;
+      _renameField(field, name);
+    }
     final field = _menuField;
     final name = _menuName.text.trim();
     if (field == null || name.isEmpty || name == _menuOpened) return;
@@ -465,16 +469,30 @@ class _TableBlockState extends State<TableBlock> {
         }, onError: (Object _) {});
   }
 
+  /// A field and the name typed in its menu before Delete field, kept while the question
+  /// is open, so quitting or the Table going meanwhile still writes it.
+  (String, String)? _asking;
+
   /// Delete field asks first, then deletes the field and its values; a name typed is kept
   /// when the question is cancelled.
   Future<void> _deleteField() async {
     final field = _fieldOf(_menuField);
-    final (name, opened) = (_menuName.text.trim(), _menuOpened);
+    final name = _menuName.text.trim();
+    if (field != null && name.isNotEmpty && name != _menuOpened) {
+      _asking = (field.id, name);
+    }
     _closeFieldMenu(drop: true);
     if (field == null) return;
-    if (!await confirmDeleteField(context, field, _rows.count ?? 0)) {
-      if (mounted && name.isNotEmpty && name != opened) {
-        _renameField(field.id, name);
+    final confirmed = await confirmDeleteField(
+      context,
+      field,
+      _rows.count ?? 0,
+    );
+    final asked = _asking;
+    _asking = null;
+    if (!confirmed) {
+      if (asked case (final id, final typed) when mounted) {
+        _renameField(id, typed);
       }
       return;
     }

@@ -255,4 +255,20 @@ void main() {
     expect(dialog, findsNothing);
     expect(renamed(), [('category', 'Kind')]);
   });
+
+  testWidgets('a name typed before Delete field is kept when Liquid quits '
+      'during the question', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await open(tester, 'Category');
+    await type(tester, 'Kind');
+    await tester.tap(inMenu(find.text('Delete field')));
+    await tester.pumpAndSettle();
+    expect(dialog, findsOneWidget);
+    await kit.workspace.drain();
+    await tester.pumpAndSettle();
+    expect(renamed(), [('category', 'Kind')]);
+    // Cancelled afterwards, it is not written again.
+    await key(tester, LogicalKeyboardKey.escape);
+    expect(renamed(), [('category', 'Kind')]);
+  });
 }
