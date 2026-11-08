@@ -755,6 +755,8 @@ class _TableBlockState extends State<TableBlock> {
                             child: TextField(
                               controller: _name,
                               focusNode: _nameFocus,
+                              // The caret stays where Liquid puts it; desktop Flutter would select all on focus.
+                              selectAllOnFocus: false,
                               style: TextStyle(
                                 fontSize: WsMetrics.fsProse,
                                 fontWeight: WsMetrics.fwSemibold,

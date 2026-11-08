@@ -197,6 +197,8 @@ class _SelectPickerState extends State<SelectPicker> {
               child: TextField(
                 controller: _text,
                 focusNode: _focus,
+                // The caret stays where Liquid puts it; desktop Flutter would select all on focus.
+                selectAllOnFocus: false,
                 style: TextStyle(fontSize: WsMetrics.fsUi, color: ws.text),
                 decoration: const InputDecoration.collapsed(hintText: null),
               ),
@@ -493,6 +495,8 @@ class _DatePickerState extends State<DatePicker> {
                 child: TextField(
                   controller: _text,
                   focusNode: _focus,
+                  // The caret stays where Liquid puts it; desktop Flutter would select all on focus.
+                  selectAllOnFocus: false,
                   style: TextStyle(fontSize: WsMetrics.fsUi, color: ws.text),
                   decoration: const InputDecoration.collapsed(hintText: null),
                 ),
