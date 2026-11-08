@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -176,5 +178,20 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(menu, findsNothing);
+  });
+
+  testWidgets('after rows move under a still pointer, leaving the Table hides '
+      'the handle', (tester) async {
+    await show(tester, 4);
+    await openMenu(tester, 'r1');
+    // The delete lands once the pointer rests on the row under the closed menu.
+    final gate = kit.fake.gate = Completer<void>();
+    kit.fake.gatedKinds = {BridgeMutationKind.removeRow};
+    await click(tester, inMenu('Delete row'));
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(kit.applied(BridgeMutationKind.removeRow).single.row, 'r1');
+    await hover(tester, const Offset(1300, 850));
+    expect(handle, findsNothing);
   });
 }

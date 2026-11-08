@@ -307,7 +307,8 @@ class _TableBlockState extends State<TableBlock> {
     setState(() {
       // While a row's menu is open, its handle stays on that row.
       if (hovered && _menuRow == null) _handleRow = row;
-      if (row == _handleRow) _rowHovered = hovered;
+      // Leaving any row leaves the hovered one; entering the next comes after.
+      _rowHovered = hovered && row == _handleRow;
     });
     _showHandle();
   }
@@ -1332,7 +1333,9 @@ class _TableBlockState extends State<TableBlock> {
                   );
                   if (row == null) return shown;
                   // A hovered row shows its handle (section 5).
+                  // Keyed by row, so a row moving under a still pointer is entered anew.
                   return MouseRegion(
+                    key: ValueKey('row ${row.id}'),
                     onEnter: (_) => _hoverRow(row.id, true),
                     onExit: (_) => _hoverRow(row.id, false),
                     child: shown,
