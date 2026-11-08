@@ -202,7 +202,7 @@ Headless replica ┘</code></pre>
       </svg>
       <ul>
         <li>Accepted target (ADR-0223, ADR-0224): each device holds everything its person may access; an agent host holds only the areas its agent Roles allow. M3 starts with complete replicas on a data model divided into areas.</li>
-        <li>An agent host runs by default under the account Meta-Harness is installed on, as in T3 Code, so on a person's laptop its agents reach what that account reaches, Liquid's files included. A VM, container, other account or computer the person sets up and links keeps them apart: such a host has its own replica, which syncs through the Sync Server like every replica, and a later offline path through the device's Liquid is required (ADR-0228, ADR-0251).</li>
+        <li>An agent host runs by default under the account Meta-Harness is installed on, as in T3 Code, so on a person's laptop its agents reach what that account reaches, Liquid's files included. A VM, container, other account or computer the person sets up and links keeps them apart: such a host has its own replica, which syncs through the Sync Server like every replica, and a later offline path through the device's Liquid is required (ADR-0228, ADR-0254).</li>
         <li>Every change is signed and checked against its signer's Role by the Sync Server; devices encrypt content per area (ADR-0228).</li>
       </ul>
       <ul>
@@ -224,7 +224,7 @@ Headless replica ┘</code></pre>
         <li>The user selects harness, that adapter's configuration and a location, then names the session by intent, such as “Refactor project X.” Flow Agent requires an explicit Flow from its global authority; other harnesses retain their documented selection model. Global-config management is a separate surface; infrastructure IDs and any device-local Runtime binding remain internal.</li>
         <li>Liquid calls the Meta-Harness that owns the location; a Meta-Harness schedule or event trigger may start the same run.</li>
         <li>Meta-Harness starts, observes and controls the CLI agent on its own host.</li>
-        <li>Liquid shows connection/freshness state, progress, transcript and prompt/steering controls. The user can add follow-ups and answer the approvals and questions the harness itself asks (ADR-0249).</li>
+        <li>Liquid shows connection/freshness state, progress, transcript and prompt/steering controls. The user can add follow-ups and answer the approvals and questions the harness itself asks (ADR-0252).</li>
         <li>The run proposes or executes project actions and permitted Liquid actions. Liquid changes always use the assigned Role, CLI/API and History pipeline.</li>
         <li>Meta-Harness retains execution/session records; Liquid retains Workspace History and cached projections.</li>
         <li>When a verified terminal checkpoint is available on another device, the user may continue it at a new execution location as a child Run. Liquid renders the resulting Conversation branch and rechecks destination authority rather than presenting a runtime transfer as the same live Run.</li>

@@ -51,7 +51,7 @@ Liquid        = standalone native workspace / app-building product</code></pre>
           <li>agent adapter model;</li>
           <li>central configuration resolution;</li>
           <li>schedules;</li>
-          <li>event-driven agent triggers and orchestration of threads across harnesses, model providers and devices, including agents that start, message and steer other agents (<a href="#orchestration">orchestration</a>, ADR-0250);</li>
+          <li>event-driven agent triggers and orchestration of threads across harnesses, model providers and devices, including agents that start, message and steer other agents (<a href="#orchestration">orchestration</a>, ADR-0253);</li>
 <li>the four durability levels;</li>
 <li>materializing the harness configurations Liquid manages;</li>
 <li>monitoring and observability of harness sessions;</li>
@@ -70,7 +70,7 @@ Liquid        = standalone native workspace / app-building product</code></pre>
           <li>PowerBar UX;</li>
           <li>the visual workspace model;</li>
           <li>Flow Agent runtime internals;</li>
-<li>governance inside a harness, such as tool approvals and sandboxes, which the harness brings and Meta-Harness neither adds nor changes (ADR-0249);</li>
+<li>governance inside a harness, such as tool approvals and sandboxes, which the harness brings and Meta-Harness neither adds nor changes (ADR-0252);</li>
           <li>agent execution on another host;</li>
           <li>a project VCS/history engine;</li>
           <li>a full separate rich GUI in the MVP.</li>
@@ -229,7 +229,7 @@ liquid integration
         <li>policy-gated config-improvement proposals.</li>
       </ul>
       <h3 id="orchestration">Agents orchestrating agents</h3>
-      <p>Accepted target (ADR-0250), with T3 Code as the model: an agent starts, messages, reads, steers and stops other threads across harnesses, model providers and linked devices. A Codex thread on a Mac can start a Claude Code subagent on a linked Windows 11 computer, whose Meta-Harness runs in WSL, talk with it and steer it.</p>
+      <p>Accepted target (ADR-0253), with T3 Code as the model: an agent starts, messages, reads, steers and stops other threads across harnesses, model providers and linked devices. A Codex thread on a Mac can start a Claude Code subagent on a linked Windows 11 computer, whose Meta-Harness runs in WSL, talk with it and steer it.</p>
       <ul>
         <li><strong>Tools:</strong> Meta-Harness offers every session it starts its orchestration as MCP tools, as T3 Code offers its agents: list the linked hosts and the harnesses and models each offers; start a thread with a harness, model, host and first message as the caller's subagent; send it a message, also while it runs; read its messages and state; wait for its result; stop it; ask to link another host.</li>
         <li><strong>Execution:</strong> a call goes to the caller's own Meta-Harness, which forwards it to the linked host; that host starts and supervises the harness itself, so execution stays host-local and a process another host claims is refused.</li>

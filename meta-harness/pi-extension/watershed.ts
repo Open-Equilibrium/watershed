@@ -1,5 +1,5 @@
 // Watershed's pi extension. The Meta-Harness core loads it into pi's RPC mode; it governs no tool
-// calls, which stay pi's (ADR-0249). It holds each run's start and end until the core took a
+// calls, which stay pi's (ADR-0252). It holds each run's start and end until the core took a
 // checkpoint of the project and refuses a run without its checkout guard (ADR-0234), lets the
 // core branch a session at any entry and records timing and checkpoints as session entries, so
 // Liquid reads everything from the session file (ADR-0189).
