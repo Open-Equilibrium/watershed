@@ -1,5 +1,5 @@
 //! Observation workload for long Trajectories (PERFORMANCE.md, Liquid): a scripted agent reports a
-//! session file of 1,000 turns of eight entries each and eight forks of ten turns. Each sample
+//! session file of 1,000 turns of seven entries each and eight forks of ten turns. Each sample
 //! starts a session that reads the stored history from that file, asks the agent for newer
 //! entries, builds its tree and two Trajectories, then reads again, which only asks for entries
 //! after the last one. The session file is written by a second run of this example, so building
