@@ -131,7 +131,7 @@ No implementation or release claim follows from a documentation decision alone. 
 
 ### M2 — Meta-Harness MVP
 
-**Wedge:** Meta-Harness orchestration wedge — run Flow Agent and external agents durably, observably and together across harnesses, model providers and devices, leaving governance to each harness (ADR-0249). Emphasize transparent, self-hostable, AGPL-aligned control; do not frame this as a monetization step.
+**Wedge:** Meta-Harness orchestration wedge — run Flow Agent and external agents durably, observably and together across harnesses, model providers and devices, leaving governance to each harness (ADR-0252). Emphasize transparent, self-hostable, AGPL-aligned control; do not frame this as a monetization step.
 
 M2 delivers Meta-Harness as a **self-contained, host-scoped headless control plane** with CLI/API/service surfaces — usable without Liquid. Each instance controls only CLI agents on its own host. Its public API is one command set over a private local connection on the host and an authenticated network connection remotely (ADR-0185). Liquid integrates later as a client of one or more instances. Full product/runtime detail: [`docs/concept/V-Spec_MetaHarness.html`](docs/concept/V-Spec_MetaHarness.html).
 
@@ -145,7 +145,7 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 - Reference scenario for schedules: a scheduled agent keeps a news feed as a database page in Liquid and changes it only with the configured approval, as `disler/pi-durable-news-agent` does with its own app.
 - Host-local Meta-Harness agent executor that rejects cross-host agent-process control and never manages a Flow Executor or Tool Sandbox (backend integration: [D-048](docs/decisions/open-decisions.html#d-048)).
 - Adapters: Flow Agent (via its public runtime surfaces) + at least one external CLI adapter.
-- Orchestration tools for agents as MCP tools (ADR-0250, [V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration)): an agent starts, messages, reads, steers and stops subagents of any harness and model, on linked hosts too, and hosts link by a pairing the person completes; Claude Code joins pi and Codex as an adapter.
+- Orchestration tools for agents as MCP tools (ADR-0253, [V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration)): an agent starts, messages, reads, steers and stops subagents of any harness and model, on linked hosts too, and hosts link by a pairing the person completes; Claude Code joins pi and Codex as an adapter.
 - Event/transcript ingestion from agents; artifact/log/handoff indexing (logs, structured summaries, host-provided diffs, handoff packs, checkpoints).
 - Policy-gated configuration writes with audit trail and review flow.
 - **No rich standalone GUI**; M2 packaging, including whether it adds a small status screen after the headless controller works, remains D-021.
@@ -214,7 +214,7 @@ Completes the Git integration for the agent's Git project (ADR-0190, ADR-0191): 
 
 #### Harness governance removal — next slice
 
-Meta-Harness integrates harnesses without changing their behavior (ADR-0249), so Watershed's own tool approvals go in one PR: the tool-call gate in Watershed's pi extension, the core's approval decisions and allowances, the bridge's approval calls, the approval card, the mode chip and its greeting, the approval shortcuts and the Trajectory's approval kind, with their tests, mockup sections and docs. pi's own dialogs stay, as do the extension's checkpoint marks, timing and session branches, so a session still requires the extension; Liquid shows approvals again only once a harness reports its own.
+Meta-Harness integrates harnesses without changing their behavior (ADR-0252), so Watershed's own tool approvals go in one PR: the tool-call gate in Watershed's pi extension, the core's approval decisions and allowances, the bridge's approval calls, the approval card, the mode chip and its greeting, the approval shortcuts and the Trajectory's approval kind, with their tests, mockup sections and docs. pi's own dialogs stay, as do the extension's checkpoint marks, timing and session branches, so a session still requires the extension; Liquid shows approvals again only once a harness reports its own.
 
 #### M3a — Local Workspace foundation
 
