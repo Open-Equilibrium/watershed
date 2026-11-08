@@ -58,17 +58,21 @@ Widget cellText(String text, {TextStyle? style}) =>
     Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: style);
 
 /// A cell's value as the Table shows it: text, a number or a day in the person's formats,
-/// an option as a tag, or a checkbox.
+/// an option as a tag, or a checkbox, unticked also before anything is written to it.
 class CellView extends StatelessWidget {
   const CellView({
     super.key,
     required this.cell,
+    required this.kind,
     required this.options,
     required this.numbers,
     required this.days,
   });
 
   final BridgeCell? cell;
+
+  /// The cell's field's kind.
+  final BridgeFieldKind kind;
 
   /// The select fields' options, by identity.
   final Map<String, BridgeOption> options;
@@ -79,6 +83,8 @@ class CellView extends StatelessWidget {
   Widget build(BuildContext context) {
     final cell = this.cell;
     return switch (cell?.kind) {
+      null || BridgeCellKind.empty when kind == BridgeFieldKind.checkbox =>
+        const CellCheckbox(checked: false),
       null || BridgeCellKind.empty => const SizedBox.shrink(),
       BridgeCellKind.text => cellText(cell!.text ?? ''),
       BridgeCellKind.number => cellText(
