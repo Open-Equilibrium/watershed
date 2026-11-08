@@ -477,7 +477,7 @@ void main() {
     await kit.show(tester, [
       TablePart([...expenses, namedRow(3)]),
     ]);
-    // A row with no Paid value yet, and a ticked one cleared with ⌫.
+    // A row with no Paid value yet, and one cleared with ⌫ after the click unticked it.
     await tester.tap(cell('r1', 'paid'));
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
