@@ -279,4 +279,31 @@ void main() {
       moreOrLessEquals(tester.getCenter(cell('r1', 'name')).dy, epsilon: 1),
     );
   });
+
+  testWidgets('a hovered row rebuilt in place as a row above goes keeps its '
+      'handle', (tester) async {
+    await show(tester, 20);
+    final table = kit.fake.views[kit.page]!.single.block;
+    final rows = tester
+        .widget<ListView>(find.byKey(const Key('table rows')))
+        .controller!;
+    rows.jumpTo(rows.position.maxScrollExtent);
+    await tester.pumpAndSettle();
+    await hover(tester, tester.getCenter(cell('r20', 'date')));
+    expect(handle, findsOneWidget);
+    // Another device removes a row above; the rows' end keeps r20 under the pointer.
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.removeRow,
+        page: kit.page,
+        block: table,
+        row: 'r1',
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.getCenter(cell('r20', 'date')).dy,
+      moreOrLessEquals(tester.getCenter(handle).dy, epsilon: 1),
+    );
+  });
 }

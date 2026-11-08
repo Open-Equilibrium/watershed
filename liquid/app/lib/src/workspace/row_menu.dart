@@ -213,11 +213,12 @@ class _RowMenuState extends State<RowMenu> {
 
 /// A region that tells when the pointer enters it and leaves it, also when it goes from
 /// under the pointer, which Flutter's MouseRegion does not tell, so no hover outlives what
-/// was hovered.
+/// was hovered. Each telling names the region, so a late leave of a region gone is told
+/// apart from a newer enter of the same thing's new region.
 class HoverRegion extends StatefulWidget {
   const HoverRegion({super.key, required this.onHover, required this.child});
 
-  final ValueChanged<bool> onHover;
+  final void Function(bool hovered, Object region) onHover;
   final Widget child;
 
   @override
@@ -229,13 +230,13 @@ class _HoverRegionState extends State<HoverRegion> {
 
   void _hover(bool hovered) {
     _hovered = hovered;
-    widget.onHover(hovered);
+    widget.onHover(hovered, this);
   }
 
   @override
   void dispose() {
     // Told after the frame that removed it, not while it is built.
-    if (_hovered) scheduleMicrotask(() => widget.onHover(false));
+    if (_hovered) scheduleMicrotask(() => widget.onHover(false, this));
     super.dispose();
   }
 

@@ -280,6 +280,7 @@ class _TableBlockState extends State<TableBlock> {
     }
     if (_pointerRow case final row? when rowIndex(row) == null) {
       _pointerRow = null;
+      _rowRegion = null;
     }
     if (_handleRow case final row? when rowIndex(row) == null) {
       _handleRow = _pointerRow;
@@ -307,9 +308,12 @@ class _TableBlockState extends State<TableBlock> {
   /// the menu, as other menus close when what they hang from moves.
   int? _menuAt;
 
-  /// The row the pointer is on, which the handle moves to once no menu holds it.
+  /// The row the pointer is on, which the handle moves to once no menu holds it, and the
+  /// regions that told the pointer is on the row and on the handle.
   String? _pointerRow;
-  var _handleHovered = false;
+  Object? _rowRegion;
+  Object? _handleRegion;
+  bool get _handleHovered => _handleRegion != null;
 
   void _showHandle() {
     final show =
@@ -318,13 +322,15 @@ class _TableBlockState extends State<TableBlock> {
     if (show != _handle.isShowing) show ? _handle.show() : _handle.hide();
   }
 
-  void _hoverRow(String row, bool hovered) {
+  void _hoverRow(String row, bool hovered, Object region) {
     if (!mounted) return;
     setState(() {
       if (hovered) {
         _pointerRow = row;
-      } else if (_pointerRow == row) {
+        _rowRegion = region;
+      } else if (_rowRegion == region) {
         _pointerRow = null;
+        _rowRegion = null;
       }
       // While a row's menu is open, its handle stays on that row.
       if (_menuRow == null && _pointerRow != null) _handleRow = _pointerRow;
@@ -332,9 +338,15 @@ class _TableBlockState extends State<TableBlock> {
     _showHandle();
   }
 
-  void _hoverHandle(bool hovered) {
+  void _hoverHandle(bool hovered, Object region) {
     if (!mounted) return;
-    setState(() => _handleHovered = hovered);
+    setState(() {
+      if (hovered) {
+        _handleRegion = region;
+      } else if (_handleRegion == region) {
+        _handleRegion = null;
+      }
+    });
     _showHandle();
   }
 
@@ -1364,7 +1376,8 @@ class _TableBlockState extends State<TableBlock> {
                   // Keyed by row, so a row moving under a still pointer is entered anew.
                   return HoverRegion(
                     key: ValueKey('row ${row.id}'),
-                    onHover: (hovered) => _hoverRow(row.id, hovered),
+                    onHover: (hovered, region) =>
+                        _hoverRow(row.id, hovered, region),
                     child: shown,
                   );
                 },
