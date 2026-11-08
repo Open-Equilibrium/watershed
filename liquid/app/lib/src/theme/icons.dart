@@ -17,6 +17,7 @@ abstract final class LucideIcons {
   static const chevronDown = IconData(0xe06d, fontFamily: _family);
   static const chevronLeft = IconData(0xe06e, fontFamily: _family);
   static const trash = IconData(0xe18d, fontFamily: _family);
+  static const gripVertical = IconData(0xe0eb, fontFamily: _family);
   static const chevronRight = IconData(0xe06f, fontFamily: _family);
   static const shield = IconData(0xe158, fontFamily: _family);
   static const triangleAlert = IconData(0xe193, fontFamily: _family);
