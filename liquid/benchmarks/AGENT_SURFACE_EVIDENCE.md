@@ -6,7 +6,7 @@ Observational evidence for the [agent-surface slice](../../PLAN.md) under the [e
 
 - Apple M6, 24 GB, macOS 27.0 (26A428).
 - Rust 1.99.0, release builds; Flutter 3.47.9 `flutter test` (debug JIT).
-- Token streaming observed on 2026-10-31 at commit `2b34840`; both Trajectory workloads on 2026-11-08 at `0a3e9fce`; one run each.
+- Token streaming observed on 2026-10-31 at commit `2b34840`; both Trajectory workloads on 2026-11-08 at `21d9382c`; one run each.
 
 ## Workloads
 
@@ -20,7 +20,7 @@ Observational evidence for the [agent-surface slice](../../PLAN.md) under the [e
 
 Token streaming: the 20,000 deltas arrive as 1 text event of 320,000 bytes, 6 events in all. Maximum resident set size 9.9 MB, peak memory footprint 8.4 MB. The record at `7781c3f`, whose forwarder also drained the channel after the window, counted 2 text events; earlier records before the 50 ms window counted 173 to 184 events; neither is comparable.
 
-Long Trajectory, core: the first read from the session file takes most of each sample (10.3 ms p50); the tree and both Trajectories over the compact index take about 3.7 ms together, and the follow-up read of new entries about 0.06 ms. The process's peak memory footprint is 15.1 MB. `/usr/bin/time` reports 44.9 MB maximum resident set size, but that counts the waited-for writer run too, so only the footprint describes the measured process. Records before `0a3e9fce` stored an approval entry per turn and are not comparable.
+Long Trajectory, core: the first read from the session file takes most of each sample (10.3 ms p50); the tree and both Trajectories over the compact index take about 3.7 ms together, and the follow-up read of new entries about 0.06 ms. The process's peak memory footprint is 15.1 MB. `/usr/bin/time` reports 44.9 MB maximum resident set size, but that counts the waited-for writer run too, so only the footprint describes the measured process. Records before `21d9382c` stored an approval entry per turn and are not comparable.
 
 Long Trajectory, Dart: every operation is linear in the steps except `compareBranches`, whose alignment is capped at 250,000 step pairs; `compareBranches.early` aligns 3,556 against 40 steps.
 
