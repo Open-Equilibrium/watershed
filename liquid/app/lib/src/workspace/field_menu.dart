@@ -184,11 +184,11 @@ class _FieldMenuState extends State<FieldMenu> {
 }
 
 /// Asks before a field and its values in all rows go (approved Table View mockups,
-/// section 5); answers whether to delete it.
+/// section 5), counting the `rows` once read; answers whether to delete it.
 Future<bool> confirmDeleteField(
   BuildContext context,
   BridgeField field,
-  int rows,
+  int? rows,
 ) async =>
     await showDialog<bool>(
       context: context,
@@ -197,6 +197,7 @@ Future<bool> confirmDeleteField(
         action: 'Delete field',
         children: [
           Text(switch (rows) {
+            null => 'Its values in all rows go with it.',
             0 => 'It holds no values yet.',
             1 => 'Its value in 1 row goes with it.',
             _ => 'Its values in all $rows rows go with it.',

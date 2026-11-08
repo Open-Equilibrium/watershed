@@ -483,11 +483,7 @@ class _TableBlockState extends State<TableBlock> {
     }
     _closeFieldMenu(drop: true);
     if (field == null) return;
-    final confirmed = await confirmDeleteField(
-      context,
-      field,
-      _rows.count ?? 0,
-    );
+    final confirmed = await confirmDeleteField(context, field, _rows.count);
     final asked = _asking;
     _asking = null;
     if (!confirmed) {

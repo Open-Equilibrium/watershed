@@ -271,4 +271,20 @@ void main() {
     await key(tester, LogicalKeyboardKey.escape);
     expect(renamed(), [('category', 'Kind')]);
   });
+
+  testWidgets('before its rows are read, the question counts none', (
+    tester,
+  ) async {
+    await kit.show(
+      tester,
+      [TablePart(expenses)],
+      before: () => kit.fake
+        ..deferred = []
+        ..deferredKinds = {BridgeQueryKind.rows},
+    );
+    await open(tester, 'Category');
+    await tester.tap(inMenu(find.text('Delete field')));
+    await tester.pumpAndSettle();
+    expect(find.text('Its values in all rows go with it.'), findsOneWidget);
+  });
 }
