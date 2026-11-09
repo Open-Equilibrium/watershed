@@ -889,8 +889,13 @@ class _TableBlockState extends State<TableBlock> {
         if (field.kind == BridgeFieldKind.select)
           for (final option in field.options) option.id: option,
     };
-    Widget content(BridgeCell? cell) =>
-        CellView(cell: cell, options: options, numbers: numbers, days: days);
+    Widget content(BridgeField field, BridgeCell? cell) => CellView(
+      cell: cell,
+      kind: field.kind,
+      options: options,
+      numbers: numbers,
+      days: days,
+    );
 
     Widget line({
       required double height,
@@ -1118,7 +1123,7 @@ class _TableBlockState extends State<TableBlock> {
                             BridgeFieldKind.checkbox => Alignment.center,
                             _ => Alignment.centerLeft,
                           },
-                          child: content(cells[field.id]),
+                          child: content(field, cells[field.id]),
                         );
                       },
                     ),

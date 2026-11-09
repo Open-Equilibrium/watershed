@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
+import 'package:liquid/src/workspace/table_cells.dart';
 import 'package:liquid/src/workspace/text_block.dart';
 
 import 'table_kit.dart';
@@ -468,5 +469,26 @@ void main() {
     expect(rows.offset, (16 - 10) * 34.0);
     await key(tester, LogicalKeyboardKey.backspace);
     expect(written().single.$1, 'r16');
+  });
+
+  testWidgets('a checkbox cell with no value shows an unticked box', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      TablePart([...expenses, namedRow(3)]),
+    ]);
+    // A row with no Paid value yet, and one cleared with ⌫ after the click unticked it.
+    await tester.tap(cell('r1', 'paid'));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+    await tester.pumpAndSettle();
+    for (final row in ['r1', 'r3']) {
+      final box = find.descendant(
+        of: cell(row, 'paid'),
+        matching: find.byType(CellCheckbox),
+      );
+      expect(box, findsOneWidget, reason: row);
+      expect(tester.widget<CellCheckbox>(box).checked, isFalse, reason: row);
+    }
   });
 }
