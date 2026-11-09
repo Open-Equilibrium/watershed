@@ -23,7 +23,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 - Controlled Run and Resume returns preserve operation, writer-finalization and ownership-cleanup failures; Drop remains only a best-effort fallback.
 - Dev/CI toolchains and dependencies use current stable pins without adding a product Node runtime; version authorities are linked from `TESTING.md`.
 - Protocol v0 applies one exclusive JSON container-recursion limit of 128 across wire, constructed-event and canonical-JSON boundaries.
-- The M1 runtime satisfies the architecture-hardening entry criteria in `PLAN.md`; M1.1 provider and general subprocess work must preserve those boundaries.
+- The M1 runtime satisfies the [architecture boundaries](docs/architecture.md#architecture-boundaries); M1.1 provider and general subprocess work must preserve those boundaries.
 - M1 provider context fixed as deterministic, cache-stable `flow-context-v0`, with durable history retained outside the bounded provider projection and post-M1 compaction/retrieval preserved.
 - Provider requests use an opaque Conversation/model-scoped cache key and durably retain optional bounded input, output, cache-read and cache-write token counters without assigning currency cost.
 - Browser authentication deliberately keeps one IPv4 loopback listener and presents the existing device-code command as its fallback when the browser callback cannot complete.
