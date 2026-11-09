@@ -3316,6 +3316,28 @@ fn automatic_fetch_never_writes_through_a_linked_remote_ref_directory() {
 }
 
 #[test]
+fn leaving_changes_leaves_an_untracked_nested_repository_alone() {
+    run(async {
+        let repo = Repo::new("stash-untracked-repository");
+        repo.git(&["branch", "other"]);
+        std::fs::create_dir(repo.path().join("vendor")).expect("folder");
+        let nested = Repo::at(repo.path().join("vendor/lib"));
+        let nested_head = nested.git(&["rev-parse", "HEAD"]);
+        repo.write("a.txt", "unsaved\n");
+        let checkpoints = Checkpoints::new(repo.path());
+
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("switched");
+
+        assert_eq!(repo.git(&["branch", "--show-current"]), "other\n");
+        assert_eq!(read(&nested, "a.txt"), "old\n");
+        assert_eq!(nested.git(&["rev-parse", "HEAD"]), nested_head);
+    });
+}
+
+#[test]
 fn restoring_never_applies_a_stashed_deletion_inside_a_nested_repository() {
     run(async {
         let repo = Repo::new("stash-deletion-in-repository");
