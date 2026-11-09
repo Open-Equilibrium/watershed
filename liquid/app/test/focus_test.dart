@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -343,6 +344,38 @@ void main() {
       find.byType(SettingsPage),
       paintsAbove(context.ws.warningSubtle, focus),
       reason: 'the highlight is painted above the notice',
+    );
+  });
+
+  testWidgets('focus and hover show in the Settings sections', (tester) async {
+    await show(tester);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.comma);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    final context = tester.element(find.byType(SettingsPage));
+    final theme = Theme.of(context);
+    Finder section(String label) => find.ancestor(
+      of: find
+          .descendant(of: find.byType(SettingsPage), matching: find.text(label))
+          .first,
+      matching: find.byType(InkWell),
+    );
+    await tabTo(tester, section('Shortcuts'));
+    expect(
+      find.byType(SettingsPage),
+      paintsAbove(context.ws.selected, theme.focusColor),
+      reason: 'the highlight is painted above the chosen section',
+    );
+
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: tester.getCenter(section('Shortcuts')));
+    addTearDown(mouse.removePointer);
+    await tester.pumpAndSettle();
+    expect(
+      find.byType(SettingsPage),
+      paintsAbove(context.ws.selected, theme.hoverColor),
+      reason: 'the hover is painted above the chosen section',
     );
   });
 
