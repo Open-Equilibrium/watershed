@@ -258,6 +258,7 @@ impl From<RevertConfirmation> for BridgeRevertConfirmation {
             branch: value.branch,
             kept: value.kept,
             ignored: value.ignored,
+            ignored_state: value.ignored_state,
         }
     }
 }
@@ -270,6 +271,7 @@ impl From<BridgeRevertConfirmation> for RevertConfirmation {
             branch: value.branch,
             kept: value.kept,
             ignored: value.ignored,
+            ignored_state: value.ignored_state,
         }
     }
 }

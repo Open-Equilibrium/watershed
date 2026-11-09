@@ -312,6 +312,7 @@ class BridgeRevertConfirmation {
   final String? branch;
   final List<String> kept;
   final List<String> ignored;
+  final String ignoredState;
 
   const BridgeRevertConfirmation({
     required this.target,
@@ -319,6 +320,7 @@ class BridgeRevertConfirmation {
     this.branch,
     required this.kept,
     required this.ignored,
+    required this.ignoredState,
   });
 
   @override
@@ -327,7 +329,8 @@ class BridgeRevertConfirmation {
       checkout.hashCode ^
       branch.hashCode ^
       kept.hashCode ^
-      ignored.hashCode;
+      ignored.hashCode ^
+      ignoredState.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -338,7 +341,8 @@ class BridgeRevertConfirmation {
           checkout == other.checkout &&
           branch == other.branch &&
           kept == other.kept &&
-          ignored == other.ignored;
+          ignored == other.ignored &&
+          ignoredState == other.ignoredState;
 }
 
 /// One file a revert would change.

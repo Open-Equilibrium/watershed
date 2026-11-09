@@ -21,6 +21,8 @@ pub struct RevertConfirmation {
     pub kept: Vec<String>,
     /// What Git ignores that the revert deletes or overwrites, sorted; folders end in `/`.
     pub ignored: Vec<String>,
+    /// What is at those paths now (see [`ignored_state`]), so an edit there counts too.
+    pub ignored_state: String,
 }
 
 /// What a revert changes and what it leaves alone near repositories.
@@ -121,6 +123,7 @@ impl WorkingTree {
         let mut ignored: Vec<String> = planned.replaced.iter().cloned().collect();
         ignored.extend(planned.removed.iter().cloned());
         ignored.sort();
+        let ignored_state = ignored_state(&self.root, &ignored);
         planned.confirmation = RevertConfirmation {
             target: to.0.clone(),
             // Only the files below the working folder are reverted, so only they count.
@@ -131,6 +134,7 @@ impl WorkingTree {
             branch: self.branch().await?,
             kept,
             ignored,
+            ignored_state,
         };
         Ok(planned)
     }
@@ -305,6 +309,50 @@ impl WorkingTree {
             ))
         }
     }
+}
+
+/// A digest of what is at the repository paths `paths` below `root`: each entry's path, type,
+/// size, inode and change and modification times, folders read recursively in name order, without
+/// following links. Past [`MAX_SEARCHED_ENTRIES`] entries the rest of a vast folder goes unread.
+fn ignored_state(root: &Path, paths: &[String]) -> String {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    use std::os::unix::fs::MetadataExt;
+    let mut digest = DefaultHasher::new();
+    let mut budget = MAX_SEARCHED_ENTRIES;
+    let mut entries: Vec<PathBuf> = paths
+        .iter()
+        .rev()
+        .map(|path| root.join(path.trim_end_matches('/')))
+        .collect();
+    while let Some(entry) = entries.pop() {
+        entry.hash(&mut digest);
+        let Ok(meta) = std::fs::symlink_metadata(&entry) else {
+            continue;
+        };
+        let times = [
+            meta.mtime(),
+            meta.mtime_nsec(),
+            meta.ctime(),
+            meta.ctime_nsec(),
+        ];
+        (meta.mode(), meta.ino(), meta.size(), times).hash(&mut digest);
+        if !meta.is_dir() {
+            continue;
+        }
+        let Ok(read) = std::fs::read_dir(&entry) else {
+            continue;
+        };
+        let mut below: Vec<PathBuf> = read
+            .flatten()
+            .take(budget)
+            .map(|child| child.path())
+            .collect();
+        budget -= below.len();
+        // Popped last first, so in name order.
+        below.sort_by(|a, b| b.cmp(a));
+        entries.extend(below);
+    }
+    format!("{:016x}", digest.finish())
 }
 
 /// Whether the folder `folder` is a repository as Git finds one: it holds `.git`, a folder or

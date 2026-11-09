@@ -914,6 +914,7 @@ BridgeRevertPlan revertPlanOf({
     branch: branch,
     kept: const [],
     ignored: const [],
+    ignoredState: 'ignored',
   ),
 );
 

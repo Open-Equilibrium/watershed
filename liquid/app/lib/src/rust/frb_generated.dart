@@ -4147,14 +4147,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeRevertConfirmation dco_decode_bridge_revert_confirmation(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
     return BridgeRevertConfirmation(
       target: dco_decode_String(arr[0]),
       checkout: dco_decode_String(arr[1]),
       branch: dco_decode_opt_String(arr[2]),
       kept: dco_decode_list_String(arr[3]),
       ignored: dco_decode_list_String(arr[4]),
+      ignoredState: dco_decode_String(arr[5]),
     );
   }
 
@@ -6376,12 +6377,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_branch = sse_decode_opt_String(deserializer);
     var var_kept = sse_decode_list_String(deserializer);
     var var_ignored = sse_decode_list_String(deserializer);
+    var var_ignoredState = sse_decode_String(deserializer);
     return BridgeRevertConfirmation(
       target: var_target,
       checkout: var_checkout,
       branch: var_branch,
       kept: var_kept,
       ignored: var_ignored,
+      ignoredState: var_ignoredState,
     );
   }
 
@@ -8851,6 +8854,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.branch, serializer);
     sse_encode_list_String(self.kept, serializer);
     sse_encode_list_String(self.ignored, serializer);
+    sse_encode_String(self.ignoredState, serializer);
   }
 
   @protected

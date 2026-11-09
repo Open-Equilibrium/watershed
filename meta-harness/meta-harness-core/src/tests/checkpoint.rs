@@ -1223,21 +1223,53 @@ fn a_revert_lists_ignored_files_in_the_way_of_restored_ones() {
 #[test]
 fn a_revert_refuses_before_any_write_once_the_project_left_the_confirmed_plan() {
     run(async {
-        // What changes between the plan and its confirmation, and the file that must stay.
+        // What is there before the plan, what changes between the plan and its confirmation,
+        // and the file that must stay.
         type Change = fn(&Repo);
-        let cases: [(&str, Change, &str); 3] = [
-            ("edited", |repo| repo.write("a.txt", "edited\n"), "a.txt"),
-            ("added", |repo| repo.write("b.txt", "unlisted\n"), "b.txt"),
+        let nothing: Change = |_| {};
+        let ignored_folder: Change = |repo| {
+            std::fs::create_dir(repo.path().join("f")).expect("folder");
+            repo.write("f/keep.db", "ignored\n");
+        };
+        let cases: [(&str, Change, Change, &str); 6] = [
             (
-                "ignored",
+                "edited",
+                nothing,
+                |repo| repo.write("a.txt", "edited\n"),
+                "a.txt",
+            ),
+            (
+                "added",
+                nothing,
+                |repo| repo.write("b.txt", "unlisted\n"),
+                "b.txt",
+            ),
+            ("ignored", nothing, ignored_folder, "f/keep.db"),
+            (
+                "ignored-file-edited",
                 |repo| {
-                    std::fs::create_dir(repo.path().join("f")).expect("folder");
-                    repo.write("f/keep.db", "ignored\n");
+                    // Untracked and ignored, so the restored file overwrites it.
+                    repo.git(&["rm", "-q", "--cached", "f"]);
+                    repo.write(".git/info/exclude", "/f\n");
+                    repo.write("f", "mine\n");
                 },
+                |repo| repo.write("f", "edited\n"),
+                "f",
+            ),
+            (
+                "ignored-folder-edited",
+                ignored_folder,
+                |repo| repo.write("f/keep.db", "edited\n"),
                 "f/keep.db",
             ),
+            (
+                "ignored-folder-added",
+                ignored_folder,
+                |repo| repo.write("f/new.db", "new\n"),
+                "f/new.db",
+            ),
         ];
-        for (name, change, stays) in cases {
+        for (name, before, change, stays) in cases {
             let repo = Repo::new(&format!("revert-confirmed-{name}"));
             repo.write(".gitignore", "/f/\n");
             repo.write("f", "returns\n");
@@ -1249,13 +1281,14 @@ fn a_revert_refuses_before_any_write_once_the_project_left_the_confirmed_plan() 
                 std::fs::remove_file(repo.path().join("f")).expect("removed");
             })
             .await;
+            before(&repo);
             let plan = checkpoints
                 .revert_plan(&at("t1", Phase::Start), None)
                 .await
                 .expect("plan");
             change(&repo);
             let read = |path: &str| std::fs::read_to_string(repo.path().join(path)).ok();
-            let (a, kept) = (read("a.txt"), read(stays));
+            let now = (read("a.txt"), read("f"), read(stays));
 
             let reverted = checkpoints
                 .revert(&at("t1", Phase::Start), &plan.confirmation)
@@ -1265,11 +1298,10 @@ fn a_revert_refuses_before_any_write_once_the_project_left_the_confirmed_plan() 
                 "{name}: {reverted:?}"
             );
             assert_eq!(
-                (read("a.txt"), read(stays)),
-                (a, kept),
-                "{name}: nothing written"
+                (read("a.txt"), read("f"), read(stays)),
+                now,
+                "{name}: nothing written or restored"
             );
-            assert!(!repo.path().join("f").is_file(), "{name}: nothing restored");
             // Confirming the plan read now reverts.
             let plan = checkpoints
                 .revert_plan(&at("t1", Phase::Start), None)

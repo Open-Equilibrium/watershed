@@ -4842,12 +4842,14 @@ impl SseDecode for crate::api::history::BridgeRevertConfirmation {
         let mut var_branch = <Option<String>>::sse_decode(deserializer);
         let mut var_kept = <Vec<String>>::sse_decode(deserializer);
         let mut var_ignored = <Vec<String>>::sse_decode(deserializer);
+        let mut var_ignoredState = <String>::sse_decode(deserializer);
         return crate::api::history::BridgeRevertConfirmation {
             target: var_target,
             checkout: var_checkout,
             branch: var_branch,
             kept: var_kept,
             ignored: var_ignored,
+            ignored_state: var_ignoredState,
         };
     }
 }
@@ -8159,6 +8161,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeRevertConfirma
             self.branch.into_into_dart().into_dart(),
             self.kept.into_into_dart().into_dart(),
             self.ignored.into_into_dart().into_dart(),
+            self.ignored_state.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -9821,6 +9824,7 @@ impl SseEncode for crate::api::history::BridgeRevertConfirmation {
         <Option<String>>::sse_encode(self.branch, serializer);
         <Vec<String>>::sse_encode(self.kept, serializer);
         <Vec<String>>::sse_encode(self.ignored, serializer);
+        <String>::sse_encode(self.ignored_state, serializer);
     }
 }
 

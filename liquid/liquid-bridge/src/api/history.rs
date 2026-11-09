@@ -290,6 +290,7 @@ pub struct BridgeRevertConfirmation {
     pub branch: Option<String>,
     pub kept: Vec<String>,
     pub ignored: Vec<String>,
+    pub ignored_state: String,
 }
 
 /// One file a revert would change.
