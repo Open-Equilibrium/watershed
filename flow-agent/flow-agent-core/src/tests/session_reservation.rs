@@ -677,6 +677,26 @@ fn unique_reservation_skips_case_alias_symlink_locks() {
 }
 
 #[test]
+fn unique_reservation_never_allocates_an_occupied_id_with_probe_hints() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = empty_workspace("reservation-occupied-probe");
+    let sessions = crate::tests::helpers::ensure_workspace_session_dir(&workspace);
+    let logs = crate::tests::helpers::ensure_workspace_log_dir(&workspace);
+    // Conclusive metadata plus a probe-only events link must stay occupied.
+    fs::write(logs.join("probe001.log"), "").expect("metadata sentinel written");
+    symlink("missing", sessions.join("probe001.jsonl")).expect("events symlink");
+    // A symlinked lock is occupied on its own.
+    symlink("missing", sessions.join("probe001-2.lock")).expect("lock symlink");
+
+    let reservation =
+        reserve_session_log(&workspace, "probe001").expect("occupied candidates are skipped");
+
+    assert_eq!(reservation.session_id, "probe001-3");
+    reservation.release_lock().expect("reservation rolls back");
+}
+
+#[test]
 fn unique_session_reservation_suffixes_an_active_session_id() {
     let workspace = empty_workspace("reservation");
     let first = reserve_session_log(&workspace, "reserve001").expect("first reservation succeeds");
