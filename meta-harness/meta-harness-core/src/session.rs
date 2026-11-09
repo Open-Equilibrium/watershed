@@ -223,7 +223,9 @@ impl State {
 #[derive(Debug)]
 pub struct Stopper {
     writer: mpsc::Sender<Write>,
-    kill: Option<oneshot::Sender<()>>,
+    /// `true` kills the agent, as dropping it does; `false` says it exited, so its output is
+    /// delivered in full.
+    kill: Option<oneshot::Sender<bool>>,
     exited: oneshot::Receiver<bool>,
 }
 
@@ -239,10 +241,13 @@ impl Stopper {
             (&mut exited).await
         };
         if let Ok(success) = tokio::time::timeout(grace, closed).await {
+            if let Some(kill) = self.kill.take() {
+                let _ = kill.send(false);
+            }
             return success.unwrap_or(false);
         }
         if let Some(kill) = self.kill.take() {
-            let _ = kill.send(());
+            let _ = kill.send(true);
         }
         exited.await.unwrap_or(false)
     }
@@ -400,7 +405,7 @@ impl Session {
             writer: writer.clone(),
             state: state.clone(),
             adapter: PiAdapter::new(),
-            killed,
+            killed: Some(killed),
             kill_requested: false,
             error_output,
             error_reader,
