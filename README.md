@@ -120,7 +120,7 @@ Each topic's canonical home; other files link there.
 | Harness configurations | [SECURITY.md](SECURITY.md#meta-agent-configuration-writes) |
 | Orchestration of agents | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration) |
 | Durability | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#durability) |
-| MVP VCS boundary, Git integration and checkpoints | [SECURITY.md](SECURITY.md#mvp-vcs-boundary); decisions: [ADR log](docs/adr/ADR-LOG.md) |
+| MVP VCS boundary, Git integration and checkpoints | [SECURITY.md](SECURITY.md#mvp-vcs-boundary); target: [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#git-integration) |
 | Liquid sync, replicas and areas | [Liquid V-Spec](docs/concept/V-Spec_Liquid.html#sync) |
 | Roles and grants | [SECURITY.md](SECURITY.md#liquid-workspace-access--external-agent-edits) |
 | Liquid Pages, Blocks and Tables | [Liquid V-Spec](docs/concept/V-Spec_Liquid.html#model) |
