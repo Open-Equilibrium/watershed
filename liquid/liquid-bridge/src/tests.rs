@@ -1547,6 +1547,7 @@ fn git_remote_transfer_display_redacts_synthetic_url_credentials() {
             remote: remote.into(),
             reference: "refs/heads/main".into(),
             commit: "a".repeat(40),
+            repository: "https://example.invalid/repo.git".into(),
         },
     });
     assert_eq!(transfer.remote, "https://example.invalid/repo.git");

@@ -996,6 +996,7 @@ BridgeGitTransfer transferOf({
     remote: remote,
     reference: 'refs/heads/${upstream.split('/').skip(1).join('/')}',
     commit: '1a2b3c4',
+    repository: 'https://example.invalid/repo.git',
   ),
 );
 

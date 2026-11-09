@@ -4639,11 +4639,13 @@ impl SseDecode for crate::api::git::BridgePushConfirmation {
         let mut var_remote = <String>::sse_decode(deserializer);
         let mut var_reference = <String>::sse_decode(deserializer);
         let mut var_commit = <String>::sse_decode(deserializer);
+        let mut var_repository = <String>::sse_decode(deserializer);
         return crate::api::git::BridgePushConfirmation {
             branch: var_branch,
             remote: var_remote,
             reference: var_reference,
             commit: var_commit,
+            repository: var_repository,
         };
     }
 }
@@ -7864,6 +7866,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgePushConfirmation {
             self.remote.into_into_dart().into_dart(),
             self.reference.into_into_dart().into_dart(),
             self.commit.into_into_dart().into_dart(),
+            self.repository.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -9611,6 +9614,7 @@ impl SseEncode for crate::api::git::BridgePushConfirmation {
         <String>::sse_encode(self.remote, serializer);
         <String>::sse_encode(self.reference, serializer);
         <String>::sse_encode(self.commit, serializer);
+        <String>::sse_encode(self.repository, serializer);
     }
 }
 
