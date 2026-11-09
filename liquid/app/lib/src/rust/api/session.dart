@@ -160,9 +160,12 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// Reverts the files to before turn `turn` of the current branch and continues the session
   /// from before its prompt, which returns to the input area; the undone turns keep their
-  /// branch. Refused while an agent runs in the checkout. Each error says whether the files
-  /// changed.
-  Future<void> revertToTurn({required String turn});
+  /// branch. Refused while an agent runs in the checkout, and once the files no longer match
+  /// the plan `confirmation` came with (ADR-0256). Each error says whether the files changed.
+  Future<void> revertToTurn({
+    required String turn,
+    required BridgeRevertConfirmation confirmation,
+  });
 
   /// Sends a message: an idle agent starts a run with it, a running one takes it before its
   /// next model request or, with `follow_up`, once it is done. Each run's start and end are

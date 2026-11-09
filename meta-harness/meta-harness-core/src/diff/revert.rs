@@ -6,6 +6,25 @@ use super::*;
 /// Most folder entries one preflight reads to find repositories in returning files' places.
 const MAX_SEARCHED_ENTRIES: usize = 100_000;
 
+/// The exact state a revert plan was read in: the checkpoint, the checkout's branch and files,
+/// and what the revert leaves alone or deletes of what Git ignores. A revert runs only while the
+/// project still matches it (ADR-0256). Return it unchanged; it is not for display.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RevertConfirmation {
+    /// The checkpoint's tree.
+    pub target: String,
+    /// The tree of the files below the working folder that Git does not ignore.
+    pub checkout: String,
+    /// The branch checked out, or none when HEAD names a commit.
+    pub branch: Option<String>,
+    /// The paths left alone near repositories, sorted.
+    pub kept: Vec<String>,
+    /// What Git ignores that the revert deletes or overwrites, sorted; folders end in `/`.
+    pub ignored: Vec<String>,
+    /// What is at those paths now (see [`ignored_state`]), so an edit there counts too.
+    pub ignored_state: String,
+}
+
 /// What a revert changes and what it leaves alone near repositories.
 #[derive(Debug, Default)]
 pub struct Revertable {
@@ -15,17 +34,30 @@ pub struct Revertable {
     pub kept: Vec<FileChange>,
     /// The paths it leaves alone, which `git restore` is told to skip.
     left_alone: BTreeSet<String>,
+    /// What Git ignores in the place of restored files (see [`WorkingTree::in_the_way`]):
+    /// restored paths with something there, and folders or files in the way.
+    pub replaced: HashSet<String>,
+    /// See [`Self::replaced`].
+    pub removed: BTreeSet<String>,
+    /// The state it was read in.
+    pub confirmation: RevertConfirmation,
 }
 
 impl WorkingTree {
-    /// Repositories a whole-checkout reset could overwrite. Share the revert's bounded,
-    /// link-aware search, without restricting it to the session's working folder.
-    pub(super) fn repositories_in_the_way(&self, changes: &[FileChange]) -> BTreeSet<String> {
+    /// Repositories a whole-checkout write could overwrite, or with `deletions` delete from.
+    /// Share the revert's bounded, link-aware search, without restricting it to the session's
+    /// working folder. A save leaves untracked repositories alone, which its reset lists as
+    /// deleted, so only a restore counts deletions.
+    pub(super) fn repositories_in_the_way(
+        &self,
+        changes: &[FileChange],
+        deletions: bool,
+    ) -> BTreeSet<String> {
         let mut kept = BTreeSet::new();
         let mut budget = MAX_SEARCHED_ENTRIES;
         for change in changes
             .iter()
-            .filter(|change| change.status != ChangeStatus::Deleted)
+            .filter(|change| deletions || change.status != ChangeStatus::Deleted)
         {
             if let Some(path) = self.repository_near(&change.path, &kept, &mut budget) {
                 kept.insert(path);
@@ -71,6 +103,40 @@ impl WorkingTree {
             }
         }
         Ok(revertable)
+    }
+
+    /// [`Self::revertable`] with what Git ignores in the way and the confirmation binding all of
+    /// it to `from`, the checkout's state now.
+    pub async fn revert_planned(
+        &self,
+        from: &Snapshot,
+        to: &Snapshot,
+    ) -> Result<Revertable, DiffError> {
+        let mut planned = self.revertable(from, to).await?;
+        (planned.replaced, planned.removed) = self.in_the_way(&planned.changes).await?;
+        let mut kept: Vec<String> = planned
+            .kept
+            .iter()
+            .map(|change| change.path.clone())
+            .collect();
+        kept.sort();
+        let mut ignored: Vec<String> = planned.replaced.iter().cloned().collect();
+        ignored.extend(planned.removed.iter().cloned());
+        ignored.sort();
+        let ignored_state = ignored_state(&self.root, &ignored);
+        planned.confirmation = RevertConfirmation {
+            target: to.0.clone(),
+            // Only the files below the working folder are reverted, so only they count.
+            checkout: self
+                .resolve(&format!("{}:{}", from.0, self.prefix.trim_end_matches('/')))
+                .await?
+                .unwrap_or_default(),
+            branch: self.branch().await?,
+            kept,
+            ignored,
+            ignored_state,
+        };
+        Ok(planned)
     }
 
     /// The path a revert must leave alone so it writes nothing into a repository near the
@@ -176,8 +242,14 @@ impl WorkingTree {
     /// Reverts the files below the working folder to `to`, as T3 Code's revert does with
     /// `git restore` and `git clean`: files `to` holds are written back and the others Git does
     /// not ignore are deleted, but for repositories (see [`Self::revertable`]). The project's
-    /// index and HEAD stay. `started` tells when files may have been written.
-    pub async fn restore(&self, to: &Snapshot, started: &AtomicBool) -> Result<(), DiffError> {
+    /// index and HEAD stay. Refused before any write unless the project still matches
+    /// `confirmed`. `started` tells when files may have been written.
+    pub async fn restore(
+        &self,
+        to: &Snapshot,
+        confirmed: &RevertConfirmation,
+        started: &AtomicBool,
+    ) -> Result<(), DiffError> {
         let _busy = self.busy.lock().await;
         // The private index then lists the current files, so `git restore` deletes those `to`
         // lacks, and a file that was untracked before the turn returns untracked.
@@ -185,8 +257,12 @@ impl WorkingTree {
         let Revertable {
             changes,
             left_alone,
+            confirmation,
             ..
-        } = self.revertable(&now, to).await?;
+        } = self.revert_planned(&now, to).await?;
+        if confirmation != *confirmed {
+            return Err(DiffError::PlanChanged);
+        }
         if changes.is_empty() {
             return Ok(());
         }
@@ -233,6 +309,50 @@ impl WorkingTree {
             ))
         }
     }
+}
+
+/// A digest of what is at the repository paths `paths` below `root`: each entry's path, type,
+/// size, inode and change and modification times, folders read recursively in name order, without
+/// following links. Past [`MAX_SEARCHED_ENTRIES`] entries the rest of a vast folder goes unread.
+fn ignored_state(root: &Path, paths: &[String]) -> String {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    use std::os::unix::fs::MetadataExt;
+    let mut digest = DefaultHasher::new();
+    let mut budget = MAX_SEARCHED_ENTRIES;
+    let mut entries: Vec<PathBuf> = paths
+        .iter()
+        .rev()
+        .map(|path| root.join(path.trim_end_matches('/')))
+        .collect();
+    while let Some(entry) = entries.pop() {
+        entry.hash(&mut digest);
+        let Ok(meta) = std::fs::symlink_metadata(&entry) else {
+            continue;
+        };
+        let times = [
+            meta.mtime(),
+            meta.mtime_nsec(),
+            meta.ctime(),
+            meta.ctime_nsec(),
+        ];
+        (meta.mode(), meta.ino(), meta.size(), times).hash(&mut digest);
+        if !meta.is_dir() {
+            continue;
+        }
+        let Ok(read) = std::fs::read_dir(&entry) else {
+            continue;
+        };
+        let mut below: Vec<PathBuf> = read
+            .flatten()
+            .take(budget)
+            .map(|child| child.path())
+            .collect();
+        budget -= below.len();
+        // Popped last first, so in name order.
+        below.sort_by(|a, b| b.cmp(a));
+        entries.extend(below);
+    }
+    format!("{:016x}", digest.finish())
 }
 
 /// Whether the folder `folder` is a repository as Git finds one: it holds `.git`, a folder or

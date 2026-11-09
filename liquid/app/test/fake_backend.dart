@@ -667,9 +667,16 @@ class FakeBackend implements SessionBackend {
     return revertPlanned;
   }
 
+  /// The confirmation the last revert received.
+  BridgeRevertConfirmation? revertedWith;
+
   @override
-  Future<void> revertToTurn(String turn) async {
+  Future<void> revertToTurn(
+    String turn,
+    BridgeRevertConfirmation confirmation,
+  ) async {
     calls.add('revert $turn');
+    revertedWith = confirmation;
     if (revertError case final error?) throw error;
   }
 
@@ -691,8 +698,15 @@ class FakeBackend implements SessionBackend {
   /// The file of the open session.
   String? openFile = '/sessions/open.jsonl';
 
+  /// Holds the open session's file, as it was when asked, until it completes.
+  Completer<void>? sessionFileGate;
+
   @override
-  Future<String?> sessionFile() async => openFile;
+  Future<String?> sessionFile() async {
+    final file = openFile;
+    await sessionFileGate?.future;
+    return file;
+  }
 
   /// Turns with checkpoints by session file.
   Map<String, int> turnCounts = const {};
@@ -894,6 +908,14 @@ BridgeRevertPlan revertPlanOf({
   files: files,
   running: running,
   branch: branch,
+  confirmation: BridgeRevertConfirmation(
+    target: 'target',
+    checkout: 'checkout',
+    branch: branch,
+    kept: const [],
+    ignored: const [],
+    ignoredState: 'ignored',
+  ),
 );
 
 /// A file a revert changes as `status` says.
@@ -996,6 +1018,7 @@ BridgeGitTransfer transferOf({
     remote: remote,
     reference: 'refs/heads/${upstream.split('/').skip(1).join('/')}',
     commit: '1a2b3c4',
+    repository: 'https://example.invalid/repo.git',
   ),
 );
 

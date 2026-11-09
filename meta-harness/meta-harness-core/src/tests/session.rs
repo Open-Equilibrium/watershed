@@ -788,7 +788,9 @@ IFS= read -r line
                     independent
                         .switch_branch(&BranchTarget::Local("other".to_owned()), Changes::Bring)
                         .await,
-                    independent.revert(&at("base", Phase::Start)).await,
+                    independent
+                        .revert(&at("base", Phase::Start), &Default::default())
+                        .await,
                     independent.restore_stash("missing").await,
                     independent.discard_stash("missing").await,
                 ] {
@@ -1771,6 +1773,41 @@ printf '%s\n' '{{"id":"1","type":"response","command":"abort","success":true}}'
             );
         }
         assert_eq!(pending.accepted().await, Ok(()));
+        assert_eq!(next(&mut events).await, exited(true));
+    });
+}
+
+#[test]
+fn shutdown_keeps_the_output_of_an_agent_that_exited_while_delivery_waits() {
+    run(async {
+        let written = marker("shutdown-buffered");
+        // More events than the session buffers, which nobody reads yet; it exits once asked.
+        let (session, mut events) = fake_agent(&format!(
+            r#"i=0
+while [ "$i" -lt 300 ]; do
+    printf '%s\n' "{{\"type\":\"extension_ui_request\",\"method\":\"notify\",\"message\":\"$i\",\"notifyType\":\"info\"}}"
+    i=$((i+1))
+done
+: > {}
+IFS= read -r line || exit 0"#,
+            super::shell_word(written.display())
+        ));
+        reached(&written).await;
+        // Time for the core to read it all and wait for room in the full buffer.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let stopped = timeout(WAIT, session.shutdown(Duration::from_millis(300))).await;
+
+        assert_eq!(stopped, Ok(true));
+        for i in 0..300 {
+            assert_eq!(
+                next(&mut events).await,
+                SessionEvent::Agent(AgentEvent::Notification {
+                    level: NotificationLevel::Info,
+                    message: i.to_string(),
+                })
+            );
+        }
         assert_eq!(next(&mut events).await, exited(true));
     });
 }

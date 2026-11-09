@@ -561,8 +561,10 @@ pub fn without_credentials(text: &str) -> String {
     while let Some(at) = rest.find("://") {
         let (before, after) = rest.split_at(at + 3);
         kept.push_str(before);
+        // A URL's user name and password may hold an apostrophe, so one never ends the
+        // authority; a double quote may not.
         let host_end = after
-            .find(|c: char| c == '/' || c.is_whitespace() || c == '\'' || c == '"')
+            .find(|c: char| c == '/' || c.is_whitespace() || c == '"')
             .unwrap_or(after.len());
         rest = match after[..host_end].rfind('@') {
             Some(credentials) => &after[credentials + 1..],

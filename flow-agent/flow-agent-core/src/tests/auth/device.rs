@@ -101,11 +101,11 @@ fn device_poll_overall_deadline() {
                 1 => {
                     assert_eq!(deadlines.overall, Duration::from_secs(60));
                     elapsed.set(DEVICE_POLL_OVERALL_DEADLINE - Duration::from_secs(5));
-                    Ok(br#"{"error":"authorization_pending"}"#.to_vec())
+                    Ok(None) // A provider pending status carries no poll body.
                 }
                 2 => {
                     assert_eq!(deadlines.overall, Duration::from_secs(4));
-                    Ok(br#"{"error":"slow_down"}"#.to_vec())
+                    Ok(Some(br#"{"error":"slow_down"}"#.to_vec()))
                 }
                 _ => unreachable!("the absolute deadline prevents a third poll"),
             }

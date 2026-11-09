@@ -1028,6 +1028,26 @@ fn a_failed_fetch_keeps_credentials_out_of_its_error() {
 }
 
 #[test]
+fn url_credentials_stay_out_of_quoted_diagnostics() {
+    for (text, kept) in [
+        (
+            "fatal: unable to access 'https://someone:hun'ter2@example.invalid/r.git/': failed",
+            "fatal: unable to access 'https://example.invalid/r.git/': failed",
+        ),
+        (
+            "fatal: 'https://someone:hunter2@example.invalid' does not appear to be a repository",
+            "fatal: 'https://example.invalid' does not appear to be a repository",
+        ),
+        (
+            "remote: see \"https://example.invalid/help\" for a@b",
+            "remote: see \"https://example.invalid/help\" for a@b",
+        ),
+    ] {
+        assert_eq!(crate::without_credentials(text), kept);
+    }
+}
+
+#[test]
 fn leaving_changes_stashes_them_on_the_branch_and_restoring_brings_them_back() {
     run(async {
         let repo = Repo::new("stash");
@@ -2623,6 +2643,129 @@ fn a_stash_another_git_stores_meanwhile_survives_a_discard_and_a_restore() {
 }
 
 #[test]
+fn discarding_drops_liquids_entry_not_a_personal_one_of_the_same_commit() {
+    run(async {
+        let repo = Repo::new("stash-shared-commit");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.git(&["branch", "other"]);
+        repo.write("a.txt", "mine\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("left");
+        checkpoints
+            .switch_branch(&local(&main), Changes::Bring)
+            .await
+            .expect("back");
+        let mine = stash_of(&checkpoints).await;
+        // The user keeps the same commit as a stash of their own, newest in the list.
+        let theirs = external_stash(&repo, "theirs\n");
+        repo.git(&["stash", "store", "-m", "theirs", &theirs]);
+        repo.git(&["stash", "store", "-m", "personal", &mine]);
+
+        checkpoints.discard_stash(&mine).await.expect("discarded");
+
+        assert_eq!(
+            repo.git(&["stash", "list", "--format=%H %gs"]),
+            format!("{mine} personal\n{theirs} theirs\n")
+        );
+    });
+}
+
+#[test]
+fn a_personal_entry_of_the_same_commit_shifted_into_place_is_put_back() {
+    run(async {
+        let repo = Repo::new("stash-shared-commit-shift");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.git(&["branch", "other"]);
+        repo.write("a.txt", "mine\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("left");
+        checkpoints
+            .switch_branch(&local(&main), Changes::Bring)
+            .await
+            .expect("back");
+        let mine = stash_of(&checkpoints).await;
+        let theirs = external_stash(&repo, "theirs\n");
+        let root = repo.path().to_owned();
+        let (stored, personal) = (theirs.clone(), mine.clone());
+        // Between finding its place and dropping it, another Git stores two stashes on top,
+        // the newest of Liquid's commit.
+        crate::diff::before_drop(repo.path(), move || {
+            let external = Repo(root);
+            external.git(&["stash", "store", "-m", "theirs", &stored]);
+            external.git(&["stash", "store", "-m", "personal", &personal]);
+            std::mem::forget(external);
+        });
+
+        checkpoints.discard_stash(&mine).await.expect("discarded");
+
+        let listed = repo.git(&["stash", "list", "--format=%H %gs"]);
+        assert!(
+            !listed.contains("Liquid: "),
+            "Liquid's entry went: {listed}"
+        );
+        assert_eq!(
+            repo.git(&["stash", "list", "--format=%H"]),
+            format!("{mine}\n{theirs}\n"),
+            "the user's entries stay"
+        );
+    });
+}
+
+#[test]
+fn a_stash_liquid_cannot_put_back_is_named_for_recovery() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        let repo = Repo::new("stash-repair-fails");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.git(&["branch", "other"]);
+        repo.write("a.txt", "mine\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("left");
+        checkpoints
+            .switch_branch(&local(&main), Changes::Bring)
+            .await
+            .expect("back");
+        let mine = stash_of(&checkpoints).await;
+        let theirs = external_stash(&repo, "theirs\n");
+        let root = repo.path().to_owned();
+        let stored = theirs.clone();
+        // Another Git stores a stash on top, then refuses every later stash update.
+        crate::diff::before_drop(repo.path(), move || {
+            let external = Repo(root.clone());
+            external.git(&["stash", "store", "-m", "theirs", &stored]);
+            std::mem::forget(external);
+            let hook = root.join(".git/hooks/reference-transaction");
+            std::fs::write(
+                &hook,
+                "#!/bin/sh\n[ \"$1\" = prepared ] && grep -q refs/stash && exit 1\nexit 0\n",
+            )
+            .expect("hook");
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755))
+                .expect("executable");
+        });
+
+        let discarded = checkpoints.discard_stash(&mine).await;
+
+        let error = discarded
+            .expect_err("the other stash was not put back")
+            .to_string();
+        assert!(
+            error.contains(&format!("git stash store {theirs}")),
+            "{error}"
+        );
+    });
+}
+
+#[test]
 fn a_concurrent_store_during_save_preserves_the_own_stash_and_index() {
     run(async {
         for refused in [false, true] {
@@ -3213,5 +3356,70 @@ fn automatic_fetch_never_writes_through_a_linked_remote_ref_directory() {
             );
             assert_eq!(read(repo, "a.txt"), "local commit\n", "{case}");
         }
+    });
+}
+
+#[test]
+fn leaving_changes_leaves_an_untracked_nested_repository_alone() {
+    run(async {
+        let repo = Repo::new("stash-untracked-repository");
+        repo.git(&["branch", "other"]);
+        std::fs::create_dir(repo.path().join("vendor")).expect("folder");
+        let nested = Repo::at(repo.path().join("vendor/lib"));
+        let nested_head = nested.git(&["rev-parse", "HEAD"]);
+        repo.write("a.txt", "unsaved\n");
+        let checkpoints = Checkpoints::new(repo.path());
+
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("switched");
+
+        assert_eq!(repo.git(&["branch", "--show-current"]), "other\n");
+        assert_eq!(read(&nested, "a.txt"), "old\n");
+        assert_eq!(nested.git(&["rev-parse", "HEAD"]), nested_head);
+    });
+}
+
+#[test]
+fn restoring_never_applies_a_stashed_deletion_inside_a_nested_repository() {
+    run(async {
+        let repo = Repo::new("stash-deletion-in-repository");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        std::fs::create_dir(repo.path().join("dir")).expect("folder");
+        repo.write("dir/x.txt", "tracked\n");
+        repo.git(&["add", "dir/x.txt"]);
+        repo.git(&["commit", "-qm", "track dir/x.txt"]);
+        repo.git(&["branch", "other"]);
+        std::fs::remove_file(repo.path().join("dir/x.txt")).expect("delete");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("left");
+        checkpoints
+            .switch_branch(&local(&main), Changes::Bring)
+            .await
+            .expect("back");
+        // Meanwhile the folder became a repository of its own, which tracks the file.
+        let nested = Repo(repo.path().join("dir"));
+        nested.git(&["init", "-q"]);
+        nested.git(&["add", "x.txt"]);
+        nested.git(&["commit", "-qm", "nested"]);
+        let nested_index = std::fs::read(nested.path().join(".git/index")).expect("index");
+        let stash = stash_of(&checkpoints).await;
+
+        let restored = checkpoints.restore_stash(&stash).await;
+
+        assert!(
+            matches!(restored, Err(DiffError::WouldOverwrite(ref paths)) if paths == &["dir"]),
+            "{restored:?}"
+        );
+        assert_eq!(read(&repo, "dir/x.txt"), "tracked\n");
+        assert_eq!(
+            std::fs::read(nested.path().join(".git/index")).expect("index"),
+            nested_index
+        );
+        assert_eq!(repo.git(&["rev-parse", "refs/stash"]).trim(), stash);
     });
 }

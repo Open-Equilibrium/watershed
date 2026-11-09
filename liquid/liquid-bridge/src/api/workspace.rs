@@ -608,6 +608,9 @@ fn open_lock(path: &Path) -> Result<File, String> {
         &mut options,
         rustix::fs::OFlags::NOFOLLOW.bits() as i32,
     );
+    // FILE_FLAG_OPEN_REPARSE_POINT: opens a link itself, which the plain-file check refuses.
+    #[cfg(windows)]
+    std::os::windows::fs::OpenOptionsExt::custom_flags(&mut options, 0x0020_0000);
     let lock = options
         .open(path)
         .map_err(|error| format!("the replica lock {}: {error}", path.display()))?;

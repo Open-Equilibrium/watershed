@@ -3,9 +3,9 @@
 use meta_harness_core::{
     AgentEvent, ChangeStatus, CommandError, ContextDetail, ContextMessage, ContextPart, EntryKind,
     FileChange, ItemDetail, ItemKind, ItemStatus, MAX_RECORD_BYTES, Model, NotificationLevel,
-    Queue, RecordKind, RevertFile, SessionEvent, StepContext, StoredSession, ToolOutcome,
-    Trajectory, TrajectoryRecord, Transcript, TranscriptItem, TreeNode, TurnCheckpoints, Usage,
-    UserInput, visible_name,
+    Queue, RecordKind, RevertConfirmation, RevertFile, SessionEvent, StepContext, StoredSession,
+    ToolOutcome, Trajectory, TrajectoryRecord, Transcript, TranscriptItem, TreeNode,
+    TurnCheckpoints, Usage, UserInput, visible_name,
 };
 
 use crate::api::events::{
@@ -15,8 +15,9 @@ use crate::api::events::{
 };
 use crate::api::history::{
     BridgeContextDetail, BridgeContextMessage, BridgeContextPart, BridgeEntryKind, BridgeRecord,
-    BridgeRecordKind, BridgeRevertFile, BridgeStepContext, BridgeToolOutcome, BridgeTrajectory,
-    BridgeTranscript, BridgeTranscriptItem, BridgeTreeNode, BridgeTurn,
+    BridgeRecordKind, BridgeRevertConfirmation, BridgeRevertFile, BridgeStepContext,
+    BridgeToolOutcome, BridgeTrajectory, BridgeTranscript, BridgeTranscriptItem, BridgeTreeNode,
+    BridgeTurn,
 };
 use crate::api::session::{BridgeModel, BridgeStoredSession};
 
@@ -245,6 +246,32 @@ impl From<FileChange> for BridgeFileChange {
             status: change.status.into(),
             added: int(change.added),
             removed: int(change.removed),
+        }
+    }
+}
+
+impl From<RevertConfirmation> for BridgeRevertConfirmation {
+    fn from(value: RevertConfirmation) -> Self {
+        Self {
+            target: value.target,
+            checkout: value.checkout,
+            branch: value.branch,
+            kept: value.kept,
+            ignored: value.ignored,
+            ignored_state: value.ignored_state,
+        }
+    }
+}
+
+impl From<BridgeRevertConfirmation> for RevertConfirmation {
+    fn from(value: BridgeRevertConfirmation) -> Self {
+        Self {
+            target: value.target,
+            checkout: value.checkout,
+            branch: value.branch,
+            kept: value.kept,
+            ignored: value.ignored,
+            ignored_state: value.ignored_state,
         }
     }
 }

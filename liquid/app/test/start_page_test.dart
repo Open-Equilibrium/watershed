@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -266,6 +268,32 @@ void main() {
       ),
       ['new session', 'delete /sessions/open.jsonl'],
     );
+  });
+
+  testWidgets('asks about no other session than the one it deletes', (
+    tester,
+  ) async {
+    await show(tester);
+    state.sessionTitle.value = 'Session A';
+    await tester.pumpAndSettle();
+    backend.sessionFileGate = Completer<void>();
+    await rightClick(
+      tester,
+      find.descendant(
+        of: find.byType(Sidebar),
+        matching: find.text('Session A'),
+      ),
+    );
+    await tester.tap(find.text('Delete session…'));
+    await tester.pump();
+    // Another session opens while the open one's file is read.
+    backend.openFile = '/sessions/b.jsonl';
+    await state.continueSession('/sessions/b.jsonl');
+    state.sessionTitle.value = 'Session B';
+    backend.sessionFileGate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Delete “Session B”?'), findsNothing);
+    expect(backend.calls.where((call) => call.startsWith('delete')), isEmpty);
   });
 
   testWidgets('removes all checkpoints of the project from its menu', (

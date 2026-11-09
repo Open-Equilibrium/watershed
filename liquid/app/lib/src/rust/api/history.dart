@@ -8,7 +8,7 @@ import 'events.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 /// Whether the changes between two checkpoints could be read.
 enum BridgeChangesState {
@@ -305,6 +305,46 @@ enum BridgeRecordKind {
   tool,
 }
 
+/// Exact identities returned unchanged by the revert dialog.
+class BridgeRevertConfirmation {
+  final String target;
+  final String checkout;
+  final String? branch;
+  final List<String> kept;
+  final List<String> ignored;
+  final String ignoredState;
+
+  const BridgeRevertConfirmation({
+    required this.target,
+    required this.checkout,
+    this.branch,
+    required this.kept,
+    required this.ignored,
+    required this.ignoredState,
+  });
+
+  @override
+  int get hashCode =>
+      target.hashCode ^
+      checkout.hashCode ^
+      branch.hashCode ^
+      kept.hashCode ^
+      ignored.hashCode ^
+      ignoredState.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeRevertConfirmation &&
+          runtimeType == other.runtimeType &&
+          target == other.target &&
+          checkout == other.checkout &&
+          branch == other.branch &&
+          kept == other.kept &&
+          ignored == other.ignored &&
+          ignoredState == other.ignoredState;
+}
+
 /// One file a revert would change.
 class BridgeRevertFile {
   /// The path relative to the root of the Git repository.
@@ -379,16 +419,25 @@ class BridgeRevertPlan {
   /// The branch checked out, as Liquid shows it, or none when HEAD names a commit.
   final String? branch;
 
+  /// Opaque identities of the state the plan was read in; return unchanged to revert, never
+  /// display these strings (ADR-0256).
+  final BridgeRevertConfirmation confirmation;
+
   const BridgeRevertPlan({
     required this.state,
     required this.files,
     required this.running,
     this.branch,
+    required this.confirmation,
   });
 
   @override
   int get hashCode =>
-      state.hashCode ^ files.hashCode ^ running.hashCode ^ branch.hashCode;
+      state.hashCode ^
+      files.hashCode ^
+      running.hashCode ^
+      branch.hashCode ^
+      confirmation.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -398,7 +447,8 @@ class BridgeRevertPlan {
           state == other.state &&
           files == other.files &&
           running == other.running &&
-          branch == other.branch;
+          branch == other.branch &&
+          confirmation == other.confirmation;
 }
 
 /// An agent that runs a turn in the checkout.

@@ -277,6 +277,20 @@ pub struct BridgeRevertPlan {
     pub running: Vec<BridgeRunningAgent>,
     /// The branch checked out, as Liquid shows it, or none when HEAD names a commit.
     pub branch: Option<String>,
+    /// Opaque identities of the state the plan was read in; return unchanged to revert, never
+    /// display these strings (ADR-0256).
+    pub confirmation: BridgeRevertConfirmation,
+}
+
+/// Exact identities returned unchanged by the revert dialog.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeRevertConfirmation {
+    pub target: String,
+    pub checkout: String,
+    pub branch: Option<String>,
+    pub kept: Vec<String>,
+    pub ignored: Vec<String>,
+    pub ignored_state: String,
 }
 
 /// One file a revert would change.

@@ -227,6 +227,19 @@ fn bounded_output_classifies_each_stream_and_preserves_its_exact_prefix() {
             b"abcd".as_slice(),
             b"vwxy".as_slice(),
         ),
+        // A descendant exceeds a cap only after the root exits successfully.
+        (
+            "(/bin/sleep 0.2; printf abcde) & exit 0",
+            Some(Classification::StdoutCapExceeded),
+            b"abcd".as_slice(),
+            b"".as_slice(),
+        ),
+        (
+            "(/bin/sleep 0.2; printf vwxyz >&2) & exit 0",
+            Some(Classification::StderrCapExceeded),
+            b"".as_slice(),
+            b"vwxy".as_slice(),
+        ),
     ] {
         let outcome = run_bounded(shell(script), 2_000, 4, 4, Vec::new(), Vec::new(), None)
             .expect("bounded direct-child supervision completes");

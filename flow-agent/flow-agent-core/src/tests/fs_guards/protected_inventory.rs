@@ -119,6 +119,43 @@ fn metadata_inventory_counts_distinct_covered_names_across_overlapping_roots() {
 }
 
 #[test]
+fn selected_image_names_count_directory_entries_not_lookup_spellings() {
+    let workspace = empty_workspace("protected-inventory-spelling");
+    let home = open_flow_agent_home_at(&workspace.join("home"), true)
+        .expect("home opens")
+        .expect("home exists");
+    let installed_path = workspace.join("installed");
+    fs::create_dir(&installed_path).expect("synthetic installation created");
+    fs::set_permissions(&installed_path, fs::Permissions::from_mode(0o755))
+        .expect("installation is not a private store");
+    let installed = AnchoredDir::workspace(&installed_path).expect("installation anchored");
+    let image = installed.file("executor");
+    fs::write(&image.path, b"synthetic installed image").expect("image written");
+    let opened = fs::File::open(&image.path).expect("image retained");
+    let roots = [home];
+
+    let sibling = installed.file("executor-copy");
+    fs::hard_link(&image.path, &sibling.path).expect("second selected entry created");
+    verify_protected_aliases(&roots, &[(&image, &opened), (&sibling, &opened)])
+        .expect("distinct selected entries cover each other");
+    fs::remove_file(&sibling.path).expect("test owner removes second entry");
+
+    let alternate = installed.file("EXECUTOR");
+    if !alternate.path.exists() {
+        return; // Case-sensitive filesystems have no alternate spelling.
+    }
+    fs::hard_link(&image.path, workspace.join("outside")).expect("outside alias created");
+    let error = verify_protected_aliases(&roots, &[(&image, &opened), (&alternate, &opened)])
+        .expect_err("an alternate spelling must not cover an outside alias");
+    assert!(
+        error
+            .to_string()
+            .contains("match its directory entry exactly"),
+        "{error}"
+    );
+}
+
+#[test]
 fn metadata_inventory_rejects_busy_or_incomplete_scans_and_releases_its_leases() {
     let workspace = empty_workspace("protected-inventory-interruption");
     let roots = ["home", "platform"].map(|name| {

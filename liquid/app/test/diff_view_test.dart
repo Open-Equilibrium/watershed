@@ -1147,6 +1147,11 @@ void main() {
       await tester.tap(find.text('Revert and branch'));
       await tester.pumpAndSettle();
       expect(backend.calls, contains('revert T2'));
+      expect(
+        backend.revertedWith,
+        same(backend.revertPlanned.confirmation),
+        reason: 'the revert runs only the plan the dialog showed',
+      );
       expect(find.text('Revert to before turn 3?'), findsNothing);
     });
 

@@ -6,9 +6,10 @@ use crate::{
             MAX_OAUTH_USER_CODE_BODY_BYTES, base64url_encode, exchange_authorization_code_at,
             exchange_authorization_code_body_with_transport, parse_device_authorization_body,
             parse_device_poll_body, parse_token_body,
-            poll_device_authorization_body_with_transport, post_json_with_deadlines,
-            read_loopback_callback, refresh_credential_at, refresh_credential_with_transport,
-            request_device_authorization_body_with_transport, send_auth_request_async,
+            poll_device_authorization_body_with_transport, post_device_poll_with_deadlines,
+            post_json_with_deadlines, read_loopback_callback, refresh_credential_at,
+            refresh_credential_with_transport, request_device_authorization_body_with_transport,
+            send_auth_request_async,
         },
         deadlines::{AUTH_HTTP_DEADLINES, HttpDeadlines, build_http_client},
         oauth_credential::CredentialRecord,
@@ -174,10 +175,10 @@ fn oauth_device_poll_body_budget() {
                     ));
                 }
                 delivered.set(true);
-                Ok(body)
+                Ok(Some(body))
             },
         )
-        .and_then(|body| parse_device_poll_body(&body));
+        .and_then(|body| parse_device_poll_body(&body.expect("fixture body")));
         assert_eq!(
             matches!(result, Ok(DevicePoll::Authorization { .. })),
             accepted
@@ -443,32 +444,69 @@ fn oauth_refresh_access_expiry_fallback_obeys_the_one_day_budget() {
     }
 }
 
+fn fake_auth_post<T>(
+    response: &'static str,
+    maximum: usize,
+    post: impl FnOnce(&str, &serde_json::Value, usize, HttpDeadlines) -> Result<T, RuntimeError>,
+) -> Result<T, RuntimeError> {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("fake auth server binds");
+    let endpoint = format!("http://{}/token", listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("one auth request");
+        let mut request = [0_u8; 4096];
+        assert!(stream.read(&mut request).expect("request reads") > 0);
+        stream
+            .write_all(response.as_bytes())
+            .expect("response writes");
+    });
+    let result = post(
+        &endpoint,
+        &serde_json::json!({"request": true}),
+        maximum,
+        HttpDeadlines {
+            connect: Duration::from_secs(1),
+            header: Duration::from_secs(1),
+            read: Duration::from_secs(1),
+            overall: Duration::from_secs(2),
+        },
+    );
+    server.join().expect("fake auth server completes");
+    result
+}
+
+#[test]
+fn device_poll_treats_provider_pending_statuses_as_pending() {
+    for (response, expected) in [
+        (
+            "HTTP/1.1 403 Forbidden\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+            Some(None),
+        ),
+        (
+            "HTTP/1.1 404 Not Found\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+            Some(None),
+        ),
+        (
+            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+            Some(Some(b"{}".to_vec())),
+        ),
+        (
+            "HTTP/1.1 401 Unauthorized\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+            None,
+        ),
+        (
+            "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+            None,
+        ),
+    ] {
+        let result = fake_auth_post(response, 2, post_device_poll_with_deadlines);
+        assert_eq!(result.ok(), expected, "{response}");
+    }
+}
+
 #[test]
 fn authentication_http_response_enforces_status_and_size() {
     fn request(response: &'static str, maximum: usize) -> Result<Vec<u8>, RuntimeError> {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("fake auth server binds");
-        let endpoint = format!("http://{}/token", listener.local_addr().unwrap());
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("one auth request");
-            let mut request = [0_u8; 4096];
-            assert!(stream.read(&mut request).expect("request reads") > 0);
-            stream
-                .write_all(response.as_bytes())
-                .expect("response writes");
-        });
-        let result = post_json_with_deadlines(
-            &endpoint,
-            &serde_json::json!({"request": true}),
-            maximum,
-            HttpDeadlines {
-                connect: Duration::from_secs(1),
-                header: Duration::from_secs(1),
-                read: Duration::from_secs(1),
-                overall: Duration::from_secs(2),
-            },
-        );
-        server.join().expect("fake auth server completes");
-        result
+        fake_auth_post(response, maximum, post_json_with_deadlines)
     }
 
     assert_eq!(

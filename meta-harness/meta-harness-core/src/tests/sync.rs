@@ -128,14 +128,17 @@ fn rejected_push_distinguishes_behind_and_diverged_without_force() {
 #[test]
 fn pull_fast_forwards_and_refuses_divergence_and_overwriting_changes() {
     run(async {
-        for state in ["clean", "diverged", "dirty"] {
+        for state in ["clean", "diverged", "dirty", "ignored"] {
             let remote = Remote::new(&format!("pull-{state}"));
             remote.advance();
             if state == "diverged" {
                 Remote::commit(&remote.repo, "local.txt");
             }
-            if state == "dirty" {
+            if state == "dirty" || state == "ignored" {
                 remote.repo.write("upstream.txt", "unsaved\n");
+            }
+            if state == "ignored" {
+                remote.repo.write(".git/info/exclude", "upstream.txt\n");
             }
             let checkpoints = Checkpoints::new(remote.repo.path());
             let before = remote.repo.git(&["rev-parse", "HEAD"]);
@@ -156,11 +159,12 @@ fn pull_fast_forwards_and_refuses_divergence_and_overwriting_changes() {
                 _ => {
                     assert!(
                         matches!(result, Err(DiffError::WouldOverwrite(ref files)) if files == &["upstream.txt"]),
-                        "{result:?}"
+                        "{state}: {result:?}"
                     );
                     assert_eq!(
                         std::fs::read_to_string(remote.repo.path().join("upstream.txt")).unwrap(),
-                        "unsaved\n"
+                        "unsaved\n",
+                        "{state}"
                     );
                 }
             }
@@ -168,6 +172,27 @@ fn pull_fast_forwards_and_refuses_divergence_and_overwriting_changes() {
                 assert_eq!(remote.repo.git(&["rev-parse", "HEAD"]), before);
             }
         }
+    });
+}
+
+#[test]
+fn pull_ignores_an_ignored_file_the_branch_stopped_tracking_ahead_of_its_upstream() {
+    run(async {
+        let remote = Remote::new("pull-ahead-untracked");
+        Remote::commit(&remote.repo, ".env");
+        remote.repo.git(&["push", "origin", "main"]);
+        remote.repo.git(&["rm", "-q", "--cached", ".env"]);
+        remote.repo.git(&["commit", "-qm", "stop tracking .env"]);
+        remote.repo.write(".git/info/exclude", ".env\n");
+        let before = remote.repo.git(&["rev-parse", "HEAD"]);
+
+        let pulled = Checkpoints::new(remote.repo.path()).pull().await;
+
+        assert!(
+            matches!(pulled, Ok(ref transfer) if transfer.behind == 0),
+            "{pulled:?}"
+        );
+        assert_eq!(remote.repo.git(&["rev-parse", "HEAD"]), before);
     });
 }
 
@@ -362,8 +387,16 @@ fn first_push_counts_commits_against_its_destination_before_confirmation() {
 #[test]
 fn default_push_confirmation_expires_when_the_commit_or_branch_changes() {
     run(async {
-        for change in ["commit", "branch", "remote", "reference"] {
+        for change in ["commit", "branch", "remote", "reference", "repository"] {
             let remote = Remote::new(&format!("push-confirm-{change}"));
+            let elsewhere = Repo(remote.repo.path().with_extension("elsewhere"));
+            let _ = std::fs::remove_dir_all(elsewhere.path());
+            remote.repo.git(&[
+                "clone",
+                "--bare",
+                remote.bare.path().to_str().unwrap(),
+                elsewhere.path().to_str().unwrap(),
+            ]);
             Remote::commit(&remote.repo, "local.txt");
             let checkpoints = Checkpoints::new(remote.repo.path());
             let DiffError::PushDefault(approval) = checkpoints.push(None).await.unwrap_err() else {
@@ -374,6 +407,13 @@ fn default_push_confirmation_expires_when_the_commit_or_branch_changes() {
                 Remote::commit(&remote.repo, "later.txt");
             } else if change == "remote" {
                 remote.repo.git(&["remote", "rename", "origin", "github"]);
+            } else if change == "repository" {
+                remote.repo.git(&[
+                    "remote",
+                    "set-url",
+                    "origin",
+                    elsewhere.path().to_str().unwrap(),
+                ]);
             } else if change == "reference" {
                 remote
                     .repo
@@ -390,7 +430,35 @@ fn default_push_confirmation_expires_when_the_commit_or_branch_changes() {
                 "{change}: {result:?}"
             );
             assert_eq!(remote.bare.git(&["rev-parse", "main"]), before);
+            assert_eq!(elsewhere.git(&["rev-parse", "main"]), before);
         }
+    });
+}
+
+#[test]
+fn push_confirms_a_destination_that_names_the_default_branch_symbolically() {
+    run(async {
+        let remote = Remote::new("push-symbolic-default");
+        remote
+            .bare
+            .git(&["symbolic-ref", "refs/heads/alias", "refs/heads/main"]);
+        remote.repo.git(&["switch", "-c", "feature"]);
+        remote
+            .repo
+            .git(&["config", "branch.feature.remote", "origin"]);
+        remote
+            .repo
+            .git(&["config", "branch.feature.merge", "refs/heads/alias"]);
+        Remote::commit(&remote.repo, "local.txt");
+        let before = remote.bare.git(&["rev-parse", "main"]);
+
+        let result = Checkpoints::new(remote.repo.path()).push(None).await;
+
+        assert!(
+            matches!(result, Err(DiffError::PushDefault(_))),
+            "{result:?}"
+        );
+        assert_eq!(remote.bare.git(&["rev-parse", "main"]), before);
     });
 }
 
@@ -649,6 +717,7 @@ fn push_refuses_other_or_multiple_repositories_before_hooks() {
             "rewrite",
             "branch-default",
             "remote-default",
+            "ssh-users",
         ] {
             let remote = Remote::new(&format!("push-endpoints-{case}"));
             let other = Remote::new(&format!("push-endpoints-other-{case}"));
@@ -697,6 +766,17 @@ fn push_refuses_other_or_multiple_repositories_before_hooks() {
                         &format!("url.{push}.insteadOf"),
                         "publication:repo",
                     ]);
+                }
+                "ssh-users" => {
+                    // The same host and path, but another account's repository access.
+                    remote.repo.git(&["config", "core.sshCommand", "false"]);
+                    for (key, user) in [("url", "alice"), ("pushurl", "bob")] {
+                        remote.repo.git(&[
+                            "config",
+                            &format!("remote.origin.{key}"),
+                            &format!("ssh://{user}@example.invalid/repo.git"),
+                        ]);
+                    }
                 }
                 _ => {
                     remote.repo.git(&["remote", "add", "publication", push]);

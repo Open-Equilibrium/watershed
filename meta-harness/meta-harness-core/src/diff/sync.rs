@@ -16,6 +16,8 @@ pub struct PushConfirmation {
     pub reference: String,
     /// The full branch-tip object ID.
     pub commit: String,
+    /// The one repository the remote fetches from and pushes to, without URL credentials.
+    pub repository: String,
 }
 
 /// The destination and counts captured immediately before a push or pull.
@@ -132,6 +134,7 @@ impl WorkingTree {
             remote: remote.clone(),
             reference,
             commit,
+            repository: String::new(),
         };
         Ok(GitTransfer {
             upstream,
@@ -154,17 +157,25 @@ impl WorkingTree {
         if status.merging {
             return Err(DiffError::MergeInProgress);
         }
-        self.check_push_destination(&transfer).await?;
+        transfer.confirmation.repository = self.check_push_destination(&transfer).await?;
         self.fetch_transfer(&transfer).await?;
         let advertised = self.transfer_counts(&mut transfer).await?;
         if transfer.behind > 0 {
             return Err(DiffError::Diverged(Box::new(transfer), String::new()));
         }
+        // A symbolic destination updates the branch it names, so that branch is checked.
         let reference = &transfer.confirmation.reference;
+        let reference = advertised
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("ref: ")?
+                    .strip_suffix(&format!("\t{reference}"))
+            })
+            .unwrap_or(reference);
         let default = status
             .default_branch
             .as_ref()
-            .is_some_and(|branch| *reference == format!("refs/heads/{branch}"))
+            .is_some_and(|branch| reference == format!("refs/heads/{branch}"))
             || advertised
                 .lines()
                 .any(|line| line == format!("ref: {reference}\tHEAD"));
@@ -244,13 +255,14 @@ impl WorkingTree {
         }
     }
 
-    /// Keep the default-branch check and push on the same single repository. Git resolves
-    /// URL rewrites; compare only after removing any URL credentials, and never report URLs.
+    /// Keep the default-branch check and push on the same single repository, which it returns.
+    /// Git resolves URL rewrites; compare only after removing any URL credentials, and never
+    /// report URLs.
     pub(super) async fn check_push_destination(
         &self,
         transfer: &GitTransfer,
-    ) -> Result<(), DiffError> {
-        let fetch = self.remote_urls(&transfer.remote, false).await?;
+    ) -> Result<String, DiffError> {
+        let mut fetch = self.remote_urls(&transfer.remote, false).await?;
         let push = self.remote_urls(&transfer.remote, true).await?;
         if fetch.len() != 1 || push != fetch {
             return Err(DiffError::PushDestinations);
@@ -267,7 +279,7 @@ impl WorkingTree {
                 return Err(DiffError::PushDestinations);
             }
         }
-        Ok(())
+        Ok(fetch.swap_remove(0))
     }
 
     pub(super) async fn remote_urls(
@@ -396,9 +408,31 @@ impl WorkingTree {
         if transfer.ahead > 0 && transfer.behind > 0 {
             return Err(DiffError::Diverged(Box::new(transfer), String::new()));
         }
+        // Git overwrites ignored files where the upstream adds one; refuse as for a stash.
+        // The checked commit is merged, even if a fetch moves the upstream meanwhile.
+        let upstream = self
+            .resolve("@{upstream}^{commit}")
+            .await?
+            .ok_or_else(|| DiffError::Git("The branch has no resolvable upstream.".to_owned()))?;
+        // Git writes what the upstream changed since the branches parted, so commits only
+        // this branch has change nothing.
+        let base = git(&self.root, &[], &["merge-base", "HEAD", &upstream])
+            .await
+            .ok();
+        let base = base.as_deref().map_or("HEAD", str::trim);
+        if let (Some(base), Some(tree)) = (
+            self.checkpointed(base).await?,
+            self.checkpointed(&upstream).await?,
+        ) {
+            let changes = self.changes(&base, &tree, Whitespace::Shown).await?;
+            let ignored = self.ignored_in_the_way(&changes, &[]).await?;
+            if !ignored.is_empty() {
+                return Err(DiffError::WouldOverwrite(ignored.into_iter().collect()));
+            }
+        }
         match user_git(
             &self.root,
-            &["merge", "--ff-only", "--no-squash", "--", "@{upstream}"],
+            &["merge", "--ff-only", "--no-squash", "--", &upstream],
         )
         .await
         {
@@ -423,7 +457,8 @@ impl WorkingTree {
     }
 }
 
-/// A resolved URL is one value: only its leading authority can contain credentials.
+/// A resolved URL is one value: only its leading authority can contain credentials. An SSH
+/// user name selects the account, so it stays part of the destination.
 fn destination_without_credentials(url: &str) -> String {
     let Some((scheme, rest)) = url.split_once("://") else {
         return url.to_owned();
@@ -437,10 +472,19 @@ fn destination_without_credentials(url: &str) -> String {
         return url.to_owned();
     }
     let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
-    match rest[..authority_end].rfind('@') {
-        Some(at) => format!("{scheme}://{}", &rest[at + 1..]),
-        None => url.to_owned(),
-    }
+    let Some(at) = rest[..authority_end].rfind('@') else {
+        return url.to_owned();
+    };
+    let user = match scheme.to_ascii_lowercase().as_str() {
+        "ssh" | "git+ssh" | "ssh+git" => {
+            let user = rest[..at]
+                .split_once(':')
+                .map_or(&rest[..at], |(user, _)| user);
+            format!("{user}@")
+        }
+        _ => String::new(),
+    };
+    format!("{scheme}://{user}{}", &rest[at + 1..])
 }
 
 fn advertised_commit<'a>(
@@ -449,6 +493,7 @@ fn advertised_commit<'a>(
 ) -> Result<Option<&'a str>, DiffError> {
     let upstream = advertised
         .lines()
+        .filter(|line| !line.starts_with("ref: "))
         .filter_map(|line| line.split_once('\t'))
         .find_map(|(oid, reference)| (reference == transfer.confirmation.reference).then_some(oid));
     if upstream.is_some_and(|oid| {

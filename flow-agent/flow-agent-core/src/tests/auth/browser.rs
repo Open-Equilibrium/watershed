@@ -115,6 +115,56 @@ fn browser_login_presents_opens_and_exchanges_one_matching_callback() {
 }
 
 #[test]
+fn browser_login_ends_on_a_state_matching_oauth_denial() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("loopback binds");
+    let address = listener.local_addr().expect("loopback address");
+    let mut client = None;
+
+    let error = run_browser_login_with_components(
+        listener,
+        "fixture-state".to_owned(),
+        "fixture-verifier".to_owned(),
+        &mut |_| Ok(()),
+        |_| {
+            client = Some(thread::spawn(move || {
+                let mut stream = TcpStream::connect(address).expect("callback connects");
+                stream
+                    .write_all(
+                        b"GET /auth/callback?state=fixture-state&error=access_denied HTTP/1.1\r\nHost: localhost\r\n\r\n",
+                    )
+                    .expect("denial callback writes");
+                let mut response = String::new();
+                stream
+                    .read_to_string(&mut response)
+                    .expect("denial response reads");
+                // A login that kept waiting would accept this later code.
+                if let Ok(mut stream) = TcpStream::connect(address) {
+                    let _ = stream.write_all(
+                        b"GET /auth/callback?state=fixture-state&code=fixture-code HTTP/1.1\r\nHost: localhost\r\n\r\n",
+                    );
+                    let _ = stream.read_to_string(&mut String::new());
+                }
+                response
+            }));
+            Ok(())
+        },
+        |_, _, _| unreachable!("a denied authorization must not exchange a code"),
+    )
+    .expect_err("a denied authorization ends browser login");
+
+    assert_eq!(error.to_string(), "authentication protocol failure");
+    let response = client
+        .expect("callback client starts")
+        .join()
+        .expect("callback client completes");
+    assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+    assert!(
+        response.contains("Authorization was not granted."),
+        "{response}"
+    );
+}
+
+#[test]
 fn browser_login_does_not_claim_completion_before_exchange_succeeds() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("loopback binds");
     let address = listener.local_addr().expect("loopback address");

@@ -5,8 +5,13 @@
 //! the repository alone. Stash writes hold a separate repository lock across lookup and mutation.
 //! The system drops the locks of a process that ends, so a crash leaves no agent running.
 
+use std::ffi::CString;
 use std::fs::{File, OpenOptions, TryLockError};
 use std::hash::{Hash, Hasher};
+use std::os::unix::ffi::OsStrExt;
+
+use rustix::fd::OwnedFd;
+use rustix::fs::{AtFlags, FileType, FlockOperation, Mode, OFlags};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -35,16 +40,16 @@ pub(crate) struct Checkout {
 pub(crate) struct Running {
     _checkout: File,
     _repository: File,
-    name: PathBuf,
-    /// The name's lock, when this holder has it; only then it removes the name.
-    name_lock: Option<File>,
+    /// The `running` folder as it was opened, the name in it and the name's lock, when this
+    /// holder has it; only then it removes the name, there, wherever a link now points.
+    name_lock: Option<(OwnedFd, CString, OwnedFd)>,
 }
 
 impl Drop for Running {
     fn drop(&mut self) {
         // Removed before its lock drops with the field, so no file outlives its holder.
-        if self.name_lock.is_some() {
-            let _ = std::fs::remove_file(&self.name);
+        if let Some((running, name, _)) = &self.name_lock {
+            let _ = rustix::fs::unlinkat(running, name.as_c_str(), AtFlags::empty());
         }
     }
 }
@@ -102,27 +107,42 @@ impl Checkout {
             }
         }
         // The turn counts as running from here, even if its name cannot be kept.
-        let name = self.running_dir().join(session);
-        let name_lock = self.name_lock(&name).await;
+        let name_lock = self.name_lock(session).await;
         Ok(Running {
             _checkout: checkout,
             _repository: repository,
-            name,
             name_lock,
         })
     }
 
-    /// The lock on the name file `name`, unless it cannot be had: a listing reads the name
-    /// briefly, the same session in another process holds it as long as it runs there, and a
-    /// writer of the Git directory can put something else there.
-    async fn name_lock(&self, name: &Path) -> Option<File> {
-        std::fs::create_dir_all(self.running_dir()).ok()?;
-        let file = open(name, true).ok()?;
+    /// The `running` folder, the name file `session` in it and its lock, unless it cannot be
+    /// had: a listing reads the name briefly, the same session in another process holds it as
+    /// long as it runs there, and a writer of the Git directory can put something else there,
+    /// so neither the folders nor the name are followed if they are links.
+    async fn name_lock(&self, session: &str) -> Option<(OwnedFd, CString, OwnedFd)> {
+        let folder = OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::RDONLY;
+        std::fs::create_dir_all(&self.dir).ok()?;
+        let path = CString::new(self.dir.as_os_str().as_bytes()).ok()?;
+        let dir = rustix::fs::open(path.as_c_str(), folder, Mode::empty()).ok()?;
+        match rustix::fs::mkdirat(&dir, c"running", Mode::from_raw_mode(0o777)) {
+            Ok(()) | Err(rustix::io::Errno::EXIST) => {}
+            Err(_) => return None,
+        }
+        let running = rustix::fs::openat(&dir, c"running", folder, Mode::empty()).ok()?;
+        let name = CString::new(session).ok()?;
+        let flags =
+            OFlags::CREATE | OFlags::RDWR | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
+        let file = rustix::fs::openat(&running, name.as_c_str(), flags, Mode::from_raw_mode(0o666))
+            .ok()?;
+        let stat = rustix::fs::fstat(&file).ok()?;
+        if FileType::from_raw_mode(stat.st_mode as _) != FileType::RegularFile {
+            return None;
+        }
         for _ in 0..NAME_TRIES {
-            match file.try_lock() {
-                Ok(()) => return Some(file),
-                Err(TryLockError::WouldBlock) => tokio::time::sleep(RETRY / 10).await,
-                Err(TryLockError::Error(_)) => return None,
+            match rustix::fs::flock(&file, FlockOperation::NonBlockingLockExclusive) {
+                Ok(()) => return Some((running, name, file)),
+                Err(rustix::io::Errno::WOULDBLOCK) => tokio::time::sleep(RETRY / 10).await,
+                Err(_) => return None,
             }
         }
         None

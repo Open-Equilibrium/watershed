@@ -20,8 +20,8 @@ pub use checkpoint::{
 pub use diff::{
     Branch, BranchTarget, ChangeStatus, Changes, Commit, Comparison, DiffError, FileChange,
     GitStatus, GitTransfer, PullRequest, PullRequestDraft, PullRequestError, PullRequestPlan,
-    PullRequestState, PullRequestText, PushConfirmation, ReviewDecision, Stash, Whitespace,
-    Worktree, WorktreeFile, WorktreeFileState, WorktreeRemoval, WorktreeRemoved,
+    PullRequestState, PullRequestText, PushConfirmation, RevertConfirmation, ReviewDecision, Stash,
+    Whitespace, Worktree, WorktreeFile, WorktreeFileState, WorktreeRemoval, WorktreeRemoved,
     without_credentials,
 };
 pub use event::{
@@ -37,7 +37,7 @@ pub use history::{
 };
 pub(crate) use pi::PiAdapter;
 pub use session::{
-    AgentCommand, CommandError, MAX_RECORD_BYTES, Model, Pending, Session, SessionEvent,
+    AgentCommand, CommandError, MAX_RECORD_BYTES, Model, Pending, Responder, Session, SessionEvent,
     SessionState, Stopper,
 };
 pub use stored::{

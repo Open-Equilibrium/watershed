@@ -22,7 +22,10 @@ use std::{
     ffi::OsStr,
     io::{self, Read},
     path::{Component, Path, PathBuf},
-    sync::OnceLock,
+    sync::{
+        OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -58,7 +61,15 @@ fn encode_credential_document(
 pub(crate) struct CredentialStore {
     path: PathBuf,
     durable_ancestor: PathBuf,
-    protected_parent: OnceLock<AnchoredDir>,
+    protected_parent: OnceLock<ProtectedParent>,
+}
+
+/// The bound credential directory and its chain from the durable ancestor.
+struct ProtectedParent {
+    parent: AnchoredDir,
+    chain: Vec<AnchoredDir>,
+    /// A read may bind the chain before any mutation has made it durable.
+    chain_synced: AtomicBool,
 }
 
 impl CredentialStore {
@@ -190,22 +201,38 @@ impl CredentialStore {
     }
 
     fn open_protected_parent(&self, create: bool) -> Result<Option<AnchoredDir>, RuntimeError> {
-        if let Some(parent) = self.protected_parent.get() {
-            parent.validate_private()?;
-            return Ok(Some(parent.clone()));
-        }
-        let parent_path = self.path.parent().ok_or_else(auth_store_failure)?;
-        let Some(parent) = open_credential_parent(parent_path, &self.durable_ancestor, create)?
-        else {
-            return Ok(None);
+        let bound = match self.protected_parent.get() {
+            Some(bound) => bound,
+            None => {
+                let parent_path = self.path.parent().ok_or_else(auth_store_failure)?;
+                let Some(chain) =
+                    open_credential_parent(parent_path, &self.durable_ancestor, create)?
+                else {
+                    return Ok(None);
+                };
+                let parent = chain
+                    .last()
+                    .expect("credential parent chain is nonempty")
+                    .clone()
+                    .with_publication();
+                let _ = self.protected_parent.set(ProtectedParent {
+                    parent,
+                    chain,
+                    chain_synced: AtomicBool::new(false),
+                });
+                self.protected_parent
+                    .get()
+                    .expect("credential parent is initialized")
+            }
         };
-        let _ = self.protected_parent.set(parent.with_publication());
-        let parent = self
-            .protected_parent
-            .get()
-            .expect("credential parent is initialized");
-        parent.validate_private()?;
-        Ok(Some(parent.clone()))
+        bound.parent.validate_private()?;
+        if create && !bound.chain_synced.load(Ordering::Acquire) {
+            for directory in bound.chain.iter().rev() {
+                sync_anchored_directory(directory)?;
+            }
+            bound.chain_synced.store(true, Ordering::Release);
+        }
+        Ok(Some(bound.parent.clone()))
     }
 
     fn read_anchored(
@@ -269,7 +296,7 @@ fn open_credential_parent(
     path: &Path,
     durable_ancestor: &Path,
     create: bool,
-) -> Result<Option<AnchoredDir>, RuntimeError> {
+) -> Result<Option<Vec<AnchoredDir>>, RuntimeError> {
     validate_durable_ancestor(path, durable_ancestor)?;
     let relative = path
         .strip_prefix(durable_ancestor)
@@ -309,12 +336,7 @@ fn open_credential_parent(
         current = next;
         chain.push(current.clone());
     }
-    if create {
-        for directory in chain.iter().rev() {
-            sync_anchored_directory(directory)?;
-        }
-    }
-    Ok(Some(current))
+    Ok(Some(chain))
 }
 
 fn needs_refresh(credential: &CredentialRecord, now_epoch_milliseconds: u64) -> bool {

@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -222,7 +223,9 @@ impl State {
 #[derive(Debug)]
 pub struct Stopper {
     writer: mpsc::Sender<Write>,
-    kill: Option<oneshot::Sender<()>>,
+    /// `true` kills the agent, as dropping it does; `false` says it exited, so its output is
+    /// delivered in full.
+    kill: Option<oneshot::Sender<bool>>,
     exited: oneshot::Receiver<bool>,
 }
 
@@ -238,24 +241,104 @@ impl Stopper {
             (&mut exited).await
         };
         if let Ok(success) = tokio::time::timeout(grace, closed).await {
+            if let Some(kill) = self.kill.take() {
+                let _ = kill.send(false);
+            }
             return success.unwrap_or(false);
         }
         if let Some(kill) = self.kill.take() {
-            let _ = kill.send(());
+            let _ = kill.send(true);
         }
         exited.await.unwrap_or(false)
+    }
+}
+
+/// Answers the agent's questions and aborts its turn without its session, so a request the
+/// agent has not answered yet cannot hold them up.
+#[derive(Debug, Clone)]
+pub struct Responder {
+    writer: mpsc::Sender<Write>,
+    /// Weak, so a responder kept after the session keeps no event stream open.
+    events: mpsc::WeakSender<SessionEvent>,
+    /// Whether the supervisor sent `Exited`; resolutions sent later would follow it.
+    ended: Arc<tokio::sync::Mutex<bool>>,
+    state: State,
+    next_id: Arc<AtomicU64>,
+}
+
+impl Responder {
+    /// Aborts the running turn. pi answers once the agent is idle, which needs its open
+    /// questions answered, so they are dismissed.
+    pub async fn abort(&self) -> Result<Pending, CommandError> {
+        self.state.lock().stopping = true;
+        let pending = self.submit_as(json!({ "type": "abort" }), false).await?;
+        let questions: Vec<_> = self.state.lock().questions.iter().cloned().collect();
+        // One the user answered meanwhile is already resolved.
+        for request in questions {
+            let _ = self.answer(&request, Answer::Cancelled).await;
+        }
+        Ok(pending)
+    }
+
+    /// Answers an open question from an agent extension.
+    pub async fn answer(&self, request: &RequestId, answer: Answer) -> Result<(), CommandError> {
+        if !self.state.lock().end_question(request) {
+            return Err(CommandError::UnknownRequest);
+        }
+        let reply = match answer {
+            Answer::Value(value) => json!({ "value": value }),
+            Answer::Confirmed(confirmed) => json!({ "confirmed": confirmed }),
+            Answer::Cancelled => json!({ "cancelled": true }),
+        };
+        self.writer
+            .send(ui_response(request, reply))
+            .await
+            .map_err(|_| CommandError::Closed)?;
+        self.resolved(AgentEvent::UserInputResolved {
+            request: request.clone(),
+        })
+        .await;
+        Ok(())
+    }
+
+    /// Reports a resolved dialog unless the agent's exit was reported, which stays last.
+    async fn resolved(&self, event: AgentEvent) {
+        let ended = self.ended.lock().await;
+        if !*ended && let Some(events) = self.events.upgrade() {
+            let _ = events.send(SessionEvent::Agent(event)).await;
+        }
+    }
+
+    /// Sends `command`; a `switch` of the session starts the next history read over once the
+    /// agent did it.
+    async fn submit_as(&self, mut command: Value, switch: bool) -> Result<Pending, CommandError> {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
+        command["id"] = Value::String(id.to_string());
+        let (reply, response) = oneshot::channel();
+        {
+            let mut shared = self.state.lock();
+            let Some(replies) = shared.replies.as_mut() else {
+                return Err(CommandError::Closed);
+            };
+            replies.insert(id, reply);
+            if switch {
+                shared.switches.insert(id);
+            }
+        }
+        self.writer
+            .send(Write::Record(encode(&command)))
+            .await
+            .map_err(|_| CommandError::Closed)?;
+        Ok(Pending(response))
     }
 }
 
 /// A running agent process; dropping it, and its [`Stopper`] if taken, kills the process.
 #[derive(Debug)]
 pub struct Session {
-    writer: mpsc::Sender<Write>,
-    events: mpsc::Sender<SessionEvent>,
-    /// Whether the supervisor sent `Exited`; resolutions sent later would follow it.
-    ended: Arc<tokio::sync::Mutex<bool>>,
-    state: State,
-    next_id: u64,
+    responder: Responder,
+    /// Keeps the event stream open while the session lives.
+    _events: mpsc::Sender<SessionEvent>,
     stopper: Option<Stopper>,
     /// The stored entries read so far; later reads continue after the last one.
     history: History,
@@ -322,7 +405,7 @@ impl Session {
             writer: writer.clone(),
             state: state.clone(),
             adapter: PiAdapter::new(),
-            killed,
+            killed: Some(killed),
             kill_requested: false,
             error_output,
             error_reader,
@@ -333,11 +416,14 @@ impl Session {
         tokio::spawn(supervisor.run(child, stdout, exit));
         let writer_for_stop = writer.clone();
         let session = Self {
-            writer,
-            events,
-            ended,
-            state,
-            next_id: 0,
+            responder: Responder {
+                writer,
+                events: events.downgrade(),
+                ended,
+                state,
+                next_id: Arc::new(AtomicU64::new(0)),
+            },
+            _events: events,
             stopper: Some(Stopper {
                 writer: writer_for_stop,
                 kill: Some(kill),
@@ -390,17 +476,9 @@ impl Session {
         Ok(queue(&data))
     }
 
-    /// Aborts the running turn. pi answers once the agent is idle, which needs its open
-    /// questions answered, so they are dismissed.
+    /// Aborts the running turn, as [`Responder::abort`] does.
     pub async fn abort(&mut self) -> Result<Pending, CommandError> {
-        self.state.lock().stopping = true;
-        let pending = self.submit(json!({ "type": "abort" })).await?;
-        let questions: Vec<_> = self.state.lock().questions.iter().cloned().collect();
-        // One the user answered meanwhile is already resolved.
-        for request in questions {
-            let _ = self.answer(&request, Answer::Cancelled).await;
-        }
-        Ok(pending)
+        self.responder.abort().await
     }
 
     /// Starts a new session in the same agent; the stored one stays available. Extensions may
@@ -499,7 +577,7 @@ impl Session {
     /// longer knows the last one, everything is read again. The entries stay with the session,
     /// so callers read them while they hold it.
     pub async fn history(&mut self) -> Result<&History, CommandError> {
-        if std::mem::take(&mut self.state.lock().switched) {
+        if std::mem::take(&mut self.responder.state.lock().switched) {
             self.history = History::default();
         }
         if self.history.last_id().is_none() {
@@ -561,7 +639,7 @@ impl Session {
 
     /// Whether the agent is running a turn, as its latest events say.
     pub fn running(&self) -> bool {
-        self.state.lock().running
+        self.responder.state.lock().running
     }
 
     /// Answers an open question from an agent extension.
@@ -570,28 +648,13 @@ impl Session {
         request: &RequestId,
         answer: Answer,
     ) -> Result<(), CommandError> {
-        if !self.state.lock().end_question(request) {
-            return Err(CommandError::UnknownRequest);
-        }
-        let reply = match answer {
-            Answer::Value(value) => json!({ "value": value }),
-            Answer::Confirmed(confirmed) => json!({ "confirmed": confirmed }),
-            Answer::Cancelled => json!({ "cancelled": true }),
-        };
-        self.respond(request, reply).await?;
-        self.resolved(AgentEvent::UserInputResolved {
-            request: request.clone(),
-        })
-        .await;
-        Ok(())
+        self.responder.answer(request, answer).await
     }
 
-    /// Reports a resolved dialog unless the agent's exit was reported, which stays last.
-    async fn resolved(&self, event: AgentEvent) {
-        let ended = self.ended.lock().await;
-        if !*ended {
-            let _ = self.events.send(SessionEvent::Agent(event)).await;
-        }
+    /// Hands out what answers the agent's questions and aborts its turn while the session
+    /// waits for an answer.
+    pub fn responder(&self) -> Responder {
+        self.responder.clone()
     }
 
     /// Asks the agent to exit and kills it after `grace`; returns whether it exited successfully.
@@ -617,38 +680,8 @@ impl Session {
         self.submit_as(command, false).await
     }
 
-    /// Sends `command`; a `switch` of the session starts the next history read over once the
-    /// agent did it.
-    async fn submit_as(
-        &mut self,
-        mut command: Value,
-        switch: bool,
-    ) -> Result<Pending, CommandError> {
-        self.next_id += 1;
-        command["id"] = Value::String(self.next_id.to_string());
-        let (reply, response) = oneshot::channel();
-        {
-            let mut shared = self.state.lock();
-            let Some(replies) = shared.replies.as_mut() else {
-                return Err(CommandError::Closed);
-            };
-            replies.insert(self.next_id, reply);
-            if switch {
-                shared.switches.insert(self.next_id);
-            }
-        }
-        self.writer
-            .send(Write::Record(encode(&command)))
-            .await
-            .map_err(|_| CommandError::Closed)?;
-        Ok(Pending(response))
-    }
-
-    async fn respond(&self, request: &RequestId, answer: Value) -> Result<(), CommandError> {
-        self.writer
-            .send(ui_response(request, answer))
-            .await
-            .map_err(|_| CommandError::Closed)
+    async fn submit_as(&mut self, command: Value, switch: bool) -> Result<Pending, CommandError> {
+        self.responder.submit_as(command, switch).await
     }
 }
 

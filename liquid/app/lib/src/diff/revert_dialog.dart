@@ -31,7 +31,8 @@ Future<void> confirmRevert(
     context: context,
     builder: (context) => _RevertDialog(turn: turn, plan: plan),
   );
-  if (confirmed == true) await state.revert(turn);
+  // Only the plan the person saw runs (ADR-0256).
+  if (confirmed == true) await state.revert(turn, plan.confirmation);
 }
 
 /// Whether the plan lists `file` as a folder.

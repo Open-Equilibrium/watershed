@@ -256,6 +256,7 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateApiSessionAgentSessionRevertToTurn({
     required AgentSession that,
     required String turn,
+    required BridgeRevertConfirmation confirmation,
   });
 
   Future<void> crateApiSessionAgentSessionSend({
@@ -1789,6 +1790,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Future<void> crateApiSessionAgentSessionRevertToTurn({
     required AgentSession that,
     required String turn,
+    required BridgeRevertConfirmation confirmation,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1799,6 +1801,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             serializer,
           );
           sse_encode_String(turn, serializer);
+          sse_encode_box_autoadd_bridge_revert_confirmation(
+            confirmation,
+            serializer,
+          );
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -1811,7 +1817,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateApiSessionAgentSessionRevertToTurnConstMeta,
-        argValues: [that, turn],
+        argValues: [that, turn, confirmation],
         apiImpl: this,
       ),
     );
@@ -1820,7 +1826,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiSessionAgentSessionRevertToTurnConstMeta =>
       const TaskConstMeta(
         debugName: "AgentSession_revert_to_turn",
-        argNames: ["that", "turn"],
+        argNames: ["that", "turn", "confirmation"],
       );
 
   @override
@@ -3244,6 +3250,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeRevertConfirmation dco_decode_box_autoadd_bridge_revert_confirmation(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_revert_confirmation(raw);
+  }
+
+  @protected
   BridgeReviewDecision dco_decode_box_autoadd_bridge_review_decision(
     dynamic raw,
   ) {
@@ -3997,13 +4011,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgePushConfirmation dco_decode_bridge_push_confirmation(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return BridgePushConfirmation(
       branch: dco_decode_String(arr[0]),
       remote: dco_decode_String(arr[1]),
       reference: dco_decode_String(arr[2]),
       commit: dco_decode_String(arr[3]),
+      repository: dco_decode_String(arr[4]),
     );
   }
 
@@ -4129,6 +4144,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeRevertConfirmation dco_decode_bridge_revert_confirmation(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    return BridgeRevertConfirmation(
+      target: dco_decode_String(arr[0]),
+      checkout: dco_decode_String(arr[1]),
+      branch: dco_decode_opt_String(arr[2]),
+      kept: dco_decode_list_String(arr[3]),
+      ignored: dco_decode_list_String(arr[4]),
+      ignoredState: dco_decode_String(arr[5]),
+    );
+  }
+
+  @protected
   BridgeRevertFile dco_decode_bridge_revert_file(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -4149,13 +4180,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeRevertPlan dco_decode_bridge_revert_plan(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return BridgeRevertPlan(
       state: dco_decode_bridge_changes_state(arr[0]),
       files: dco_decode_list_bridge_revert_file(arr[1]),
       running: dco_decode_list_bridge_running_agent(arr[2]),
       branch: dco_decode_opt_String(arr[3]),
+      confirmation: dco_decode_bridge_revert_confirmation(arr[4]),
     );
   }
 
@@ -5281,6 +5313,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeRevertConfirmation sse_decode_box_autoadd_bridge_revert_confirmation(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_revert_confirmation(deserializer));
+  }
+
+  @protected
   BridgeReviewDecision sse_decode_box_autoadd_bridge_review_decision(
     SseDeserializer deserializer,
   ) {
@@ -6173,11 +6213,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_remote = sse_decode_String(deserializer);
     var var_reference = sse_decode_String(deserializer);
     var var_commit = sse_decode_String(deserializer);
+    var var_repository = sse_decode_String(deserializer);
     return BridgePushConfirmation(
       branch: var_branch,
       remote: var_remote,
       reference: var_reference,
       commit: var_commit,
+      repository: var_repository,
     );
   }
 
@@ -6326,6 +6368,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeRevertConfirmation sse_decode_bridge_revert_confirmation(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_target = sse_decode_String(deserializer);
+    var var_checkout = sse_decode_String(deserializer);
+    var var_branch = sse_decode_opt_String(deserializer);
+    var var_kept = sse_decode_list_String(deserializer);
+    var var_ignored = sse_decode_list_String(deserializer);
+    var var_ignoredState = sse_decode_String(deserializer);
+    return BridgeRevertConfirmation(
+      target: var_target,
+      checkout: var_checkout,
+      branch: var_branch,
+      kept: var_kept,
+      ignored: var_ignored,
+      ignoredState: var_ignoredState,
+    );
+  }
+
+  @protected
   BridgeRevertFile sse_decode_bridge_revert_file(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_path = sse_decode_String(deserializer);
@@ -6353,11 +6416,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_files = sse_decode_list_bridge_revert_file(deserializer);
     var var_running = sse_decode_list_bridge_running_agent(deserializer);
     var var_branch = sse_decode_opt_String(deserializer);
+    var var_confirmation = sse_decode_bridge_revert_confirmation(deserializer);
     return BridgeRevertPlan(
       state: var_state,
       files: var_files,
       running: var_running,
       branch: var_branch,
+      confirmation: var_confirmation,
     );
   }
 
@@ -7962,6 +8027,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_bridge_revert_confirmation(
+    BridgeRevertConfirmation self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_revert_confirmation(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_bridge_review_decision(
     BridgeReviewDecision self,
     SseSerializer serializer,
@@ -8657,6 +8731,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.remote, serializer);
     sse_encode_String(self.reference, serializer);
     sse_encode_String(self.commit, serializer);
+    sse_encode_String(self.repository, serializer);
   }
 
   @protected
@@ -8769,6 +8844,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bridge_revert_confirmation(
+    BridgeRevertConfirmation self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.target, serializer);
+    sse_encode_String(self.checkout, serializer);
+    sse_encode_opt_String(self.branch, serializer);
+    sse_encode_list_String(self.kept, serializer);
+    sse_encode_list_String(self.ignored, serializer);
+    sse_encode_String(self.ignoredState, serializer);
+  }
+
+  @protected
   void sse_encode_bridge_revert_file(
     BridgeRevertFile self,
     SseSerializer serializer,
@@ -8793,6 +8882,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_list_bridge_revert_file(self.files, serializer);
     sse_encode_list_bridge_running_agent(self.running, serializer);
     sse_encode_opt_String(self.branch, serializer);
+    sse_encode_bridge_revert_confirmation(self.confirmation, serializer);
   }
 
   @protected
@@ -10137,10 +10227,16 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
 
   /// Reverts the files to before turn `turn` of the current branch and continues the session
   /// from before its prompt, which returns to the input area; the undone turns keep their
-  /// branch. Refused while an agent runs in the checkout. Each error says whether the files
-  /// changed.
-  Future<void> revertToTurn({required String turn}) => RustLib.instance.api
-      .crateApiSessionAgentSessionRevertToTurn(that: this, turn: turn);
+  /// branch. Refused while an agent runs in the checkout, and once the files no longer match
+  /// the plan `confirmation` came with (ADR-0256). Each error says whether the files changed.
+  Future<void> revertToTurn({
+    required String turn,
+    required BridgeRevertConfirmation confirmation,
+  }) => RustLib.instance.api.crateApiSessionAgentSessionRevertToTurn(
+    that: this,
+    turn: turn,
+    confirmation: confirmation,
+  );
 
   /// Sends a message: an idle agent starts a run with it, a running one takes it before its
   /// next model request or, with `follow_up`, once it is done. Each run's start and end are

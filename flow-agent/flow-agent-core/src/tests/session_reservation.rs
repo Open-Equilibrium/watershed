@@ -227,6 +227,29 @@ fn reservation_collision_preserves_existing_session_log() {
 }
 
 #[test]
+fn reservation_skips_a_marker_retained_after_its_availability_snapshot() {
+    let workspace = empty_workspace("reservation-retained-marker");
+    let anchored = AnchoredWorkspace::open(&workspace).expect("workspace opens");
+    let dirs = ensure_runtime_dirs(&workspace).expect("runtime dirs");
+    let marker = dirs.sessions.file("marker001.lock");
+    let retained = marker.path.clone();
+    set_candidate_pre_lease_observer_for_test(move || {
+        // A released owner leaves its regular marker in place.
+        open_or_create_anchored_session_marker(&marker).expect("concurrent marker created");
+    });
+
+    let candidate =
+        reserve_unique_session_candidate_with_anchored_workspace(&anchored, "marker001")
+            .expect("reservation skips the occupied base");
+    assert_eq!(candidate.session_id, "marker001-2");
+    materialize_session_candidate(&anchored, candidate)
+        .expect("the next suffix materializes")
+        .release_lock()
+        .expect("reservation releases");
+    assert!(retained.is_file(), "the retained marker is not changed");
+}
+
+#[test]
 fn reserved_candidate_rejects_materialization_in_another_workspace() {
     let reserved_workspace = empty_workspace("reservation-bound-workspace-a");
     let materialized_workspace = empty_workspace("reservation-bound-workspace-b");
@@ -650,6 +673,26 @@ fn unique_reservation_skips_case_alias_symlink_locks() {
         .expect("case aliases are inventoried on a case-sensitive host");
 
     assert_eq!(reservation.session_id, "bundle001-5");
+    reservation.release_lock().expect("reservation rolls back");
+}
+
+#[test]
+fn unique_reservation_never_allocates_an_occupied_id_with_probe_hints() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = empty_workspace("reservation-occupied-probe");
+    let sessions = crate::tests::helpers::ensure_workspace_session_dir(&workspace);
+    let logs = crate::tests::helpers::ensure_workspace_log_dir(&workspace);
+    // Conclusive metadata plus a probe-only events link must stay occupied.
+    fs::write(logs.join("probe001.log"), "").expect("metadata sentinel written");
+    symlink("missing", sessions.join("probe001.jsonl")).expect("events symlink");
+    // A symlinked lock is occupied on its own.
+    symlink("missing", sessions.join("probe001-2.lock")).expect("lock symlink");
+
+    let reservation =
+        reserve_session_log(&workspace, "probe001").expect("occupied candidates are skipped");
+
+    assert_eq!(reservation.session_id, "probe001-3");
     reservation.release_lock().expect("reservation rolls back");
 }
 
