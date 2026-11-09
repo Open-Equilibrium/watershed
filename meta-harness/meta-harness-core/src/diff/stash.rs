@@ -320,8 +320,9 @@ impl WorkingTree {
     /// Drops the stash commit `id`, wherever it now is in the list.
     ///
     /// Git drops a stash only by its place in the list, which another Git can shift between
-    /// finding and dropping it. Git names the commit it dropped, so one not `id` goes straight
-    /// back into the list, its commit unchanged, and the drop tries again.
+    /// finding and dropping it. Git names the commit it dropped; one not `id`, or `id` while
+    /// Liquid's entry of it stays, was another entry, which goes straight back into the list,
+    /// its commit unchanged, and the drop tries again.
     pub(super) async fn drop_stash(&self, id: &str) -> Result<(), DiffError> {
         for _ in 0..DROP_TRIES {
             let place = self.place_of(id).await?;
@@ -332,32 +333,43 @@ impl WorkingTree {
                 .rsplit_once('(')
                 .and_then(|(_, rest)| rest.trim_end().strip_suffix(')'))
                 .unwrap_or_default();
-            if dropped == id {
-                return Ok(());
-            }
             if dropped.is_empty() {
                 return Err(DiffError::Git(format!(
                     "Git did not say which stash it dropped: {said}"
                 )));
             }
-            // Its own subject is what the list showed for it.
-            let subject = git(
-                &self.root,
-                &[],
-                &["log", "-1", "--encoding=UTF-8", "--format=%s", dropped],
-            )
-            .await?;
+            let own = dropped == id;
+            if own && self.place_of(id).await.is_err() {
+                return Ok(());
+            }
+            // Its own subject is what the list showed for it. Liquid's commit names Liquid's
+            // entry, so another entry of it goes back under a message of its own.
+            let subject = if own {
+                "Put back by Liquid".to_owned()
+            } else {
+                git(
+                    &self.root,
+                    &[],
+                    &["log", "-1", "--encoding=UTF-8", "--format=%s", dropped],
+                )
+                .await?
+            };
             user_git(
                 &self.root,
                 &["stash", "store", "-m", subject.trim_end(), dropped],
             )
             .await
-            .map_err(|error| {
-                DiffError::Git(format!(
-                    "Git dropped another stash while Liquid dropped its own, and could not put \
-                     it back ({error}). Recover it with `git stash store {dropped}`."
-                ))
-            })?;
+            .map_err(|error| lost(dropped, &error.to_string()))?;
+            // Git stores nothing when the list's newest entry already holds the commit.
+            if own
+                && !self
+                    .stashes()
+                    .await?
+                    .iter()
+                    .any(|entry| entry.id == id && entry.branch.is_none())
+            {
+                return Err(lost(dropped, "Git kept only Liquid's entry of its commit"));
+            }
         }
         Err(DiffError::Git(
             "the stash list kept changing while Liquid dropped its stash".to_owned(),
@@ -661,4 +673,12 @@ pub(super) fn listed_files(reason: &str) -> Vec<String> {
         .filter_map(|line| line.strip_prefix('\t'))
         .map(str::to_owned)
         .collect()
+}
+
+/// Says that Git dropped the stash `dropped` of someone else and it could not go back.
+fn lost(dropped: &str, why: &str) -> DiffError {
+    DiffError::Git(format!(
+        "Git dropped another stash while Liquid dropped its own, and could not put it back \
+         ({why}). Recover it with `git stash store {dropped}`."
+    ))
 }

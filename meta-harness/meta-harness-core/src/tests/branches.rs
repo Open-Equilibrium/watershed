@@ -2674,6 +2674,50 @@ fn discarding_drops_liquids_entry_not_a_personal_one_of_the_same_commit() {
 }
 
 #[test]
+fn a_personal_entry_of_the_same_commit_shifted_into_place_is_put_back() {
+    run(async {
+        let repo = Repo::new("stash-shared-commit-shift");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.git(&["branch", "other"]);
+        repo.write("a.txt", "mine\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("left");
+        checkpoints
+            .switch_branch(&local(&main), Changes::Bring)
+            .await
+            .expect("back");
+        let mine = stash_of(&checkpoints).await;
+        let theirs = external_stash(&repo, "theirs\n");
+        let root = repo.path().to_owned();
+        let (stored, personal) = (theirs.clone(), mine.clone());
+        // Between finding its place and dropping it, another Git stores two stashes on top,
+        // the newest of Liquid's commit.
+        crate::diff::before_drop(repo.path(), move || {
+            let external = Repo(root);
+            external.git(&["stash", "store", "-m", "theirs", &stored]);
+            external.git(&["stash", "store", "-m", "personal", &personal]);
+            std::mem::forget(external);
+        });
+
+        checkpoints.discard_stash(&mine).await.expect("discarded");
+
+        let listed = repo.git(&["stash", "list", "--format=%H %gs"]);
+        assert!(
+            !listed.contains("Liquid: "),
+            "Liquid's entry went: {listed}"
+        );
+        assert_eq!(
+            repo.git(&["stash", "list", "--format=%H"]),
+            format!("{mine}\n{theirs}\n"),
+            "the user's entries stay"
+        );
+    });
+}
+
+#[test]
 fn a_stash_liquid_cannot_put_back_is_named_for_recovery() {
     use std::os::unix::fs::PermissionsExt;
     run(async {
