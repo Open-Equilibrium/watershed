@@ -885,6 +885,58 @@ printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":true,"da
 }
 
 #[test]
+fn a_prompt_waits_until_the_revert_moved_the_session() {
+    let repo = repository("revert-serialized");
+    let script = [
+        checkpoint("q1", "T1", "start", r#"\"ok\":true"#),
+        "printf 'new\\n' > a.txt\n".to_owned(),
+        checkpoint("q2", "T1", "end", r#"\"files\":1"#),
+        "touch .git/checkpointed\n".to_owned(),
+        no_session_file(2),
+        entries(3, TURN),
+        gate(4),
+        // An extension asks before the move; the next line must be its answer, not a prompt.
+        r#"IFS= read -r line
+case "$line" in *'"type":"prompt"'*) ;; *) exit 9 ;; esac
+printf '%s\n' '{"type":"extension_ui_request","id":"x1","method":"confirm","title":"Leave?","message":""}'
+touch .git/asked
+IFS= read -r line
+case "$line" in *'"id":"x1"'*) ;; *) exit 9 ;; esac
+printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":true}'
+"#
+        .to_owned(),
+        entries_at(6, "", "c1"),
+        gate(7),
+        r#"IFS= read -r line
+case "$line" in *'"message":"next"'*) ;; *) exit 9 ;; esac
+printf '%s\n' '{"id":"8","type":"response","command":"prompt","success":true}'
+IFS= read -r line || exit 0"#
+            .to_owned(),
+    ]
+    .concat();
+    let session =
+        Arc::new(launch(gated(&script), repo.display().to_string()).expect("agent starts"));
+    reached(&repo.join(".git/checkpointed"));
+    let reverting = {
+        let session = Arc::clone(&session);
+        std::thread::spawn(move || session.revert_to_turn("T1".to_owned()))
+    };
+    reached(&repo.join(".git/asked"));
+    let sending = {
+        let session = Arc::clone(&session);
+        std::thread::spawn(move || session.send("next".to_owned(), false))
+    };
+    // Time for the prompt to overtake the move, were it free to.
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(call(session.answer_confirm("x1".to_owned(), true)), Ok(()));
+
+    assert_eq!(reverting.join().expect("revert returns"), Ok(()));
+    assert_eq!(sending.join().expect("send returns"), Ok(()));
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
 fn says_when_the_files_were_reverted_but_the_session_did_not_branch() {
     let repo = repository("revert-unbranched");
     let script = [

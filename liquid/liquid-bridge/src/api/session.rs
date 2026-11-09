@@ -349,7 +349,8 @@ impl AgentSession {
     pub fn revert_to_turn(&self, turn: String) -> Result<(), String> {
         RUNTIME.block_on(async {
             let not_reverted = |error: String| format!("the files were not reverted: {error}");
-            // Held until the branch is asked for, so a prompt sent meanwhile starts on it.
+            // Held until the session moved, so a prompt or move sent meanwhile starts after it;
+            // questions are answered and the agent stopped without it.
             let mut session = self.session.lock().await;
             let turns = branch_turns(&mut session).await.map_err(not_reverted)?;
             let found = turn_of(&turns, &turn).map_err(not_reverted)?;
@@ -372,11 +373,10 @@ impl AgentSession {
                     .branch(&prompt, None)
                     .await
                     .map_err(describe)?;
-                drop(session);
                 pending.accepted().await.map_err(describe)?;
                 // pi reports the command handled even when an extension cancelled the move, so
                 // the branch is read back: the turn's prompt must be off it.
-                let turns = branch_turns(&mut *self.session.lock().await).await?;
+                let turns = branch_turns(&mut session).await?;
                 if turns
                     .iter()
                     .any(|turn| turn.prompt_entry.as_deref() == Some(prompt.as_str()))
