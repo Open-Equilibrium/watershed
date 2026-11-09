@@ -1,6 +1,6 @@
 # Testing
 
-**Flow security replacement:** Runtime, invocation policy, wire and fixtures use the [accepted replacement](SECURITY.md#accepted-flow-agent-security-target). CI targets native Ubuntu 24.04 x86_64 and macOS 27 ARM64, including release-artifact acceptance. The [native status](#native-verification-status) records complete and partial results separately; Windows shared tests and historical feasibility observations cannot replace native proof. Manual administration, protected global/editable local instructions, overlapping locations and the full selected inventory remain required acceptance boundaries.
+**Flow security replacement:** Runtime, invocation policy, wire and fixtures use the [accepted replacement](SECURITY.md#flow-agent-security-contract). CI targets native Ubuntu 24.04 x86_64 and macOS 27 ARM64, including release-artifact acceptance. The [native status](#native-verification-status) records complete and partial results separately; Windows shared tests and historical feasibility observations cannot replace native proof. Manual administration, protected global/editable local instructions, overlapping locations and the full selected inventory remain required acceptance boundaries.
 
 Verification strategy. Tests enforce product behavior and the boundaries in `SECURITY.md`; fixed workloads provide the observational evidence defined by `PERFORMANCE.md`. Definition of Done (see `AGENTS.md`) requires both where relevant.
 

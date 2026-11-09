@@ -80,7 +80,7 @@ The concrete Run writer inventories current stored usage and admits the complete
 
 ## Tool runner
 
-The rows below retain M1.1 direct-process evidence. TR-03–TR-05 observe real-process outcomes and elapsed ranges, not exact `CleanupDeadline` transition times or replacement protection. The replacement Executor's [`CleanupController` test using supplied times](../flow-agent-executor/src/tests.rs) covers its own lifecycle. Security guarantees remain canonical in [SECURITY.md](../../SECURITY.md#accepted-flow-agent-security-target).
+The rows below retain M1.1 direct-process evidence. TR-03–TR-05 observe real-process outcomes and elapsed ranges, not exact `CleanupDeadline` transition times or replacement protection. The replacement Executor's [`CleanupController` test using supplied times](../flow-agent-executor/src/tests.rs) covers its own lifecycle. Security guarantees remain canonical in [SECURITY.md](../../SECURITY.md#flow-agent-security-contract).
 
 Stream caps count raw bytes read from each pipe before UTF-8 classification.
 

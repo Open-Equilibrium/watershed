@@ -1,6 +1,6 @@
 # M1.2 Executor Startup Evidence
 
-The workload/report consumer follows the accepted own-file protection contract in [SECURITY.md](../../SECURITY.md#accepted-flow-agent-security-target). Linux and Mac replacement observations are available below; [TESTING.md](../../TESTING.md#native-verification-status) owns native acceptance status.
+The workload/report consumer follows the accepted own-file protection contract in [SECURITY.md](../../SECURITY.md#flow-agent-security-contract). Linux and Mac replacement observations are available below; [TESTING.md](../../TESTING.md#native-verification-status) owns native acceptance status.
 
 This file is the single source for the M1.2 startup workload, evidence and regression policy. Protocol, security and platform behavior remain canonical in `PROTOCOL.md`, `SECURITY.md` and `TESTING.md`.
 
