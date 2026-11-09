@@ -48,7 +48,10 @@ pub(super) fn select_primary(
     candidate: PrimaryTrigger,
 ) -> bool {
     match (*primary, candidate) {
-        (Some(_), PrimaryTrigger::CollectorFailed) => {
+        // A cap found while draining after root exit must not leave truncated
+        // output classified as that exit.
+        (Some(_), PrimaryTrigger::CollectorFailed)
+        | (Some(PrimaryTrigger::Exit), PrimaryTrigger::StdoutCap | PrimaryTrigger::StderrCap) => {
             *primary = Some(candidate);
             false
         }
