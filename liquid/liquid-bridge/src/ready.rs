@@ -47,9 +47,8 @@ pub(crate) async fn ready(
     let mut check = Box::pin(session.require_extension());
     let mut limit = Box::pin(tokio::time::sleep(START_TIMEOUT));
     let gate = std::future::poll_fn(|context| {
-        if let Poll::Ready(gate) = check.as_mut().poll(context) {
-            return Poll::Ready(Ok(gate));
-        }
+        let checked = check.as_mut().poll(context);
+        // Events the agent sent before its answer are in the channel once the answer arrived.
         while let Poll::Ready(Some(event)) = receiver.poll_recv(context) {
             if early.len() == EARLY_EVENTS {
                 return Poll::Ready(Err(format!(
@@ -57,6 +56,9 @@ pub(crate) async fn ready(
                 )));
             }
             early.push(event);
+        }
+        if let Poll::Ready(gate) = checked {
+            return Poll::Ready(Ok(gate));
         }
         if limit.as_mut().poll(context).is_ready() {
             return Poll::Ready(Err(format!(
