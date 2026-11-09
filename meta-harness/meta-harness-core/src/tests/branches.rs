@@ -1028,6 +1028,26 @@ fn a_failed_fetch_keeps_credentials_out_of_its_error() {
 }
 
 #[test]
+fn url_credentials_stay_out_of_quoted_diagnostics() {
+    for (text, kept) in [
+        (
+            "fatal: unable to access 'https://someone:hun'ter2@example.invalid/r.git/': failed",
+            "fatal: unable to access 'https://example.invalid/r.git/': failed",
+        ),
+        (
+            "fatal: 'https://someone:hunter2@example.invalid' does not appear to be a repository",
+            "fatal: 'https://example.invalid' does not appear to be a repository",
+        ),
+        (
+            "remote: see \"https://example.invalid/help\" for a@b",
+            "remote: see \"https://example.invalid/help\" for a@b",
+        ),
+    ] {
+        assert_eq!(crate::without_credentials(text), kept);
+    }
+}
+
+#[test]
 fn leaving_changes_stashes_them_on_the_branch_and_restoring_brings_them_back() {
     run(async {
         let repo = Repo::new("stash");
