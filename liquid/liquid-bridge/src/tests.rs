@@ -334,6 +334,48 @@ IFS= read -r line || exit 0"#;
 }
 
 #[test]
+fn answers_and_stop_never_wait_for_a_pending_query() {
+    // pi never answers the `get_state`, yet the question is answered and the turn stopped.
+    let script = r#"printf '%s\n' '{"type":"extension_ui_request","id":"q1","method":"confirm","title":"Run?","message":""}'
+IFS= read -r line
+case "$line" in *'"type":"get_state"'*) ;; *) exit 9 ;; esac
+printf '%s\n' '{"type":"extension_ui_request","id":"s1","method":"setStatus","statusKey":"k","statusText":"pending"}'
+IFS= read -r line
+case "$line" in *'"id":"q1"'*) ;; *) exit 9 ;; esac
+case "$line" in *'"confirmed":true'*) ;; *) exit 9 ;; esac
+IFS= read -r line
+case "$line" in *'"type":"abort"'*) ;; *) exit 9 ;; esac
+printf '%s\n' '{"id":"3","type":"response","command":"abort","success":true}'
+IFS= read -r line || exit 0"#;
+    let session = Arc::new(
+        launch(gated(script), std::env::temp_dir().display().to_string()).expect("agent starts"),
+    );
+    let (sender, receiver) = mpsc::channel();
+    session
+        .forward(move |event| sender.send(event).is_ok())
+        .expect("first subscriber");
+    let mut events = std::iter::from_fn(|| receiver.recv_timeout(Duration::from_secs(10)).ok());
+    assert!(events.any(|event| event.kind == BridgeEventKind::UserInputRequested));
+    let query = {
+        let session = Arc::clone(&session);
+        std::thread::spawn(move || session.title())
+    };
+    assert!(events.any(|event| event.text.as_deref() == Some("pending")));
+    let (done, finished) = mpsc::channel();
+    {
+        let session = Arc::clone(&session);
+        std::thread::spawn(move || {
+            let _ = done.send(call(session.answer_confirm("q1".to_owned(), true)));
+            let _ = done.send(call(session.abort()));
+        });
+    }
+    assert_eq!(finished.recv_timeout(Duration::from_secs(10)), Ok(Ok(())));
+    assert_eq!(finished.recv_timeout(Duration::from_secs(10)), Ok(Ok(())));
+    call(session.shutdown());
+    assert!(query.join().expect("the query returns").is_err());
+}
+
+#[test]
 fn starts_and_resumes_sessions_and_picks_models() {
     let project = std::env::temp_dir();
     let dir = project.join(format!("watershed-bridge-stored-{}", std::process::id()));

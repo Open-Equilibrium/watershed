@@ -92,6 +92,8 @@ pub struct AgentSession {
     pub(crate) cwd: PathBuf,
     /// Stops the agent even while a request holds the session.
     stopper: std::sync::Mutex<Option<meta_harness_core::Stopper>>,
+    /// Answers questions and aborts the turn even while a request holds the session.
+    responder: meta_harness_core::Responder,
     /// The program and arguments pi started with, which write a pull request's text the same
     /// way.
     pub(crate) pi_program: PathBuf,
@@ -144,6 +146,7 @@ impl AgentSession {
         let checkpoints = session.checkpoints();
         Ok(Self {
             stopper: std::sync::Mutex::new(stopper),
+            responder: session.responder(),
             session: Mutex::new(Some(session)),
             receiver: std::sync::Mutex::new(Some(receiver)),
             early: std::sync::Mutex::new(early),
@@ -681,10 +684,7 @@ impl AgentSession {
 
     /// Aborts the running turn; open questions are dismissed, so the agent can stop.
     pub async fn abort(&self) -> Result<(), String> {
-        let pending = open(&mut *self.session.lock().await)?
-            .abort()
-            .await
-            .map_err(describe)?;
+        let pending = self.responder.abort().await.map_err(describe)?;
         // pi answers once the agent is idle; the session stays free meanwhile.
         pending.accepted().await.map_err(describe)
     }
@@ -732,7 +732,7 @@ impl AgentSession {
     }
 
     async fn answer(&self, request: String, answer: Answer) -> Result<(), String> {
-        open(&mut *self.session.lock().await)?
+        self.responder
             .answer(&RequestId(request), answer)
             .await
             .map_err(describe)
