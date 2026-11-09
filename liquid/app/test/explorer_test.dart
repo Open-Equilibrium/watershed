@@ -298,9 +298,14 @@ void main() {
       find.ancestor(of: inSidebar('Untitled'), matching: find.byType(InkWell)),
     );
     expect(
-      find.byType(Sidebar),
+      find.descendant(
+        of: find.byType(Sidebar),
+        matching: find.byType(ListView),
+      ),
       paintsAbove(context.ws.selected, theme.focusColor),
-      reason: 'the highlight is painted above the open Page\'s row',
+      reason:
+          'the highlight is painted above the open Page\'s row, in the '
+          'list that clips it',
     );
 
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);

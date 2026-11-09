@@ -264,64 +264,75 @@ class Sidebar extends StatelessWidget {
         WsMetrics.space3,
         WsMetrics.space4,
       ),
-      // Hover and focus ink paints on the sidebar's own Material, above its background.
-      child: Material(
-        type: MaterialType.transparency,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
-              child: Row(
-                children: [
-                  const LiquidMark(),
-                  const SizedBox(width: WsMetrics.space3),
-                  Text(
-                    'Liquid',
-                    style: Theme.of(context).textTheme.labelMedium
-                        ?.copyWith(fontWeight: WsMetrics.fwSemibold),
-                  ),
-                ],
-              ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
+            child: Row(
+              children: [
+                const LiquidMark(),
+                const SizedBox(width: WsMetrics.space3),
+                Text(
+                  'Liquid',
+                  style: Theme.of(context).textTheme.labelMedium
+                      ?.copyWith(fontWeight: WsMetrics.fwSemibold),
+                ),
+              ],
             ),
-            const SizedBox(height: WsMetrics.space3),
-            Expanded(
-              child: ListView(
-                children: [
-                  if (workspace case final workspace?)
-                    Explorer(state: workspace),
-                  if (workspaceProblem case final problem?)
-                    Padding(
-                      padding: const EdgeInsets.only(top: WsMetrics.space3),
-                      child: WarningNotice(problem),
-                    ),
-                  // A Page shows the Workspace's latest problem itself; without one, it shows
-                  // here.
-                  if (workspace case final workspace?)
-                    ListenableBuilder(
-                      listenable: Listenable.merge([
-                        workspace.problem,
-                        workspace.open,
-                      ]),
-                      builder: (context, _) => switch ((
-                        workspace.problem.value,
-                        workspace.open.value,
-                      )) {
-                        (final problem?, null) => Padding(
+          ),
+          const SizedBox(height: WsMetrics.space3),
+          Expanded(
+            child: ListView(
+              children: [
+                // Hover and focus ink paints on a Material above the sidebar's background,
+                // inside the list, whose edges clip it.
+                Material(
+                  type: MaterialType.transparency,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (workspace case final workspace?)
+                        Explorer(state: workspace),
+                      if (workspaceProblem case final problem?)
+                        Padding(
                           padding: const EdgeInsets.only(top: WsMetrics.space3),
                           child: WarningNotice(problem),
                         ),
-                        _ => const SizedBox.shrink(),
-                      },
-                    ),
-                  const SidebarHeading('Agent sessions'),
-                  if ((state, info) case (final state?, final info?))
-                    ..._session(context, state, info, small),
-                ],
-              ),
+                      // A Page shows the Workspace's latest problem itself; without one, it shows
+                      // here.
+                      if (workspace case final workspace?)
+                        ListenableBuilder(
+                          listenable: Listenable.merge([
+                            workspace.problem,
+                            workspace.open,
+                          ]),
+                          builder: (context, _) => switch ((
+                            workspace.problem.value,
+                            workspace.open.value,
+                          )) {
+                            (final problem?, null) => Padding(
+                              padding: const EdgeInsets.only(
+                                top: WsMetrics.space3,
+                              ),
+                              child: WarningNotice(problem),
+                            ),
+                            _ => const SizedBox.shrink(),
+                          },
+                        ),
+                      const SidebarHeading('Agent sessions'),
+                      if ((state, info) case (final state?, final info?))
+                        ..._session(context, state, info, small),
+                    ],
+                  ),
+                ),
+              ],
             ),
-            if (onSettings case final onSettings?)
-              Tooltip(
+          ),
+          if (onSettings case final onSettings?)
+            Material(
+              type: MaterialType.transparency,
+              child: Tooltip(
                 message: 'Settings',
                 child: Shortcuts(
                   shortcuts: activateKeys,
@@ -354,8 +365,8 @@ class Sidebar extends StatelessWidget {
                   ),
                 ),
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
