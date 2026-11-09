@@ -334,6 +334,48 @@ IFS= read -r line || exit 0"#;
 }
 
 #[test]
+fn answers_and_stop_never_wait_for_a_pending_query() {
+    // pi never answers the `get_state`, yet the question is answered and the turn stopped.
+    let script = r#"printf '%s\n' '{"type":"extension_ui_request","id":"q1","method":"confirm","title":"Run?","message":""}'
+IFS= read -r line
+case "$line" in *'"type":"get_state"'*) ;; *) exit 9 ;; esac
+printf '%s\n' '{"type":"extension_ui_request","id":"s1","method":"setStatus","statusKey":"k","statusText":"pending"}'
+IFS= read -r line
+case "$line" in *'"id":"q1"'*) ;; *) exit 9 ;; esac
+case "$line" in *'"confirmed":true'*) ;; *) exit 9 ;; esac
+IFS= read -r line
+case "$line" in *'"type":"abort"'*) ;; *) exit 9 ;; esac
+printf '%s\n' '{"id":"3","type":"response","command":"abort","success":true}'
+IFS= read -r line || exit 0"#;
+    let session = Arc::new(
+        launch(gated(script), std::env::temp_dir().display().to_string()).expect("agent starts"),
+    );
+    let (sender, receiver) = mpsc::channel();
+    session
+        .forward(move |event| sender.send(event).is_ok())
+        .expect("first subscriber");
+    let mut events = std::iter::from_fn(|| receiver.recv_timeout(Duration::from_secs(10)).ok());
+    assert!(events.any(|event| event.kind == BridgeEventKind::UserInputRequested));
+    let query = {
+        let session = Arc::clone(&session);
+        std::thread::spawn(move || session.title())
+    };
+    assert!(events.any(|event| event.text.as_deref() == Some("pending")));
+    let (done, finished) = mpsc::channel();
+    {
+        let session = Arc::clone(&session);
+        std::thread::spawn(move || {
+            let _ = done.send(call(session.answer_confirm("q1".to_owned(), true)));
+            let _ = done.send(call(session.abort()));
+        });
+    }
+    assert_eq!(finished.recv_timeout(Duration::from_secs(10)), Ok(Ok(())));
+    assert_eq!(finished.recv_timeout(Duration::from_secs(10)), Ok(Ok(())));
+    call(session.shutdown());
+    assert!(query.join().expect("the query returns").is_err());
+}
+
+#[test]
 fn starts_and_resumes_sessions_and_picks_models() {
     let project = std::env::temp_dir();
     let dir = project.join(format!("watershed-bridge-stored-{}", std::process::id()));
@@ -838,6 +880,58 @@ printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":true,"da
         std::fs::read_to_string(repo.join("a.txt")).expect("a"),
         "old\n"
     );
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn a_prompt_waits_until_the_revert_moved_the_session() {
+    let repo = repository("revert-serialized");
+    let script = [
+        checkpoint("q1", "T1", "start", r#"\"ok\":true"#),
+        "printf 'new\\n' > a.txt\n".to_owned(),
+        checkpoint("q2", "T1", "end", r#"\"files\":1"#),
+        "touch .git/checkpointed\n".to_owned(),
+        no_session_file(2),
+        entries(3, TURN),
+        gate(4),
+        // An extension asks before the move; the next line must be its answer, not a prompt.
+        r#"IFS= read -r line
+case "$line" in *'"type":"prompt"'*) ;; *) exit 9 ;; esac
+printf '%s\n' '{"type":"extension_ui_request","id":"x1","method":"confirm","title":"Leave?","message":""}'
+touch .git/asked
+IFS= read -r line
+case "$line" in *'"id":"x1"'*) ;; *) exit 9 ;; esac
+printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":true}'
+"#
+        .to_owned(),
+        entries_at(6, "", "c1"),
+        gate(7),
+        r#"IFS= read -r line
+case "$line" in *'"message":"next"'*) ;; *) exit 9 ;; esac
+printf '%s\n' '{"id":"8","type":"response","command":"prompt","success":true}'
+IFS= read -r line || exit 0"#
+            .to_owned(),
+    ]
+    .concat();
+    let session =
+        Arc::new(launch(gated(&script), repo.display().to_string()).expect("agent starts"));
+    reached(&repo.join(".git/checkpointed"));
+    let reverting = {
+        let session = Arc::clone(&session);
+        std::thread::spawn(move || session.revert_to_turn("T1".to_owned()))
+    };
+    reached(&repo.join(".git/asked"));
+    let sending = {
+        let session = Arc::clone(&session);
+        std::thread::spawn(move || session.send("next".to_owned(), false))
+    };
+    // Time for the prompt to overtake the move, were it free to.
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(call(session.answer_confirm("x1".to_owned(), true)), Ok(()));
+
+    assert_eq!(reverting.join().expect("revert returns"), Ok(()));
+    assert_eq!(sending.join().expect("send returns"), Ok(()));
     assert!(call(session.shutdown()));
     let _ = std::fs::remove_dir_all(&repo);
 }
@@ -1391,6 +1485,19 @@ fn starts_after_an_agent_says_much_before_it_is_ready() {
 }
 
 #[test]
+fn refuses_an_agent_that_says_too_much_before_it_is_ready() {
+    // One event more than a starting agent may send, then the answer to the start check.
+    let script = r#"i=0; while [ $i -le 4096 ]; do printf '%s\n' "{\"type\":\"extension_ui_request\",\"id\":\"s$i\",\"method\":\"setStatus\",\"statusKey\":\"k\",\"statusText\":\"$i\"}"; i=$((i+1)); done
+"#
+    .to_owned()
+        + &gated("IFS= read -r line || exit 0");
+    let error = launch(script, std::env::temp_dir().display().to_string())
+        .err()
+        .expect("no session starts");
+    assert!(error.contains("4096 events"), "{error}");
+}
+
+#[test]
 fn gives_up_on_an_agent_that_never_says_it_is_ready() {
     let (done, started) = mpsc::channel();
     std::thread::spawn(move || {
@@ -1547,6 +1654,7 @@ fn git_remote_transfer_display_redacts_synthetic_url_credentials() {
             remote: remote.into(),
             reference: "refs/heads/main".into(),
             commit: "a".repeat(40),
+            repository: "https://example.invalid/repo.git".into(),
         },
     });
     assert_eq!(transfer.remote, "https://example.invalid/repo.git");

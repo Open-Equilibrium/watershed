@@ -107,6 +107,14 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
   <section id="m3">
     <h2>M3 - Liquid</h2>
     <div class="grid">
+      <details id="d-085" class="decision">
+        <summary><h3>D-085 - Bind A Revert To The Plan The Person Confirmed</h3></summary>
+        <p><strong>Status:</strong> Open; found by Clawpatch on 2026-11-09, predating the Git integration fixes.</p>
+        <p><strong>Question:</strong> Before reverting to a turn, Liquid lists the files it will restore and asks. If the files, the checkout or ignored files in the way change between that list and the person's confirmation, the revert still runs with what it finds then, so it can touch files the person never saw listed. Should the revert be tied to the list the person confirmed?</p>
+        <ul><li><strong>A: Pass the confirmed plan to the revert, and refuse if the project no longer matches it.</strong> The dialog then says what changed and offers to show the new list. Pro: the person confirms exactly what happens. Con: changes the bridge call and the dialog, so it needs an approved mockup.</li><li><strong>B: Recheck right before writing and ask again only if the list changed.</strong> Pro: no visible change in the usual case. Con: a second dialog can appear unexpectedly.</li><li><strong>C: Accept it as T3 Code does</strong>, whose "Edit from here" shows no file list at all. Pro: nothing to build. Con: the list Liquid shows can be out of date.</li></ul>
+        <p><strong>Recommendation:</strong> A: a confirmation that the code does not hold to is worse than none.</p>
+        <p><strong>Acceptance criterion:</strong> a test changes a listed file between preview and confirmation, and the revert refuses before any write and says why.</p>
+      </details>
       <details id="d-027" class="decision">
         <summary><h3>D-027 - Liquid CLI/API Surface</h3></summary>
         <p><strong>Status:</strong> Open before external-agent Liquid edits.</p>

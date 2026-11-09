@@ -3997,13 +3997,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgePushConfirmation dco_decode_bridge_push_confirmation(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return BridgePushConfirmation(
       branch: dco_decode_String(arr[0]),
       remote: dco_decode_String(arr[1]),
       reference: dco_decode_String(arr[2]),
       commit: dco_decode_String(arr[3]),
+      repository: dco_decode_String(arr[4]),
     );
   }
 
@@ -6173,11 +6174,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_remote = sse_decode_String(deserializer);
     var var_reference = sse_decode_String(deserializer);
     var var_commit = sse_decode_String(deserializer);
+    var var_repository = sse_decode_String(deserializer);
     return BridgePushConfirmation(
       branch: var_branch,
       remote: var_remote,
       reference: var_reference,
       commit: var_commit,
+      repository: var_repository,
     );
   }
 
@@ -8657,6 +8660,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.remote, serializer);
     sse_encode_String(self.reference, serializer);
     sse_encode_String(self.commit, serializer);
+    sse_encode_String(self.repository, serializer);
   }
 
   @protected

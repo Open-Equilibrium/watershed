@@ -63,19 +63,6 @@ The macOS Liquid app controls pi through an embedded Meta-Harness core (ADR-0184
 
 Completes the Git integration for the agent's Git project (ADR-0190, ADR-0191, ADR-0220, ADR-0234); Meta-Harness runs the host's `git` and `gh`, Liquid provides the UI. Remaining: worktrees with Chats (ADR-0239), which they need — creating one from a new Chat's composer, its location and the last-Chat choice, the folder chip and moving an idle Chat ([mockups](docs/design/mockups/liquid-git-prs-worktrees.html)).
 
-#### Security fixes — next
-
-Open weaknesses from reviews, fixed in the next bugfix pass:
-
-- `liquid-bridge/src/api/workspace.rs` follows lock-file links on targets other than Unix.
-- Stash restoration skips deleted paths in `diff/revert.rs::repositories_in_the_way`; reject stashed deletions inside nested repositories before mutation, preserving their files, index and stash.
-- A confirmed default-branch push is not bound to the resolved repository, and symbolic push refs are not resolved before that check (`diff/sync.rs`).
-- Push destinations compare SSH URLs without their user names (`diff/sync.rs`).
-- A fast-forward pull can overwrite ignored local files (`diff/sync.rs`).
-- Commits pushed from elsewhere between the recheck and the pull request creation request join the new pull request unreviewed.
-- `liquid/liquid-bridge/src/ready.rs` does not enforce the startup event limit, so an agent process can exceed the bound before the session is ready.
-- Pending bridge queries block Stop and answers, so a user cannot stop a running agent while a query is pending.
-
 #### M3a — Local Workspace foundation
 
 - KPI review of the M3a Workspace (2026-11-08): fixes in this order, one PR each — empty checkbox cells drawing no box, the sidebar's invisible focus and hover, the slash command menu's placement and its opening on a quickly typed "/ta", then shared menu parts and the picker and field panel out of `table_block.dart`, one placement routine in `liquid-core`, `liquid-bridge`'s `api/workspace.rs` split into replica, subscriptions and messages, and one shared Workspace test setup; then the KPIs again. Minors fixed where their code is touched: tied sort keys under `Place::After`, a cap on a stored sort key's length with an iterative `sort_key::midpoint` (today it recurses once per shared digit and copies the suffix while unwinding) and a long-key regression test, `Text("")` stored as a value, open failures reported as a wrong key, the folder lock released before the database closes, a poisoned lock reused with uncommitted changes, a failed commit reusing its writer's sequence, number separators parsed loosely, quick ticks matched by value, a false warning after typing during a join, modified keys right after ⏎, a reread lost after a failed read, numbered-list style reads, quitting before a second write that follows an await, and a crash-durability test after an unclean exit.

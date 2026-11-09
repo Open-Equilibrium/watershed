@@ -47,8 +47,9 @@ pub(super) struct Supervisor {
     pub(super) writer: mpsc::Sender<Write>,
     pub(super) state: State,
     pub(super) adapter: PiAdapter,
-    pub(super) killed: oneshot::Receiver<()>,
-    /// Set once `killed` completed; it must not be polled again.
+    /// Kills the agent with `true` or when dropped; none once shutdown saw it exit.
+    pub(super) killed: Option<oneshot::Receiver<bool>>,
+    /// Set once `killed` asked to kill; it must not be polled again.
     pub(super) kill_requested: bool,
     /// The end of the agent's error output so far, and the task that reads it.
     pub(super) error_output: Arc<Mutex<Vec<u8>>>,
@@ -75,6 +76,7 @@ impl Supervisor {
         let (exited, drain) = oneshot::channel();
         let mut exited = Some(exited);
         let reader = tokio::spawn(read_output(stdout, output, drain));
+        let mut exit = Some(exit);
         let mut cut_off = false;
         let checkpoints = self.checkpoints.clone();
         let input_writer = self.input_writer.abort_handle();
@@ -83,6 +85,7 @@ impl Supervisor {
                 self.unless_killed(reads.recv()),
                 &mut child,
                 &mut exited,
+                &mut exit,
                 &checkpoints,
                 &input_writer,
             )
@@ -105,6 +108,7 @@ impl Supervisor {
                             self.skip(&start),
                             &mut child,
                             &mut exited,
+                            &mut exit,
                             &checkpoints,
                             &input_writer,
                         );
@@ -121,6 +125,7 @@ impl Supervisor {
                     self.handle(record),
                     &mut child,
                     &mut exited,
+                    &mut exit,
                     &checkpoints,
                     &input_writer,
                 )
@@ -164,7 +169,9 @@ impl Supervisor {
         // exit is reported.
         self.checkpoints.close().await;
         // Shutdown learns of the exit first; the event waits for buffer space.
-        let _ = exit.send(success);
+        if let Some(exit) = exit.take() {
+            let _ = exit.send(success);
+        }
         if tokio::time::timeout(ERROR_OUTPUT_WAIT, &mut self.error_reader)
             .await
             .is_err()
@@ -403,7 +410,14 @@ impl Supervisor {
             if let Poll::Ready(output) = work.as_mut().poll(context) {
                 return Poll::Ready(Some(output));
             }
-            Pin::new(&mut *killed).poll(context).map(|_| None)
+            if let Some(kill) = killed {
+                match Pin::new(kill).poll(context) {
+                    Poll::Ready(Ok(false)) => *killed = None,
+                    Poll::Ready(_) => return Poll::Ready(None),
+                    Poll::Pending => {}
+                }
+            }
+            Poll::Pending
         })
         .await;
         self.kill_requested = outcome.is_none();
@@ -412,12 +426,15 @@ impl Supervisor {
 }
 
 /// Runs `work` while watching for the agent's exit. Once the agent exited, the checkpoints close
-/// at once, so no capture outlives it, input delivery ends and output collection gets its deadline.
-/// Already read records still finish delivery, even when the event buffer is full.
+/// at once, so no capture outlives it, input delivery ends, output collection gets its deadline
+/// and shutdown learns of the exit through `stopped`, so its grace period never ends in a kill
+/// that would cut delivery short. Already read records still finish delivery, even when the
+/// event buffer is full.
 async fn watching<F: Future>(
     work: F,
     child: &mut Child,
     exited: &mut Option<oneshot::Sender<Instant>>,
+    stopped: &mut Option<oneshot::Sender<bool>>,
     checkpoints: &Checkpoints,
     input_writer: &tokio::task::AbortHandle,
 ) -> F::Output {
@@ -426,16 +443,17 @@ async fn watching<F: Future>(
         let done = {
             let mut waiting = pin!(child.wait());
             poll_fn(|context| {
-                if waiting.as_mut().poll(context).is_ready() {
-                    return Poll::Ready(None);
+                if let Poll::Ready(status) = waiting.as_mut().poll(context) {
+                    return Poll::Ready(Err(status));
                 }
-                work.as_mut().poll(context).map(Some)
+                work.as_mut().poll(context).map(Ok)
             })
             .await
         };
-        if let Some(output) = done {
-            return output;
-        }
+        let status = match done {
+            Ok(output) => return output,
+            Err(status) => status,
+        };
         if let Some(exited) = exited.take() {
             let _ = exited.send(Instant::now() + OUTPUT_DRAIN_WAIT);
         }
@@ -443,6 +461,9 @@ async fn watching<F: Future>(
         // releases queued automatic answers while already collected output finishes delivery.
         input_writer.abort();
         checkpoints.close().await;
+        if let Some(stopped) = stopped.take() {
+            let _ = stopped.send(status.is_ok_and(|status| status.success()));
+        }
     }
     work.await
 }

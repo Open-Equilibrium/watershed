@@ -166,6 +166,7 @@ pub struct BridgePushConfirmation {
     pub remote: String,
     pub reference: String,
     pub commit: String,
+    pub repository: String,
 }
 
 impl From<BridgePushConfirmation> for meta_harness_core::PushConfirmation {
@@ -175,6 +176,7 @@ impl From<BridgePushConfirmation> for meta_harness_core::PushConfirmation {
             remote: value.remote,
             reference: value.reference,
             commit: value.commit,
+            repository: value.repository,
         }
     }
 }
@@ -201,6 +203,7 @@ impl From<meta_harness_core::GitTransfer> for BridgeGitTransfer {
                 remote: transfer.confirmation.remote,
                 reference: transfer.confirmation.reference,
                 commit: transfer.confirmation.commit,
+                repository: transfer.confirmation.repository,
             },
         }
     }

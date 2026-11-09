@@ -20,7 +20,7 @@ use crate::api::history::{
 };
 use crate::convert::describe;
 use crate::frb_generated::StreamSink;
-use crate::ready::{SHUTDOWN_GRACE, START_TIMEOUT, error_output, ready};
+use crate::ready::{SHUTDOWN_GRACE, error_output, ready};
 use crate::stream::{STREAM_WINDOW, gather, push};
 
 pub(crate) static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
@@ -92,6 +92,8 @@ pub struct AgentSession {
     pub(crate) cwd: PathBuf,
     /// Stops the agent even while a request holds the session.
     stopper: std::sync::Mutex<Option<meta_harness_core::Stopper>>,
+    /// Answers questions and aborts the turn even while a request holds the session.
+    responder: meta_harness_core::Responder,
     /// The program and arguments pi started with, which write a pull request's text the same
     /// way.
     pub(crate) pi_program: PathBuf,
@@ -122,9 +124,9 @@ impl AgentSession {
         // it within a time limit; dropping the session ends the agent.
         let (gate, mut early) = RUNTIME.block_on(ready(&mut session, &mut receiver));
         match gate {
-            Some(Ok(())) => {}
+            Ok(Ok(())) => {}
             // An agent that ended at once says why on its error output.
-            Some(Err(CommandError::Closed)) => {
+            Ok(Err(CommandError::Closed)) => {
                 let output = early
                     .iter()
                     .find_map(|event| match event {
@@ -136,19 +138,15 @@ impl AgentSession {
                     .filter(|output| !output.is_empty())
                     .unwrap_or_else(|| describe(CommandError::Closed)));
             }
-            Some(Err(error)) => return Err(describe(error)),
-            None => {
-                return Err(format!(
-                    "pi did not answer within {} s of starting",
-                    START_TIMEOUT.as_secs()
-                ));
-            }
+            Ok(Err(error)) => return Err(describe(error)),
+            Err(not_ready) => return Err(not_ready),
         }
         early.shrink_to_fit();
         let stopper = session.stopper();
         let checkpoints = session.checkpoints();
         Ok(Self {
             stopper: std::sync::Mutex::new(stopper),
+            responder: session.responder(),
             session: Mutex::new(Some(session)),
             receiver: std::sync::Mutex::new(Some(receiver)),
             early: std::sync::Mutex::new(early),
@@ -351,7 +349,8 @@ impl AgentSession {
     pub fn revert_to_turn(&self, turn: String) -> Result<(), String> {
         RUNTIME.block_on(async {
             let not_reverted = |error: String| format!("the files were not reverted: {error}");
-            // Held until the branch is asked for, so a prompt sent meanwhile starts on it.
+            // Held until the session moved, so a prompt or move sent meanwhile starts after it;
+            // questions are answered and the agent stopped without it.
             let mut session = self.session.lock().await;
             let turns = branch_turns(&mut session).await.map_err(not_reverted)?;
             let found = turn_of(&turns, &turn).map_err(not_reverted)?;
@@ -374,11 +373,10 @@ impl AgentSession {
                     .branch(&prompt, None)
                     .await
                     .map_err(describe)?;
-                drop(session);
                 pending.accepted().await.map_err(describe)?;
                 // pi reports the command handled even when an extension cancelled the move, so
                 // the branch is read back: the turn's prompt must be off it.
-                let turns = branch_turns(&mut *self.session.lock().await).await?;
+                let turns = branch_turns(&mut session).await?;
                 if turns
                     .iter()
                     .any(|turn| turn.prompt_entry.as_deref() == Some(prompt.as_str()))
@@ -686,10 +684,7 @@ impl AgentSession {
 
     /// Aborts the running turn; open questions are dismissed, so the agent can stop.
     pub async fn abort(&self) -> Result<(), String> {
-        let pending = open(&mut *self.session.lock().await)?
-            .abort()
-            .await
-            .map_err(describe)?;
+        let pending = self.responder.abort().await.map_err(describe)?;
         // pi answers once the agent is idle; the session stays free meanwhile.
         pending.accepted().await.map_err(describe)
     }
@@ -737,7 +732,7 @@ impl AgentSession {
     }
 
     async fn answer(&self, request: String, answer: Answer) -> Result<(), String> {
-        open(&mut *self.session.lock().await)?
+        self.responder
             .answer(&RequestId(request), answer)
             .await
             .map_err(describe)

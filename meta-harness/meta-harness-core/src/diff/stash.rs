@@ -228,7 +228,7 @@ impl WorkingTree {
             self.tree_paths(&head).await?;
             let reset = self.changes(&now, &head, Whitespace::Shown).await?;
             let mut blocked = self.ignored_in_the_way(&reset, &self.env(&index)).await?;
-            blocked.extend(self.repositories_in_the_way(&reset));
+            blocked.extend(self.repositories_in_the_way(&reset, false));
             if !blocked.is_empty() {
                 return Err(DiffError::WouldOverwrite(blocked.into_iter().collect()));
             }
@@ -320,8 +320,9 @@ impl WorkingTree {
     /// Drops the stash commit `id`, wherever it now is in the list.
     ///
     /// Git drops a stash only by its place in the list, which another Git can shift between
-    /// finding and dropping it. Git names the commit it dropped, so one not `id` goes straight
-    /// back into the list, its commit unchanged, and the drop tries again.
+    /// finding and dropping it. Git names the commit it dropped; one not `id`, or `id` while
+    /// Liquid's entry of it stays, was another entry, which goes straight back into the list,
+    /// its commit unchanged, and the drop tries again.
     pub(super) async fn drop_stash(&self, id: &str) -> Result<(), DiffError> {
         for _ in 0..DROP_TRIES {
             let place = self.place_of(id).await?;
@@ -332,26 +333,43 @@ impl WorkingTree {
                 .rsplit_once('(')
                 .and_then(|(_, rest)| rest.trim_end().strip_suffix(')'))
                 .unwrap_or_default();
-            if dropped == id {
-                return Ok(());
-            }
             if dropped.is_empty() {
                 return Err(DiffError::Git(format!(
                     "Git did not say which stash it dropped: {said}"
                 )));
             }
-            // Its own subject is what the list showed for it.
-            let subject = git(
-                &self.root,
-                &[],
-                &["log", "-1", "--encoding=UTF-8", "--format=%s", dropped],
-            )
-            .await?;
+            let own = dropped == id;
+            if own && self.place_of(id).await.is_err() {
+                return Ok(());
+            }
+            // Its own subject is what the list showed for it. Liquid's commit names Liquid's
+            // entry, so another entry of it goes back under a message of its own.
+            let subject = if own {
+                "Put back by Liquid".to_owned()
+            } else {
+                git(
+                    &self.root,
+                    &[],
+                    &["log", "-1", "--encoding=UTF-8", "--format=%s", dropped],
+                )
+                .await?
+            };
             user_git(
                 &self.root,
                 &["stash", "store", "-m", subject.trim_end(), dropped],
             )
-            .await?;
+            .await
+            .map_err(|error| lost(dropped, &error.to_string()))?;
+            // Git stores nothing when the list's newest entry already holds the commit.
+            if own
+                && !self
+                    .stashes()
+                    .await?
+                    .iter()
+                    .any(|entry| entry.id == id && entry.branch.is_none())
+            {
+                return Err(lost(dropped, "Git kept only Liquid's entry of its commit"));
+            }
         }
         Err(DiffError::Git(
             "the stash list kept changing while Liquid dropped its stash".to_owned(),
@@ -411,7 +429,7 @@ impl WorkingTree {
         // contents too. Check both trees because --index restores saved index-only changes.
         for changes in [&index_changes, &tracked_changes] {
             in_the_way.extend(self.ignored_in_the_way(changes, &[]).await?);
-            in_the_way.extend(self.repositories_in_the_way(changes));
+            in_the_way.extend(self.repositories_in_the_way(changes, true));
         }
         let stash_changes = self.changes(&base, &tracked, Whitespace::Shown).await?;
         // Only a file still tracked in HEAD can be removed to make way for untracked files.
@@ -461,7 +479,7 @@ impl WorkingTree {
 
     /// The ignored paths a tracked-tree write would overwrite or remove, using its source
     /// index so a tracked descendant of a now-ignored parent does not hide that obstruction.
-    async fn ignored_in_the_way(
+    pub(super) async fn ignored_in_the_way(
         &self,
         changes: &[FileChange],
         env: &[(&str, OsString)],
@@ -506,19 +524,7 @@ impl WorkingTree {
     /// Deletes the stashed changes `id` left on a branch.
     pub async fn discard_stash(&self, id: &str) -> Result<(), DiffError> {
         let _stash = self.checkout().stash_alone().await?;
-        self.liquid_stash(id).await?;
         self.drop_stash(id).await
-    }
-
-    /// Refuses `id` unless it names changes Liquid left on a branch, so no stash of the user's
-    /// own is popped or dropped.
-    async fn liquid_stash(&self, id: &str) -> Result<(), DiffError> {
-        self.stashes()
-            .await?
-            .into_iter()
-            .any(|entry| entry.id == id && entry.branch.is_some())
-            .then_some(())
-            .ok_or(DiffError::NoStash)
     }
 
     /// The entry Liquid left for the branch checked out.
@@ -533,12 +539,13 @@ impl WorkingTree {
             .find(|entry| entry.branch.as_deref() == Some(branch.as_str())))
     }
 
-    /// The current place of the stash commit `id`.
+    /// The current place of the stash commit `id` among the changes Liquid left on a branch,
+    /// so no stash of the user's own is popped or dropped, even one of the same commit.
     async fn place_of(&self, id: &str) -> Result<String, DiffError> {
         self.stashes()
             .await?
             .into_iter()
-            .find(|entry| entry.id == id)
+            .find(|entry| entry.id == id && entry.branch.is_some())
             .map(|entry| entry.place)
             .ok_or(DiffError::NoStash)
     }
@@ -666,4 +673,12 @@ pub(super) fn listed_files(reason: &str) -> Vec<String> {
         .filter_map(|line| line.strip_prefix('\t'))
         .map(str::to_owned)
         .collect()
+}
+
+/// Says that Git dropped the stash `dropped` of someone else and it could not go back.
+fn lost(dropped: &str, why: &str) -> DiffError {
+    DiffError::Git(format!(
+        "Git dropped another stash while Liquid dropped its own, and could not put it back \
+         ({why}). Recover it with `git stash store {dropped}`."
+    ))
 }

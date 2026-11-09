@@ -938,17 +938,23 @@ class BridgePushConfirmation {
   final String remote;
   final String reference;
   final String commit;
+  final String repository;
 
   const BridgePushConfirmation({
     required this.branch,
     required this.remote,
     required this.reference,
     required this.commit,
+    required this.repository,
   });
 
   @override
   int get hashCode =>
-      branch.hashCode ^ remote.hashCode ^ reference.hashCode ^ commit.hashCode;
+      branch.hashCode ^
+      remote.hashCode ^
+      reference.hashCode ^
+      commit.hashCode ^
+      repository.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -958,7 +964,8 @@ class BridgePushConfirmation {
           branch == other.branch &&
           remote == other.remote &&
           reference == other.reference &&
-          commit == other.commit;
+          commit == other.commit &&
+          repository == other.repository;
 }
 
 /// A pull request's review decision.

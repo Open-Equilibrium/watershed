@@ -691,8 +691,15 @@ class FakeBackend implements SessionBackend {
   /// The file of the open session.
   String? openFile = '/sessions/open.jsonl';
 
+  /// Holds the open session's file, as it was when asked, until it completes.
+  Completer<void>? sessionFileGate;
+
   @override
-  Future<String?> sessionFile() async => openFile;
+  Future<String?> sessionFile() async {
+    final file = openFile;
+    await sessionFileGate?.future;
+    return file;
+  }
 
   /// Turns with checkpoints by session file.
   Map<String, int> turnCounts = const {};
@@ -996,6 +1003,7 @@ BridgeGitTransfer transferOf({
     remote: remote,
     reference: 'refs/heads/${upstream.split('/').skip(1).join('/')}',
     commit: '1a2b3c4',
+    repository: 'https://example.invalid/repo.git',
   ),
 );
 

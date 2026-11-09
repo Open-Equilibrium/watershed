@@ -86,6 +86,7 @@ class Sidebar extends StatelessWidget {
 
   /// Asks before deleting the open session, which a new session then replaces.
   Future<void> _deleteOpen(BuildContext context, SessionState state) async {
+    final generation = state.generation;
     final String? path;
     try {
       path = await state.sessionFile();
@@ -93,7 +94,8 @@ class Sidebar extends StatelessWidget {
       state.notify(BridgeLevel.error, 'Could not read the session: $error');
       return;
     }
-    if (!context.mounted) return;
+    // Another session opened meanwhile: the file and the title it shows would differ.
+    if (!context.mounted || generation != state.generation) return;
     if (path == null) {
       state.notify(
         BridgeLevel.info,

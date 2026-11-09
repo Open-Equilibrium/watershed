@@ -584,6 +584,65 @@ fn a_project_outside_git_says_so_instead_of_showing_no_changes() {
 }
 
 #[test]
+fn outside_git_no_session_is_deleted_while_an_agent_runs_in_the_folder() {
+    run(async {
+        let dir = std::env::temp_dir().join(format!(
+            "watershed-checkpoint-no-git-delete-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("directory");
+        let file = dir.join("s1.jsonl");
+        std::fs::write(&file, "{}\n").expect("session file");
+        let mine = Checkpoints::new(&dir);
+        let other = Checkpoints::new(&dir);
+        let theirs = |phase| Checkpoint {
+            session: "s2".to_owned(),
+            turn: "u1".to_owned(),
+            phase,
+        };
+        assert!(matches!(
+            other.capture(&theirs(Phase::Start)).await,
+            Err(DiffError::NotARepository)
+        ));
+
+        assert!(matches!(
+            mine.delete_session("s1", &file).await,
+            Err(DiffError::AgentRunning(running)) if running == ["s2"]
+        ));
+        assert!(file.exists(), "kept");
+        let _ = other.capture(&theirs(Phase::End)).await;
+        mine.delete_session("s1", &file).await.expect("deleted");
+        assert!(!file.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    });
+}
+
+#[test]
+fn a_linked_marker_folder_never_removes_a_file_elsewhere() {
+    run(async {
+        let repo = Repo::new("linked-running");
+        let elsewhere = repo.path().with_extension("elsewhere");
+        let _ = std::fs::remove_dir_all(&elsewhere);
+        std::fs::create_dir_all(&elsewhere).expect("folder elsewhere");
+        std::fs::write(elsewhere.join("s1"), "keep me\n").expect("file elsewhere");
+        std::fs::create_dir_all(repo.path().join(".git/watershed")).expect("marker folder");
+        std::os::unix::fs::symlink(&elsewhere, repo.path().join(".git/watershed/running"))
+            .expect("link");
+        let checkpoints = Checkpoints::new(repo.path());
+
+        let _ = checkpoints.capture(&at("t1", Phase::Start)).await;
+        let _ = checkpoints.capture(&at("t1", Phase::End)).await;
+        checkpoints.close().await;
+
+        assert_eq!(
+            std::fs::read_to_string(elsewhere.join("s1")).expect("still there"),
+            "keep me\n"
+        );
+        let _ = std::fs::remove_dir_all(&elsewhere);
+    });
+}
+
+#[test]
 fn a_git_that_cannot_read_the_project_is_reported_instead_of_outside_git() {
     run(async {
         let repo = Repo::new("broken-config");
