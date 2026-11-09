@@ -42,7 +42,7 @@ String compareKeys(ShortcutSettings keys) => [
   keys.hint(Command.compare, 'leave compare'),
 ].where((part) => part.isNotEmpty).join(' · ');
 
-/// The Trajectory tab (approved mockups 2 and 3 and the approved context track): one overview
+/// The Trajectory tab: one overview
 /// on a shared time axis, the steps grouped by turn with their context and an inspector, and
 /// the session tree. It reads the session's
 /// stored history, so it looks the same during the run, after it and after a restart.
@@ -334,7 +334,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     _reveal();
   }
 
-  /// Opens the inspector on the context of `turn`'s last request (approved look mockup).
+  /// Opens the inspector on the context of `turn`'s last request.
   void _openTurn(TurnGroup turn) {
     final records = _records;
     final last = [

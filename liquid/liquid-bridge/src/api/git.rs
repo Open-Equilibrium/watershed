@@ -1,5 +1,5 @@
 //! The checkout's branches, commits, changes and pull requests for the session header and the
-//! Diff tab ([mockups](../../../../docs/design/mockups/liquid-git-branches.html),
+//! Diff tab ([Git integration](../../../../docs/concept/V-Spec_MetaHarness.html#git-integration),
 //! [pull requests](../../../../docs/design/mockups/liquid-git-prs-worktrees.html)).
 
 use meta_harness_core::{

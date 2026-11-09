@@ -6,7 +6,7 @@ Observational evidence for the [agent-surface slice](../../PLAN.md) under the [e
 
 - Apple M6, 24 GB, macOS 27.0 (26A428).
 - Rust 1.99.0, release builds; Flutter 3.47.9 `flutter test` (debug JIT).
-- Token streaming observed on 2026-10-31 at commit `2b34840`; both Trajectory workloads on 2026-11-08 at `21d9382c`; one run each.
+- Token streaming observed on 2026-11-03 at commit `228ede81`; both Trajectory workloads on 2026-11-08 at `21d9382c`; one run each.
 
 ## Workloads
 
@@ -18,7 +18,7 @@ Observational evidence for the [agent-surface slice](../../PLAN.md) under the [e
 
 ## Observations
 
-Token streaming: the 20,000 deltas arrive as 1 text event of 320,000 bytes, 6 events in all. Maximum resident set size 9.9 MB, peak memory footprint 8.4 MB. The record at `7781c3f`, whose forwarder also drained the channel after the window, counted 2 text events; earlier records before the 50 ms window counted 173 to 184 events; neither is comparable.
+Token streaming: every sample preserved all 20,000 deltas as one 320,000-byte text event, six events in all. Maximum resident set size 14.4 MB, peak memory footprint 9.4 MB. Session exit cancels and joins a stderr reader whose drain deadline expires; this workload does not exercise a descendant holding stderr open, which the session regression test covers. The record at `7781c3f`, whose forwarder also drained the channel after the window, counted 2 text events; earlier records before the 50 ms window counted 173 to 184 events; neither is comparable.
 
 Long Trajectory, core: the first read from the session file takes most of each sample (10.3 ms p50); the tree and both Trajectories over the compact index take about 3.7 ms together, and the follow-up read of new entries about 0.06 ms. The process's peak memory footprint is 15.1 MB. `/usr/bin/time` reports 44.9 MB maximum resident set size, but that counts the waited-for writer run too, so only the footprint describes the measured process. Records before `21d9382c` stored an approval entry per turn and are not comparable.
 
@@ -29,27 +29,27 @@ Long Trajectory, Dart: every operation is linear in the steps except `compareBra
 Token streaming:
 
 ```json
-{"sample":0,"elapsed_ms":19.612,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":1,"elapsed_ms":13.004,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":2,"elapsed_ms":10.913,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":3,"elapsed_ms":10.817,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":4,"elapsed_ms":10.846,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":5,"elapsed_ms":10.682,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":6,"elapsed_ms":10.914,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":7,"elapsed_ms":10.645,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":8,"elapsed_ms":10.747,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":9,"elapsed_ms":10.668,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":10,"elapsed_ms":10.679,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":11,"elapsed_ms":10.877,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":12,"elapsed_ms":10.894,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":13,"elapsed_ms":10.967,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":14,"elapsed_ms":10.789,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":15,"elapsed_ms":10.866,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":16,"elapsed_ms":11.019,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":17,"elapsed_ms":10.979,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":18,"elapsed_ms":10.708,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":19,"elapsed_ms":10.734,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"summary":"stream","deltas_in":20000,"delta_bytes":16,"samples":20,"p50_ms":10.846,"p95_ms":13.004,"max_ms":19.612}
+{"sample":0,"elapsed_ms":24.977,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":1,"elapsed_ms":16.965,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":2,"elapsed_ms":13.435,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":3,"elapsed_ms":11.442,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":4,"elapsed_ms":11.440,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":5,"elapsed_ms":11.296,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":6,"elapsed_ms":11.256,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":7,"elapsed_ms":11.836,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":8,"elapsed_ms":11.477,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":9,"elapsed_ms":11.650,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":10,"elapsed_ms":11.420,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":11,"elapsed_ms":11.574,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":12,"elapsed_ms":11.633,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":13,"elapsed_ms":11.629,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":14,"elapsed_ms":11.533,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":15,"elapsed_ms":11.664,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":16,"elapsed_ms":11.928,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":17,"elapsed_ms":11.498,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":18,"elapsed_ms":11.381,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":19,"elapsed_ms":11.647,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"summary":"stream","deltas_in":20000,"delta_bytes":16,"samples":20,"p50_ms":11.574,"p95_ms":16.965,"max_ms":24.977}
 ```
 
 Long Trajectory, core:
@@ -88,32 +88,4 @@ Long Trajectory, Dart:
 {"operation":"inRange","samples":20,"p50_ms":0.031,"p95_ms":0.072,"max_ms":0.099}
 {"operation":"compareBranches.late","samples":20,"p50_ms":0.069,"p95_ms":0.254,"max_ms":1.023}
 {"operation":"compareBranches.early","samples":20,"p50_ms":0.43,"p95_ms":0.532,"max_ms":0.572}
-```
-
-## Token streaming after stderr cleanup
-
-Observed on 2026-11-03 at `228ede81`, in the environment above, using the same release command and 20-sample workload. The stream path is now passed as a shell argument, and session exit cancels and joins a stderr reader whose drain deadline expires. Every sample preserved all 20,000 deltas as one 320,000-byte text event, six events in all. Maximum resident set size was 14,368,768 bytes; peak memory footprint was 9,372,152 bytes. This workload does not exercise a descendant holding stderr open; the session regression test covers that cleanup path.
-
-```json
-{"sample":0,"elapsed_ms":24.977,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":1,"elapsed_ms":16.965,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":2,"elapsed_ms":13.435,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":3,"elapsed_ms":11.442,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":4,"elapsed_ms":11.440,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":5,"elapsed_ms":11.296,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":6,"elapsed_ms":11.256,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":7,"elapsed_ms":11.836,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":8,"elapsed_ms":11.477,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":9,"elapsed_ms":11.650,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":10,"elapsed_ms":11.420,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":11,"elapsed_ms":11.574,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":12,"elapsed_ms":11.633,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":13,"elapsed_ms":11.629,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":14,"elapsed_ms":11.533,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":15,"elapsed_ms":11.664,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":16,"elapsed_ms":11.928,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":17,"elapsed_ms":11.498,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":18,"elapsed_ms":11.381,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"sample":19,"elapsed_ms":11.647,"events":6,"delta_events":1,"largest_delta_bytes":320000}
-{"summary":"stream","deltas_in":20000,"delta_bytes":16,"samples":20,"p50_ms":11.574,"p95_ms":16.965,"max_ms":24.977}
 ```

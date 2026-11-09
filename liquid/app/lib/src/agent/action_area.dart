@@ -86,7 +86,7 @@ class _ActionAreaState extends State<ActionArea> {
   }
 }
 
-/// Text entry for prompts and steering (approved session-flow mockup): Enter sends or steers a
+/// Text entry for prompts and steering: Enter sends or steers a
 /// running agent, ⌥Enter queues a follow-up, Esc stops the run, Shift+Enter adds a line.
 /// Waiting messages are chips inside the input area.
 class Composer extends StatelessWidget {

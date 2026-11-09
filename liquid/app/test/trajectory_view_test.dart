@@ -51,7 +51,7 @@ BridgeStepContext saw(int messages, List<String> added) => BridgeStepContext(
   newSincePrevious: added,
 );
 
-/// Branch A of the approved mockup, shortened.
+/// Branch A of a sample session, shortened.
 final branchA = [
   record('e1', 1, BridgeRecordKind.user, 'Add rate limiting', 0),
   record(

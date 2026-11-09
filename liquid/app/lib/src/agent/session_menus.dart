@@ -26,7 +26,7 @@ class RowAction {
 }
 
 /// A row whose menu opens on right-click or from the "···" that shows while the pointer is
-/// over it, as T3 Code's thread list and Notion's pages do (approved checkpoint mockups).
+/// over it, as T3 Code's thread list and Notion's pages do.
 class RowMenu extends StatefulWidget {
   const RowMenu({super.key, required this.actions, required this.child});
 
@@ -143,7 +143,7 @@ class _RowMenuState extends State<RowMenu> {
 }
 
 /// Asks before deleting the session stored at `path`, named `title`, with its checkpoints,
-/// then deletes it (approved checkpoint mockups).
+/// then deletes it.
 Future<void> confirmDeleteSession(
   BuildContext context,
   SessionState state, {
@@ -181,7 +181,7 @@ Future<void> confirmDeleteSession(
 }
 
 /// Asks before removing every checkpoint of `project`, listing the sessions that lose them,
-/// then removes them (approved checkpoint mockups).
+/// then removes them.
 Future<void> confirmRemoveCheckpoints(
   BuildContext context,
   SessionState state,

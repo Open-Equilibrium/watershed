@@ -12,15 +12,15 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'trajectory_model.dart';
 
-/// Widths of the open session tree and of its collapsed rail (approved navigation mockup).
+/// Widths of the open session tree and of its collapsed rail.
 const treeWidth = 200.0;
 const treeRailWidth = 24.0;
 const _rowHeight = 22.0;
 
 /// The session's branches as a graph like GitHub's network view: one lane per branch and one
-/// node per step, its shape and color telling the step's kind as the ledger's Kind tags do
-/// (approved navigation mockup). Lines are gray but for the shown branches. Each row paints its
-/// own slice, so long trees stay a lazy list. Collapsed, it is a rail with one dot per turn.
+/// node per step, its shape and color telling the step's kind as the ledger's Kind tags do.
+/// Lines are gray but for the shown branches. Each row paints its own slice, so long trees
+/// stay a lazy list. Collapsed, it is a rail with one dot per turn.
 class SessionTreeView extends StatelessWidget {
   const SessionTreeView({
     super.key,
@@ -400,7 +400,7 @@ class _RowContent extends StatelessWidget {
   }
 }
 
-/// A branch's letter: blue for a shown branch, gray otherwise (approved navigation mockup).
+/// A branch's letter: blue for a shown branch, gray otherwise.
 class RefBadge extends StatelessWidget {
   const RefBadge({super.key, required this.ref, required this.shown});
 

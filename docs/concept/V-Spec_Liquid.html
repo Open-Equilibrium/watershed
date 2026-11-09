@@ -68,13 +68,13 @@ Liquid        = local-first workspace and App platform</code></pre>
         <li>Typing creates a Text Block; <code>/</code> opens slash commands; paste/drop/drawing create the deterministic matching Block.</li>
         <li>Text shortcuts format the current Text Block. For example, <code>&gt;</code> plus space applies toggle formatting; a toggle is not a Block.</li>
         <li>Blocks begin in one ordered vertical flow. Arrange mode reveals a responsive grid with move/resize handles, like placing mobile widgets without a separate container.</li>
-        <li>A Text Block is one paragraph, heading, list item, to-do or quote; ⏎ ends it. As in Notion, ⏎ continues a list or to-do and ends one left empty, and at a Text Block's start adds an empty one above; ⌫ at a start removes a divider above, then the formatting, and then joins the Text Block above. Consecutive Text Blocks form a <strong>Section</strong>, which <code>---</code> or a Block of another type ends; Arrange mode places each Section and each other Block as one tile, and a Section's Text Blocks can be arranged in columns inside it. A Section is layout only and owns no content (ADR-0235).</li>
+        <li>A Text Block is one paragraph, heading, list item, to-do or quote; ⏎ ends it. As in Notion, ⏎ continues a list or to-do and ends one left empty, and at a Text Block's start adds an empty one above; ⌫ at a start removes a divider above, then the formatting, and then joins the Text Block above. Consecutive Text Blocks form a <strong>Section</strong>, which <code>---</code> or a Block of another type ends; Arrange mode places each Section and each other Block as one tile, and a Section's Text Blocks can be arranged in columns inside it, without groups or decorative dividers. A Section is layout only and owns no content (ADR-0235).</li>
         <li>Page templates create useful starting compositions, such as an AI project with a Chat, Database and App Blocks. A template is not a Page Type.</li>
         <li>The Explorer shows Pages and Sources as peer entries. Opening either follows one navigation model; the internal object types remain distinct.</li>
         <li>The Explorer shows each area under its own heading, as Notion shows teamspaces; each holds a tree of nested Pages with Sources among them (ADR-0235). A new Workspace starts, as Notion does, with the area Private holding one blank Page, and the Workspace works without an agent.</li>
-        <li>In M3a a Source is a local file or folder, read-only, because History cannot revert writes outside Workspace data (ADR-0235). Web links follow after M3a as read-only Sources that load only when opened and show in a built-in browser (ADR-0236).</li>
+        <li>In M3a a Source is a local file or folder, read-only, because History cannot revert writes outside Workspace data (ADR-0235). Web links follow after M3a as read-only Sources that load only when opened and show in a built-in browser, as T3 Code's isolated preview does: a native WebView per platform (WKWebView, WebView2, WebKitGTK), whose dependency is chosen when it is built; it gives pages no access to Liquid or the Rust–Flutter bridge and keeps cookies per Workspace; agent control of it comes later (ADR-0236).</li>
         <li>Media come from local attachments; a web link is a bookmark that fetches nothing, and an embed loads remote content only after a click (ADR-0235).</li>
-        <li>The PowerBar finds Workspace objects, creates Blocks and invokes permitted Workspace or agent actions. Without a prefix it searches and jumps; <code>/</code> adds a Block and <code>&gt;</code> lists actions; <code>@</code> is kept for people (ADR-0236, <a href="../design/mockups/liquid-workspace-pages.html">Pages mockups</a>).</li>
+        <li>The PowerBar finds Workspace objects, creates Blocks and invokes permitted Workspace or agent actions. Without a prefix it searches and jumps; <code>/</code> adds a Block and <code>&gt;</code> lists actions; <code>@</code> is kept for people (ADR-0236, <a href="../design/mockups/liquid-workspace-pages.html">Pages mockups</a>). A tap of the Liquid key inside Liquid opens it.</li>
       </ul>
     </div></section>
 
@@ -112,7 +112,7 @@ Liquid        = local-first workspace and App platform</code></pre>
       </svg>
       <ul>
         <li>Accepted target (ADR-0228): Pages and Blocks in M3; files like a drive and media like a photo library later, as views on the same store. M3 builds attachments only.</li>
-        <li>Metadata lives in one CRDT document per Page; Pages group into areas, the unit for Roles, replication and keys.</li>
+        <li>Metadata lives in one CRDT document per Page; Pages group into areas, the unit for Roles, replication and keys. Moving a Block between Pages changes both documents in one History Action, and a reference to a Page a device does not hold shows a placeholder.</li>
         <li>Contents are content-addressed, chunked, encrypted blobs outside the CRDT, loaded on demand; a device indexes a file for search when it first loads it. Binary files cannot merge, so concurrent edits keep both versions.</li>
         <li>Rich text is text with formatting marks, Tables (the core's Database Blocks, ADR-0244) are typed fields and rows (text, number, select, date, checkbox, file, link to a row, formula and button; a new Table starts with a text field "Name"), with a total row, kept in their home Page's document and read in windows that Rust filters and sorts, and Markdown and HTML serve only import and export. Later drive and media views add OS integration (macOS File Provider, Windows Cloud Files, Linux FUSE) and on-device previews and indexing.</li>
       </ul>
@@ -133,7 +133,6 @@ Liquid        = local-first workspace and App platform</code></pre>
       <p>A user should be able to ask, “Build an interactive fitness overview over Table X,” and receive a working App Block without knowing runtimes, SDKs, CI, builds or deployment. Liquid AI writes the App through the same reviewed mutation pipeline as a human.</p>
       <ul>
         <li>The App SDK declares UI, versioned state, typed actions, Connections and capabilities with minimal code.</li>
-        <li>The App Runtime executes restricted JavaScript/TypeScript locally with declarative UI and resource limits. WASM is a later extension.</li>
         <li>Simple logic uses formulas/Connections or Automations; complex interactive logic uses an App.</li>
         <li>An App is Workspace-local, synchronizes with its Workspace, inherits History/version recovery and is immediately available to authorized collaborators.</li>
         <li>An App Block can be opened as a page-like full View or embedded through Views on other Pages, like a reusable Database Block.</li>
@@ -143,10 +142,20 @@ Liquid        = local-first workspace and App platform</code></pre>
       <p>The Block SDK serves maintainers and the open-source community. It defines complete reusable Block Types, including state/migrations, Views, responsive behavior, ports/actions, permissions and lifecycle. Users install compatible Block Types from the signed, sandboxed Block Registry and then use them like built-in Blocks. The initial model loads no arbitrary third-party native code.</p>
       <h3>MCP: adapter, not user mental model</h3>
       <p>Liquid can connect to an external MCP server and map its capabilities into the same typed App actions, Roles and capability checks. The integration may power an App Block or remain headless when no UI is useful. Users see the App/integration and its permissions. Liquid supplies the MCP client boundary; agents call the resulting permitted action through Liquid's CLI/API when that is more compact than MCP discovery.</p>
+      <h3>Accepted target: App, Block package and MCP security</h3>
+      <ul>
+        <li>App code runs locally in the restricted App Runtime. The first target is isolated JavaScript/TypeScript with declarative UI, explicit capabilities, CPU/memory/time limits, no ambient filesystem/process/environment access and deny-by-default network access. WASM is a later runtime target.</li>
+        <li>App state changes and App-driven workspace writes use the mutation pipeline. App code cannot edit another Block merely because a View is nearby; a Connection plus an effective permission is required.</li>
+        <li>An App action is capability-scoped and may be invoked by UI, Connection, Automation or agent only when the caller and App both allow it.</li>
+        <li>External MCP servers remain outside the App Runtime. Liquid's MCP adapter is the client boundary, validates declared inputs/outputs and maps only granted capabilities to typed App actions. MCP connectivity never grants broader Workspace access.</li>
+        <li>Block Registry packages are signed, versioned, sandboxed and capability-scoped. Initial support loads no arbitrary third-party native code; package update and migration are explicit, reviewable actions.</li>
+        <li>App execution, external MCP calls and external-agent edits are separate risk classes and keep separate capability grants.</li>
+      </ul>
     </div></section>
 
     <section id="permissions" class="section"><h2>6. Roles and safety</h2><div class="body">
-      <p>A <strong>Role</strong> is an editable composition of allow-only permissions over named Workspaces, Pages, Blocks, Sources, App actions, agent controls and administrative capabilities. Roles can be assigned to users, groups, agent profiles, sessions and Automations.</p>
+      <p class="muted" id="workspace-access">Accepted target (M3): shipped today are the one mutation pipeline with its Actions, which allows only the Workspace's owner, and the encrypted replica (<a href="../../SECURITY.md#liquid-workspace-access--external-agent-edits">SECURITY.md</a>); Roles, the Workspace CLI/API and the rules below follow.</p>
+      <p>A <strong>Role</strong> is an editable composition of allow-only permissions over named Workspaces, Pages, Blocks, Sources, App actions, Meta-Harness projections, agent controls and administrative capabilities. Roles can be assigned to users, groups, agent profiles, sessions and Automations.</p>
       <pre><code>effective permission =
   Role allow
   ∩ system boundary
@@ -154,11 +163,14 @@ Liquid        = local-first workspace and App platform</code></pre>
   ∩ session grant
   ∩ provider/host boundary</code></pre>
       <ul>
-        <li>Anything not allowed is denied by default. Explicit deny/blacklist rules are deferred until real policy conflicts require them.</li>
+        <li>Workspace CLI/API access requires an authenticated identity and an assigned allow-only Role. Anything not allowed is denied by default. Explicit deny/blacklist rules are deferred until real policy conflicts require them.</li>
+        <li>Effective authority is the intersection above: no layer can grant a capability another boundary denies.</li>
         <li>Capabilities distinguish discovery/read, propose, execute/apply, approve and manage where the resource supports them.</li>
-        <li>In the M3 MVP, resource-scoped discovery/read permissions govern Liquid surfaces but do not hide bytes in a complete plaintext replica from its authorized device owner or same-identity local processes.</li>
+        <li>In the M3 MVP, resource-scoped discovery/read permissions govern Liquid surfaces but do not hide bytes in a complete plaintext replica from its authorized device owner or same-identity local processes. This does not grant write, execution or administrative authority.</li>
         <li>Agents may receive narrower per-session authority than their reusable agent profile.</li>
-        <li>Every Workspace write uses the same mutation pipeline and records actor, origin, permission result and reversible change in History.</li>
+        <li>Every Workspace write, from the UI, Liquid AI, the CLI/API or an external agent, uses the same mutation pipeline and records actor, origin, permission result and reversible change in History; no hidden write bypasses it.</li>
+        <li>External-agent writes are attributed (actor/origin) and revertible; sensitive changes require approval, and a proposed diff can be reviewed before apply.</li>
+        <li>Secrets and credentials are never Workspace data; Workspace data holds only references to a keychain or a company secret manager (ADR-0224).</li>
         <li>Visibility, View placement, Connection existence and sync access never imply execution authority.</li>
         <li>Rights inherit from an area to its Pages and Blocks. A <strong>protected</strong> Page, Block or Source stops inheriting them, so only Roles allowed on it may change it. A Block's rights follow its home, never the Page that shows a View of it. Read access is never finer than an area; in M3 every authorized device holds the complete Workspace, so the Workspace stays the confidentiality boundary (ADR-0235).</li>
         <li>M3a assigns Roles to Automations; people follow with sync and agent profiles with M3b (ADR-0235). Three editable Role templates follow Notion's access levels: Can view (read), Can edit (read and apply) and Can manage (every capability). The person who creates a Workspace holds Can manage, which protection never removes, so no one can lock the owner out (<a href="../design/mockups/liquid-workspace-history.html">History and Roles mockups</a>).</li>
@@ -172,8 +184,16 @@ Liquid        = local-first workspace and App platform</code></pre>
         <div class="node"><strong>5 · History</strong><br><span class="muted">Actor: the agent; on behalf of: the person; origin: CLI; revertible.</span></div><span class="arrow">→</span>
         <div class="node"><strong>6 · Sync</strong><br><span class="muted">The signed change reaches other replicas; the Sync Server refuses it once the grant is revoked.</span></div>
       </div>
-      <p class="muted">Accepted target (ADR-0223, ADR-0224). Agents write only through the Workspace CLI/API: of the person's Liquid on a default agent host, otherwise of the headless replica on their agent host, which holds only their Roles' areas once selective replication follows the complete M3 replicas (ADR-0255); the rules are canonical in <a href="../../SECURITY.md#liquid-workspace-access--external-agent-edits">SECURITY.md</a>.</p>
-      <p>App Runtime and supply-chain requirements are canonical in <a href="../../SECURITY.md#liquid-apps-block-packages-and-mcp">SECURITY.md</a>.</p>
+      <p id="agent-grants">Accepted target (ADR-0223, ADR-0224, ADR-0229, ADR-0255):</p>
+      <ul>
+        <li>An agent acts with its own identity and a grant signed by the person it works for, naming an area, actions and an expiry. Its authority never exceeds that person's: it is the intersection of the agent's Role, the person's authority and the grant.</li>
+        <li>Agents change Workspace data only through the Workspace CLI/API and mutation pipeline, never in a store: of the person's Liquid on a default agent host, otherwise of their agent host's headless replica, which receives only the areas the agent Roles allow once selective replication follows the complete M3 replicas (ADR-0224, ADR-0255).</li>
+        <li>Each Role sets which changes are sensitive and wait for the person's approval, by default deletion, permission, grant and Automation changes. A grant may waive these approvals, at the discretion of the person who issues it.</li>
+        <li>History records the agent as actor and the person it acts for. Revoking the session or grant makes the Sync Server refuse the agent's further changes.</li>
+        <li>A subagent's authority comes from its parent's grant and is never larger; agent hosts pair and start their own processes as in <a href="V-Spec_MetaHarness.html#orchestration">Meta-Harness orchestration</a> (ADR-0253).</li>
+        <li>Liquid AI is a built-in agent profile on an agent host, local or remote, limited to Liquid actions (ADR-0229).</li>
+        <li>Where agents run and what they reach is the accepted agent-host risk in <a href="../../SECURITY.md#liquid-workspace-access--external-agent-edits">SECURITY.md</a> (ADR-0254).</li>
+      </ul>
     </div></section>
 
     <section id="sync" class="section"><h2>7. Local-first replicas, central sync and headless replicas</h2><div class="body">
@@ -202,15 +222,21 @@ Headless replica ┘</code></pre>
       </svg>
       <ul>
         <li>Accepted target (ADR-0223, ADR-0224): each device holds everything its person may access; a headless replica holds only the areas its Roles allow. M3 starts with complete replicas on a data model divided into areas.</li>
-        <li>An agent host runs by default under the account Meta-Harness is installed on, as in T3 Code, so on a person's laptop its agents reach what that account reaches, Liquid's files included; it has no replica of its own, and its agents use the person's Liquid through the Workspace CLI/API. A separate machine, VM, container or account the person sets up and links keeps them apart: such an agent host has a headless replica, which syncs through the Sync Server like every replica, and a later offline path through the device's Liquid is required (ADR-0228, ADR-0254, ADR-0255).</li>
-        <li>Every change is signed and checked against its signer's Role by the Sync Server; devices encrypt content per area (ADR-0228).</li>
+        <li>An agent host runs by default under the account Meta-Harness is installed on, as in T3 Code, so on a person's laptop its agents reach what that account reaches, Liquid's files included; it has no replica of its own, and its agents use the person's Liquid through the Workspace CLI/API. A separate machine, VM, container or account the person sets up and links keeps them apart, and a Mac project needs a Mac agent host; such an agent host has a headless replica, which syncs through the Sync Server like every replica, and a later offline path through the device's Liquid is required; the Sync Server verifies signed changes either way (ADR-0228, ADR-0254, ADR-0255).</li>
+        <li>Liquid accounts sign in with passkeys from M3; companies add single sign-on through OIDC or SAML, with SCIM provisioning (ADR-0224).</li>
+        <li>Each device holds its own key in the Secure Enclave or TPM and connects over TLS 1.3. Every change is signed, and from M3 the Sync Server accepts a change only if its signer's Role allows it; a refused change is visibly undone on its device (ADR-0224, ADR-0228).</li>
+        <li>Signed changes make History tamper-evident, and the Sync Server keeps an audit log that companies can export to their security monitoring.</li>
+        <li>Liquid runs both as Liquid Cloud, with a chosen region and customer-managed keys, and self-hosted.</li>
+        <li>Devices encrypt Workspace content per area from M3. Each area key is wrapped for every device and headless replica allowed in the area and, unless the Workspace chooses end-to-end encryption, for the Sync Server; choosing it later removes the server's copy. A company may run a compliance replica with its own key for search, legal hold and data-loss checks (ADR-0228).</li>
+        <li>A new device receives keys only after a signed-in device approves it or a recovery key restores access; area keys are also wrapped for that key, which the person or their company holds. A fault in key approval, rotation, revocation or recovery loses data, so each has dedicated tests. Liquid ships native apps only, with no web client.</li>
       </ul>
       <ul>
         <li>Every authorized M3 MVP client reads and writes a complete local Workspace replica; network loss never switches Liquid into a remote-only mode.</li>
         <li>Replicas connect to the central Sync Server, not directly to one another. The server persists and exchanges committed changes resumably.</li>
+        <li>Sync applies received actions through the same mutation pipeline. Sync credentials authorize Workspace exchange only, not Meta-Harness control. Interrupted or untrusted sync never disables access to the local replica.</li>
         <li>Authorized user devices sync the full plaintext Workspace. The Workspace is therefore the local confidentiality boundary, while Liquid still enforces resource-scoped action and API checks.</li>
         <li>Workspace admission and resource authorization remain separate. Resources keep stable identities, committed changes remain resource-addressed and sync is versioned so a later protocol can add a finite authorized-resource closure. Selective replication is not part of the MVP.</li>
-        <li>A headless replica is an optional normal replica without UI, on a server for Automations and schedules or on a separate agent host. It requires workspace-level opt-in because it introduces a separate execution boundary.</li>
+        <li>A headless replica is an optional normal replica without UI, on a server for Automations and schedules or on a separate agent host. It requires workspace-level opt-in because it introduces a separate execution boundary: it receives only Workspaces explicitly enabled for it, then enforces the same Roles and mutation pipeline as a UI replica.</li>
         <li>Agents and Automations on its host use its normal CLI/API, Roles and mutation pipeline even while user devices are offline.</li>
         <li>The Sync Server does not execute Apps or agents. It and a headless replica may be co-located in one hosted deployment while remaining separate logical services.</li>
         <li>Replicas merge with Automerge 3, which keeps both values of a concurrent edit to one field (ADR-0238).</li>
@@ -218,7 +244,7 @@ Headless replica ┘</code></pre>
     </div></section>
 
     <section id="agents" class="section"><h2>8. Agent experience</h2><div class="body">
-      <p class="muted">Planned (ADR-0239, ADR-0241): every conversation becomes a Chat, one-to-one or a group of people and agents, which may belong to a Page; an agent's work folder is a folder Source, and the steps below then start a Chat rather than a session (<a href="../design/mockups/liquid-app-concept.html">the app's structure</a>).</p>
+      <p class="muted">Planned (ADR-0239, ADR-0241): every conversation becomes a Chat, one-to-one or a group of people and agents, which may belong to a Page; an agent's work folder is a folder Source, chosen in the system dialog through the Flutter team's <code>file_selector</code>, and the steps below then start a Chat rather than a session (<a href="../design/mockups/liquid-app-concept.html">the app's structure</a>).</p>
       <ol>
         <li>A user or developer configures a harness in Liquid and gives its execution location a friendly name such as “My laptop” or “Liquid Cloud Server.”</li>
         <li>The user selects harness, that adapter's configuration and a location, then names the session by intent, such as “Refactor project X.” Flow Agent requires an explicit Flow from its global authority; other harnesses retain their documented selection model. Global-config management is a separate surface; infrastructure IDs and any device-local Runtime binding remain internal.</li>
@@ -230,8 +256,8 @@ Headless replica ┘</code></pre>
         <li>When a verified terminal checkpoint is available on another device, the user may continue it at a new execution location as a child Run. Liquid renders the resulting Conversation branch and rechecks destination authority rather than presenting a runtime transfer as the same live Run.</li>
       </ol>
       <p>Liquid may combine several Meta-Harness projections visually, but every live command returns to the owning instance and unreachable state is clearly offline/stale. A provisioned same-host stack may execute locally without Internet; remote sessions remain stale while unreachable. Portable continuation transfers no credential-store records/references, Roles, approvals or live process ownership, but its recorded content remains sensitive; disconnected continuations from one checkpoint appear as separate branches.</p>
-      <p>Accepted target (ADR-0233): a company can keep agents off its laptops, which then only attach to allowed agent hosts.</p>
-      <p>Accepted target (ADR-0230): a reply that cites Liquid content carries a reference, a Page or Block with a revision, never a copy. Liquid renders it from the person's replica with the Page's Block View, a breadcrumb, the revision and a link to the Block, or a placeholder without access; see the <a href="../design/mockups/liquid-look.html">approved mockup</a>. The live read-only embed comes first, the agent's marked edits once History has revision ids, editing in place later.</p>
+      <p>Accepted target (ADR-0233): a company can keep agents off its laptops, which then only attach to allowed agent hosts. It may limit where agent hosts run: the Sync Server then wraps no area keys and accepts no grants for other agent hosts, and Liquid follows the company's device-management policy, starting no local Meta-Harness. Agents installed outside Liquid are the device management's to block.</p>
+      <p>Accepted target (ADR-0230): a reply that cites Liquid content carries a reference, a Page or Block with a revision, “latest” or a History id, never a copy; the Workspace CLI/API returns a ready reference for every change, so any harness can cite it. Liquid renders it from the person's replica with the Page's Block View, a breadcrumb, the revision, which a menu changes, and “Open”, which opens the Page at the Block, or a placeholder without access. The live read-only embed comes first; the agent's edits, marked against the current state with who changed them on whose behalf, when, that History can revert them and a filter to the person's own changes, once History has revision ids; editing in place later.</p>
     </div></section>
 
     <section id="mobile" class="section"><h2>9. Responsive layout, mobile and widgets</h2><div class="body">

@@ -7,7 +7,7 @@ import 'keymap.dart';
 
 /// One key event as the key log writes it: kind, logical key and label, physical key,
 /// character, the keys held and the focused node, to find why some Liquid key shortcuts do
-/// nothing (PLAN.md). Labels, not debug names, so a release build reads the same.
+/// nothing. Labels, not debug names, so a release build reads the same.
 String describeKeyEvent(
   KeyEvent event, {
   required Set<LogicalKeyboardKey> pressed,

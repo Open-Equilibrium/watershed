@@ -20,7 +20,7 @@ Prefer an architectural simplification over a local micro-optimization. Never we
 
 ## Evidence convention
 
-Performance evidence uses a fixed, documented workload and records the environment, exact inputs and exclusions, raw observations and useful aggregates such as p50, p95, maximum and RSS growth. Values remain unadjusted; do not subtract estimated work or normalize away an observed cost. Compare like-for-like runs and keep enough history to identify trends.
+Performance evidence uses a fixed, documented workload and records the environment, exact inputs and exclusions, raw observations and useful aggregates such as p50, p95, maximum and RSS growth. Values remain unadjusted; do not subtract estimated work or normalize away an observed cost. Compare like-for-like runs. An evidence file keeps every workload definition but only the latest comparable record per workload, plus the record before a workload change; older records live in Git history, and a decided spike's evidence goes with the spike.
 
 CI may fail when the workload, lifecycle, schema, measurement integrity, report completeness or artifact retention is invalid. It must not compare timing, throughput or RSS observations with an estimated threshold. Command and test timeouts remain deadlock guards, not performance claims.
 
@@ -47,7 +47,7 @@ The [M1.1 limits matrix](flow-agent/benchmarks/M1_1_BUDGETS.md) owns every fixed
 
 ### M1.2 Executor evidence
 
-The [M1.2 startup evidence](flow-agent/benchmarks/M1_2_STARTUP_EVIDENCE.md) owns the fixed one-noop workload, measured interval and report contract. Native Linux and macOS hosts retain separate, unadjusted `executor_elapsed_ns` distributions through preparation, readiness, the one-shot Executor/Tool lifecycle and exact result/receipt validation, with mandatory own-file protection under the [accepted security contract](SECURITY.md#accepted-flow-agent-security-target). Never pool their observations or substitute one host's evidence for the other. Review avoidable probe, request, descriptor and process-start work without weakening readiness or protection; Custom Executor performance is administrator-owned. Historical container observations measure the legacy boundary, not replacement native evidence. Bounded waiting does not prove hostile-descendant cleanup.
+The [M1.2 startup evidence](flow-agent/benchmarks/M1_2_STARTUP_EVIDENCE.md) owns the fixed one-noop workload, measured interval and report contract. Native Linux and macOS hosts retain separate, unadjusted `executor_elapsed_ns` distributions through preparation, readiness, the one-shot Executor/Tool lifecycle and exact result/receipt validation, with mandatory own-file protection under the [accepted security contract](SECURITY.md#flow-agent-security-contract). Never pool their observations or substitute one host's evidence for the other. Review avoidable probe, request, descriptor and process-start work without weakening readiness or protection; Custom Executor performance is administrator-owned. Bounded waiting does not prove hostile-descendant cleanup.
 
 ## Meta-Harness
 
@@ -61,4 +61,4 @@ Local interaction should feel immediate, shared workspaces should remain respons
 
 The [client architecture](docs/concept/liquid-client-architecture.md) makes responsiveness structural: typing renders without waiting for Rust, disk or network, and Pages build only viewport Views. Its first workloads cover input-to-presented-frame latency while typing in a long Page, scrolling across many Views, paging a large Database View, applying a sync burst and memory returned after closing Pages, on each Liquid target in [`PLATFORMS.md`](PLATFORMS.md), including Linux Wayland sessions and Android. Next-frame typing is the design goal; it becomes a binding SLO only through that rule.
 
-The agent-surface slice retains fixed observational workloads for token streaming and long Trajectories in [AGENT_SURFACE_EVIDENCE.md](liquid/benchmarks/AGENT_SURFACE_EVIDENCE.md), the CRDT choice its typing, memory, sync and Role-check workloads in [CRDT_SPIKE_EVIDENCE.md](liquid/benchmarks/CRDT_SPIKE_EVIDENCE.md), and the Workspace core and local replica their typing, long-Page, Database and reopening workloads in [WORKSPACE_CORE_EVIDENCE.md](liquid/benchmarks/WORKSPACE_CORE_EVIDENCE.md).
+The agent-surface slice retains fixed observational workloads for token streaming and long Trajectories in [AGENT_SURFACE_EVIDENCE.md](liquid/benchmarks/AGENT_SURFACE_EVIDENCE.md) and the Workspace core and local replica their typing, long-Page, Database and reopening workloads in [WORKSPACE_CORE_EVIDENCE.md](liquid/benchmarks/WORKSPACE_CORE_EVIDENCE.md).

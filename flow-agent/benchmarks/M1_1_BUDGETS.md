@@ -80,7 +80,7 @@ The concrete Run writer inventories current stored usage and admits the complete
 
 ## Tool runner
 
-The rows below retain M1.1 direct-process evidence. TR-03–TR-05 observe real-process outcomes and elapsed ranges, not exact `CleanupDeadline` transition times or replacement protection. The replacement Executor's [`CleanupController` test using supplied times](../flow-agent-executor/src/tests.rs) covers its own lifecycle. Security guarantees remain canonical in [SECURITY.md](../../SECURITY.md#accepted-flow-agent-security-target).
+The rows below retain M1.1 direct-process evidence. TR-03–TR-05 observe real-process outcomes and elapsed ranges, not exact `CleanupDeadline` transition times or replacement protection. The replacement Executor's [`CleanupController` test using supplied times](../flow-agent-executor/src/tests.rs) covers its own lifecycle. Security guarantees remain canonical in [SECURITY.md](../../SECURITY.md#flow-agent-security-contract).
 
 Stream caps count raw bytes read from each pipe before UTF-8 classification.
 
@@ -145,25 +145,16 @@ Elapsed time covers exactly one real `verify_protected_aliases` call, including 
 
 The reference remains Ubuntu 24.04 x64 with the existing sampling, schema and observational timing/RSS rules. The call uses the verifier's existing Linux x86_64-or-test export; other production targets return an unavailable-workload error without creating a fixture.
 
-### Initial inventory observations
+### Inventory observations
 
-[CI run 34227029253](https://github.com/Open-Equilibrium/watershed/actions/runs/34227029253) retained the complete 16-workload report for `78d5ca66fabfb80d6ef89616e96ddb2aebeb638e`, before installed-image alias integration. The directory-only verifier then had the name `verify_protected_directory_aliases`; the fixture inputs above are unchanged. Each row contains 30 fresh-child samples after five warmups, on Rust 1.98.1, Ubuntu runner image `20260831.293.1`, four logical Intel Xeon Platinum 8573C CPUs and 16,765,378,560 bytes of memory.
-
-| Single-link files | p50 (ns) | p95 (ns) | Maximum (ns) | Maximum RSS growth (bytes) |
-|---|---:|---:|---:|---:|
-| 512 | 847,140 | 1,145,406 | 1,195,908 | 1,073,152 |
-| 16,384 | 25,619,586 | 26,682,329 | 26,850,333 | 1,118,208 |
-
-RSS includes preparation. These warm-cache observations establish neither a supported inventory maximum nor cold-cache/concurrent-admission performance; they do not prove native write protection.
-
-At `2b59f10`, [native Linux job 110523397292](https://github.com/Open-Equilibrium/watershed/actions/runs/36908028880/job/110523397292) retained artifact `11186626527`: all 16 workloads complete, with five warmups and 30 samples each, including successful RSS detection. The 498-record payload and recomputed aggregates agree. Rust 1.99.0, image `20260927.320.1`, four logical Intel Xeon 6973P-C CPUs and 16,765,374,464 bytes of memory produced these observations under the same inventory inputs:
+At `2b59f10`, [native Linux job 110523397292](https://github.com/Open-Equilibrium/watershed/actions/runs/36908028880/job/110523397292) retained artifact `11186626527`: all 16 workloads complete, with five warmups and 30 samples each, including successful RSS detection. The 498-record payload and recomputed aggregates agree. Rust 1.99.0, image `20260927.320.1`, four logical Intel Xeon 6973P-C CPUs and 16,765,374,464 bytes of memory produced these observations under the inventory inputs above:
 
 | Single-link files | p50 (ns) | p95 (ns) | Maximum (ns) | Maximum RSS growth (bytes) |
 |---|---:|---:|---:|---:|
 | 512 | 715,343 | 987,316 | 1,072,898 | 1,355,776 |
 | 16,384 | 25,214,552 | 26,060,090 | 26,132,819 | 1,396,736 |
 
-Toolchain, hardware and image changes prevent attributing differences solely to code. [TESTING.md](../../TESTING.md#native-verification-status) owns the tested-tree binding and full native acceptance.
+RSS includes preparation. These warm-cache observations establish neither a supported inventory maximum nor cold-cache/concurrent-admission performance; they do not prove native write protection. [TESTING.md](../../TESTING.md#native-verification-status) owns the tested-tree binding and full native acceptance.
 
 ## Completion criterion
 

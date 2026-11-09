@@ -351,7 +351,7 @@ int? stepAt(List<BridgeRecord> records, double at, {required bool equalWidth}) {
   return nearest;
 }
 
-/// What the Trajectory's filters let through (approved navigation mockup): kinds of step, tool
+/// What the Trajectory's filters let through: kinds of step, tool
 /// names, failed steps only and text; empty lets everything through.
 @immutable
 class StepFilter {

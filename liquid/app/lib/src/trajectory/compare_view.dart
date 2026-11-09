@@ -10,7 +10,7 @@ import 'step_parts.dart';
 import 'trajectory_model.dart';
 import 'tree_view.dart';
 
-/// Two branches side by side (approved mockup 3): headline metrics, the shared steps and the
+/// Two branches side by side: headline metrics, the shared steps and the
 /// aligned rest, with steps only one branch has marked.
 class CompareView extends StatelessWidget {
   const CompareView({

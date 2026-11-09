@@ -15,7 +15,7 @@ import 'sidebar.dart';
 const revertWaitKey = 'watershed.revert';
 
 /// Run status, tokens, cost and extension status entries. A notification takes the status
-/// slot (approved session-flow mockup); a click lists the latest ones.
+/// slot; a click lists the latest ones.
 class StatusBar extends StatefulWidget {
   const StatusBar({super.key, required this.state, required this.keys});
 
@@ -279,7 +279,7 @@ class _NoticeListState extends State<_NoticeList> {
                           shrinkWrap: true,
                           children: [
                             for (final notice in notices) ...[
-                              // A click or ⏎ shows the whole text (approved mockup).
+                              // A click or ⏎ shows the whole text.
                               Shortcuts(
                                 shortcuts: activateKeys,
                                 child: InkWell(

@@ -18,7 +18,7 @@ enum ThemeChoice {
   final ThemeMode mode;
 }
 
-/// How large Liquid draws its text and rows (approved look mockup): Default is the base size,
+/// How large Liquid draws its text and rows: Default is the base size,
 /// Compact and Large scale text and rows together.
 enum TextSize {
   compact(13 / 14),
@@ -120,7 +120,7 @@ class UiScale extends StatelessWidget {
   }
 }
 
-/// Settings → Appearance (approved look mockup): the theme and the text size, applied at once.
+/// Settings → Appearance: the theme and the text size, applied at once.
 class AppearancePane extends StatefulWidget {
   const AppearancePane({super.key, required this.appearance});
 

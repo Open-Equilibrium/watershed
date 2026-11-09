@@ -1,5 +1,5 @@
 //! Fixed observational workloads for ADR-0238 (PERFORMANCE.md: observations, no thresholds).
-//! Run with `cargo run --release` and copy the table into the evidence file.
+//! Run with `cargo run --release`; ADR-0238's recorded observations are in Git history.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};

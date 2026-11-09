@@ -56,7 +56,7 @@ class SessionTitle extends StatelessWidget {
 final _noPage = ValueNotifier<OpenPage?>(null);
 
 /// The Explorer above the agent sessions with project, harness and device per session, and
-/// Settings in its footer (approved look and Pages mockups).
+/// Settings in its footer (approved Pages mockups).
 class Sidebar extends StatelessWidget {
   const Sidebar({
     super.key,
@@ -217,7 +217,7 @@ class Sidebar extends StatelessWidget {
                     ),
                     Padding(
                       padding: const EdgeInsets.only(left: 15),
-                      // The checkout's branch, live (approved Git mockups).
+                      // The checkout's branch, live.
                       child: ValueListenableBuilder(
                         valueListenable: state.git.status,
                         builder: (context, git, _) => Text(

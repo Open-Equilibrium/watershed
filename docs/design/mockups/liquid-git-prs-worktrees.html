@@ -1,49 +1,9 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Liquid: Git pull request and worktree mockups</title>
-<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="mockup.css">
 <style>
-.chrome{--foreground:var(--ws-text);--muted-foreground:var(--ws-text-muted);--muted:var(--ws-subtle);--border:var(--ws-border-strong);--secondary:var(--ws-hover);--radius:8px;background:var(--ws-canvas);padding:24px}
-body{margin:0;font-family:var(--ws-font-ui);color:var(--foreground)}
-.page{display:flex;flex-direction:column;gap:28px;max-width:1400px}
-.toolbar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;font-size:13px;color:var(--muted-foreground)}
-.toolbar>div{display:flex;gap:8px;align-items:center}
-.seg{display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden}
-.seg button{all:unset;cursor:pointer;padding:4px 10px;font-size:12.5px;color:var(--muted-foreground)}
-.seg button.on{background:var(--secondary);color:var(--foreground)}
-h1{margin:0 0 6px;font-size:var(--ws-fs-h1);line-height:var(--ws-lh-h1)}
-h3.sec{margin:0 0 4px;font-size:15px;font-weight:600}
-p.sub{margin:0 0 10px;font-size:13px;color:var(--muted-foreground);line-height:1.5;max-width:900px}
-.stage{padding:16px;border-radius:8px;background:var(--muted);overflow:hidden}
-.scaler{position:relative}
-.scaler>.win{position:absolute;top:0;left:0;transform-origin:0 0}
-.win{font-family:var(--ws-font-ui);color:var(--ws-text);font-size:var(--ws-fs-ui);line-height:var(--ws-lh-ui);-webkit-font-smoothing:antialiased;background:var(--ws-canvas);border-radius:var(--ws-radius-xl);overflow:hidden;box-shadow:var(--ws-shadow)}
-.win code,.win kbd,.mono{font-family:var(--ws-font-mono)}
-.tbar{height:38px;background:var(--ws-titlebar);display:flex;align-items:center;padding:0 14px}
-.lights{display:flex;gap:8px}.lights i{width:12px;height:12px;border-radius:50%;display:block}
-.body{display:flex;height:var(--h);position:relative}
-.av{width:22px;height:22px;border-radius:4px;background:var(--ws-accent);color:var(--ws-on-accent);display:grid;place-items:center;font-size:12px;font-weight:600;flex:none}
-.srch{height:var(--ws-row-side);display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:var(--ws-text-muted)}
-.srch span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
-.ib{height:28px;min-width:28px;padding:0 6px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;gap:6px;color:var(--ws-text-muted);font-size:13px;box-sizing:border-box}
-kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor;opacity:.6;line-height:16px;font-weight:400}
-.btn{height:28px;padding:0 10px;border-radius:6px;background:var(--ws-canvas);box-shadow:inset 0 0 0 1px var(--ws-border-strong);color:var(--ws-text);font-size:13px;display:inline-flex;align-items:center;gap:8px;font-weight:500;white-space:nowrap}
-.btn.pri{background:var(--ws-accent);color:var(--ws-on-accent);box-shadow:none}
-.col{width:var(--ws-width-reading);margin:0 auto;display:flex;flex-direction:column;gap:14px}
-.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;color:var(--ws-text-muted);font-size:13px;white-space:nowrap;background:var(--ws-subtle)}
-.card{border-radius:8px;box-shadow:0 0 0 1px var(--ws-border);padding:12px 14px;background:var(--ws-canvas)}
-.cap{font-size:12px;line-height:18px;color:var(--ws-text-faint)}
-.pop{position:absolute;z-index:3;border-radius:8px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:6px;display:flex;flex-direction:column;gap:1px;font-size:14px}
-.pop .lbl{font-size:12px;color:var(--ws-text-faint);padding:6px 8px 2px}
-.pop .it{display:flex;gap:10px;align-items:center;min-height:32px;padding:0 8px;border-radius:6px;white-space:nowrap;color:var(--ws-text)}
-.pop .it.on{background:var(--ws-hover)}
-.pop .it .d{color:var(--ws-text-faint);font-size:12px}
-.pop .it .r{margin-left:auto;color:var(--ws-text-faint);font-size:12px}
-.pop .it .tx{display:flex;flex-direction:column;line-height:18px;padding:4px 0}
-.pop hr{border:0;height:1px;background:var(--ws-border);margin:4px 2px}
-.scrim{position:absolute;inset:0;background:rgba(15,15,15,.24);z-index:2}
 .sp{flex:1}
-.av{width:22px;height:22px;border-radius:50%;flex:none;display:inline-grid;place-items:center;font-size:11px;font-weight:600;color:#fff}.av.me{background:var(--ws-accent)}
+.av{width:22px;height:22px;border-radius:50%;flex:none;display:inline-grid;place-items:center;font-size:11px;font-weight:600;color:var(--ws-on-accent)}.av.me{background:var(--ws-accent)}
 .av.ag{background:var(--ws-subtle);color:var(--ws-accent);box-shadow:inset 0 0 0 1px var(--ws-border-strong)}
 .av.grp{background:var(--ws-hover);color:var(--ws-text-muted)}
 .dot{width:7px;height:7px;border-radius:50%;display:inline-block}
@@ -146,10 +106,10 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
 .q{border-radius:var(--ws-radius-lg);box-shadow:0 0 0 1px var(--ws-border);padding:var(--ws-space-4) var(--ws-space-5);font-size:var(--ws-fs-compact);line-height:var(--ws-lh-compact)}
 .q+.q{margin-top:var(--ws-space-4)}.q h4{margin:0 0 var(--ws-space-1);font-size:var(--ws-fs-ui)}
 .q p{margin:0 0 var(--ws-space-3);color:var(--ws-text-muted)}.q ul{margin:0 0 var(--ws-space-3);padding-left:18px}.q li{margin-bottom:var(--ws-space-1)}
-.qs{font-size:var(--ws-fs-compact);line-height:var(--ws-lh-compact);margin:0;padding-left:18px}
+.qs{font-size:var(--ws-fs-compact);line-height:var(--ws-lh-compact);margin:0;padding-left:18px;max-width:none}.qs li{margin:0}
 @media(max-width:560px){.chrome{padding:var(--ws-space-4)}.rows>div{grid-template-columns:1fr}.nrow{flex-direction:column;gap:0}.nrow .k{width:auto}}
-.modal{position:absolute;left:var(--ws-space-7);right:var(--ws-space-7);top:var(--ws-space-7);bottom:var(--ws-space-7);z-index:3;background:var(--ws-canvas);border-radius:var(--ws-radius-xl);box-shadow:var(--ws-shadow);display:flex;flex-direction:column;overflow:hidden}
-.mh{height:48px;flex:none;display:flex;align-items:center;padding:0 var(--ws-space-4) 0 var(--ws-space-6);font-size:15px;font-weight:600;box-shadow:inset 0 -1px 0 var(--ws-border)}.mh .ib{margin-left:auto}
+.modal{position:absolute;left:var(--ws-space-7);right:var(--ws-space-7);top:var(--ws-space-7);bottom:var(--ws-space-7);transform:none;z-index:3;background:var(--ws-canvas);border-radius:var(--ws-radius-xl);box-shadow:var(--ws-shadow);display:flex;flex-direction:column;overflow:hidden}
+.mh{height:48px;flex:none;display:flex;align-items:center;gap:normal;padding:0 var(--ws-space-4) 0 var(--ws-space-6);font-size:15px;font-weight:600;box-shadow:inset 0 -1px 0 var(--ws-border)}.mh .ib{margin-left:auto}
 .snav{width:180px;flex:none;padding:var(--ws-space-5) var(--ws-space-3);display:flex;flex-direction:column;gap:1px;box-shadow:inset -1px 0 0 var(--ws-border)}
 .snav .h{font-size:12px;color:var(--ws-text-faint);padding:10px 10px 4px}
 .snav .it{height:var(--ws-row-nav);display:flex;align-items:center;padding:0 10px;border-radius:6px;color:var(--ws-text-muted);font-size:14px}.snav .it.on{background:var(--ws-selected);color:var(--ws-text)}
@@ -166,7 +126,7 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
   </div>
   <section>
     <h1>Git pull requests and worktrees: mockups</h1>
-    <p class="sub">The next step of the <a href="../../../PLAN.md#liquid-git-integration--next-slice">Liquid Git slice</a>, following the merged branch, commit, push and pull work. These drawings extend <a href="liquid-git-branches.html">the approved branch flow</a> §10 inside <a href="liquid-app-concept.html">the current app structure</a> (ADR-0241): rail, Pages and Sources, Chats, and tabs. They use <a href="liquid-chats.html">the agent Chat</a> and the current Workspace components at Notion's scale.</p>
+    <p class="sub">The next step of the <a href="../../../PLAN.md#liquid-git-integration--next-slice">Liquid Git slice</a>, following the merged branch, commit, push and pull work. These drawings extend the shipped <a href="../../concept/V-Spec_MetaHarness.html#git-integration">branch flow</a> inside <a href="liquid-app-concept.html">the current app structure</a> (ADR-0241): rail, Pages and Sources, Chats, and tabs. They use <a href="liquid-chats.html">the agent Chat</a> and the current Workspace components at Notion's scale.</p>
     <p class="sub">Decided bounds come from <a href="../../adr/ADR-LOG.md">ADR-0011/0190/0191/0220/0234</a> and <a href="../../../SECURITY.md#mvp-vcs-boundary">SECURITY.md</a>. Layout follows <a href="liquid-app-concept.html">the app frame</a>, <a href="liquid-chats.html">Chats</a>, <a href="liquid-workspace-pages.html">Workspace Pages</a>, <a href="liquid-workspace-blocks.html">Blocks</a>, <a href="liquid-workspace-history.html">History</a>, <a href="liquid-workspace-text-sections.html">Sections</a> and <a href="../guidelines.md">the guidelines</a>. Git keeps “branch”; a path through the conversation is a <a href="../../../GLOSSARY.md">session branch</a>. <b>Approved 2026-11-03</b>, sections 1–12 as drawn; see Decisions. Paths, titles, times and PR numbers are examples. State cards and tables are review annotations; every screen is drawn in the current app frame.</p>
   </section>
   <section>
@@ -272,7 +232,7 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
       <div class="card"><b>No permission or repository not found</b><span>gh cannot access acme/acme-api on MacBook. Check the host's login and repository access, then check again.</span><span class="btn">Check again</span></div>
       <div class="card"><b>Offline, rate limited or host unavailable</b><span>Could not read GitHub status. The last successful result stays labelled with its time. Retry is explicit.</span><span class="btn">Refresh</span></div>
     </div>
-    <p class="sub" style="margin-top:12px">Errors give a plain first sentence, a safe command message and the completed steps. Credentials in remote URLs or command output must not appear. The T3 Code source says “GitHub is not authenticated. Run `gh auth login` (or set GH_TOKEN) and retry.” Liquid keeps only the gh login guidance; it does not expose a token setup flow. No Git repository or unavailable Git uses the <a href="liquid-git-branches.html">approved states</a>.</p>
+    <p class="sub" style="margin-top:12px">Errors give a plain first sentence, a safe command message and the completed steps. Credentials in remote URLs or command output must not appear. The T3 Code source says “GitHub is not authenticated. Run `gh auth login` (or set GH_TOKEN) and retry.” Liquid keeps only the gh login guidance; it does not expose a token setup flow. No Git repository or unavailable Git keeps the shipped states.</p>
   </section>
   <section>
     <h3 class="sec">6 · Open a branch in a new worktree</h3>

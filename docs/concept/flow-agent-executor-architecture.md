@@ -1,6 +1,6 @@
 # Flow Agent execution and security architecture
 
-Diagrams of the boundaries in the normative [security contract](../../SECURITY.md#accepted-flow-agent-security-target), which owns guarantees and responsibilities; [PROTOCOL.md](../../PROTOCOL.md#m12-executor-protocol) owns the Executor wire and [TESTING.md](../../TESTING.md#native-verification-status) native results. The cases are representative authority paths, not an exploit enumeration.
+Diagrams of the boundaries in the normative [security contract](../../SECURITY.md#flow-agent-security-contract), which owns guarantees and responsibilities; [PROTOCOL.md](../../PROTOCOL.md#m12-executor-protocol) owns the Executor wire and [TESTING.md](../../TESTING.md#native-verification-status) native results. The cases are representative authority paths, not an exploit enumeration.
 
 ## 1. Ordinary or invalid request
 

@@ -172,7 +172,7 @@ class ShortcutController extends ValueNotifier<ShortcutSettings> {
       });
 
   /// `settings` without the Liquid key: a chosen Liquid key profile gives way to the profile
-  /// before it (approved mockup), other settings only turn the key off.
+  /// before it, other settings only turn the key off.
   ShortcutSettings _withoutLiquidKey(ShortcutSettings settings) {
     final before = _settled.profile;
     final back =
@@ -205,7 +205,7 @@ class ShortcutController extends ValueNotifier<ShortcutSettings> {
   }
 
   /// Why the Liquid key could not be turned on; Settings show it below the profile until the
-  /// next choice, since they cover the status bar (approved mockup).
+  /// next choice, since they cover the status bar.
   final liquidKeyProblem = ValueNotifier<String?>(null);
 
   @override

@@ -19,7 +19,7 @@ const inspectorHeight = 232.0;
 enum InspectorTab { summary, context, usage, raw }
 
 /// The selected step's details below its row: a summary, the context and usage of the request
-/// that read it (approved look mockup), or the raw entry.
+/// that read it, or the raw entry.
 class Inspector extends StatelessWidget {
   const Inspector({
     super.key,
@@ -462,7 +462,7 @@ class _MessageSummary extends StatelessWidget {
       : '${names.take(3).join(', ')}, ${names.length - 3} more';
 }
 
-/// The request that read a step (approved look mockup): its size against the window, its parts
+/// The request that read a step: its size against the window, its parts
 /// with the step's own hatched, the largest parts and then every part.
 class _ContextTab extends StatelessWidget {
   const _ContextTab({
@@ -787,7 +787,7 @@ class _UsageTab extends StatelessWidget {
   }
 }
 
-/// Every part of what the model saw for one request (approved session-flow mockup).
+/// Every part of what the model saw for one request.
 class _ContextList extends StatelessWidget {
   const _ContextList({required this.record, required this.detail, this.unread});
 

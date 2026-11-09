@@ -8,7 +8,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'read_delay.dart';
 
-/// A selection that narrows as the user types; arrows move and Enter picks (approved mockup).
+/// A selection that narrows as the user types; arrows move and Enter picks.
 class _OptionList extends StatefulWidget {
   const _OptionList({
     required this.options,
@@ -217,7 +217,7 @@ class _QuestionCardState extends State<QuestionCard> with ReadDelay {
           SecondaryButton(label: 'No', onPressed: () => answerConfirm(false)),
         ],
       ),
-      // An editor fills the card: Enter adds a line, ⌘Enter answers (approved mockup).
+      // An editor fills the card: Enter adds a line, ⌘Enter answers.
       BridgeQuestionKind.editor => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
