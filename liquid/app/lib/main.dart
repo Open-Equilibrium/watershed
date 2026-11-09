@@ -39,7 +39,7 @@ Future<void> main() async {
   );
   // Without a session the Workspace still opens; the reason stays in the terminal.
   if (launch.problem case final problem?) stderr.writeln('Liquid: $problem');
-  // Beside the settings, in the data folder agents are kept out of (ADR-0229).
+  // Beside the settings, in Liquid's data folder.
   final (workspace, workspaceProblem) = await openWorkspace(
     '$settings/Workspace',
     show: launch.state == null,

@@ -7,11 +7,11 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Platform** — Watershed as a whole: one AGPL/free-software AI-native work platform for reusable, measurable and reversible agent workflows, composed of three independently usable layers.
 - **Platform layer** — One independently usable part of the Watershed platform. There are three: execution, control and workspace/action.
 - **Execution layer** — Flow Agent's role: running repeatable, auditable agent workflows.
-- **Control layer** — Meta-Harness's role: controlling, observing, measuring and governing many agents.
+- **Control layer** — Meta-Harness's role: orchestrating, observing and measuring agents of any harness across linked hosts, leaving their governance to each harness.
 - **Workspace/action layer** — Liquid's role: human/agent workspace co-editing with reversible action history.
 - **Agent workflow** — A structured unit of AI-agent work that can be run, observed, measured and improved (in Flow Agent, realized as a Flow).
 - **Reversible agent action** — An attributed workspace mutation that can be inspected and reverted (see Action, Workspace action history).
-- **Wedge** — The first narrow adoption path used to validate and grow the platform. Flow Agent is the developer/open-source execution wedge, Meta-Harness the team/control/governance wedge, Liquid the long-term workspace/action wedge.
+- **Wedge** — The first narrow adoption path used to validate and grow the platform. Flow Agent is the developer/open-source execution wedge, Meta-Harness the orchestration wedge, Liquid the long-term workspace/action wedge.
 - **AGPL/free-software posture** — The project's commitment to transparent, inspectable, self-hostable software under the repository's `AGPL-3.0-only` license; not a proprietary/open-core monetization stance.
 - **Offline after provisioning** — The state in which installed Watershed binaries, approved model/runtime artifacts, required Global Flow configuration, one applicable Runtime binding and local-runtime readiness are already present, so the core local Flow, control and Workspace paths operate with network interfaces disabled. Requested remote-only actions fail visibly when unavailable; sync reports offline/stale state and waits resumably without blocking local work.
 - **Topic branch** — Short-lived Git branch for one logical change; can span multiple sessions and is PR'd back to `main`.
@@ -156,12 +156,13 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Sync Server** — Central service in the replica star topology. It stores and exchanges committed Workspace changes resumably; it does not execute App Blocks or control agents.
 - **Harness handoff** — Continuing a conversation in another harness as a new session that receives the earlier conversation as bounded text, without native tool or reasoning state (ADR-0231).
 - **Area** — A part of a Workspace that Roles, replication and encryption treat as one unit. Its area key is wrapped for every device and agent host allowed in it (ADR-0224, ADR-0228).
-- **Agent host** — Where Meta-Harness runs agents with its own Liquid replica, which holds only the areas the agent Roles allow once selective replication follows the complete M3 replicas: a machine of its own, or on a person's device a sandbox profile or separate operating-system account (ADR-0223, ADR-0229).
+- **Agent host** — Where Meta-Harness runs agents: by default the account it is installed on, or a VM, container, other account or computer the person sets up and links; a host apart from the person's Liquid has its own Liquid replica, which holds only the areas the agent Roles allow once selective replication follows the complete M3 replicas (ADR-0223, ADR-0254).
+- **Linked host** — Another Meta-Harness host the person paired with this one over the authenticated remote connection, so agents on either start and steer threads on the other (ADR-0253).
+- **Subagent** — A thread an agent starts through Meta-Harness's orchestration tools, in any harness, with any model and on a linked host, which reports back to it as messages; its authority never exceeds its parent's grant (ADR-0253).
 - **Grant** — What a person signs to let an agent act for them in a Workspace: an area, actions and an expiry, never more than that person may do; revoking it makes the Sync Server refuse the agent's changes (ADR-0223).
 - **Agent-sessions area** — The area where Meta-Harness mirrors agent session records at turn boundaries, so another of the person's hosts can continue a session (ADR-0229).
 - **Replay-safe** — A tool that may run again after a crash without a second effect, such as pi's own reading tools or a Flow Agent Tool declared so; other tools report "interrupted" instead (ADR-0229).
 - **Checkpoint ref** — A Git ref under Meta-Harness's own namespace, `refs/watershed/checkpoints/<session>/<turn>/<start|end>`, that points at a commit of the agent project's files at a turn's start or end, to show the turn's changes and to revert the files to it (ADR-0220, ADR-0234).
-- **Team agent** — A planned agent whose grant comes from a Role instead of one person; only people who hold that grant's rights themselves may steer it (ADR-0232).
 - **Context track** — The Trajectory's column that draws each step's context against the model's window: exact at each request's prompt tokens, estimated between them, with pi's compaction point.
 - **Compliance replica** — A replica a company runs with its own key for search, legal hold and data-loss checks (ADR-0228).
 - **Recovery key** — The second way to regain a Workspace's keys when no signed-in device can approve a new one. Area keys are also wrapped for it, and the person or their company holds it (ADR-0228).
