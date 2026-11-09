@@ -414,11 +414,17 @@ impl WorkingTree {
             .resolve("@{upstream}^{commit}")
             .await?
             .ok_or_else(|| DiffError::Git("The branch has no resolvable upstream.".to_owned()))?;
-        if let (Some(head), Some(tree)) = (
-            self.checkpointed("HEAD").await?,
+        // Git writes what the upstream changed since the branches parted, so commits only
+        // this branch has change nothing.
+        let base = git(&self.root, &[], &["merge-base", "HEAD", &upstream])
+            .await
+            .ok();
+        let base = base.as_deref().map_or("HEAD", str::trim);
+        if let (Some(base), Some(tree)) = (
+            self.checkpointed(base).await?,
             self.checkpointed(&upstream).await?,
         ) {
-            let changes = self.changes(&head, &tree, Whitespace::Shown).await?;
+            let changes = self.changes(&base, &tree, Whitespace::Shown).await?;
             let ignored = self.ignored_in_the_way(&changes, &[]).await?;
             if !ignored.is_empty() {
                 return Err(DiffError::WouldOverwrite(ignored.into_iter().collect()));

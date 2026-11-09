@@ -176,6 +176,27 @@ fn pull_fast_forwards_and_refuses_divergence_and_overwriting_changes() {
 }
 
 #[test]
+fn pull_ignores_an_ignored_file_the_branch_stopped_tracking_ahead_of_its_upstream() {
+    run(async {
+        let remote = Remote::new("pull-ahead-untracked");
+        Remote::commit(&remote.repo, ".env");
+        remote.repo.git(&["push", "origin", "main"]);
+        remote.repo.git(&["rm", "-q", "--cached", ".env"]);
+        remote.repo.git(&["commit", "-qm", "stop tracking .env"]);
+        remote.repo.write(".git/info/exclude", ".env\n");
+        let before = remote.repo.git(&["rev-parse", "HEAD"]);
+
+        let pulled = Checkpoints::new(remote.repo.path()).pull().await;
+
+        assert!(
+            matches!(pulled, Ok(ref transfer) if transfer.behind == 0),
+            "{pulled:?}"
+        );
+        assert_eq!(remote.repo.git(&["rev-parse", "HEAD"]), before);
+    });
+}
+
+#[test]
 fn pull_refuses_an_upstream_omitted_by_fetch_before_merging() {
     use std::os::unix::fs::PermissionsExt;
     run(async {
