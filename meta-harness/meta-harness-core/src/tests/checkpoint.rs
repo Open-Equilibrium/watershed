@@ -584,6 +584,40 @@ fn a_project_outside_git_says_so_instead_of_showing_no_changes() {
 }
 
 #[test]
+fn outside_git_no_session_is_deleted_while_an_agent_runs_in_the_folder() {
+    run(async {
+        let dir = std::env::temp_dir().join(format!(
+            "watershed-checkpoint-no-git-delete-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("directory");
+        let file = dir.join("s1.jsonl");
+        std::fs::write(&file, "{}\n").expect("session file");
+        let mine = Checkpoints::new(&dir);
+        let other = Checkpoints::new(&dir);
+        let theirs = |phase| Checkpoint {
+            session: "s2".to_owned(),
+            turn: "u1".to_owned(),
+            phase,
+        };
+        assert!(matches!(
+            other.capture(&theirs(Phase::Start)).await,
+            Err(DiffError::NotARepository)
+        ));
+
+        assert!(matches!(
+            mine.delete_session("s1", &file).await,
+            Err(DiffError::AgentRunning(running)) if running == ["s2"]
+        ));
+        assert!(file.exists(), "kept");
+        let _ = other.capture(&theirs(Phase::End)).await;
+        mine.delete_session("s1", &file).await.expect("deleted");
+        assert!(!file.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    });
+}
+
+#[test]
 fn a_git_that_cannot_read_the_project_is_reported_instead_of_outside_git() {
     run(async {
         let repo = Repo::new("broken-config");

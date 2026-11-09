@@ -502,11 +502,14 @@ impl Checkpoints {
     }
 
     /// Deletes the session `session` stored in `file` with its checkpoints first. While an
-    /// agent runs in any worktree of the repository it is refused, so no turn of it starts
-    /// meanwhile; a turn that is ending gets a moment to end. Git frees the checkpoints' space at
-    /// its next cleanup; outside Git only the file goes.
+    /// agent runs in any worktree of the repository, or outside Git in the folder, it is refused,
+    /// so no turn of it starts meanwhile; a turn that is ending gets a moment to end. Git frees
+    /// the checkpoints' space at its next cleanup; outside Git only the file goes.
     pub async fn delete_session(&self, session: &str, file: &Path) -> Result<(), DiffError> {
         valid_id(session)?;
+        // Turns outside Git hold the folder's guard, which Initialize Git takes too, so it is
+        // held before the repository is looked up and until the file is gone.
+        let _folder = Checkout::folder(&self.dir)?.alone().await?;
         let tree = match self.tree().await {
             Ok(tree) => Some(tree),
             Err(DiffError::NotARepository) => None,
