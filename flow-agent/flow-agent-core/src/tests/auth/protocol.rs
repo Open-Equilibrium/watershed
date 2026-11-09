@@ -1,7 +1,7 @@
 use super::{jwt_with_account, token_body, token_body_with_id};
 use crate::runtime::{
     auth::{
-        DevicePoll, build_authorize_url, epoch_milliseconds, next_poll_interval,
+        DevicePoll, OAuthCallback, build_authorize_url, epoch_milliseconds, next_poll_interval,
         parse_device_authorization_body, parse_device_poll_body, parse_oauth_callback,
         parse_token_body, percent_encode, random_url_token, read_loopback_callback,
         read_loopback_callback_until, write_loopback_response,
@@ -20,7 +20,11 @@ fn oauth_callback_accepts_encoded_fields_and_rejects_ambiguous_requests() {
     assert_eq!(
         parse_oauth_callback("ignored=x&state=s%2F1&code=a+b%2Fc", "s/1")
             .expect("encoded callback"),
-        "a b/c"
+        OAuthCallback::Code("a b/c".to_owned())
+    );
+    assert_eq!(
+        parse_oauth_callback("state=s&error=access_denied", "s").expect("matching denial"),
+        OAuthCallback::Denied
     );
 
     for query in [
@@ -34,6 +38,10 @@ fn oauth_callback_accepts_encoded_fields_and_rejects_ambiguous_requests() {
         "code=%GG&state=s",
         "code=%FF&state=s",
         "code=%00&state=s",
+        "error=access_denied&state=wrong",
+        "error=&state=s",
+        "error=a&error=b&state=s",
+        "code=c&error=access_denied&state=s",
     ] {
         assert!(
             parse_oauth_callback(query, "s").is_err(),
@@ -142,7 +150,7 @@ fn oauth_authorize_and_loopback_protocol_are_canonical() {
     let (mut stream, _) = listener.accept().expect("callback accepts");
     assert_eq!(
         read_loopback_callback(&mut stream, "s").expect("callback parses"),
-        "c"
+        OAuthCallback::Code("c".to_owned())
     );
     write_loopback_response(&mut stream, "200 OK", "complete").expect("response writes");
     drop(stream);
@@ -152,7 +160,7 @@ fn oauth_authorize_and_loopback_protocol_are_canonical() {
     assert_eq!(
         parse_oauth_callback("state=s%2f1&code=c", "s/1")
             .expect("lowercase percent encoding parses"),
-        "c"
+        OAuthCallback::Code("c".to_owned())
     );
 }
 
@@ -196,7 +204,7 @@ fn oauth_loopback_waits_for_a_callback_on_an_inherited_nonblocking_stream() {
             Duration::from_secs(1),
         )
         .expect("callback waits for request bytes"),
-        "c"
+        OAuthCallback::Code("c".to_owned())
     );
     client.join().expect("callback client completes");
 }

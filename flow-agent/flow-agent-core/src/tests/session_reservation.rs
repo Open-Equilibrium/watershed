@@ -227,6 +227,29 @@ fn reservation_collision_preserves_existing_session_log() {
 }
 
 #[test]
+fn reservation_skips_a_marker_retained_after_its_availability_snapshot() {
+    let workspace = empty_workspace("reservation-retained-marker");
+    let anchored = AnchoredWorkspace::open(&workspace).expect("workspace opens");
+    let dirs = ensure_runtime_dirs(&workspace).expect("runtime dirs");
+    let marker = dirs.sessions.file("marker001.lock");
+    let retained = marker.path.clone();
+    set_candidate_pre_lease_observer_for_test(move || {
+        // A released owner leaves its regular marker in place.
+        open_or_create_anchored_session_marker(&marker).expect("concurrent marker created");
+    });
+
+    let candidate =
+        reserve_unique_session_candidate_with_anchored_workspace(&anchored, "marker001")
+            .expect("reservation skips the occupied base");
+    assert_eq!(candidate.session_id, "marker001-2");
+    materialize_session_candidate(&anchored, candidate)
+        .expect("the next suffix materializes")
+        .release_lock()
+        .expect("reservation releases");
+    assert!(retained.is_file(), "the retained marker is not changed");
+}
+
+#[test]
 fn reserved_candidate_rejects_materialization_in_another_workspace() {
     let reserved_workspace = empty_workspace("reservation-bound-workspace-a");
     let materialized_workspace = empty_workspace("reservation-bound-workspace-b");

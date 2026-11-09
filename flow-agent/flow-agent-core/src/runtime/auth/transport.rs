@@ -180,11 +180,41 @@ pub(crate) async fn send_auth_request_async(
     maximum: usize,
     deadlines: HttpDeadlines,
 ) -> Result<Vec<u8>, RuntimeError> {
-    let response = await_deadline(deadlines.header, request.send())
+    let response = auth_response_head(request, deadlines).await?;
+    read_auth_response(response, maximum, deadlines.read).await
+}
+
+/// OpenAI device polling reports a pending authorization as HTTP 403 or 404.
+pub(crate) fn post_device_poll_with_deadlines(
+    endpoint: &str,
+    body: &serde_json::Value,
+    maximum: usize,
+    deadlines: HttpDeadlines,
+) -> Result<Option<Vec<u8>>, RuntimeError> {
+    let client = build_http_client(deadlines).map_err(|_| auth_protocol())?;
+    let request = client.post(endpoint).json(body);
+    block_on_network(async {
+        let response = auth_response_head(request, deadlines).await?;
+        if matches!(
+            response.status(),
+            reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::NOT_FOUND
+        ) {
+            return Ok(None);
+        }
+        read_auth_response(response, maximum, deadlines.read)
+            .await
+            .map(Some)
+    })?
+}
+
+async fn auth_response_head(
+    request: reqwest::RequestBuilder,
+    deadlines: HttpDeadlines,
+) -> Result<reqwest::Response, RuntimeError> {
+    await_deadline(deadlines.header, request.send())
         .await
         .map_err(|_| auth_protocol())?
-        .map_err(|_| auth_protocol())?;
-    read_auth_response(response, maximum, deadlines.read).await
+        .map_err(|_| auth_protocol())
 }
 
 async fn read_auth_response(

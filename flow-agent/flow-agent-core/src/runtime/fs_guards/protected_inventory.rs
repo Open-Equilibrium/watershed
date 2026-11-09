@@ -120,6 +120,13 @@ pub(crate) fn verify_protected_aliases(
         // Traversed parents already contributed every direct-child name.
         let new_name = !directories.contains(&parent_identity)
             && selected_names.insert((parent_identity, &name.leaf));
+        // Case- or normalization-insensitive lookups let two spellings name one entry.
+        if new_name && metadata.nlink() > 1 && !is_exact_entry(name)? {
+            return Err(RuntimeError::Protocol(format!(
+                "{} protected image name does not match its directory entry exactly",
+                name.path.display()
+            )));
+        }
         count_alias(&metadata, &name.path, new_name)?;
     }
     for (_, (expected, covered, path)) in aliases {
@@ -131,6 +138,21 @@ pub(crate) fn verify_protected_aliases(
         }
     }
     Ok(())
+}
+
+fn is_exact_entry(name: &super::AnchoredFile) -> Result<bool, RuntimeError> {
+    let parent = &name.parent;
+    for entry in parent
+        .dir
+        .entries()
+        .map_err(|source| path_io_error(&parent.path, source))?
+    {
+        let entry = entry.map_err(|source| path_io_error(&parent.path, source))?;
+        if entry.file_name() == name.leaf.as_os_str() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn verified_image_metadata(

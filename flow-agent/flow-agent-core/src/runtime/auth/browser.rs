@@ -1,4 +1,8 @@
-use super::{MAX_OAUTH_CALLBACK_HTTP_HEAD_BYTES, protocol, transport};
+use super::{
+    MAX_OAUTH_CALLBACK_HTTP_HEAD_BYTES,
+    protocol::{self, OAuthCallback},
+    transport,
+};
 use crate::runtime::{
     deadlines::AUTH_OVERALL_DEADLINE,
     oauth_credential::{CredentialRecord, auth_protocol},
@@ -69,17 +73,22 @@ where
                     started + AUTH_OVERALL_DEADLINE,
                     LOOPBACK_CALLBACK_CONNECTION_DEADLINE,
                 );
-                let (status, body) = if result.is_ok() {
-                    (
+                let (status, body) = match &result {
+                    Ok(OAuthCallback::Code(_)) => (
                         "200 OK",
                         "Authorization received. Return to the terminal for the final result.",
-                    )
-                } else {
-                    ("400 Bad Request", "Authentication request rejected.")
+                    ),
+                    Ok(OAuthCallback::Denied) => (
+                        "200 OK",
+                        "Authorization was not granted. Return to the terminal.",
+                    ),
+                    Err(_) => ("400 Bad Request", "Authentication request rejected."),
                 };
                 let _ = write_loopback_response(&mut stream, status, body);
-                if let Ok(code) = result {
-                    break code;
+                match result {
+                    Ok(OAuthCallback::Code(code)) => break code,
+                    Ok(OAuthCallback::Denied) => return Err(auth_protocol()),
+                    Err(_) => {}
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -116,7 +125,7 @@ pub(crate) fn build_authorize_url(state: &str, challenge: &str) -> String {
 pub(crate) fn read_loopback_callback(
     stream: &mut TcpStream,
     expected_state: &str,
-) -> Result<String, RuntimeError> {
+) -> Result<OAuthCallback, RuntimeError> {
     read_loopback_callback_until(
         stream,
         expected_state,
@@ -130,7 +139,7 @@ pub(crate) fn read_loopback_callback_until(
     expected_state: &str,
     deadline: Instant,
     connection_deadline: Duration,
-) -> Result<String, RuntimeError> {
+) -> Result<OAuthCallback, RuntimeError> {
     stream.set_nonblocking(false).map_err(|_| auth_protocol())?;
     let deadline = deadline.min(
         Instant::now()

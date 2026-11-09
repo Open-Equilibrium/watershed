@@ -29,7 +29,7 @@ pub(super) fn device_login(
             poll_device_authorization_body_with_transport(
                 authorization,
                 deadlines,
-                transport::post_json_with_deadlines,
+                transport::post_device_poll_with_deadlines,
             )
         },
         transport::exchange_authorization_code_with_deadlines,
@@ -56,8 +56,8 @@ pub(crate) fn poll_device_authorization_body_with_transport(
         &serde_json::Value,
         usize,
         HttpDeadlines,
-    ) -> Result<Vec<u8>, RuntimeError>,
-) -> Result<Vec<u8>, RuntimeError> {
+    ) -> Result<Option<Vec<u8>>, RuntimeError>,
+) -> Result<Option<Vec<u8>>, RuntimeError> {
     transport(
         OPENAI_DEVICE_POLL_URL,
         &serde_json::json!({
@@ -88,7 +88,7 @@ where
     run_device_login_with_deadlines_and_clock(
         present,
         start,
-        |authorization, _| poll(authorization),
+        |authorization, _| poll(authorization).map(Some),
         |code, verifier, redirect_uri, _| exchange(code, verifier, redirect_uri),
         wait,
         || started.elapsed(),
@@ -106,7 +106,7 @@ pub(crate) fn run_device_login_with_deadlines_and_clock<P, S, Q, E, W, N>(
 where
     P: FnMut(&str) -> Result<(), RuntimeError>,
     S: FnMut() -> Result<Vec<u8>, RuntimeError>,
-    Q: FnMut(&DeviceAuthorization, HttpDeadlines) -> Result<Vec<u8>, RuntimeError>,
+    Q: FnMut(&DeviceAuthorization, HttpDeadlines) -> Result<Option<Vec<u8>>, RuntimeError>,
     E: FnMut(&str, &str, &str, HttpDeadlines) -> Result<CredentialRecord, RuntimeError>,
     W: FnMut(Duration),
     N: FnMut() -> Duration,
@@ -128,7 +128,11 @@ where
             &authorization,
             device_login_http_deadlines(device_login_remaining(elapsed())?),
         )?;
-        match protocol::parse_device_poll_body(&body)? {
+        let state = match body {
+            Some(body) => protocol::parse_device_poll_body(&body)?,
+            None => DevicePoll::Pending,
+        };
+        match state {
             DevicePoll::Pending => {}
             DevicePoll::SlowDown => interval = protocol::next_poll_interval(interval, true)?,
             DevicePoll::Authorization {

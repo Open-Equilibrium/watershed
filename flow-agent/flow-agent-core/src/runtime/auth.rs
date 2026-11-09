@@ -21,15 +21,15 @@ pub(crate) use device::{
 };
 #[cfg(test)]
 pub(crate) use protocol::{
-    base64url_encode, epoch_milliseconds, next_poll_interval, parse_device_authorization_body,
-    parse_device_poll_body, parse_oauth_callback, parse_token_body, percent_encode,
-    random_url_token,
+    OAuthCallback, base64url_encode, epoch_milliseconds, next_poll_interval,
+    parse_device_authorization_body, parse_device_poll_body, parse_oauth_callback,
+    parse_token_body, percent_encode, random_url_token,
 };
 #[cfg(test)]
 pub(crate) use transport::{
     exchange_authorization_code_at, exchange_authorization_code_body_with_transport,
-    post_json_with_deadlines, refresh_credential_at, refresh_credential_with_transport,
-    send_auth_request_async,
+    post_device_poll_with_deadlines, post_json_with_deadlines, refresh_credential_at,
+    refresh_credential_with_transport, send_auth_request_async,
 };
 
 pub(crate) const MAX_OAUTH_CALLBACK_HTTP_HEAD_BYTES: usize = 16_384;

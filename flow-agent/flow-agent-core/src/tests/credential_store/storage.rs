@@ -202,6 +202,12 @@ fn credential_store_retries_every_created_parent_sync_before_success() {
         .replace(&current)
         .expect_err("the injected created-parent sync failure is reported");
     assert!(parent.is_dir(), "the failed sync leaves created parents");
+    assert_eq!(
+        store
+            .read()
+            .expect("an intervening read opens the existing parents"),
+        None
+    );
 
     start_directory_sync_trace_for_test();
     set_directory_sync_error_for_path_for_test(&workspace_parent, io::ErrorKind::Other);

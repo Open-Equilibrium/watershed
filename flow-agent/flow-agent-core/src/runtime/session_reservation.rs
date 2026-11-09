@@ -101,15 +101,11 @@ pub(crate) fn reserve_unique_session_candidate_with_anchored_workspace(
         }
         match SessionOwnershipLease::acquire_anchored(workspace, &session_id, &marker_path) {
             Ok(ownership) => {
-                if let Some(sessions) = open_anchored_runtime_dir(workspace, SESSION_STORAGE_DIR)? {
-                    match ensure_anchored_session_candidate_available(&sessions, &session_id) {
-                        Ok(()) => {}
-                        Err(RuntimeError::SessionLogExists(_)) => {
-                            ownership.release()?;
-                            continue;
-                        }
-                        Err(error) => return Err(error),
-                    }
+                // Another owner may have published or retained its marker after
+                // the snapshot, so recheck with the same occupancy rules.
+                if !candidate_still_available(workspace, base_session_id, ordinal, &session_id)? {
+                    ownership.release()?;
+                    continue;
                 }
                 return Ok(SessionCandidateReservation {
                     ownership,
@@ -124,6 +120,29 @@ pub(crate) fn reserve_unique_session_candidate_with_anchored_workspace(
     Err(RuntimeError::Protocol(format!(
         "could not allocate a unique session_id for {base_session_id}"
     )))
+}
+
+fn candidate_still_available(
+    workspace: &AnchoredWorkspace,
+    base_session_id: &str,
+    ordinal: u32,
+    session_id: &str,
+) -> Result<bool, RuntimeError> {
+    let sessions = open_anchored_runtime_dir(workspace, SESSION_STORAGE_DIR)?;
+    let logs = open_anchored_runtime_dir(workspace, LOG_STORAGE_DIR)?;
+    let hints =
+        session_candidate_hints_from_dirs(sessions.as_ref(), logs.as_ref(), base_session_id)?;
+    match (hints[(ordinal - 1) as usize], sessions) {
+        (SessionCandidateHint::Occupied, _) => Ok(false),
+        (SessionCandidateHint::Probe, Some(sessions)) => {
+            match ensure_anchored_session_candidate_available(&sessions, session_id) {
+                Ok(()) => Ok(true),
+                Err(RuntimeError::SessionLogExists(_)) => Ok(false),
+                Err(error) => Err(error),
+            }
+        }
+        _ => Ok(true),
+    }
 }
 
 fn ensure_anchored_session_candidate_available(

@@ -220,11 +220,14 @@ fn terminal_evidence_preserves_status_and_bounded_output() {
 
 #[test]
 fn timeout_and_cancellation_reap_the_tool_root_after_term_grace() {
-    for cancel in [false, true] {
+    for (cancel, cooperative) in [(false, true), (true, true), (false, false), (true, false)] {
         let fixture = Fixture::new();
-        let request = fixture.request(
-            "trap 'printf stopped > term-marker; exit 0' TERM; printf ready > root-ready; while :; do sleep 0.02; done",
-            limits(1024, 1024, if cancel { 5000 } else { 1500 }));
+        let script = if cooperative {
+            "trap 'printf stopped > term-marker; exit 0' TERM; printf ready > root-ready; while :; do sleep 0.02; done"
+        } else {
+            "trap '' TERM; printf ready > root-ready; while :; do printf . >> heartbeat; sleep 0.02; done"
+        };
+        let request = fixture.request(script, limits(1024, 1024, if cancel { 5000 } else { 1500 }));
         let mut running = fixture.spawn(&request);
         running.ready(&request);
         running.start(&request);
@@ -255,9 +258,21 @@ fn timeout_and_cancellation_reap_the_tool_root_after_term_grace() {
             }
         );
         assert_eq!(tool_result.exit_code, None);
-        assert_eq!(
-            fs::read(fixture.project.join("term-marker")).unwrap(),
-            b"stopped"
-        );
+        if cooperative {
+            assert_eq!(
+                fs::read(fixture.project.join("term-marker")).unwrap(),
+                b"stopped"
+            );
+        } else {
+            // Host-visible proof, independent of the Tool's PID namespace.
+            let heartbeat = fixture.project.join("heartbeat");
+            let size = fs::metadata(&heartbeat).unwrap().len();
+            thread::sleep(Duration::from_millis(250));
+            assert_eq!(
+                fs::metadata(&heartbeat).unwrap().len(),
+                size,
+                "the forced Tool root must have stopped"
+            );
+        }
     }
 }
