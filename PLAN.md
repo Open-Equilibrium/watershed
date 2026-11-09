@@ -47,7 +47,7 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 
 **Wedge:** prove safe human/agent co-editing of local-first Workspace state with attributed, reviewable and reversible History. Liquid remains useful without agents, network or a hosted service. Do not build a generic Notion clone.
 
-The target product is canonical in [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html). M3 is staged so workspace fundamentals prove value before sync, community extensions and broad integrations. Chat between people and a calendar follow after Release 1 (ADR-0236). Review leftovers are tracked as GitHub issues.
+The target product is canonical in [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html). M3 is staged so workspace fundamentals prove value before sync, community extensions and broad integrations. Chat between people and a calendar follow after Release 1 (ADR-0236). Review leftovers are tracked as GitHub issues [#61](https://github.com/Open-Equilibrium/watershed/issues/61)–[#67](https://github.com/Open-Equilibrium/watershed/issues/67).
 
 #### Liquid agent surface — early slice
 
@@ -62,6 +62,19 @@ The macOS Liquid app controls pi through an embedded Meta-Harness core (ADR-0184
 #### Liquid Git integration — next slice
 
 Completes the Git integration for the agent's Git project (ADR-0190, ADR-0191, ADR-0220, ADR-0234); Meta-Harness runs the host's `git` and `gh`, Liquid provides the UI. Remaining: worktrees with Chats (ADR-0239), which they need — creating one from a new Chat's composer, its location and the last-Chat choice, the folder chip and moving an idle Chat ([mockups](docs/design/mockups/liquid-git-prs-worktrees.html)).
+
+#### Security fixes — next
+
+Open weaknesses from reviews, fixed in the next bugfix pass:
+
+- `liquid-bridge/src/api/workspace.rs` follows lock-file links on targets other than Unix.
+- Stash restoration skips deleted paths in `diff/revert.rs::repositories_in_the_way`; reject stashed deletions inside nested repositories before mutation, preserving their files, index and stash.
+- A confirmed default-branch push is not bound to the resolved repository, and symbolic push refs are not resolved before that check (`diff/sync.rs`).
+- Push destinations compare SSH URLs without their user names (`diff/sync.rs`).
+- A fast-forward pull can overwrite ignored local files (`diff/sync.rs`).
+- Commits pushed from elsewhere between the recheck and the pull request creation request join the new pull request unreviewed.
+- `liquid/liquid-bridge/src/ready.rs` does not enforce the startup event limit, so an agent process can exceed the bound before the session is ready.
+- Pending bridge queries block Stop and answers, so a user cannot stop a running agent while a query is pending.
 
 #### M3a — Local Workspace foundation
 

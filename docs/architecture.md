@@ -74,9 +74,9 @@ Flow Agent's runtime keeps these boundaries; provider and subprocess work preser
 - `proto` alone validates Event-envelope and Event-payload structure; the runtime keeps only stream, sequence, budget and lifecycle invariants.
 - `core-script` is real Rust modules with explicit visibility and imports, no `include!` assembly and a minimal public API.
 - Imports, re-exports and security-critical interfaces are targeted, not flat `pub use module::*` namespaces or systematic `use super::*`.
-- Modules split by responsibility: planning and apply, Event construction and persistence, lifecycle validation, Run reservation and locks, bundle inventory, reader, replay and tail, Resume, context compilation and Tool execution; tests split the same way.
-- `FlowExecutionPlan` is a typed finite IR: planning has no provider or Tool adapter and performs no side effects, and Apply consumes only the plan.
-- `main.rs` is only the composition root; argument parsing, dispatch, streaming and tail are separate modules.
+- Modules split by responsibility: planning and apply, Event construction and persistence, lifecycle validation, Run reservation and locks, bundle inventory, reader, replay and tail, Resume, context compilation, fixture Tool execution and capability-relative filesystem operations; tests split the same way, behavior-focused, with the coverage threshold unchanged.
+- `FlowExecutionPlan` is a typed finite IR: planning has no provider or Tool adapter and performs no side effects, invocation IDs are planned, Apply consumes only the plan, Resume distinguishes pending from completed intents, and no second full FSM pass substitutes for the IR.
+- `main.rs` is only the composition root; argument and usage parsing, dispatch, live streaming and tail are separate internal modules.
 
 ## Configuration boundary
 

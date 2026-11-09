@@ -25,7 +25,7 @@ class MainFlutterWindow: NSWindow {
 
 /// With LIQUID_KEY_LOG=1, writes the key events macOS hands the window with the Liquid key
 /// (F18), or with ⌘ or ⌃ but not ⌥, to stderr, beside Flutter's own log of them, to find why
-/// some Liquid key shortcuts do nothing (PLAN.md). Plain typing stays out of the log: ⌥ types
+/// some Liquid key shortcuts do nothing (issue #63). Plain typing stays out of the log: ⌥ types
 /// characters such as @ on many layouts, and only Caps Lock of the modifier keys is logged.
 private func logKeysIfAsked() {
   guard ProcessInfo.processInfo.environment["LIQUID_KEY_LOG"] == "1" else { return }
