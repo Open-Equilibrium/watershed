@@ -176,6 +176,8 @@ pub(super) fn run_bounded(
             }
         }
         if cleanup.is_none() && primary.is_some() {
+            let started = Instant::now();
+            let mut controller = CleanupController::new(started);
             if status.is_none() {
                 if let Some(control) = cancellation.take() {
                     // The inner supervisor owns the Tool root. Terminating the
@@ -183,11 +185,12 @@ pub(super) fn run_bounded(
                     // EOF requests cancellation without leaving an unread byte
                     // that could reset the returning status after a fast Tool exit.
                     let _ = control.shutdown(std::net::Shutdown::Write);
+                    controller = CleanupController::delegated(started);
                 } else {
                     signal_child(&child, rustix::process::Signal::TERM);
                 }
             }
-            cleanup = Some(CleanupController::new(Instant::now()));
+            cleanup = Some(controller);
         }
         if let Some(controller) = cleanup.as_mut() {
             let output_drained = stdout.input.is_none() && stderr.input.is_none();
