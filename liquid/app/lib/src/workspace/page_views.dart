@@ -11,7 +11,13 @@ import 'workspace_state.dart';
 /// Where the caret goes once a Text Block's View is built.
 @immutable
 class Caret {
-  const Caret(this.view, this.offset, {this.text, this.style});
+  const Caret(
+    this.view,
+    this.offset, {
+    this.text,
+    this.style,
+    this.first = false,
+  });
 
   final String view;
 
@@ -24,6 +30,9 @@ class Caret {
 
   /// How that Text Block reads, as the input queue last set it.
   final BridgeTextStyle? style;
+
+  /// Whether an empty Page's first line made that Text Block, handing over what was typed.
+  final bool first;
 }
 
 /// An open Page's Views in order, read in windows as the Page scrolls to them, and reread

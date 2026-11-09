@@ -669,6 +669,16 @@ void main() {
     expect(fake.views[page]!.first.kind, BridgeBlockKind.database);
   });
 
+  testWidgets('a line left alone by a join opens no menu', (tester) async {
+    await show(tester, ['/text', '']);
+    await tester.tap(block(1));
+    await tester.pump();
+    // ⌫ at the empty line's start joins it to the line above, the Page's only one.
+    await key(tester, LogicalKeyboardKey.backspace);
+    expect(fake.textsOf(page), ['/text']);
+    expect(menu, findsNothing);
+  });
+
   testWidgets('near the window\'s bottom, the menu opens above the line', (
     tester,
   ) async {

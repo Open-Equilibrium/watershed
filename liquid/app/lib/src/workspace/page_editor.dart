@@ -101,6 +101,7 @@ class EditorTarget {
     required this.caret,
     required this.style,
     this.boundary = false,
+    this.first = false,
   });
 
   final String view;
@@ -110,6 +111,9 @@ class EditorTarget {
   int caret;
   BridgeTextStyle style;
   bool boundary;
+
+  /// Whether an empty Page's first line made it.
+  final bool first;
 }
 
 /// A key waiting for the change before it, with what its field held when it was pressed.
@@ -306,6 +310,7 @@ class PageEditor {
           text: first.text,
           caret: _caret(first),
           style: BridgeTextStyle.paragraph,
+          first: true,
         );
         _known[target.block] = target.text;
         await _markdown(target, '');
@@ -411,8 +416,13 @@ class PageEditor {
   static int _caret(TextEditingValue value) =>
       value.selection.isValid ? value.selection.baseOffset : value.text.length;
 
-  static Caret _caretOf(EditorTarget target) =>
-      Caret(target.view, target.caret, text: target.text, style: target.style);
+  static Caret _caretOf(EditorTarget target) => Caret(
+    target.view,
+    target.caret,
+    text: target.text,
+    style: target.style,
+    first: target.first,
+  );
 
   /// Offers the caret to the target's Text Block. True once it took it or the Page closed;
   /// false when more input came first, which then takes its turn.
