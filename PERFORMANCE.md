@@ -20,7 +20,7 @@ Prefer an architectural simplification over a local micro-optimization. Never we
 
 ## Evidence convention
 
-Performance evidence uses a fixed, documented workload and records the environment, exact inputs and exclusions, raw observations and useful aggregates such as p50, p95, maximum and RSS growth. Values remain unadjusted; do not subtract estimated work or normalize away an observed cost. Compare like-for-like runs. An evidence file keeps every workload definition but only the latest comparable record per workload, plus the record before a workload change; older records live in Git history.
+Performance evidence uses a fixed, documented workload and records the environment, exact inputs and exclusions, raw observations and useful aggregates such as p50, p95, maximum and RSS growth. Values remain unadjusted; do not subtract estimated work or normalize away an observed cost. Compare like-for-like runs. An evidence file keeps every workload definition but only the latest comparable record per workload, plus the record before a workload change; older records live in Git history, and a decided spike's evidence goes with the spike.
 
 CI may fail when the workload, lifecycle, schema, measurement integrity, report completeness or artifact retention is invalid. It must not compare timing, throughput or RSS observations with an estimated threshold. Command and test timeouts remain deadlock guards, not performance claims.
 
