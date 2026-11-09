@@ -642,7 +642,7 @@ class SessionState {
   /// The turns with checkpoints of the session stored at `path`.
   Future<int> storedTurns(String path) => _backend.storedTurns(path);
 
-  /// Deletes the session stored at `path` with its checkpoints (approved checkpoint mockups).
+  /// Deletes the session stored at `path` with its checkpoints.
   /// The open session's agent stops and a new session takes its place first, as T3 Code moves
   /// on after deleting the active thread. Returns whether it deleted, and says why not.
   Future<bool> deleteSession(String path) async {
@@ -750,7 +750,7 @@ class SessionState {
   Future<void> loadEarlier() => _chat.loadEarlier();
 
   /// Says why the agent stopped, and keeps all of it among the notifications, where it can be
-  /// read in full (approved mockup).
+  /// read in full.
   void _failed(String? text) {
     failure.value = text;
     if (text != null && text.isNotEmpty) notify(BridgeLevel.error, text);

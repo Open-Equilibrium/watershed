@@ -61,7 +61,7 @@ class ChatView extends StatelessWidget {
           // A session without a conversation shows the start page.
           builder: (context, items, _) => items.isEmpty
               ? StartPage(state: state, info: info)
-              // Messages start at the top and flow down (approved look mockup); a long chat
+              // Messages start at the top and flow down; a long chat
               // still keeps its newest message above the input.
               : Align(
                   alignment: Alignment.topCenter,
@@ -113,7 +113,7 @@ class ChatView extends StatelessWidget {
   }
 }
 
-/// What a turn changed, below its last item (approved checkpoint mockups).
+/// What a turn changed, below its last item.
 class TurnChanges extends StatelessWidget {
   const TurnChanges({
     super.key,
@@ -160,7 +160,7 @@ class TurnChanges extends StatelessWidget {
   }
 }
 
-/// Where the current branch leaves the others (approved session-flow mockup).
+/// Where the current branch leaves the others.
 class BranchMark extends StatelessWidget {
   const BranchMark({super.key, required this.marker});
 
@@ -259,7 +259,7 @@ class ToolRow extends StatelessWidget {
           ),
           null => (LucideIcons.loader, ws.textFaint),
         };
-        // A file change shows its lines (approved mockup), other tools how long they ran.
+        // A file change shows its lines, other tools how long they ran.
         final lines = outcome?.lines;
         final trailing = [
           if (lines != null)

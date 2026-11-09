@@ -10,8 +10,7 @@ import '../rust/api/history.dart';
 import 'backend.dart';
 import 'branch_bases.dart';
 
-/// How often Liquid fetches the upstream's remote while a session is open, as T3 Code does
-/// (approved Git mockups).
+/// How often Liquid fetches the upstream's remote while a session is open, as T3 Code does.
 const fetchEvery = Duration(seconds: 15);
 
 /// The wait before the next fetch after `failures` failed ones in a row: from 30 seconds,

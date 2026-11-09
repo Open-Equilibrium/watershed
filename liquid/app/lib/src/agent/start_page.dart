@@ -15,7 +15,7 @@ import 'sidebar.dart';
 /// The device a local session runs on, as the start page's device chip names it.
 final localDevice = Platform.isMacOS ? 'This Mac' : 'This computer';
 
-/// The main area of a session without a conversation yet (approved start page mockup):
+/// The main area of a session without a conversation yet:
 /// the project's recent sessions to continue; the input area below starts a new one.
 class StartPage extends StatelessWidget {
   const StartPage({super.key, required this.state, required this.info});
@@ -30,7 +30,7 @@ class StartPage extends StatelessWidget {
     return Column(
       children: [
         const SizedBox(height: WsMetrics.space8),
-        // A new session greets with its project, as in T3 Code (approved look mockup).
+        // A new session greets with its project, as in T3 Code.
         Text(
           'What should we build in ${info.project}?',
           textAlign: TextAlign.center,

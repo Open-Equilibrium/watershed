@@ -1,5 +1,5 @@
 //! Uncommitted changes left on a branch, as GitHub Desktop leaves them: one stash per branch,
-//! whose message names it ([mockups](../../../../docs/design/mockups/liquid-git-branches.html)).
+//! whose message names it ([Git integration](../../../../docs/concept/V-Spec_MetaHarness.html#git-integration)).
 
 use super::process::{git_path_output, paths, timestamp_ms, user_git};
 use super::*;

@@ -7,7 +7,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'trajectory_model.dart';
 
-/// The Trajectory's filter row (approved navigation mockup): kinds of step, the session's tool
+/// The Trajectory's filter row: kinds of step, the session's tool
 /// names, failed steps only and text. Steps that do not match draw faint but keep their place.
 class FilterBar extends StatelessWidget {
   const FilterBar({

@@ -111,7 +111,7 @@ const List<_Group> _right = [
 /// A section of Settings.
 enum _Section { appearance, shortcuts, worktrees }
 
-/// Settings (approved mockups): Appearance with theme and text size, Shortcuts with the
+/// Settings: Appearance with theme and text size, Shortcuts with the
 /// profile, every action's keys and recording new ones, and Worktrees with a session. It
 /// replaces the main area; esc closes it.
 class SettingsPage extends StatefulWidget {
@@ -704,7 +704,7 @@ class _ProfileRow extends StatelessWidget {
           _Row(
             label: 'Use Caps Lock as the Liquid key',
             keys: [
-              // As small as the approved mockup's switch, within the row.
+              // A small switch, within the row.
               SizedBox(
                 height: 20,
                 child: FittedBox(
@@ -775,7 +775,7 @@ class _Row extends StatelessWidget {
 
 enum _Tone { plain, faint, changed, recording }
 
-/// Keys as a key cap (approved mockup).
+/// Keys as a key cap.
 class _Kbd extends StatelessWidget {
   const _Kbd(this.text, {this.tone = _Tone.plain});
 
@@ -819,7 +819,7 @@ class _Kbd extends StatelessWidget {
   }
 }
 
-/// A warning below the recording row (approved mockup).
+/// A warning below the recording row.
 class _Notice extends StatelessWidget {
   const _Notice({required this.children});
 
@@ -864,7 +864,7 @@ class _Link extends StatelessWidget {
   );
 }
 
-/// Asks whether a change may replace the kept Custom profile (approved mockup); keeping it is
+/// Asks whether a change may replace the kept Custom profile; keeping it is
 /// the default, and leaving the question keeps it too.
 class _ReplaceCustom extends StatelessWidget {
   const _ReplaceCustom({

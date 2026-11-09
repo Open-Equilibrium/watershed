@@ -21,16 +21,16 @@ import 'diff_settings.dart';
 import 'revert_dialog.dart';
 import 'turn_scope.dart';
 
-/// Keys of the Diff tab, for the status bar (approved mockup).
+/// Keys of the Diff tab, for the status bar.
 String diffKeys() =>
     '${Fixed.turnMenu.display} turn · ${Fixed.previousOrNextFile.display} file · '
     '${Fixed.foldFolder.display} folder · ${Fixed.previousOrNextHunk.display} hunk · '
     '${Fixed.unifiedOrSplit.display} unified/split · ${Fixed.hideWhitespace.display} whitespace';
 
-/// What a turn changed between its checkpoints, or all turns of the branch (approved checkpoint
-/// mockups): a folder tree of changed files and the selected file's diff, unified or split. Up
-/// and Down select files, Left and Right fold and unfold the selected file's folders, ⌥Up and
-/// ⌥Down move between the file's changes, T chooses the turn.
+/// What a turn changed between its checkpoints, or all turns of the branch: a folder tree of
+/// changed files and the selected file's diff, unified or split. Up and Down select files, Left and
+/// Right fold and unfold the selected file's folders, ⌥Up and ⌥Down move between the file's
+/// changes, T chooses the turn.
 class DiffView extends StatefulWidget {
   const DiffView({
     super.key,
@@ -778,7 +778,7 @@ class _Patch extends StatelessWidget {
   }
 }
 
-/// A switch shown as a button that stays pressed while on (approved mockup).
+/// A switch shown as a button that stays pressed while on.
 class _Toggle extends StatelessWidget {
   const _Toggle({required this.label, required this.on, required this.onTap});
 
@@ -1019,8 +1019,7 @@ TextSpan highlight(BuildContext context, String code) {
 }
 
 /// The turn menu with what the shown turns are: their prompt, their time and what they are
-/// compared with (approved checkpoint mockups), or the branch's stashed changes with Restore
-/// and Discard (approved Git mockups).
+/// compared with, or the branch's stashed changes with Restore and Discard.
 class _TurnHeader extends StatelessWidget {
   const _TurnHeader({
     required this.menuKey,

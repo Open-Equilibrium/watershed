@@ -14,8 +14,8 @@ const widgetStripHeight = 36.0;
 const inputClearance =
     widgetStripHeight + actionAreaHeight + 2 * WsMetrics.space4;
 
-/// A tab's main column with the input area floating at its bottom, as T3 Code's composer does
-/// (approved mockup): centered, at most the reading width, over a fade into the canvas. Without
+/// A tab's main column with the input area floating at its bottom, as T3 Code's composer does:
+/// centered, at most the reading width, over a fade into the canvas. Without
 /// an `input` it shows only `child`.
 class InputLane extends StatelessWidget {
   const InputLane({super.key, required this.input, required this.child});

@@ -54,7 +54,7 @@ The target product is canonical in [`docs/concept/V-Spec_Liquid.html`](docs/conc
 The macOS Liquid app controls pi through an embedded Meta-Harness core (ADR-0184). Open:
 
 - Close the cheap record gaps (ADR-0222): show the nested tool calls pi records, and say in the Diff and Trajectory tabs exactly what they cover, after an approved mockup.
-- The agent-surface mockup's context-window display.
+- Show the context window's use in the status bar beside the session's tokens and cost, such as `Context 7.4k / 200k`.
 - The macOS app build on a macOS runner becomes a required CI check once it runs reliably.
 - Service mode, remote access and Android follow with multi-device (ADR-0195).
 - Trajectory search and attribution of entries to the extension that produced them stay out of scope.

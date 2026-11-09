@@ -9,7 +9,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 
 /// Asks before reverting the files to before `turn` and then reverts them, so the session
-/// continues on a new branch (approved checkpoint mockups). The dialog lists every file that
+/// continues on a new branch. The dialog lists every file that
 /// changes and refuses while an agent runs in the checkout.
 Future<void> confirmRevert(
   BuildContext context,

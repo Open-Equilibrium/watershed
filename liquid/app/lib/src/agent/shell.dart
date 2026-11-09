@@ -470,8 +470,8 @@ class _AgentShellState extends State<AgentShell> {
   }
 }
 
-/// The session's title with its project and model as chips (approved look mockup), and at the
-/// right the checkout's branch, its pull request and the Git action (approved Git mockups).
+/// The session's title with its project and model as chips, and at the
+/// right the checkout's branch, its pull request and the Git action.
 class _Header extends StatelessWidget {
   const _Header({
     required this.state,
@@ -538,7 +538,7 @@ class _Header extends StatelessWidget {
   }
 }
 
-/// How many files the Diff tab shows, beside its name (approved mockup): the shown turns',
+/// How many files the Diff tab shows, beside its name: the shown turns',
 /// the latest by default, counted as the whitespace choice says.
 class _ChangedFiles extends StatelessWidget {
   const _ChangedFiles({required this.state});

@@ -1,6 +1,6 @@
 import '../rust/api/history.dart';
 
-/// Which turns the Diff tab compares (approved checkpoint mockups).
+/// Which turns the Diff tab compares.
 sealed class DiffScope {
   const DiffScope();
 }
@@ -33,7 +33,7 @@ class UncommittedChanges extends DiffScope {
   const UncommittedChanges();
 }
 
-/// The stashed changes of the branch checked out (approved Git mockups).
+/// The stashed changes of the branch checked out.
 class StashedChanges extends DiffScope {
   const StashedChanges();
 }

@@ -32,7 +32,7 @@ class Hint extends StatelessWidget {
   }
 }
 
-/// The look of a shortcut hint: small, dark and above what it labels (approved mockup).
+/// The look of a shortcut hint: small, dark and above what it labels.
 class KeyBadge extends StatelessWidget {
   const KeyBadge(this.text, {super.key});
 
@@ -242,7 +242,7 @@ class DangerButton extends StatelessWidget {
   );
 }
 
-/// Asks before an action Liquid cannot undo (approved checkpoint mockups): ⏎ confirms while
+/// Asks before an action Liquid cannot undo: ⏎ confirms while
 /// it is allowed and esc cancels; it closes with `true` when confirmed. Without `action` it
 /// only says why nothing can be done.
 class DangerDialog extends StatelessWidget {
@@ -540,7 +540,7 @@ const activateKeys = <ShortcutActivator, Intent>{
   SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
 };
 
-/// A choice of one among a few, as the segments of one control (approved mockups).
+/// A choice of one among a few, as the segments of one control.
 class Segments<T> extends StatelessWidget {
   const Segments({
     super.key,

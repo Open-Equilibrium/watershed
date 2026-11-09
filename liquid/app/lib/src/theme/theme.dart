@@ -52,7 +52,7 @@ ThemeData liquidTheme(Brightness brightness) {
     ),
     dividerColor: palette.border,
     splashFactory: NoSplash.splashFactory,
-    // Menus sit on the canvas with the card radius, as the mockups show them.
+    // Menus sit on the canvas with the card radius.
     popupMenuTheme: PopupMenuThemeData(
       color: palette.canvas,
       surfaceTintColor: Colors.transparent,

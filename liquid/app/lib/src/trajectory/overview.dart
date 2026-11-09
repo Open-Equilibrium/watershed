@@ -44,9 +44,9 @@ class Brush {
   int get hashCode => Object.hash(start, end, label, range);
 }
 
-/// The Trajectory's single top section: every step on one time axis (approved navigation
-/// mockup). A brush marks what the list shows; its handles limit the list to a range, dragging
-/// it scrolls the list, a click jumps to the step there and scrolling zooms around the pointer.
+/// The Trajectory's single top section: every step on one time axis. A brush marks what the list
+/// shows; its handles limit the list to a range, dragging it scrolls the list, a click jumps to the
+/// step there and scrolling zooms around the pointer.
 class Overview extends StatefulWidget {
   const Overview({
     super.key,
@@ -319,7 +319,7 @@ class _OverviewState extends State<Overview> {
 /// The size of the hint's icon at the end of the axis.
 const _infoSize = 14.0;
 
-/// The brush over the tracks with a handle at each end (approved navigation mockup).
+/// The brush over the tracks with a handle at each end.
 class _BrushView extends StatefulWidget {
   const _BrushView({
     required this.brush,

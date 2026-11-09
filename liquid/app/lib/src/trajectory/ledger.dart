@@ -121,7 +121,7 @@ class LedgerHeader extends StatelessWidget {
         border: Border(bottom: BorderSide(color: ws.border)),
       ),
       child: _columns([
-        // In the column of the turns' chevrons (approved look mockup); return and space
+        // In the column of the turns' chevrons; return and space
         // press it rather than the view's own keys.
         Center(
           child: Tooltip(
@@ -272,7 +272,7 @@ class LineRow extends StatelessWidget {
   }
 }
 
-/// A turn's line (approved look mockup): its chevron, prompt, duration and what it added to
+/// A turn's line: its chevron, prompt, duration and what it added to
 /// the context. A click on the chevron collapses or expands it, ⌥-click every turn; a click on
 /// the line opens its last request's context.
 class TurnRow extends StatelessWidget {

@@ -15,7 +15,7 @@ import '../theme/tokens.g.dart';
 import 'commit_dialog.dart';
 
 /// The checkout's branch with its commits ahead and behind its upstream, in the session header;
-/// it opens the branch menu (approved Git mockups).
+/// it opens the branch menu.
 class BranchChip extends StatelessWidget {
   const BranchChip({super.key, required this.state});
 
@@ -232,8 +232,7 @@ Future<void> _switch(
   }
 }
 
-/// The searchable list of local and remote branches, with "Create branch" for a new name
-/// (approved Git mockups).
+/// The searchable list of local and remote branches, with "Create branch" for a new name.
 class _BranchMenu extends StatefulWidget {
   const _BranchMenu({required this.branches, required this.status});
 

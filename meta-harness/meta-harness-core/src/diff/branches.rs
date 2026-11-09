@@ -1,5 +1,5 @@
 //! The checkout's branch and its upstream, listing, switching and creating branches, and
-//! fetching the upstream's remote ([mockups](../../../../docs/design/mockups/liquid-git-branches.html)).
+//! fetching the upstream's remote ([Git integration](../../../../docs/concept/V-Spec_MetaHarness.html#git-integration)).
 
 use super::process::{git_bytes, git_config, git_ref_output, ref_text, timestamp_ms, user_git};
 use super::stash::listed_files;

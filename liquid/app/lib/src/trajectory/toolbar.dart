@@ -6,7 +6,7 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 
-/// One row (approved look mockup): the view switch on the left, the summary and Compare on the
+/// One row: the view switch on the left, the summary and Compare on the
 /// right.
 class TrajectoryToolbar extends StatelessWidget {
   const TrajectoryToolbar({

@@ -14,7 +14,7 @@ String formatWindow(int tokens) => tokens >= 1000000 && tokens % 1000000 == 0
     ? '${tokens ~/ 1000}k'
     : formatCompact(tokens);
 
-/// One row's cell of the context track (approved look mockup): a bar to the step's context,
+/// One row's cell of the context track: a bar to the step's context,
 /// light when estimated, a line through the bars' ends, pi's compaction point as a dashed line
 /// and ··· for a collapsed turn.
 class TrackCell extends StatelessWidget {
