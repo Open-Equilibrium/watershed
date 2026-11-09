@@ -408,9 +408,25 @@ impl WorkingTree {
         if transfer.ahead > 0 && transfer.behind > 0 {
             return Err(DiffError::Diverged(Box::new(transfer), String::new()));
         }
+        // Git overwrites ignored files where the upstream adds one; refuse as for a stash.
+        // The checked commit is merged, even if a fetch moves the upstream meanwhile.
+        let upstream = self
+            .resolve("@{upstream}^{commit}")
+            .await?
+            .ok_or_else(|| DiffError::Git("The branch has no resolvable upstream.".to_owned()))?;
+        if let (Some(head), Some(tree)) = (
+            self.checkpointed("HEAD").await?,
+            self.checkpointed(&upstream).await?,
+        ) {
+            let changes = self.changes(&head, &tree, Whitespace::Shown).await?;
+            let ignored = self.ignored_in_the_way(&changes, &[]).await?;
+            if !ignored.is_empty() {
+                return Err(DiffError::WouldOverwrite(ignored.into_iter().collect()));
+            }
+        }
         match user_git(
             &self.root,
-            &["merge", "--ff-only", "--no-squash", "--", "@{upstream}"],
+            &["merge", "--ff-only", "--no-squash", "--", &upstream],
         )
         .await
         {

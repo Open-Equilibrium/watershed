@@ -128,14 +128,17 @@ fn rejected_push_distinguishes_behind_and_diverged_without_force() {
 #[test]
 fn pull_fast_forwards_and_refuses_divergence_and_overwriting_changes() {
     run(async {
-        for state in ["clean", "diverged", "dirty"] {
+        for state in ["clean", "diverged", "dirty", "ignored"] {
             let remote = Remote::new(&format!("pull-{state}"));
             remote.advance();
             if state == "diverged" {
                 Remote::commit(&remote.repo, "local.txt");
             }
-            if state == "dirty" {
+            if state == "dirty" || state == "ignored" {
                 remote.repo.write("upstream.txt", "unsaved\n");
+            }
+            if state == "ignored" {
+                remote.repo.write(".git/info/exclude", "upstream.txt\n");
             }
             let checkpoints = Checkpoints::new(remote.repo.path());
             let before = remote.repo.git(&["rev-parse", "HEAD"]);
@@ -156,11 +159,12 @@ fn pull_fast_forwards_and_refuses_divergence_and_overwriting_changes() {
                 _ => {
                     assert!(
                         matches!(result, Err(DiffError::WouldOverwrite(ref files)) if files == &["upstream.txt"]),
-                        "{result:?}"
+                        "{state}: {result:?}"
                     );
                     assert_eq!(
                         std::fs::read_to_string(remote.repo.path().join("upstream.txt")).unwrap(),
-                        "unsaved\n"
+                        "unsaved\n",
+                        "{state}"
                     );
                 }
             }

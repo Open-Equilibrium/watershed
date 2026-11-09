@@ -461,7 +461,7 @@ impl WorkingTree {
 
     /// The ignored paths a tracked-tree write would overwrite or remove, using its source
     /// index so a tracked descendant of a now-ignored parent does not hide that obstruction.
-    async fn ignored_in_the_way(
+    pub(super) async fn ignored_in_the_way(
         &self,
         changes: &[FileChange],
         env: &[(&str, OsString)],
