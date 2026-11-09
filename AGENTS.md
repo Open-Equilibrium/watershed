@@ -8,6 +8,12 @@
 4. **Single source of truth** — if information belongs in another file, link to it.
 5. **Smallest sufficient read** — structure docs so an agent can answer from the smallest relevant file.
 6. **Simplicity** — keep structure, code, and documentation as simple as possible; human understanding and reviewability are the bottleneck.
+7. **Topic index** — the topic index in `README.md` names each topic's canonical home; add a row before writing about a new topic.
+8. **One name per concept** — define each term once in `GLOSSARY.md` before use; no synonyms, and qualify overloaded words such as "sandbox" or "host".
+9. **Status by file** — `SECURITY.md` states implemented guarantees and accepted risks only, `PLAN.md` open work only, V-Specs the target; run and review history stays in Git, CI and GitHub issues.
+10. **Short decisions** — an ADR-LOG entry is at most ~600 characters: decision, why, links; details live in the canonical doc, and no proposal file outlives its decision.
+11. **Mockups until built** — a mockup specifies unbuilt UI; the PR that ships its slice moves its remaining decisions into the ADR log or design guidelines and deletes it. Mockups use `docs/design/tokens.css`.
+12. **Latest evidence** — an evidence file keeps the latest comparable record per workload, plus the one before a workload change.
 
 These rules apply to every file an agent creates or edits, including this one.
 
