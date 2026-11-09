@@ -4,7 +4,11 @@ Watershed is an **AGPL/free-software AI-native work platform** for reusable, mea
 
 ## Project status
 
-**M1.2 — Flow Agent OS isolation, in progress.** The runtime now implements [trusted Tools with native Flow-file protection](SECURITY.md#accepted-flow-agent-security-target) on Linux x86_64 and macOS ARM64. Native acceptance, installation and repository closeout must pass before this becomes a release claim. Current status is canonical in [PLAN.md](PLAN.md#m12--flow-agent-os-isolation).
+Nothing is released yet; status is canonical in [PLAN.md](PLAN.md).
+
+- **Flow Agent:** [trusted Tools with native Flow-file protection](SECURITY.md#accepted-flow-agent-security-target) are implemented on Linux x86_64 and macOS ARM64; native acceptance, installation and closeout remain ([M1.2](PLAN.md#m12--flow-agent-os-isolation)).
+- **Meta-Harness:** its core runs embedded in Liquid's macOS app (ADR-0184); the separate service and CLI follow with [M2](PLAN.md#m2--meta-harness-mvp).
+- **Liquid:** a macOS app in development with the agent surface for pi, its Git integration and the local Workspace with Pages and Tables ([M3a](PLAN.md#m3a--local-workspace-foundation)).
 
 [PLATFORMS.md](PLATFORMS.md) defines each product's native release targets, current capabilities and required verification; compilation alone is not a support claim.
 
@@ -17,7 +21,8 @@ proto/        proto: event and Executor wire schemas/types (the integration seam
 flow-agent/   flow-agent-core (engine/runtime/session), flow-agent-cli
               (human CLI, machine-readable run mode, tail/replay/resume), and
               flow-agent-executor (one-shot native self-protection companion)
-meta-harness/ host-scoped headless control plane for local CLI agents
+meta-harness/ host-scoped control plane for local CLI agents; today a core
+              embedded in Liquid (ADR-0184), later a headless service
 liquid/       local-first Page/Block workspace and app-building product
 docs/         governance, specs, decisions
 ```
@@ -97,17 +102,40 @@ The complete command, storage and Executor contract is in [`PROTOCOL.md`](PROTOC
 
 Sequencing and the MVP project-code VCS boundary are canonical in [PLAN.md](PLAN.md). Surface details live in the [Flow Agent](docs/concept/V-Spec_FlowAgent.html), [Meta-Harness](docs/concept/V-Spec_MetaHarness.html), and [Liquid](docs/concept/V-Spec_Liquid.html) V-Specs; events are defined in [PROTOCOL.md](PROTOCOL.md).
 
-## Start here
+## Topic index
 
-- **Why & how it fits together:** [VISION.md](VISION.md)
-- **Build plan & milestones:** [PLAN.md](PLAN.md)
-- **Current implementation architecture:** [docs/architecture.md](docs/architecture.md)
-- **Platform targets and available capabilities:** [PLATFORMS.md](PLATFORMS.md)
-- **Executor and Sandbox architecture:** [docs/concept/flow-agent-executor-architecture.md](docs/concept/flow-agent-executor-architecture.md)
-- **Liquid client architecture:** [docs/concept/liquid-client-architecture.md](docs/concept/liquid-client-architecture.md)
-- **Rules for AI/human contributors:** [AGENTS.md](AGENTS.md)
-- **Open decisions (human decision page):** [docs/decisions/open-decisions.html](docs/decisions/open-decisions.html)
-- **Terminology:** [GLOSSARY.md](GLOSSARY.md)
+Each topic's canonical home; other files link there.
+
+| Topic | Canonical home |
+|---|---|
+| Why and how the products fit together | [VISION.md](VISION.md) |
+| Milestones and open work | [PLAN.md](PLAN.md) |
+| Terms | [GLOSSARY.md](GLOSSARY.md) |
+| Agent host and headless replica | [Liquid V-Spec: sync](docs/concept/V-Spec_Liquid.html#sync) |
+| Flow Executor and native self-protection | [SECURITY.md](SECURITY.md#accepted-flow-agent-security-target); wire: [PROTOCOL.md](PROTOCOL.md#m12-executor-protocol) |
+| Flow execution architecture | [Executor architecture](docs/concept/flow-agent-executor-architecture.md) |
+| Flow configuration authority | [PROTOCOL.md](PROTOCOL.md#local-run-storage-and-m11-conversation-trees) |
+| Portable continuation | [SECURITY.md](SECURITY.md#accepted-post-m11-target-local-inference-and-portable-continuation) |
+| Harness governance | [SECURITY.md](SECURITY.md#meta-harness-agent-sessions) |
+| Harness configurations | [SECURITY.md](SECURITY.md#meta-agent-configuration-writes) |
+| Orchestration of agents | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration) |
+| Durability | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#durability) |
+| MVP VCS boundary, Git integration and checkpoints | [SECURITY.md](SECURITY.md#mvp-vcs-boundary); decisions: [ADR log](docs/adr/ADR-LOG.md) |
+| Liquid sync, replicas and areas | [Liquid V-Spec](docs/concept/V-Spec_Liquid.html#sync) |
+| Roles and grants | [SECURITY.md](SECURITY.md#liquid-workspace-access--external-agent-edits) |
+| Liquid Pages, Blocks and Tables | [Liquid V-Spec](docs/concept/V-Spec_Liquid.html#model) |
+| History and Workspace CLI/API | [Liquid V-Spec](docs/concept/V-Spec_Liquid.html#history) |
+| Liquid client architecture | [docs/concept/liquid-client-architecture.md](docs/concept/liquid-client-architecture.md) |
+| Implementation architecture | [docs/architecture.md](docs/architecture.md) |
+| Platforms, Windows and WSL | [PLATFORMS.md](PLATFORMS.md) |
+| Events, CLI and API protocol | [PROTOCOL.md](PROTOCOL.md) |
+| Testing and CI gates | [TESTING.md](TESTING.md#ci) |
+| Performance evidence | [PERFORMANCE.md](PERFORMANCE.md#evidence-convention) |
+| Design guidelines and tokens | [docs/design/guidelines.md](docs/design/guidelines.md) |
+| Rules for contributors and agents | [AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Open decisions | [docs/decisions/open-decisions.html](docs/decisions/open-decisions.html) |
+| Accepted decisions | [docs/adr/ADR-LOG.md](docs/adr/ADR-LOG.md) |
+| License | [License](#license) |
 
 ## License
 

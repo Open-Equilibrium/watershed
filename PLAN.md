@@ -142,15 +142,15 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 - API/protocol surface for Liquid and BYOA: session registry, live event and transcript streams, artifact/log/handoff queries, config read/write proposals, agent schedule/trigger control, answers to a harness's own approvals and questions, revert.
 - Central configuration model that resolves shared Watershed building blocks to each target's documented config surface. Flow Agent receives only its global authority and explicit Flows rather than a project-local config layer; device-local Runtime bindings remain owned by the execution host.
 - Control plane: session registry, routing, task state, attention state and agent schedule/trigger skeleton.
-- Reference scenario for schedules: a scheduled agent keeps a news feed as a database page in Liquid and changes it only with the configured approval, as `disler/pi-durable-news-agent` does with its own app.
-- Host-local Meta-Harness agent executor that rejects cross-host agent-process control and never manages a Flow Executor or Tool Sandbox (backend integration: [D-048](docs/decisions/open-decisions.html#d-048)).
+- Reference scenario for schedules: a scheduled agent keeps a news feed as a database page in Liquid and changes it only with the approval its Workspace Role requires, as `disler/pi-durable-news-agent` does with its own app.
+- Host-local Meta-Harness agent executor that rejects cross-host agent-process control (backend integration: [D-048](docs/decisions/open-decisions.html#d-048)).
 - Adapters: Flow Agent (via its public runtime surfaces) + at least one external CLI adapter.
-- Orchestration tools for agents as MCP tools (ADR-0253, [V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration)): an agent starts, messages, reads, steers and stops subagents of any harness and model, on linked hosts too, and hosts link by a pairing the person completes; Claude Code joins pi and Codex as an adapter.
+- Orchestration tools for agents as MCP tools (ADR-0253, [V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration)): an agent starts, messages, reads, steers and stops subagents of any harness and model, on other agent hosts too, and hosts link by a pairing the person completes; Claude Code joins pi and Codex as an adapter.
 - Event/transcript ingestion from agents; artifact/log/handoff indexing (logs, structured summaries, host-provided diffs, handoff packs, checkpoints).
 - Policy-gated configuration writes with audit trail and review flow.
 - **No rich standalone GUI**; M2 packaging, including whether it adds a small status screen after the headless controller works, remains D-021.
 
-**DoD:** monitor, steer and configure at least two different CLI agents on the Meta-Harness host from one control surface, with both represented through one normalized session/event model; reject attempts to claim or control a process on another host; run without Liquid; expose the public API/protocol over both connections; integrate Flow Agent through its public runtime surfaces (not its internals); resolve shared config without duplicated per-agent config directories for the same capability; require approval plus an audit record for every sensitive config change; and let a session on one host start, message, steer and stop a subagent of another harness on a linked host through the orchestration tools.
+**DoD:** monitor, steer and configure at least two different CLI agents on one agent host from one control surface, with both represented through one normalized session/event model; reject attempts to claim or control a process on another host; run without Liquid; expose the public API/protocol over both connections; integrate Flow Agent through its public runtime surfaces (not its internals); resolve shared config without duplicated per-agent config directories for the same capability; require approval plus an audit record for every sensitive config change; and let a session on one host start, message, steer and stop a subagent of another harness on another agent host through the orchestration tools.
 
 ### M3 — Liquid (staged standalone workspace product)
 
@@ -169,7 +169,7 @@ A macOS Liquid app, built ahead of M2 and M3a, that controls pi through an embed
 - Diff view of a run's changes in the agent's Git project, unified or split and with whitespace changes hidden on request (ADR-0190).
 - Shared [design guidelines](docs/design/guidelines.md) and tokens, plus approved mockups of the agent view, Trajectory tab and Diff tab before their implementation.
 - CI: `flutter analyze` and `flutter test` on Linux as required checks; a macOS app build on a macOS runner becomes required once it runs reliably.
-- Out of scope: Trajectory search and attribution of entries to the extension that produced them. The agent-surface mockup's Git branch in the sidebar and its context-window display follow in a later step.
+- Out of scope: Trajectory search and attribution of entries to the extension that produced them. The agent-surface mockup's context-window display follows in a later step.
 
 **DoD (macOS):**
 
@@ -202,7 +202,7 @@ A macOS Liquid app, built ahead of M2 and M3a, that controls pi through an embed
   - Clawpatch on the checkpoint branch (2026-11-01), predating it: test fixtures can write an inherited `GIT_INDEX_FILE`; the linked-FIFO test in `tests/stored.rs` can hang; the trajectory drops superseded compaction summaries from context details and can leave the preceding response outside the freshness window; the supervisor loses a question's deadline under event backpressure; `ready.rs` does not enforce the startup event limit; pending bridge queries block Stop and answers; a tool that settles unfinished loses its partial output.
   - Revert reviews (2026-11-01): open a session file that may be a pipe without waiting and refuse what is no plain file, in `stored.rs` and `History::from_file`.
   - Session removal reviews (2026-11-01), Minor: listing refs is capped at 4 MiB of Git output, so past about 45,000 checkpoint refs listing and removing them fail; a turn's end that takes over two seconds after a stop refuses deleting the session just left until retried; a session open but idle in another window can be deleted; a refusal cannot name a running turn whose name lock it could not take; a non-folder entry under `worktrees/` fails removing all with an unclear I/O error; a turn waiting while all checkpoints are removed says it waits for a revert; the row menu's button sits beside the sidebar's session card rather than inside it; a name file can change its inode under concurrent starts, so a running session's name can drop from the refusal while its locks still hold.
-- A tool row in the chat overflows with a 64-character tool name (found 2026-11-08 while removing the approval card).
+- A tool row in the chat overflows with a 64-character tool name (found 2026-11-08).
 - At the smallest window, 1050 x 640, the session tree starts collapsed, so the Trajectory's Step column keeps about 190 px and the context track shows; the comparison still shows no step rows until scrolled.
 
 #### Liquid Git integration — next slice
@@ -260,9 +260,9 @@ Completes the Git integration for the agent's Git project (ADR-0190, ADR-0191): 
 
 - Central Sync Server with resumable star-topology exchange, merging with Automerge 3 (ADR-0238); a concurrent edit of one field shows both values, after an approved mockup.
 - Authorized user devices sync complete Workspaces and continue offline from local replicas.
-- Optional headless Liquid replica receives only explicitly enabled Workspaces and exposes the same Role/mutation boundary to same-host agents while user devices are offline.
+- An optional headless replica receives only explicitly enabled Workspaces and exposes the same Role/mutation boundary to Automations, schedules and agents on its host while user devices are offline.
 - Sync applies received actions through the same permissioned mutation/History pipeline.
-- Sync, headless Liquid and Meta-Harness remain separate logical roles even when one hosted deployment co-locates them.
+- Sync, headless replicas and Meta-Harness remain separate logical roles even when one hosted deployment co-locates them.
 
 **M3c DoD:** laptop, phone and an opted-in headless replica converge through the Sync Server; disconnecting any replica never blocks its local work; reconnection resumes without silent loss; a server agent can act only within its Workspace and Role.
 

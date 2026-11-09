@@ -6,7 +6,7 @@ Product targets, available capabilities and native release requirements are cano
 
 ## Accepted Flow Agent security target
 
-**ADR-0166 defines the integrated replacement; ADR-0176 settles installation trust and launch.** This section owns the Flow Agent security contract. Runtime, invocation policy and Executor wire use trusted Tools with mandatory native self-protection on Linux and macOS. [TESTING.md](TESTING.md#native-verification-status) owns native CI results and remaining acceptance gaps. Integration and passing Windows shared tests do not establish native protection or release readiness.
+**ADR-0166 defines the integrated replacement; ADR-0176 settles installation trust and launch.** This section owns the Flow Agent security contract. Runtime, invocation policy and Executor wire use trusted Tools with mandatory native self-protection on Linux and macOS. [TESTING.md](TESTING.md#native-verification-status) owns native CI results and remaining acceptance gaps. Integration and passing shared-platform tests do not establish native protection or release readiness.
 
 ### Guarantees and owners
 
@@ -50,7 +50,7 @@ Concurrent Runs do not imply independent OS security domains. The existing user-
 
 **First Flow Agent release (ADR-0173): manual configuration administration only.** Implement no Tool configuration-proposal protocol, per-Building-Block `ask`/scoped `allow` configuration policy or approval UI. Direct Tool/child writes to protected Flow objects remain blocked, without converting OS errors into prompts. Existing manual authoring, configuration validation and safe publication remain required, as do Flow's internal runtime/storage writes. This deferral neither freezes runtime state nor grants Tools access to trusted administration paths.
 
-The unreleased Flow definitions, schema, compiled policy, protocol, goldens and tests migrate together without compatibility aliases. Removed isolation requirements are rejected before effects, never accepted as ignored security settings. Replacement behavior requires meaningful red-first tests and native evidence on both release targets. Standard Tool scope and trust UX remain [D-066](docs/decisions/open-decisions.html#d-066); the later marketplace remains [D-067](docs/decisions/open-decisions.html#d-067), not a certification promise.
+The unreleased Flow definitions, schema, compiled policy, protocol, goldens and tests migrate together without compatibility aliases. Removed isolation requirements are rejected before effects, never accepted as ignored security settings. Replacement behavior requires meaningful red-first tests and native evidence on both release targets. Standard Tool scope and trust UX remain [D-066](docs/decisions/open-decisions.html#d-066).
 
 The [later roadmap](PLAN.md#later-flow-agent-roadmap) retains the deferred configuration feature and prior discussion context, without a future protocol, UI specification or acceptance matrix here.
 
@@ -133,13 +133,13 @@ Flow validation, native self-protection and durable lifecycle are the separate r
 
 ## Meta-Agent configuration writes
 
-A Meta-Agent may reconfigure underlying agents, **policy-gated**: low-risk changes apply only through the configured review/audit flow; sensitive changes (permissions, tools, network, schedules, external credentials) require human approval. Every change is recorded with who/what/when, is monitorable and is revertible according to the chosen config-storage model. The human always knows what changed.
+A Meta-Agent may reconfigure underlying agents, **policy-gated**: low-risk configuration changes apply only through the configured review/audit flow; sensitive ones (permission, tool, network, schedule and external-credential settings) require human approval. Every change is recorded with who/what/when, is monitorable and is revertible according to the chosen config-storage model. The human always knows what changed.
 
 Harness configurations are kept in Liquid and materialized by Meta-Harness per session into a home it owns; changes arrive as proposals through this gate, and credentials never leave the host (ADR-0227). Local inference endpoints are configured the same way; an area may be kept to local models, which Meta-Harness checks before a session starts (ADR-0225).
 
-The same gate applies to **all Meta-Harness control surfaces** — its CLI, API/service and BYOA/external command surface. Meta-Harness runs headlessly (without Liquid), so the policy/audit gate, not a UI confirmation dialog, is the boundary: sensitive commands from any client must be authorized and audited identically.
+The same gate applies to **all Meta-Harness control surfaces** — its CLI, API/service and BYOA/external command surface. Meta-Harness runs headlessly (without Liquid), so the policy/audit gate, not a UI confirmation dialog, is the boundary: configuration changes and control commands from any client must be authorized and audited identically.
 
-Execution ownership is host-local. A Meta-Harness agent executor may control only whole CLI agent processes created or adopted on its own host under an explicit local identity; it rejects cross-host process claims. This process supervisor is not a Flow Executor and has no authority to select, configure or manage Flow Tool Sandboxes. Exposing the API to another device requires authenticated, integrity-protected transport and does not expand agent-executor authority. Liquid must route live commands to the instance that owns the addressed session/configuration and must not treat cached state as controllable while that instance is unreachable.
+Execution ownership is host-local. A Meta-Harness agent executor may control only whole CLI agent processes created or adopted on its own host under an explicit local identity; it rejects cross-host process claims. Exposing the API to another device requires authenticated, integrity-protected transport and does not expand agent-executor authority. Liquid must route live commands to the instance that owns the addressed session/configuration and must not treat cached state as controllable while that instance is unreachable.
 
 ## Meta-Harness agent sessions
 
@@ -159,7 +159,7 @@ Liquid is a standalone workspace product that external agents and tools can read
 - Effective authority is the intersection of the Role and narrower system, App, session, provider and execution-host boundaries. No layer can grant a capability another boundary denies.
 - Every workspace write — from the UI, Liquid AI, the CLI/API or an external agent — goes through one **permissioned mutation pipeline** and is recorded in Liquid's **action history**; there are no hidden writes that bypass it.
 - Sync applies received actions through that same pipeline. Sync credentials authorize Workspace exchange only; they do not authorize Meta-Harness control. Interrupted or untrusted sync never disables access to the local replica.
-- A headless Liquid replica is a separate execution boundary. It receives only Workspaces explicitly enabled for that replica, then enforces the same Roles and mutation pipeline as a UI replica.
+- A headless replica is a separate execution boundary. It receives only Workspaces explicitly enabled for that replica, then enforces the same Roles and mutation pipeline as a UI replica.
 - External-agent writes are **attributed** (actor/origin) and **revertible**; sensitive changes require approval, and a proposed diff can be reviewed before apply.
 - The built-in browser for web-link Sources (planned after M3a) gives pages no access to Liquid or the Rust–Flutter bridge, keeps cookies per Workspace and loads a page only when the person opens it (ADR-0236).
 - Secrets and credentials are never Workspace data; Workspace data holds only references to a keychain or a company secret manager (ADR-0224).
@@ -167,14 +167,14 @@ Liquid is a standalone workspace product that external agents and tools can read
 Accepted target for agents (ADR-0223):
 
 - An agent acts with its own identity and a grant signed by the person it works for, naming an area, actions and an expiry. Its authority never exceeds that person's: it is the intersection of the agent's Role, the person's authority and the grant.
-- Agents change Workspace data only through the CLI/API and mutation pipeline of the replica on their own host, never in its store; once selective replication follows the complete M3 replicas, that replica receives only the areas the agent Roles allow (ADR-0224).
+- Agents change Workspace data only through the Workspace CLI/API and mutation pipeline, never in a store: of the person's Liquid on a default agent host, otherwise of their agent host's headless replica, which receives only the areas the agent Roles allow once selective replication follows the complete M3 replicas (ADR-0224, ADR-0255).
 - Each Role sets which changes are sensitive and wait for the person's approval, by default deletion, permission, grant and Automation changes. A grant may waive these approvals, at the discretion of the person who issues it.
 - History records the agent as actor and the person it acts for. Revoking the session or grant makes the Sync Server refuse the agent's further changes.
-- Watershed puts no sandbox around a harness (ADR-0252). A Meta-Harness host runs agents under the account it is installed on, so its agents reach what that account reaches (ADR-0254): on a person's own account they can delete or damage Liquid's data folder; the replica key stays Liquid's on macOS, whose keychain releases it only to Liquid, while on Linux the Secret Service and on Windows the Credential Manager release it to any program of the user; and Meta-Harness in WSL sees the Windows drives, Liquid's data folder included, unless WSL's automount is turned off. Whoever wants agents apart sets Meta-Harness up in a VM, a container, another account or on another computer and links it as a host.
-- A subagent's authority comes from its parent's grant and is never larger; linked hosts are paired over the authenticated remote connection, an agent may only ask for a pairing the person then completes on that host, and each host starts its own processes (ADR-0253).
-- Liquid AI is a built-in agent profile on a Meta-Harness host, local or remote, limited to Liquid actions (ADR-0229).
-- Agent hosts sync through the Sync Server; a later offline path through the device's Liquid is required, and the Sync Server verifies signed changes either way (ADR-0228).
-- A company may limit where agent hosts run. The Sync Server then wraps no area keys and accepts no grants for other hosts, and Liquid follows the company's device-management policy, starting no local Meta-Harness. Agents installed outside Liquid are the device management's to block (ADR-0233).
+- Watershed puts no sandbox around a harness (ADR-0252). An agent host runs agents under the account it is installed on, so its agents reach what that account reaches (ADR-0254): on a person's own account they can delete or damage Liquid's data folder; the replica key stays Liquid's on macOS, whose keychain releases it only to Liquid, while on Linux the Secret Service and on Windows the Credential Manager release it to any program of the user; and Meta-Harness in WSL sees the Windows drives, Liquid's data folder included, unless WSL's automount is turned off. Whoever wants agents apart sets Meta-Harness up in a VM, a container, another account or on another computer and links it as an agent host.
+- A subagent's authority comes from its parent's grant and is never larger; agent hosts are linked by pairing over the authenticated remote connection, an agent may only ask for a pairing the person then completes on that agent host, and each agent host starts its own processes (ADR-0253).
+- Liquid AI is a built-in agent profile on an agent host, local or remote, limited to Liquid actions (ADR-0229).
+- Headless replicas on agent hosts sync through the Sync Server; a later offline path through the device's Liquid is required, and the Sync Server verifies signed changes either way (ADR-0228).
+- A company may limit where agent hosts run. The Sync Server then wraps no area keys and accepts no grants for other agent hosts, and Liquid follows the company's device-management policy, starting no local Meta-Harness. Agents installed outside Liquid are the device management's to block (ADR-0233).
 
 Accepted enterprise target for sign-in, sync and storage (ADR-0224, ADR-0228):
 
@@ -183,7 +183,7 @@ Accepted enterprise target for sign-in, sync and storage (ADR-0224, ADR-0228):
 - M3 starts with complete Workspace replicas, but the data model is divided into areas from the start, so that each device can later receive only what its person may access.
 - Signed changes make History tamper-evident, and the Sync Server keeps an audit log that companies can export to their security monitoring.
 - Liquid runs both as Liquid Cloud, with a chosen region and customer-managed keys, and self-hosted.
-- Devices encrypt Workspace content per area from M3. Each area key is wrapped for every device and agent host allowed in the area and, unless the Workspace chooses end-to-end encryption, for the Sync Server; choosing it later removes the server's copy. A company may run a compliance replica with its own key for search, legal hold and data-loss checks.
+- Devices encrypt Workspace content per area from M3. Each area key is wrapped for every device and headless replica allowed in the area and, unless the Workspace chooses end-to-end encryption, for the Sync Server; choosing it later removes the server's copy. A company may run a compliance replica with its own key for search, legal hold and data-loss checks.
 - A new device receives keys only after a signed-in device approves it or a recovery key restores access; area keys are also wrapped for that key, which the person or their company holds. A fault in key approval, rotation, revocation or recovery loses data, so each has dedicated tests. Liquid ships native apps only, with no web client.
 - App execution, external MCP calls and external-agent edits are separate risk classes and keep separate capability grants.
 
