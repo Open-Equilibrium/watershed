@@ -225,7 +225,7 @@ fn timeout_and_cancellation_reap_the_tool_root_after_term_grace() {
         let script = if cooperative {
             "trap 'printf stopped > term-marker; exit 0' TERM; printf ready > root-ready; while :; do sleep 0.02; done"
         } else {
-            "trap '' TERM; printf $$ > root-pid; printf ready > root-ready; while :; do :; done"
+            "trap '' TERM; printf ready > root-ready; while :; do printf . >> heartbeat; sleep 0.02; done"
         };
         let request = fixture.request(script, limits(1024, 1024, if cancel { 5000 } else { 1500 }));
         let mut running = fixture.spawn(&request);
@@ -264,12 +264,14 @@ fn timeout_and_cancellation_reap_the_tool_root_after_term_grace() {
                 b"stopped"
             );
         } else {
-            let root = fs::read_to_string(fixture.project.join("root-pid")).unwrap();
-            let root = rustix::process::Pid::from_raw(root.parse().unwrap()).unwrap();
+            // Host-visible proof, independent of the Tool's PID namespace.
+            let heartbeat = fixture.project.join("heartbeat");
+            let size = fs::metadata(&heartbeat).unwrap().len();
+            thread::sleep(Duration::from_millis(250));
             assert_eq!(
-                rustix::process::test_kill_process(root),
-                Err(rustix::io::Errno::SRCH),
-                "the forced Tool root must be reaped"
+                fs::metadata(&heartbeat).unwrap().len(),
+                size,
+                "the forced Tool root must have stopped"
             );
         }
     }
