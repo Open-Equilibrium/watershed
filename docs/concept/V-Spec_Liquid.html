@@ -154,7 +154,8 @@ Liquid        = local-first workspace and App platform</code></pre>
     </div></section>
 
     <section id="permissions" class="section"><h2>6. Roles and safety</h2><div class="body">
-      <p>A <strong>Role</strong> is an editable composition of allow-only permissions over named Workspaces, Pages, Blocks, Sources, App actions, agent controls and administrative capabilities. Roles can be assigned to users, groups, agent profiles, sessions and Automations.</p>
+      <p class="muted" id="workspace-access">Accepted target (M3): shipped today are the one mutation pipeline with its Actions, which allows only the Workspace's owner, and the encrypted replica (<a href="../../SECURITY.md#liquid-workspace-access--external-agent-edits">SECURITY.md</a>); Roles, the Workspace CLI/API and the rules below follow.</p>
+      <p>A <strong>Role</strong> is an editable composition of allow-only permissions over named Workspaces, Pages, Blocks, Sources, App actions, Meta-Harness projections, agent controls and administrative capabilities. Roles can be assigned to users, groups, agent profiles, sessions and Automations.</p>
       <pre><code>effective permission =
   Role allow
   ∩ system boundary
@@ -162,11 +163,14 @@ Liquid        = local-first workspace and App platform</code></pre>
   ∩ session grant
   ∩ provider/host boundary</code></pre>
       <ul>
-        <li>Anything not allowed is denied by default. Explicit deny/blacklist rules are deferred until real policy conflicts require them.</li>
+        <li>Workspace CLI/API access requires an authenticated identity and an assigned allow-only Role. Anything not allowed is denied by default. Explicit deny/blacklist rules are deferred until real policy conflicts require them.</li>
+        <li>Effective authority is the intersection above: no layer can grant a capability another boundary denies.</li>
         <li>Capabilities distinguish discovery/read, propose, execute/apply, approve and manage where the resource supports them.</li>
-        <li>In the M3 MVP, resource-scoped discovery/read permissions govern Liquid surfaces but do not hide bytes in a complete plaintext replica from its authorized device owner or same-identity local processes.</li>
+        <li>In the M3 MVP, resource-scoped discovery/read permissions govern Liquid surfaces but do not hide bytes in a complete plaintext replica from its authorized device owner or same-identity local processes. This does not grant write, execution or administrative authority.</li>
         <li>Agents may receive narrower per-session authority than their reusable agent profile.</li>
-        <li>Every Workspace write uses the same mutation pipeline and records actor, origin, permission result and reversible change in History.</li>
+        <li>Every Workspace write, from the UI, Liquid AI, the CLI/API or an external agent, uses the same mutation pipeline and records actor, origin, permission result and reversible change in History; no hidden write bypasses it.</li>
+        <li>External-agent writes are attributed (actor/origin) and revertible; sensitive changes require approval, and a proposed diff can be reviewed before apply.</li>
+        <li>Secrets and credentials are never Workspace data; Workspace data holds only references to a keychain or a company secret manager (ADR-0224).</li>
         <li>Visibility, View placement, Connection existence and sync access never imply execution authority.</li>
         <li>Rights inherit from an area to its Pages and Blocks. A <strong>protected</strong> Page, Block or Source stops inheriting them, so only Roles allowed on it may change it. A Block's rights follow its home, never the Page that shows a View of it. Read access is never finer than an area; in M3 every authorized device holds the complete Workspace, so the Workspace stays the confidentiality boundary (ADR-0235).</li>
         <li>M3a assigns Roles to Automations; people follow with sync and agent profiles with M3b (ADR-0235). Three editable Role templates follow Notion's access levels: Can view (read), Can edit (read and apply) and Can manage (every capability). The person who creates a Workspace holds Can manage, which protection never removes, so no one can lock the owner out (<a href="../design/mockups/liquid-workspace-history.html">History and Roles mockups</a>).</li>
@@ -229,9 +233,10 @@ Headless replica ┘</code></pre>
       <ul>
         <li>Every authorized M3 MVP client reads and writes a complete local Workspace replica; network loss never switches Liquid into a remote-only mode.</li>
         <li>Replicas connect to the central Sync Server, not directly to one another. The server persists and exchanges committed changes resumably.</li>
+        <li>Sync applies received actions through the same mutation pipeline. Sync credentials authorize Workspace exchange only, not Meta-Harness control. Interrupted or untrusted sync never disables access to the local replica.</li>
         <li>Authorized user devices sync the full plaintext Workspace. The Workspace is therefore the local confidentiality boundary, while Liquid still enforces resource-scoped action and API checks.</li>
         <li>Workspace admission and resource authorization remain separate. Resources keep stable identities, committed changes remain resource-addressed and sync is versioned so a later protocol can add a finite authorized-resource closure. Selective replication is not part of the MVP.</li>
-        <li>A headless replica is an optional normal replica without UI, on a server for Automations and schedules or on a separate agent host. It requires workspace-level opt-in because it introduces a separate execution boundary.</li>
+        <li>A headless replica is an optional normal replica without UI, on a server for Automations and schedules or on a separate agent host. It requires workspace-level opt-in because it introduces a separate execution boundary: it receives only Workspaces explicitly enabled for it, then enforces the same Roles and mutation pipeline as a UI replica.</li>
         <li>Agents and Automations on its host use its normal CLI/API, Roles and mutation pipeline even while user devices are offline.</li>
         <li>The Sync Server does not execute Apps or agents. It and a headless replica may be co-located in one hosted deployment while remaining separate logical services.</li>
         <li>Replicas merge with Automerge 3, which keeps both values of a concurrent edit to one field (ADR-0238).</li>
