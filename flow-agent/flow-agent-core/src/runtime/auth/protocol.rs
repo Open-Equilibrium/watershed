@@ -48,12 +48,21 @@ pub(crate) fn epoch_milliseconds() -> Result<u64, RuntimeError> {
         .ok_or_else(auth_protocol)
 }
 
+/// A callback that carries the generated state.
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum OAuthCallback {
+    Code(String),
+    /// The authorization server returned an OAuth error instead of a code.
+    Denied,
+}
+
 pub(crate) fn parse_oauth_callback(
     query: &str,
     expected_state: &str,
-) -> Result<String, RuntimeError> {
+) -> Result<OAuthCallback, RuntimeError> {
     let mut state = None;
     let mut code = None;
+    let mut error = None;
     for pair in query.split('&') {
         let (name, value) = pair.split_once('=').ok_or_else(auth_protocol)?;
         let name = percent_decode(name)?;
@@ -61,6 +70,7 @@ pub(crate) fn parse_oauth_callback(
         match name.as_str() {
             "state" => set_once(&mut state, value)?,
             "code" => set_once(&mut code, value)?,
+            "error" => set_once(&mut error, value)?,
             _ => {}
         }
     }
@@ -68,11 +78,13 @@ pub(crate) fn parse_oauth_callback(
     if !constant_time_equal(state.as_bytes(), expected_state.as_bytes()) {
         return Err(auth_protocol());
     }
-    let code = code.ok_or_else(auth_protocol)?;
-    if code.is_empty() || code.contains('\0') {
-        return Err(auth_protocol());
+    match (code, error) {
+        (Some(code), None) if !code.is_empty() && !code.contains('\0') => {
+            Ok(OAuthCallback::Code(code))
+        }
+        (None, Some(error)) if !error.is_empty() => Ok(OAuthCallback::Denied),
+        _ => Err(auth_protocol()),
     }
-    Ok(code)
 }
 
 pub(crate) fn parse_device_authorization_body(

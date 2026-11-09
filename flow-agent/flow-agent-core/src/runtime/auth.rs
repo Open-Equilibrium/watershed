@@ -21,9 +21,9 @@ pub(crate) use device::{
 };
 #[cfg(test)]
 pub(crate) use protocol::{
-    base64url_encode, epoch_milliseconds, next_poll_interval, parse_device_authorization_body,
-    parse_device_poll_body, parse_oauth_callback, parse_token_body, percent_encode,
-    random_url_token,
+    OAuthCallback, base64url_encode, epoch_milliseconds, next_poll_interval,
+    parse_device_authorization_body, parse_device_poll_body, parse_oauth_callback,
+    parse_token_body, percent_encode, random_url_token,
 };
 #[cfg(test)]
 pub(crate) use transport::{
