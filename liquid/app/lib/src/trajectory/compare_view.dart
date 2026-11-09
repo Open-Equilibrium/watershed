@@ -138,7 +138,7 @@ class CompareView extends StatelessWidget {
   static String _sharedLabel(BridgeRecord record) => switch (record.kind) {
     BridgeRecordKind.user => 'prompt',
     BridgeRecordKind.message => 'message',
-    BridgeRecordKind.tool || BridgeRecordKind.approval => record.label,
+    BridgeRecordKind.tool => record.label,
   };
 }
 
@@ -260,10 +260,6 @@ class _Cell extends StatelessWidget {
       BridgeRecordKind.message when usage != null => [
         ?time,
         '${formatCompact(promptTokens(usage))} → ${formatCompact(usage.output)}',
-      ].join(' · '),
-      BridgeRecordKind.approval => [
-        decisionLabel(record.decision),
-        ?time,
       ].join(' · '),
       BridgeRecordKind.tool => outcomeText(record.outcome) ?? time ?? '',
       _ => time ?? '',

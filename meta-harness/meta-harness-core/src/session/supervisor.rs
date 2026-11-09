@@ -1,5 +1,5 @@
-//! Routes an agent's records to the session: answers, approvals it may decide itself and
-//! events, until the agent exits.
+//! Routes an agent's records to the session: answers, checkpoint requests and events, until
+//! the agent exits.
 
 use std::future::{Future, poll_fn};
 use std::pin::{Pin, pin};
@@ -14,7 +14,6 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
 use super::{CommandError, MAX_RECORD_BYTES, SessionEvent, State, Write, switched, ui_response};
-use crate::approval::{Allowance, needs_user};
 use crate::framing::keep_end;
 use crate::pi::checkpoint_request;
 use crate::{
@@ -160,7 +159,6 @@ impl Supervisor {
             for (_, expiry) in shared.expiries.drain() {
                 expiry.abort();
             }
-            shared.approvals.clear();
         }
         // A capture in progress stops with its Git and the programs Git started, before the
         // exit is reported.
@@ -222,41 +220,6 @@ impl Supervisor {
         for event in self.adapter.translate(&record) {
             let mut expiry = None;
             let forward = match &event {
-                AgentEvent::RequestOpened {
-                    request,
-                    kind,
-                    tool,
-                    text,
-                    read_only,
-                    session,
-                    ..
-                } => {
-                    let answer = {
-                        let mut shared = self.state.lock();
-                        shared.allow_in(session.clone());
-                        let allowance = Allowance::of(*kind, tool, text);
-                        let allowed = shared.allowed.contains(&allowance);
-                        if shared.stopping {
-                            Some(json!({ "cancelled": true }))
-                        } else if needs_user(shared.mode, *kind, *read_only, allowed) {
-                            shared
-                                .approvals
-                                .insert(request.clone(), (allowance, session.clone()));
-                            None
-                        } else {
-                            Some(json!({ "value": "allow-auto" }))
-                        }
-                    };
-                    match answer {
-                        Some(answer) => {
-                            if !self.reply(request, answer).await {
-                                return false;
-                            }
-                            false
-                        }
-                        None => true,
-                    }
-                }
                 AgentEvent::UserInputRequested { request, .. } => {
                     let stopping = {
                         let mut shared = self.state.lock();
@@ -366,8 +329,7 @@ impl Supervisor {
             let _ = reply.send(Err(CommandError::TooLarge));
             return true;
         }
-        // The agent waits for an answer to its dialog; dismissing it fails the dialog instead,
-        // and an approval dismissed this way blocks its call.
+        // The agent waits for an answer to its dialog; dismissing it fails the dialog instead.
         if start.contains(r#""type":"extension_ui_request""#)
             && let Some(id) = id
             && !self
@@ -423,12 +385,9 @@ impl Supervisor {
         if response.get("command").and_then(Value::as_str) == Some("abort") {
             self.state.lock().stopping = false;
         }
-        // Before any later record is read: tools allowed for the rest of a session need asking
-        // again once the agent switched to another one.
+        // Once the agent switched sessions, the next history read starts over.
         if switch && result.as_ref().is_ok_and(switched) {
-            let mut shared = self.state.lock();
-            shared.allowed.clear();
-            shared.switched = true;
+            self.state.lock().switched = true;
         }
         let _ = reply.send(result);
     }

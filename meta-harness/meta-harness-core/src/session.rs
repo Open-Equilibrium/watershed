@@ -12,11 +12,10 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::{ChildStdin, Command};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::approval::{Allowance, ApprovalMode};
 use crate::pi::queue;
 use crate::{
-    AgentEvent, Answer, Checkpoint, Checkpoints, Decision, Delivery, History, Phase, PiAdapter,
-    Queue, RequestId, Whitespace,
+    AgentEvent, Answer, Checkpoint, Checkpoints, Delivery, History, Phase, PiAdapter, Queue,
+    RequestId, Whitespace,
 };
 use supervisor::{Supervisor, read_end};
 
@@ -40,8 +39,8 @@ pub struct AgentCommand {
     /// Arguments before the ones the session adds, such as an interpreter's script or more pi
     /// options.
     pub args: Vec<OsString>,
-    /// Watershed's pi extension, which makes pi ask before tool calls; the session checks that
-    /// pi loaded this file. It must be absolute: pi would read a relative path inside the
+    /// Watershed's pi extension, which marks each turn's checkpoints; the session checks that pi
+    /// loaded this file. It must be absolute: pi would read a relative path inside the
     /// project, which could supply its own copy.
     pub extension: PathBuf,
     /// A session file pi reopens instead of starting a new session.
@@ -109,8 +108,8 @@ pub enum CommandError {
     Closed,
     /// The agent's response exceeded the record limit and was skipped.
     TooLarge,
-    /// Watershed's pi extension is not loaded, so tool calls would run without asking.
-    Ungated,
+    /// Watershed's pi extension is not loaded, so a turn would run without its checkpoints.
+    ExtensionMissing,
 }
 
 type Reply = oneshot::Sender<Result<Value, CommandError>>;
@@ -183,12 +182,6 @@ enum Write {
 struct Shared {
     /// Commands awaiting their response; `None` once the agent is gone.
     replies: Option<HashMap<u64, Reply>>,
-    mode: ApprovalMode,
-    /// What the user allowed for the rest of the session, and the session it belongs to.
-    allowed: HashSet<Allowance>,
-    allowed_in: Option<String>,
-    /// Open approval requests, the allowance each one would use and its session.
-    approvals: HashMap<RequestId, (Allowance, Option<String>)>,
     /// Open questions from agent extensions.
     questions: HashSet<RequestId>,
     /// The timers of questions with a time limit.
@@ -200,8 +193,8 @@ struct Shared {
     /// Whether the agent switched sessions since the history was read; the next read starts
     /// over, since sessions can share entry ids.
     switched: bool,
-    /// Whether an abort waits for the turn to settle; dialogs arriving meanwhile are withdrawn
-    /// or dismissed, since the agent stops only once they are answered.
+    /// Whether an abort waits for the turn to settle; questions arriving meanwhile are dismissed,
+    /// since the agent stops only once they are answered.
     stopping: bool,
 }
 
@@ -212,15 +205,6 @@ impl Shared {
             expiry.abort();
         }
         self.questions.remove(request)
-    }
-
-    /// Keeps allowances only for `session`: an extension command can switch sessions without
-    /// the core seeing it, and a call from another session asks again.
-    fn allow_in(&mut self, session: Option<String>) {
-        if self.allowed_in != session {
-            self.allowed.clear();
-            self.allowed_in = session;
-        }
     }
 }
 
@@ -375,7 +359,7 @@ impl Session {
 
     /// Sends a prompt that starts a turn.
     pub async fn prompt(&mut self, message: &str) -> Result<Pending, CommandError> {
-        self.require_gate().await?;
+        self.require_extension().await?;
         self.submit(json!({ "type": "prompt", "message": message }))
             .await
     }
@@ -387,7 +371,7 @@ impl Session {
         message: &str,
         delivery: Delivery,
     ) -> Result<Pending, CommandError> {
-        self.require_gate().await?;
+        self.require_extension().await?;
         let behavior = match delivery {
             Delivery::Steer => "steer",
             Delivery::FollowUp => "followUp",
@@ -406,23 +390,13 @@ impl Session {
         Ok(queue(&data))
     }
 
-    /// Aborts the running turn. pi answers once the agent is idle, which needs its open dialogs
-    /// answered, so open approvals are withdrawn, which blocks their calls, and open questions
-    /// dismissed.
+    /// Aborts the running turn. pi answers once the agent is idle, which needs its open
+    /// questions answered, so they are dismissed.
     pub async fn abort(&mut self) -> Result<Pending, CommandError> {
         self.state.lock().stopping = true;
         let pending = self.submit(json!({ "type": "abort" })).await?;
-        let (approvals, questions): (Vec<_>, Vec<_>) = {
-            let shared = self.state.lock();
-            (
-                shared.approvals.keys().cloned().collect(),
-                shared.questions.iter().cloned().collect(),
-            )
-        };
+        let questions: Vec<_> = self.state.lock().questions.iter().cloned().collect();
         // One the user answered meanwhile is already resolved.
-        for request in approvals {
-            let _ = self.withdraw(&request).await;
-        }
         for request in questions {
             let _ = self.answer(&request, Answer::Cancelled).await;
         }
@@ -445,13 +419,13 @@ impl Session {
     }
 
     /// Fails unless Watershed's pi extension is loaded from the file the session named, which
-    /// pi shows by listing its `watershed-branch` command with that path: without it the agent
-    /// would run tools without asking, so a session must not start, and every message that may
-    /// start a run checks again: pi loads extensions anew for each session, and an extension can
-    /// switch sessions unseen (ADR-0188).
-    pub async fn require_gate(&mut self) -> Result<(), CommandError> {
+    /// pi shows by listing its `watershed-branch` command with that path: without it a turn
+    /// would run without its checkpoints, so a session must not start, and every message that
+    /// may start a run checks again: pi loads extensions anew for each session, and an extension
+    /// can switch sessions unseen (ADR-0234).
+    pub async fn require_extension(&mut self) -> Result<(), CommandError> {
         let data = self.command(json!({ "type": "get_commands" })).await?;
-        let gated = data
+        let loaded = data
             .get("commands")
             .and_then(Value::as_array)
             .into_iter()
@@ -464,10 +438,10 @@ impl Session {
                         .and_then(Value::as_str)
                         .is_some_and(|path| Path::new(path) == self.extension)
             });
-        if gated {
+        if loaded {
             Ok(())
         } else {
-            Err(CommandError::Ungated)
+            Err(CommandError::ExtensionMissing)
         }
     }
 
@@ -590,55 +564,6 @@ impl Session {
         self.state.lock().running
     }
 
-    /// Changes which tool calls need the user's approval.
-    pub fn set_approval_mode(&self, mode: ApprovalMode) {
-        self.state.lock().mode = mode;
-    }
-
-    /// Answers an open approval request. Like every command, it runs to completion: dropped
-    /// midway, the request may stay unanswered.
-    pub async fn decide(
-        &mut self,
-        request: &RequestId,
-        decision: Decision,
-    ) -> Result<(), CommandError> {
-        {
-            let mut shared = self.state.lock();
-            let (allowance, session) = shared
-                .approvals
-                .remove(request)
-                .ok_or(CommandError::UnknownRequest)?;
-            if decision == Decision::AllowSession {
-                shared.allow_in(session);
-                shared.allowed.insert(allowance);
-            }
-        }
-        let value = match decision {
-            Decision::AllowOnce => "allow-once",
-            Decision::AllowSession => "allow-session",
-            Decision::Reject => "reject",
-        };
-        self.respond(request, json!({ "value": value })).await?;
-        self.resolved(AgentEvent::RequestResolved {
-            request: request.clone(),
-        })
-        .await;
-        Ok(())
-    }
-
-    /// Ends an open approval request without a decision of the user's; its call is blocked.
-    async fn withdraw(&mut self, request: &RequestId) -> Result<(), CommandError> {
-        if self.state.lock().approvals.remove(request).is_none() {
-            return Err(CommandError::UnknownRequest);
-        }
-        self.respond(request, json!({ "cancelled": true })).await?;
-        self.resolved(AgentEvent::RequestResolved {
-            request: request.clone(),
-        })
-        .await;
-        Ok(())
-    }
-
     /// Answers an open question from an agent extension.
     pub async fn answer(
         &mut self,
@@ -692,7 +617,8 @@ impl Session {
         self.submit_as(command, false).await
     }
 
-    /// Sends `command`; a `switch` of the session ends its allowances once the agent did it.
+    /// Sends `command`; a `switch` of the session starts the next history read over once the
+    /// agent did it.
     async fn submit_as(
         &mut self,
         mut command: Value,

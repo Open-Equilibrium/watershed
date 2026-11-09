@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 
-import '../rust/api/events.dart';
 import '../rust/api/history.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'trajectory_model.dart';
 
-/// A step's kind as a colored tag: User, Message, Tool or Approval.
+/// A step's kind as a colored tag: User, Message or Tool.
 class KindTag extends StatelessWidget {
   const KindTag(this.kind, {super.key});
 
@@ -23,7 +22,6 @@ class KindTag extends StatelessWidget {
         ws.data2,
         ws.data2.withValues(alpha: 0.14),
       ),
-      BridgeRecordKind.approval => ('Approval', ws.warning, ws.warningSubtle),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space2),
@@ -44,23 +42,13 @@ class KindTag extends StatelessWidget {
   }
 }
 
-/// An approval decision in words.
-String decisionLabel(BridgeDecision? decision) => switch (decision) {
-  BridgeDecision.allowOnce => 'allowed once',
-  BridgeDecision.allowSession => 'allowed for session',
-  BridgeDecision.reject => 'rejected',
-  null => 'decided',
-};
-
 /// What a step did, as the ledger's Step column shows it.
 String stepText(BridgeRecord record) => switch (record.kind) {
   BridgeRecordKind.user || BridgeRecordKind.message => record.label,
   BridgeRecordKind.tool => toolSummary(record),
-  BridgeRecordKind.approval =>
-    '${record.label} · ${decisionLabel(record.decision)}',
 };
 
-/// The Step column's text; tool calls and approvals are code.
+/// The Step column's text; tool calls are code.
 class StepText extends StatelessWidget {
   const StepText(this.record, {super.key});
 
@@ -69,9 +57,7 @@ class StepText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    final code =
-        record.kind == BridgeRecordKind.tool ||
-        record.kind == BridgeRecordKind.approval;
+    final code = record.kind == BridgeRecordKind.tool;
     return Text.rich(
       TextSpan(
         children: [

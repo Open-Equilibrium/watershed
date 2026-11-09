@@ -7,53 +7,7 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
-
-/// A tool call awaiting approval.
-class BridgeApproval {
-  /// What the call would do.
-  final BridgeRequestKind kind;
-
-  /// The tool name.
-  final String tool;
-
-  /// The whole call the user decides on, such as a shell command.
-  final String text;
-
-  /// The id of the call's item in the chat, when known.
-  final PlatformInt64? item;
-
-  /// What a file change does, when pi's own `edit` or `write` asks; the card shows it as
-  /// removed and added lines.
-  final BridgeEdit? edit;
-
-  const BridgeApproval({
-    required this.kind,
-    required this.tool,
-    required this.text,
-    this.item,
-    this.edit,
-  });
-
-  @override
-  int get hashCode =>
-      kind.hashCode ^
-      tool.hashCode ^
-      text.hashCode ^
-      item.hashCode ^
-      edit.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeApproval &&
-          runtimeType == other.runtimeType &&
-          kind == other.kind &&
-          tool == other.tool &&
-          text == other.text &&
-          item == other.item &&
-          edit == other.edit;
-}
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 /// How a file changed in a run.
 enum BridgeChangeStatus {
@@ -65,18 +19,6 @@ enum BridgeChangeStatus {
 
   /// The file was removed.
   deleted,
-}
-
-/// The user's answer to an approval request.
-enum BridgeDecision {
-  /// Allow this call only.
-  allowOnce,
-
-  /// Allow this shell command, or this tool, for the rest of the session.
-  allowSession,
-
-  /// Block this call.
-  reject,
 }
 
 /// A notification, status entry or widget from an agent extension.
@@ -105,64 +47,6 @@ class BridgeDisplay {
           lines == other.lines;
 }
 
-/// A file change as its approval shows it.
-class BridgeEdit {
-  /// The file, as the agent gave it.
-  final String path;
-
-  /// The file pi changes, when the path does not say so plainly.
-  final String? writesTo;
-
-  /// The replacements in order; a write is one change that adds its whole content.
-  final List<BridgeEditChange> changes;
-
-  /// Whether the change replaces whatever the file holds, as a write does.
-  final bool wholeFile;
-
-  const BridgeEdit({
-    required this.path,
-    this.writesTo,
-    required this.changes,
-    required this.wholeFile,
-  });
-
-  @override
-  int get hashCode =>
-      path.hashCode ^ writesTo.hashCode ^ changes.hashCode ^ wholeFile.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeEdit &&
-          runtimeType == other.runtimeType &&
-          path == other.path &&
-          writesTo == other.writesTo &&
-          changes == other.changes &&
-          wholeFile == other.wholeFile;
-}
-
-/// One replacement in a file.
-class BridgeEditChange {
-  /// The text it removes.
-  final String removed;
-
-  /// The text it adds.
-  final String added;
-
-  const BridgeEditChange({required this.removed, required this.added});
-
-  @override
-  int get hashCode => removed.hashCode ^ added.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeEditChange &&
-          runtimeType == other.runtimeType &&
-          removed == other.removed &&
-          added == other.added;
-}
-
 /// One session event for Dart.
 class BridgeEvent {
   /// What happened.
@@ -174,7 +58,7 @@ class BridgeEvent {
   /// The model request.
   final BridgeStep? step;
 
-  /// The approval request or question.
+  /// The question.
   final BridgeRequest? request;
 
   /// Text whose meaning the kind defines.
@@ -251,12 +135,6 @@ enum BridgeEventKind {
 
   /// `step` with usage, stop reason and error.
   modelRequestCompleted,
-
-  /// `request` with its approval.
-  requestOpened,
-
-  /// `request` id.
-  requestResolved,
 
   /// `request` with its question.
   userInputRequested,
@@ -509,16 +387,13 @@ class BridgeRequest {
   /// The request id.
   final String id;
 
-  /// The tool call awaiting approval.
-  final BridgeApproval? approval;
-
   /// The question awaiting an answer.
   final BridgeQuestion? question;
 
-  const BridgeRequest({required this.id, this.approval, this.question});
+  const BridgeRequest({required this.id, this.question});
 
   @override
-  int get hashCode => id.hashCode ^ approval.hashCode ^ question.hashCode;
+  int get hashCode => id.hashCode ^ question.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -526,20 +401,7 @@ class BridgeRequest {
       other is BridgeRequest &&
           runtimeType == other.runtimeType &&
           id == other.id &&
-          approval == other.approval &&
           question == other.question;
-}
-
-/// What an approval request asks to allow.
-enum BridgeRequestKind {
-  /// Running a shell command.
-  commandExecution,
-
-  /// Changing project files.
-  fileChange,
-
-  /// Calling any other tool.
-  tool,
 }
 
 /// A completed model request's outcome.

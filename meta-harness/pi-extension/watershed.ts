@@ -1,32 +1,14 @@
-// Watershed's pi extension. The Meta-Harness core loads it into pi's RPC mode: it pauses every
-// tool call until the core decides (ADR-0188), holds each run's start and end until the core took
-// a checkpoint of the project (ADR-0234), lets the core branch a session at any entry and records
-// timing and checkpoints as session entries, so Liquid reads everything from the session file
-// (ADR-0189).
+// Watershed's pi extension. The Meta-Harness core loads it into pi's RPC mode; it governs no tool
+// calls, which stay pi's (ADR-0252). It holds each run's start and end until the core took a
+// checkpoint of the project and refuses a run without its checkout guard (ADR-0234), lets the
+// core branch a session at any entry and records timing and checkpoints as session entries, so
+// Liquid reads everything from the session file (ADR-0189).
 import { randomUUID } from "node:crypto";
-import { homedir } from "node:os";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-/** Title prefix of the select dialog the core answers instead of the user. */
-export const APPROVAL_PREFIX = "watershed.approval ";
-
 /** Title prefix of the input dialog the core answers once it took a checkpoint. */
 export const CHECKPOINT_PREFIX = "watershed.checkpoint ";
-
-/**
- * pi's built-in tools that only read; pi gives its built-ins no annotations. Only these count as
- * read-only: another tool's own `readOnlyHint` is a claim nobody checks (ADR-0208).
- */
-const READING_BUILTINS = new Set(["read", "grep", "find", "ls", "tool_search"]);
-
-/** pi's built-in tools that change the file their `path` names. */
-const FILE_CHANGES = new Set(["edit", "write"]);
-
-/** Answers the core may give; only the first three are user decisions. */
-const DECISIONS = ["allow-once", "allow-session", "reject", "allow-auto"];
 
 /** Milliseconds on a monotonic clock. */
 type Clock = () => number;
@@ -40,47 +22,6 @@ export default watershedWith(() => performance.now());
 
 function watershed(pi: ExtensionAPI, clock: Clock): void {
   const since = (start: number) => Math.round(clock() - start);
-  pi.on("tool_call", async (event, ctx) => {
-    if (ctx.mode !== "rpc") {
-      return undefined;
-    }
-    const tool = pi.getAllTools().find((candidate) => candidate.name === event.toolName);
-    const payload = {
-      tool: event.toolName,
-      arguments: event.input,
-      readOnly: tool?.sourceInfo?.source === "builtin" && READING_BUILTINS.has(tool.name),
-      // Only pi's own tools ask as what their names say, such as edits (ADR-0208).
-      builtin: tool?.sourceInfo?.source === "builtin",
-      // Allowances for a session end with it, also when an extension command switches it.
-      session: ctx.sessionManager.getSessionId(),
-      // The call the user decides on, among a response's calls that pi started.
-      toolCallId: event.toolCallId,
-      writesTo:
-        tool?.sourceInfo?.source === "builtin" && FILE_CHANGES.has(tool.name)
-          ? writesTo((event.input as { path?: unknown }).path, ctx.cwd)
-          : undefined,
-    };
-    const asked = clock();
-    const decision = await ctx.ui.select(APPROVAL_PREFIX + JSON.stringify(payload), DECISIONS);
-    if (decision === "allow-auto") {
-      return undefined;
-    }
-    if (decision === "allow-once" || decision === "allow-session" || decision === "reject") {
-      pi.appendEntry("watershed.approval", {
-        toolCallId: event.toolCallId,
-        tool: event.toolName,
-        decision,
-        waitedMs: since(asked),
-      });
-    }
-    if (decision === "allow-once" || decision === "allow-session") {
-      return undefined;
-    }
-    // Fail closed: a rejection, a dismissed dialog or a lost core all block the call.
-    const reason = decision === "reject" ? "Rejected by the user" : "No approval was given";
-    return { block: true, reason };
-  });
-
   // A run's start checkpoint is taken before its first request and stored before its prompt;
   // its end checkpoint once it settled, follow-ups and retries included. pi waits for both.
   let running: { session: string; turn: string } | undefined;
@@ -219,40 +160,4 @@ function promptText(content: string | readonly { type: string; text?: string }[]
     .filter((part) => part.type === "text")
     .map((part) => part.text ?? "")
     .join("");
-}
-
-/**
- * The file pi's `edit` or `write` changes for `path`, resolved against the project `cwd` as
- * pi 1.3.0's `resolveToCwd` does, when the path does not say so plainly: pi rewrites it (Unicode
- * spaces, a leading `@`, `~` or a `file://` URL), it holds a `..` segment, or it leaves the
- * project. A path pi cannot resolve names nothing, since the tool then fails.
- */
-function writesTo(path: unknown, cwd: string): string | undefined {
-  if (typeof path !== "string") {
-    return undefined;
-  }
-  let given = path.replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, " ");
-  if (given.startsWith("@")) {
-    given = given.slice(1);
-  }
-  try {
-    if (given === "~") {
-      given = homedir();
-    } else if (given.startsWith("~/")) {
-      given = join(homedir(), given.slice(2));
-    } else if (/^file:\/\//.test(given)) {
-      given = fileURLToPath(given);
-    }
-  } catch {
-    return undefined;
-  }
-  const file = resolve(cwd, given);
-  const inProject = relative(cwd, file);
-  const plain =
-    given === path &&
-    !path.split("/").includes("..") &&
-    inProject !== ".." &&
-    !inProject.startsWith(`..${sep}`) &&
-    !isAbsolute(inProject);
-  return plain ? undefined : file;
 }

@@ -31,7 +31,7 @@ class Keys {
 
   /// Accepts exactly these keys when pressed: a binding without the Liquid key ignores its
   /// key while the Liquid key is held, so ⇪⏎ never also runs ⏎. A key held from before, such
-  /// as one that just decided an approval, runs nothing.
+  /// as one that just answered a question, runs nothing.
   ShortcutActivator get activator => _KeysActivator(this);
 
   /// Like [activator], and also while the key is held, as for moving through a list.
@@ -176,19 +176,13 @@ class _KeysActivator extends ShortcutActivator {
 }
 
 /// Where a command's keys work; keys conflict only within one area.
-enum Area { app, input, approval, question, trajectory, diff }
+enum Area { app, input, question, trajectory, diff }
 
 /// Keys that never change, as Settings → Shortcuts lists them per area; no command may take
 /// them there.
 enum Fixed {
   newLine('New line', Area.input, '⇧⏎', [
     Keys(LogicalKeyboardKey.enter, shift: true),
-  ]),
-  scrollCall('Scroll the call', Area.approval, '↑↓ ⇞⇟', [
-    Keys(LogicalKeyboardKey.arrowUp),
-    Keys(LogicalKeyboardKey.arrowDown),
-    Keys(LogicalKeyboardKey.pageUp),
-    Keys(LogicalKeyboardKey.pageDown),
   ]),
   moveThroughOptions('Move through options', Area.question, '↑↓', [
     Keys(LogicalKeyboardKey.arrowUp),
@@ -310,14 +304,6 @@ enum Command {
     Keys(LogicalKeyboardKey.enter, alt: true),
   ),
   stop('Stop the run', Area.input, Keys(LogicalKeyboardKey.escape)),
-  allowOnce('Allow once', Area.approval, Keys(LogicalKeyboardKey.enter)),
-  allowSession(
-    'Allow for this session',
-    Area.approval,
-    Keys(LogicalKeyboardKey.enter, meta: true),
-    liquid: true,
-  ),
-  reject('Reject', Area.approval, Keys(LogicalKeyboardKey.escape)),
   answer('Answer, or confirm', Area.question, Keys(LogicalKeyboardKey.enter)),
   answerEditor(
     'Answer an editor question',

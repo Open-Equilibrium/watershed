@@ -2,15 +2,13 @@ mod database;
 mod workspace;
 
 use meta_harness_core::{
-    AgentCommand, AgentEvent, ChangedLines, CommandError, Decision, EditChange, EditPreview,
-    ItemDetail, ItemId, ItemKind, ItemStatus, RequestId, RequestKind, SessionEvent, TurnId, Usage,
-    UserInput,
+    AgentCommand, AgentEvent, ChangedLines, CommandError, ItemDetail, ItemId, ItemKind, ItemStatus,
+    RequestId, SessionEvent, TurnId, Usage, UserInput,
 };
 
 use crate::api::events::{
-    BridgeApproval, BridgeChangeStatus, BridgeDecision, BridgeEdit, BridgeEditChange, BridgeEvent,
-    BridgeEventKind, BridgeFileChange, BridgeItemKind, BridgeQuestionKind, BridgeQueue,
-    BridgeRequestKind,
+    BridgeChangeStatus, BridgeEvent, BridgeEventKind, BridgeFileChange, BridgeItemKind,
+    BridgeQuestionKind, BridgeQueue,
 };
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
@@ -20,8 +18,7 @@ use crate::api::history::{
     BridgeTurn, BridgeTurnChanges,
 };
 use crate::api::session::{
-    AgentSession, BridgeApprovalMode, BridgeCheckpointSession, BridgeModel, BridgeStoredSession,
-    SessionConfig,
+    AgentSession, BridgeCheckpointSession, BridgeModel, BridgeStoredSession, SessionConfig,
 };
 use crate::convert::describe;
 use crate::stream::{gather, push};
@@ -180,58 +177,7 @@ fn a_changed_file_shows_its_name_with_hiding_characters_written_out() {
 }
 
 #[test]
-fn requests_and_questions_reach_dart_with_their_answers() {
-    let opened = bridge(AgentEvent::RequestOpened {
-        request: RequestId("a1".to_owned()),
-        kind: RequestKind::FileChangeApproval,
-        tool: "write".to_owned(),
-        arguments: "{}".to_owned(),
-        text: "{}".to_owned(),
-        read_only: false,
-        session: None,
-        item: Some(ItemId(7)),
-        edit: Some(EditPreview {
-            path: "a.ts".to_owned(),
-            writes_to: Some("/work/a.ts".to_owned()),
-            changes: vec![EditChange {
-                removed: String::new(),
-                added: "one".to_owned(),
-            }],
-            whole_file: true,
-        }),
-    });
-    let request = opened.request.expect("request");
-    assert_eq!(request.id, "a1");
-    assert_eq!(
-        request.approval,
-        Some(BridgeApproval {
-            kind: BridgeRequestKind::FileChange,
-            tool: "write".to_owned(),
-            text: "{}".to_owned(),
-            item: Some(7),
-            edit: Some(BridgeEdit {
-                path: "a.ts".to_owned(),
-                writes_to: Some("/work/a.ts".to_owned()),
-                changes: vec![BridgeEditChange {
-                    removed: String::new(),
-                    added: "one".to_owned(),
-                }],
-                whole_file: true,
-            }),
-        })
-    );
-    let resolved = bridge(AgentEvent::RequestResolved {
-        request: RequestId("a1".to_owned()),
-    });
-    assert_eq!(
-        (
-            resolved.kind,
-            resolved.request.expect("request").id.as_str()
-        ),
-        (BridgeEventKind::RequestResolved, "a1")
-    );
-    assert_eq!(Decision::from(BridgeDecision::Reject), Decision::Reject);
-
+fn questions_reach_dart_with_their_answers() {
     let asked = bridge(AgentEvent::UserInputRequested {
         request: RequestId("q1".to_owned()),
         input: UserInput::Editor {
@@ -295,10 +241,6 @@ IFS= read -r line || exit 0"#;
         session.forward(|_| true),
         Err("the session's events already have a subscriber".to_owned())
     );
-    assert_eq!(
-        call(session.set_approval_mode(BridgeApprovalMode::FullAccess)),
-        Ok(())
-    );
     assert_eq!(session.send("Say hi".to_owned(), false), Ok(()));
     let next = || {
         receiver
@@ -354,21 +296,18 @@ IFS= read -r line || exit 0"#;
 }
 
 #[test]
-fn stopping_withdraws_the_open_approval_the_agent_waits_for() {
+fn stopping_dismisses_the_question_the_agent_waits_for() {
     // pi acknowledges an abort once the agent is idle, which needs its open dialogs answered.
-    let payload = r#"{\"tool\":\"bash\",\"arguments\":{},\"readOnly\":false}"#;
-    let script = format!(
-        r#"printf '%s\n' '{{"type":"extension_ui_request","id":"a1","method":"select","title":"watershed.approval {payload}","options":[]}}'
+    let script = r#"printf '%s\n' '{"type":"extension_ui_request","id":"q1","method":"input","title":"Name","placeholder":""}'
 IFS= read -r line
 case "$line" in *'"type":"abort"'*) ;; *) exit 9 ;; esac
 IFS= read -r line
-case "$line" in *'"id":"a1"'*) ;; *) exit 9 ;; esac
+case "$line" in *'"id":"q1"'*) ;; *) exit 9 ;; esac
 case "$line" in *'"cancelled":true'*) ;; *) exit 9 ;; esac
-printf '%s\n' '{{"id":"2","type":"response","command":"abort","success":true}}'
-IFS= read -r line || exit 0"#
-    );
+printf '%s\n' '{"id":"2","type":"response","command":"abort","success":true}'
+IFS= read -r line || exit 0"#;
     let session = Arc::new(
-        launch(gated(&script), std::env::temp_dir().display().to_string()).expect("agent starts"),
+        launch(gated(script), std::env::temp_dir().display().to_string()).expect("agent starts"),
     );
     let (sender, receiver) = mpsc::channel();
     session
@@ -379,7 +318,7 @@ IFS= read -r line || exit 0"#
             .recv_timeout(Duration::from_secs(10))
             .expect("event arrives")
     };
-    assert_eq!(next().kind, BridgeEventKind::RequestOpened);
+    assert_eq!(next().kind, BridgeEventKind::UserInputRequested);
     let (stopped, stop) = mpsc::channel();
     {
         let session = Arc::clone(&session);
@@ -389,7 +328,7 @@ IFS= read -r line || exit 0"#
     let resolved = next();
     assert_eq!(
         (resolved.kind, resolved.request.map(|request| request.id)),
-        (BridgeEventKind::RequestResolved, Some("a1".to_owned()))
+        (BridgeEventKind::UserInputResolved, Some("q1".to_owned()))
     );
     assert!(call(session.shutdown()));
 }

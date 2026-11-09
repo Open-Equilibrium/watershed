@@ -156,7 +156,7 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
   </div>
   <section>
     <h1>Git branches and commits: mockups</h1>
-<p class="sub"><b>Superseded in part by ADR-0239 and ADR-0241:</b> sessions are Chats, projects are folder Sources, and the shell and sizes follow <a href="liquid-app-concept.html">the app's structure</a> and <code>tokens.css</code>; the Git, checkpoint, approval and Trajectory behavior shown here stays.</p>
+<p class="sub"><b>Superseded in part by ADR-0239 and ADR-0241:</b> sessions are Chats, projects are folder Sources, and the shell and sizes follow <a href="liquid-app-concept.html">the app's structure</a> and <code>tokens.css</code>; the Git, checkpoint and Trajectory behavior shown here stays.</p>
     <p class="sub">The next step of the Liquid Git slice in <a href="../../../PLAN.md#liquid-git-integration--next-slice">PLAN.md</a>: the current branch, switching and creating branches, committing, and push and pull state. Pull requests and worktrees follow later; section 10 shows where they attach. Bounds already decided (ADR-0190, ADR-0191, ADR-0220, ADR-0234, <a href="../../../SECURITY.md#mvp-vcs-boundary">SECURITY.md</a>): Meta-Harness runs the host's <code>git</code> and <code>gh</code> and Liquid only presents them, every Git write needs an explicit user action except checkpoints and the background fetch, whose bounds SECURITY.md defines, a checkout with a running agent allows no branch switch, and parallel sessions use their own worktrees. Layout, components and wording follow the <a href="liquid-agent-surface.html">agent surface</a> and <a href="liquid-checkpoints.html">checkpoint</a> mockups and <a href="../guidelines.md">guidelines.md</a>; Git's own words and T3 Code's Git panel set the wording. <b>Approved 2026-11-01</b>, sections 1–10 as drawn; with section 4 changed the same day to stashing as GitHub Desktop does; see Decisions.</p>
   </section>
   <section>
@@ -350,7 +350,7 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
     <p class="sub">The mockups above draw the recommendation of each question. The maintainer answered them on 2026-11-01; see Decisions.</p>
     <div class="q"><h4>1 · Where the branch and the Git actions live</h4>
       <ul><li><b>A · Session header, right side</b> (drawn): visible in Chat, Trajectory and Diff alike; + one place, guideline 8; − the header gets busier.</li>
-      <li><b>B · Input area bar</b>, beside "Ask" and "Context": + T3 Code's spot for a new thread's branch; − mixes Git writes with prompt settings, hidden while an approval fills the input area.</li>
+      <li><b>B · Input area bar</b>, beside "Context": + T3 Code's spot for a new thread's branch; − mixes Git writes with prompt settings, hidden while a question fills the input area.</li>
       <li><b>C · Diff tab only</b>: + next to the changes; − the branch is invisible in Chat, where most work happens.</li></ul>
       <p class="t3">T3 Code: branch picker below the composer and in the thread details panel's "Version Control" section, with the Git split button and a "Changes" row.</p>
       <p class="rec">Recommendation: A.</p></div>
@@ -504,7 +504,7 @@ const ahead=n=>`<span class="sync">↑${n}</span>`;
 const both=(a,b)=>`<span class="sync">↑${a}</span><span class="sync wa">↓${b}</span>`;
 const commitBtn=(on)=>split(I.commit,'Commit','4','',on);
 function gitbar(o){return `<span class="gitbar">${o.chip===undefined?chip('main',ahead(1),o.chipOn):o.chip}${o.btn===undefined?commitBtn(o.btnOn):o.btn}<span style="color:var(--ws-text-faint)">···</span></span>`}
-const composer=`<div class="actbox"><div class="ph">Ask the agent…</div><div class="bar"><span class="chip box">◐ Ask ⌄</span><span class="chip">＋ Context</span><span style="flex:1"></span><span class="btn pri">Send <kbd>⏎</kbd></span></div></div>`;
+const composer=`<div class="actbox"><div class="ph">Ask the agent…</div><div class="bar"><span class="chip">＋ Context</span><span style="flex:1"></span><span class="btn pri">Send <kbd>⏎</kbd></span></div></div>`;
 function frame(id,tab,main,h,o){o=o||{};const tabs=[['chat','Chat','','⌘1'],['traj','Trajectory','','⌘2'],['diff','Diff','3','⌘3']].map(([k,l,b,s])=>`<div class="tab ${k==tab?'on':''}">${l}${b?`<span class="badge">${b}</span>`:''}<kbd>${s}</kbd></div>`).join('');
 const st=o.status||`<span style="color:${o.running?'var(--ws-accent)':'var(--ws-text-muted)'}">● ${o.running?'Fix flaky sync test is running in this checkout':'Idle · finished 10:58'}</span><span>Context 11.2k / 200k</span>`;
 document.getElementById(id).innerHTML=`<div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>

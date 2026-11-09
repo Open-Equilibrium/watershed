@@ -1,5 +1,5 @@
 //! Observation workload for long Trajectories (PERFORMANCE.md, Liquid): a scripted agent reports a
-//! session file of 1,000 turns of eight entries each and eight forks of ten turns. Each sample
+//! session file of 1,000 turns of seven entries each and eight forks of ten turns. Each sample
 //! starts a session that reads the stored history from that file, asks the agent for newer
 //! entries, builds its tree and two Trajectories, then reads again, which only asks for entries
 //! after the last one. The session file is written by a second run of this example, so building
@@ -164,7 +164,7 @@ fn session() -> (Value, String) {
 }
 
 /// Appends one turn as pi and Watershed's extension store it: a prompt, a response with a tool
-/// call, an approval, the tool result and a final response, with their timing entries.
+/// call, the tool result and a final response, with their timing entries.
 fn push_turn(
     entries: &mut Vec<Value>,
     id: &str,
@@ -196,10 +196,6 @@ fn push_turn(
     push(
         "a",
         json!({"type":"message","message":{"role":"assistant","model":"faux-1","stopReason":"toolUse","usage":{"input":6140,"output":820,"cacheRead":0,"cacheWrite":0,"reasoning":214,"cost":{"total":0.02}},"content":[{"type":"text","text":"I'll run the tests."},{"type":"toolCall","id":format!("{id}c"),"name":"bash","arguments":{"command":"npm test -- login"}}]}}),
-    );
-    push(
-        "p",
-        json!({"type":"custom","customType":"watershed.approval","data":{"toolCallId":format!("{id}c"),"tool":"bash","decision":"allow-once","waitedMs":1200}}),
     );
     push(
         "tt",

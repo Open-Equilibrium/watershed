@@ -5,10 +5,9 @@ use tokio::sync::mpsc::Receiver;
 use tokio::time::timeout;
 
 use crate::{
-    AgentCommand, AgentEvent, Answer, ApprovalMode, CommandError, Decision, Delivery, EntryKind,
-    ItemDetail, ItemId, ItemKind, ItemStatus, Model, NotificationLevel, Pending, Queue, RecordKind,
-    RequestId, RequestKind, Session, SessionEvent, SessionState, SessionTree, TreeNode, TurnId,
-    UserInput,
+    AgentCommand, AgentEvent, Answer, CommandError, Delivery, EntryKind, ItemDetail, ItemId,
+    ItemKind, ItemStatus, Model, NotificationLevel, Pending, Queue, RecordKind, RequestId, Session,
+    SessionEvent, SessionState, SessionTree, TreeNode, TurnId, UserInput,
 };
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -465,10 +464,10 @@ fn shutdown_ends_an_agent_that_stopped_reading() {
 #[test]
 fn shutdown_ends_an_agent_that_stopped_reading_its_automatic_answers() {
     run(async {
-        // Read-only calls are allowed at once; the agent never reads the answers.
+        // Unreadable checkpoint requests are answered at once; the agent never reads the answers.
         let (session, _events) = fake_agent(&format!(
             "trap '' TERM\ni=0\nwhile [ $i -lt 3000 ]; do {}i=$((i+1)); done\nwhile :; do sleep 1; done",
-            approval_request("'$i'", "read", true)
+            unreadable_checkpoint("'$i'")
         ));
         // The core stops reading once the agent's full input blocks its answers, so the agent
         // never finishes writing; a marker after its loop could not appear.
@@ -657,29 +656,17 @@ fn session_file(id: u32, file: &std::path::Path) -> String {
     format!("printf '%s\\n' {}\n", super::shell_word(answer))
 }
 
-fn approval_request(id: &str, tool: &str, read_only: bool) -> String {
-    approval_in("s1", id, tool, read_only)
-}
-
-/// An approval request for one of pi's own tools from the session `session`, as the extension
-/// asks it.
-fn approval_in(session: &str, id: &str, tool: &str, read_only: bool) -> String {
-    let payload = format!(
-        r#"{{\"tool\":\"{tool}\",\"arguments\":{{}},\"readOnly\":{read_only},\"builtin\":true,\"session\":\"{session}\"}}"#
-    );
+/// A question an extension asks the user.
+fn question(id: &str) -> String {
     format!(
-        "printf '%s\\n' '{{\"type\":\"extension_ui_request\",\"id\":\"{id}\",\"method\":\"select\",\"title\":\"watershed.approval {payload}\",\"options\":[]}}'\n"
+        "printf '%s\\n' '{{\"type\":\"extension_ui_request\",\"id\":\"{id}\",\"method\":\"select\",\"title\":\"Continue?\",\"options\":[\"Yes\",\"No\"]}}'\n"
     )
 }
 
-/// An approval request for a call of one of pi's own tools with `arguments`, JSON whose quotes
-/// are escaped as in a JSON string.
-fn approval_with(id: &str, tool: &str, arguments: &str) -> String {
-    let payload = format!(
-        r#"{{\"tool\":\"{tool}\",\"arguments\":{arguments},\"readOnly\":false,\"builtin\":true,\"session\":\"s1\"}}"#
-    );
+/// A checkpoint request the core answers at once with an error, as its payload is unreadable.
+fn unreadable_checkpoint(id: &str) -> String {
     format!(
-        "printf '%s\\n' '{{\"type\":\"extension_ui_request\",\"id\":\"{id}\",\"method\":\"select\",\"title\":\"watershed.approval {payload}\",\"options\":[]}}'\n"
+        "printf '%s\\n' '{{\"type\":\"extension_ui_request\",\"id\":\"{id}\",\"method\":\"input\",\"title\":\"watershed.checkpoint x\"}}'\n"
     )
 }
 
@@ -1120,18 +1107,17 @@ fn answers_extension_questions() {
 }
 
 #[test]
-fn stopping_withdraws_an_approval_that_arrives_late() {
+fn stopping_dismisses_a_question_that_arrives_late() {
     run(async {
-        // The agent asked before the abort reached it; the request only arrives afterwards.
-        // Withdrawn rather than rejected, it is no decision of the user's.
+        // The agent asked before the abort reached it; the question only arrives afterwards.
         let script = [
             expect_response(&[r#""type":"abort""#]),
-            approval_request("a1", "bash", false),
-            expect_response(&[r#""id":"a1""#, r#""cancelled":true"#]),
+            question("q1"),
+            expect_response(&[r#""id":"q1""#, r#""cancelled":true"#]),
             r#"printf '%s\n' '{"id":"1","type":"response","command":"abort","success":true}' '{"type":"agent_start"}'
 "#
             .to_owned(),
-            approval_request("a2", "bash", false),
+            question("q2"),
             "IFS= read -r line || exit 0\n".to_owned(),
         ]
         .concat();
@@ -1145,8 +1131,8 @@ fn stopping_withdraws_an_approval_that_arrives_late() {
         assert!(
             matches!(
                 next(&mut events).await,
-                SessionEvent::Agent(AgentEvent::RequestOpened { request, .. })
-                    if request == RequestId("a2".to_owned())
+                SessionEvent::Agent(AgentEvent::UserInputRequested { request, .. })
+                    if request == RequestId("q2".to_owned())
             ),
             "the next turn asks again"
         );
@@ -1243,157 +1229,6 @@ fn switches_sessions_and_models_through_pi() {
 }
 
 #[test]
-fn allowances_for_a_session_end_with_it() {
-    run(async {
-        let script = [
-            approval_request("a1", "bash", false),
-            expect_response(&[r#""id":"a1""#, r#""value":"allow-session""#]),
-            expect_response(&[r#""type":"switch_session""#, r#""id":"1""#]),
-            r#"printf '%s\n' '{"id":"1","type":"response","command":"switch_session","success":true,"data":{"cancelled":true}}'
-"#
-            .to_owned(),
-            // A cancelled switch keeps the session and its allowance.
-            approval_request("a2", "bash", false),
-            expect_response(&[r#""id":"a2""#, r#""value":"allow-auto""#]),
-            // Tells the test the allowance was used before it starts a new session.
-            r#"printf '%s\n' '{"type":"queue_update","steering":[],"followUp":[]}'
-"#
-            .to_owned(),
-            expect_response(&[r#""type":"new_session""#, r#""id":"2""#]),
-            r#"printf '%s\n' '{"id":"2","type":"response","command":"new_session","success":true,"data":{"cancelled":false}}'
-"#
-            .to_owned(),
-            approval_request("a3", "bash", false),
-            "IFS= read -r line || exit 0\n".to_owned(),
-        ]
-        .concat();
-        let (mut session, mut events) = fake_agent(&script);
-        let opened = |event: SessionEvent, id: &str| {
-            matches!(
-                event,
-                SessionEvent::Agent(AgentEvent::RequestOpened { request, .. })
-                    if request == RequestId(id.to_owned())
-            )
-        };
-        assert!(opened(next(&mut events).await, "a1"));
-        assert_eq!(
-            session
-                .decide(&RequestId("a1".to_owned()), Decision::AllowSession)
-                .await,
-            Ok(())
-        );
-        let _resolved = next(&mut events).await;
-        let kept = session
-            .switch_session(std::path::Path::new("/tmp/other.jsonl"))
-            .await
-            .expect("sent");
-        assert_eq!(kept.switched().await, Ok(false));
-        assert!(matches!(
-            next(&mut events).await,
-            SessionEvent::Agent(AgentEvent::QueueChanged(_))
-        ));
-        let started = session.new_session().await.expect("sent");
-        assert_eq!(started.switched().await, Ok(true));
-        assert!(
-            opened(next(&mut events).await, "a3"),
-            "the new session asks again"
-        );
-    });
-}
-
-#[test]
-fn allowances_end_when_the_agent_asks_for_another_session() {
-    run(async {
-        // An extension command can switch sessions without the core seeing the switch.
-        let script = [
-            approval_in("s1", "a1", "bash", false),
-            expect_response(&[r#""id":"a1""#, r#""value":"allow-session""#]),
-            approval_in("s1", "a2", "bash", false),
-            expect_response(&[r#""id":"a2""#, r#""value":"allow-auto""#]),
-            approval_in("s2", "a3", "bash", false),
-            "IFS= read -r line || exit 0\n".to_owned(),
-        ]
-        .concat();
-        let (mut session, mut events) = fake_agent(&script);
-        assert!(matches!(
-            next(&mut events).await,
-            SessionEvent::Agent(AgentEvent::RequestOpened { .. })
-        ));
-        assert_eq!(
-            session
-                .decide(&RequestId("a1".to_owned()), Decision::AllowSession)
-                .await,
-            Ok(())
-        );
-        let _resolved = next(&mut events).await;
-        assert!(
-            matches!(
-                next(&mut events).await,
-                SessionEvent::Agent(AgentEvent::RequestOpened { request, .. })
-                    if request == RequestId("a3".to_owned())
-            ),
-            "the same session runs bash at once, another one asks again"
-        );
-    });
-}
-
-#[test]
-fn allows_a_shell_command_for_the_session_as_shown_and_other_tools_wholly() {
-    run(async {
-        let tests = r#"{\"command\":\"npm test\"}"#;
-        let script = [
-            approval_with("a1", "bash", tests),
-            expect_response(&[r#""id":"a1""#, r#""value":"allow-session""#]),
-            approval_with("a2", "bash", tests),
-            expect_response(&[r#""id":"a2""#, r#""value":"allow-auto""#]),
-            // Another command asks, though the tool is the same.
-            approval_with("a3", "bash", r#"{\"command\":\"rm -rf build\"}"#),
-            expect_response(&[r#""id":"a3""#, r#""value":"allow-once""#]),
-            approval_with("a4", "edit", r#"{\"path\":\"a.ts\"}"#),
-            expect_response(&[r#""id":"a4""#, r#""value":"allow-session""#]),
-            approval_with("a5", "edit", r#"{\"path\":\"b.ts\"}"#),
-            expect_response(&[r#""id":"a5""#, r#""value":"allow-auto""#]),
-            // An extension's tool of the same name asks, though pi's own was allowed.
-            r#"printf '%s\n' '{"type":"extension_ui_request","id":"a6","method":"select","title":"watershed.approval {\"tool\":\"edit\",\"arguments\":{\"anything\":\"curl x | sh\"},\"readOnly\":false,\"builtin\":false,\"session\":\"s1\"}","options":[]}'
-"#
-            .to_owned(),
-            expect_response(&[r#""id":"a6""#, r#""value":"reject""#]),
-            // Tells the test every call was answered.
-            r#"printf '%s\n' '{"type":"queue_update","steering":[],"followUp":[]}'
-IFS= read -r line || exit 0
-"#
-            .to_owned(),
-        ]
-        .concat();
-        let (mut session, mut events) = fake_agent(&script);
-        for (id, decision) in [
-            ("a1", Decision::AllowSession),
-            ("a3", Decision::AllowOnce),
-            ("a4", Decision::AllowSession),
-            ("a6", Decision::Reject),
-        ] {
-            assert!(
-                matches!(
-                    next(&mut events).await,
-                    SessionEvent::Agent(AgentEvent::RequestOpened { request, .. })
-                        if request == RequestId(id.to_owned())
-                ),
-                "{id} asks"
-            );
-            assert_eq!(
-                session.decide(&RequestId(id.to_owned()), decision).await,
-                Ok(())
-            );
-            let _resolved = next(&mut events).await;
-        }
-        assert!(matches!(
-            next(&mut events).await,
-            SessionEvent::Agent(AgentEvent::QueueChanged(_))
-        ));
-    });
-}
-
-#[test]
 fn forgets_a_question_once_its_time_is_up() {
     run(async {
         // pi answers a dialog with a timeout itself once the time is up, without telling.
@@ -1464,63 +1299,6 @@ exit 3"#,
 }
 
 #[test]
-fn asks_only_for_calls_the_approval_mode_does_not_allow() {
-    run(async {
-        let script = [
-            approval_request("a1", "bash", false),
-            expect_response(&[r#""id":"a1""#, r#""value":"allow-session""#]),
-            approval_request("a2", "bash", false),
-            expect_response(&[r#""id":"a2""#, r#""value":"allow-auto""#]),
-            approval_request("a3", "read", true),
-            expect_response(&[r#""id":"a3""#, r#""value":"allow-auto""#]),
-            approval_request("a4", "write", false),
-            expect_response(&[r#""id":"a4""#, r#""value":"allow-auto""#]),
-            approval_request("a5", "grep", false),
-            expect_response(&[r#""id":"a5""#, r#""value":"reject""#]),
-        ]
-        .concat();
-        let (mut session, mut events) = fake_agent(&script);
-        session.set_approval_mode(ApprovalMode::AllowEdits);
-        for (id, kind, tool, decision) in [
-            (
-                "a1",
-                RequestKind::CommandExecutionApproval,
-                "bash",
-                Decision::AllowSession,
-            ),
-            ("a5", RequestKind::ToolApproval, "grep", Decision::Reject),
-        ] {
-            let request = RequestId(id.to_owned());
-            assert_eq!(
-                next(&mut events).await,
-                SessionEvent::Agent(AgentEvent::RequestOpened {
-                    request: request.clone(),
-                    kind,
-                    tool: tool.to_owned(),
-                    arguments: "{}".to_owned(),
-                    text: "{}".to_owned(),
-                    read_only: false,
-                    session: Some("s1".to_owned()),
-                    item: None,
-                    edit: None,
-                })
-            );
-            assert_eq!(session.decide(&request, decision).await, Ok(()));
-            assert_eq!(
-                next(&mut events).await,
-                SessionEvent::Agent(AgentEvent::RequestResolved { request })
-            );
-        }
-        assert_eq!(next(&mut events).await, exited(true));
-        let unknown = RequestId("a1".to_owned());
-        assert_eq!(
-            session.decide(&unknown, Decision::AllowOnce).await,
-            Err(CommandError::UnknownRequest)
-        );
-    });
-}
-
-#[test]
 fn reads_state_and_tree_and_branches_through_the_extension() {
     run(async {
         let script = [
@@ -1580,7 +1358,7 @@ fn reads_state_and_tree_and_branches_through_the_extension() {
 }
 
 #[test]
-fn requires_the_extension_that_asks_before_tool_calls() {
+fn requires_the_extension_that_marks_checkpoints() {
     run(async {
         let answer = |names: &str| {
             format!(
@@ -1589,18 +1367,24 @@ fn requires_the_extension_that_asks_before_tool_calls() {
             )
         };
         let (mut gated, _events) = fake_agent(&answer(GATE));
-        assert_eq!(gated.require_gate().await, Ok(()));
+        assert_eq!(gated.require_extension().await, Ok(()));
 
-        // Another extension loads fine, but nothing would ask before a tool call.
+        // Another extension loads fine, but nothing would mark the turn's checkpoints.
         let other = r#"{"name":"fix-tests","source":"prompt"},{"name":"watershed-branch","source":"prompt"}"#;
         let (mut ungated, _events) = fake_agent(&answer(other));
-        assert_eq!(ungated.require_gate().await, Err(CommandError::Ungated));
+        assert_eq!(
+            ungated.require_extension().await,
+            Err(CommandError::ExtensionMissing)
+        );
 
         // An extension from another file registers the same command, for example a project's
-        // own copy that never asks.
+        // own copy that marks no checkpoints.
         let copy = r#"{"name":"watershed-branch","source":"extension","sourceInfo":{"path":"/p/.pi/extensions/watershed.ts","source":"local"}}"#;
         let (mut copied, _events) = fake_agent(&answer(copy));
-        assert_eq!(copied.require_gate().await, Err(CommandError::Ungated));
+        assert_eq!(
+            copied.require_extension().await,
+            Err(CommandError::ExtensionMissing)
+        );
     });
 }
 
@@ -1622,7 +1406,7 @@ fn starts_pi_in_rpc_mode_with_watersheds_extension_and_the_stored_session() {
                 cwd: std::env::temp_dir(),
             };
             let (mut session, _events) = Session::start(&command).expect("fake agent starts");
-            assert_eq!(session.require_gate().await, Ok(()), "{args:?}");
+            assert_eq!(session.require_extension().await, Ok(()), "{args:?}");
         }
     });
 }
@@ -1643,7 +1427,7 @@ fn names_the_extension_as_pi_reports_it_when_its_path_has_dot_dot() {
             cwd: std::env::temp_dir(),
         };
         let (mut session, _events) = Session::start(&command).expect("fake agent starts");
-        assert_eq!(session.require_gate().await, Ok(()));
+        assert_eq!(session.require_extension().await, Ok(()));
     });
 }
 
@@ -1703,8 +1487,8 @@ fn checks_the_extension_before_every_message_that_starts_a_run() {
         assert_eq!(accepted(session.prompt("Hi").await).await, Ok(()));
         assert_eq!(
             session.send("Again", Delivery::Steer).await.map(drop),
-            Err(CommandError::Ungated),
-            "the message never reaches an agent that would run tools without asking"
+            Err(CommandError::ExtensionMissing),
+            "the message never reaches an agent that would run without checkpoints"
         );
         assert_eq!(
             session.new_session().await.expect("sent").switched().await,
@@ -1923,7 +1707,7 @@ fn an_exited_agents_unread_stdin_cannot_block_collected_output_or_completion() {
         // Large automatic answers fill both the inherited input pipe and its bounded queue.
         let descendant = format!(
             "i=0\nwhile [ $i -lt 512 ]; do {}i=$((i+1)); done\nprintf '%s\\n' '{{\"type\":\"extension_ui_request\",\"method\":\"notify\",\"message\":\"collected\",\"notifyType\":\"info\"}}'\nexec sleep 30",
-            approval_request(&"x".repeat(4096), "read", true)
+            unreadable_checkpoint(&"x".repeat(4096))
         );
         let (mut session, mut events) = fake_agent(&format!(
             "IFS= read -r line\nexec 3<&0\n/bin/sh -c {} <&3 2>/dev/null &\nprintf '%s\\n' \"$!\" > {}/holder",
@@ -2073,18 +1857,15 @@ fn finds_a_relative_session_file_in_the_agents_directory() {
 }
 
 #[test]
-fn stopping_withdraws_the_dialogs_the_agent_waits_for() {
+fn stopping_dismisses_the_questions_the_agent_waits_for() {
     run(async {
-        // pi answers an abort only once its open dialogs are answered: an approval and a
-        // question asked before the abort, and a question that arrives after it. The approval
-        // is withdrawn, not rejected, since the user decided nothing.
+        // pi answers an abort only once its open dialogs are answered: a question asked before
+        // the abort, and one that arrives after it.
         let script = [
-            approval_request("a1", "bash", false),
             r#"printf '%s\n' '{"type":"extension_ui_request","id":"q1","method":"input","title":"Name","placeholder":""}'
 "#
             .to_owned(),
             expect_response(&[r#""type":"abort""#]),
-            expect_response(&[r#""id":"a1""#, r#""cancelled":true"#]),
             expect_response(&[r#""id":"q1""#, r#""cancelled":true"#]),
             r#"printf '%s\n' '{"type":"extension_ui_request","id":"q2","method":"confirm","title":"Sure?","message":""}'
 "#
@@ -2099,20 +1880,10 @@ fn stopping_withdraws_the_dialogs_the_agent_waits_for() {
         let (mut session, mut events) = fake_agent(&script);
         assert!(matches!(
             next(&mut events).await,
-            SessionEvent::Agent(AgentEvent::RequestOpened { .. })
-        ));
-        assert!(matches!(
-            next(&mut events).await,
             SessionEvent::Agent(AgentEvent::UserInputRequested { .. })
         ));
         let stopping = session.abort().await.expect("abort sent");
         assert_eq!(timeout(WAIT, stopping.accepted()).await, Ok(Ok(())));
-        assert_eq!(
-            next(&mut events).await,
-            SessionEvent::Agent(AgentEvent::RequestResolved {
-                request: RequestId("a1".to_owned()),
-            })
-        );
         assert_eq!(
             next(&mut events).await,
             SessionEvent::Agent(AgentEvent::UserInputResolved {

@@ -187,7 +187,7 @@ void main() {
     expect(find.byType(WorkspacePage), findsOneWidget);
   });
 
-  testWidgets('an approval that came behind a Page waits once shown', (
+  testWidgets('a question that came behind a Page waits once shown', (
     tester,
   ) async {
     final backend = FakeBackend();
@@ -196,13 +196,14 @@ void main() {
     await tester.pumpAndSettle();
     backend.controller.add(
       event(
-        BridgeEventKind.requestOpened,
+        BridgeEventKind.userInputRequested,
         request: const BridgeRequest(
-          id: 'a1',
-          approval: BridgeApproval(
-            kind: BridgeRequestKind.commandExecution,
-            tool: 'bash',
-            text: 'npm test',
+          id: 'q1',
+          question: BridgeQuestion(
+            kind: BridgeQuestionKind.confirm,
+            title: 'Run the tests?',
+            detail: '',
+            options: [],
           ),
         ),
       ),
@@ -212,12 +213,12 @@ void main() {
 
     await tester.tap(find.byKey(const Key('session-card')));
     await tester.pump();
-    await tester.tap(find.text('Allow once'));
+    await tester.tap(find.text('Yes'));
     await tester.pump();
-    expect(backend.calls.where((call) => call.startsWith('decide')), isEmpty);
+    expect(backend.calls.where((call) => call.startsWith('confirm')), isEmpty);
     await tester.pump(const Duration(milliseconds: 500));
-    await tester.tap(find.text('Allow once'));
-    expect(backend.calls.last, 'decide a1 allowOnce');
+    await tester.tap(find.text('Yes'));
+    expect(backend.calls.last, 'confirm q1 true');
   });
 
   testWidgets(

@@ -69,16 +69,6 @@ const List<_Group> _left = [
 
 const List<_Group> _right = [
   (
-    'Approvals',
-    null,
-    [
-      _Entry(Command.allowOnce),
-      _Entry(Command.allowSession),
-      _Entry(Command.reject),
-      _Entry.fixed(Fixed.scrollCall),
-    ],
-  ),
-  (
     'Agent questions',
     null,
     [

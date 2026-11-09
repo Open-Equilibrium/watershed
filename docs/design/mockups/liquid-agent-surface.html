@@ -79,7 +79,6 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
 .tool{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ws-text-muted);height:32px;padding:0 10px;border-radius:6px;background:var(--ws-subtle)}
 .tool code{color:var(--ws-text);font-size:13px}
 .tool .r{margin-left:auto;display:flex;gap:10px;font-variant-numeric:tabular-nums}
-.tool.wait{background:var(--ws-warning-subtle);color:var(--ws-warning)}
 .ttb{height:44px;flex:none;display:flex;align-items:center;gap:6px;padding:0 16px}
 .ttb .sch{width:220px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;color:var(--ws-text-faint);font-size:13px;background:var(--ws-subtle)}
 .ttb .end{margin-left:auto;display:flex;gap:6px;align-items:center}
@@ -107,7 +106,7 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
 .lr.dim{opacity:.4}
 .lr code{font-size:13px}
 .tg{display:inline-block;font-size:12px;font-weight:500;padding:0 6px;border-radius:4px;line-height:20px}
-.tg.User{background:var(--ws-hover);color:var(--ws-text-muted)}.tg.Message{background:var(--ws-accent-subtle);color:var(--ws-accent)}.tg.Tool{background:color-mix(in srgb,var(--ws-data-2) 14%,transparent);color:var(--ws-data-2)}.tg.Approval{background:var(--ws-warning-subtle);color:var(--ws-warning)}
+.tg.User{background:var(--ws-hover);color:var(--ws-text-muted)}.tg.Message{background:var(--ws-accent-subtle);color:var(--ws-accent)}.tg.Tool{background:color-mix(in srgb,var(--ws-data-2) 14%,transparent);color:var(--ws-data-2)}
 .turn{display:flex;gap:10px;align-items:center;height:34px;padding:0 16px;font-size:14px;white-space:nowrap;box-shadow:inset 0 -1px 0 var(--ws-border)}
 .turn b{font-weight:600}.turn .q{color:var(--ws-text-muted);overflow:hidden;text-overflow:ellipsis}.turn .end{margin-left:auto;color:var(--ws-text-faint);font-size:12px;font-variant-numeric:tabular-nums}
 .insp{margin:8px 16px 10px 52px;border-radius:8px;background:var(--ws-surface);box-shadow:0 0 0 1px var(--ws-border);overflow:hidden}
@@ -185,7 +184,7 @@ i.kw{font-style:normal;color:var(--ws-syn-kw)}i.st{font-style:normal;color:var(-
 @media (max-width:560px){.found{grid-template-columns:1fr}.swg{grid-template-columns:repeat(2,1fr)}}
 </style></head><body class="theme-light chrome">
 <div class="page">
-<p class="sub"><b>Superseded in part by ADR-0239 and ADR-0241:</b> sessions are Chats, projects are folder Sources, and the shell and sizes follow <a href="liquid-app-concept.html">the app's structure</a> and <code>tokens.css</code>; the Git, checkpoint, approval and Trajectory behavior shown here stays.</p>
+<p class="sub"><b>Superseded in part by ADR-0239 and ADR-0241:</b> sessions are Chats, projects are folder Sources, and the shell and sizes follow <a href="liquid-app-concept.html">the app's structure</a> and <code>tokens.css</code>; the Git, checkpoint and Trajectory behavior shown here stays.</p>
   <div class="toolbar">
     <div>Theme <span class="seg" id="theme"><button data-v="light">Light</button><button data-v="dark">Dark</button><button data-v="system" class="on">System</button></span></div>
     <div>Size <span class="seg" id="size"><button data-v="fit" class="on">Fit</button><button data-v="full">100 %</button></span></div>
@@ -212,7 +211,7 @@ i.kw{font-style:normal;color:var(--ws-syn-kw)}i.st{font-style:normal;color:var(-
   </section>
   <section>
     <h3 class="sec">1 · Agent view</h3>
-    <p class="sub">The sidebar shows project, harness, branch and device per session. Widgets sit directly above the input area, which keeps one position and height in every tab; approvals appear inside it and keep the draft.</p>
+    <p class="sub">The sidebar shows project, harness, branch and device per session. Widgets sit directly above the input area, which keeps one position and height in every tab; agent questions appear inside it and keep the draft.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-chat"></div></div></div>
   </section>
   <section>
@@ -252,17 +251,16 @@ function side(st){const w=st=='wait';return `<div class="side"><div class="wsw">
 <div class="proj"><span class="ico">⌄</span>watershed <span class="f">~/workspaces/watershed</span></div>
 <div class="sess"><div class="l1"><span class="dot" style="background:var(--ws-text-faint)"></span><span>Refactor auth middleware</span><span class="end">done</span></div>${meta('pi','feat/auth','build-server','srv')}</div>
 <div class="nav" style="color:var(--ws-text-faint);margin-top:2px"><span class="ico">+</span>New agent session</div></div>`}
-const composer=`<div class="actbox"><div class="ph">Steer the agent or queue a follow-up…</div><div class="bar"><span class="chip box">◐ Ask ⌄</span><span class="chip">＋ Context</span><span style="flex:1"></span><kbd style="color:var(--ws-text-faint)">⌘L</kbd><span class="btn pri">Send <kbd>⏎</kbd></span></div></div>`;
-const approval=`<div class="actbox appr"><div class="top"><span class="ic">!</span><span class="ttl">Run a shell command?</span><span class="end">bash · step 9 · mode Ask</span></div>
-<div class="cmd mono"><span>$</span>npm test -- login<i>in ~/code/acme-api · not read-only</i></div>
-<div class="bar"><span class="btn pri">Allow once <kbd>⏎</kbd></span><span class="btn">Allow for this session <kbd>⌘⏎</kbd></span><span style="flex:1"></span><span style="font-size:12px;color:var(--ws-text-faint)">your draft is kept</span><span class="btn ghost dng">Reject <kbd>esc</kbd></span></div></div>`;
+const composer=`<div class="actbox"><div class="ph">Steer the agent or queue a follow-up…</div><div class="bar"><span class="chip">＋ Context</span><span style="flex:1"></span><kbd style="color:var(--ws-text-faint)">⌘L</kbd><span class="btn pri">Send <kbd>⏎</kbd></span></div></div>`;
+const question=`<div class="actbox appr"><div class="top"><span class="ic">?</span><span class="ttl">Run the login tests now?</span><span class="end">asked by an extension</span></div>
+<div class="bar"><span class="btn pri">Yes <kbd>⏎</kbd></span><span class="btn">No</span><span style="flex:1"></span><span style="font-size:12px;color:var(--ws-text-faint)">your draft is kept</span><span class="btn ghost">Dismiss <kbd>esc</kbd></span></div></div>`;
 function frame(id,tab,main,h,o){const tabs=[['chat','Chat','','⌘1'],['traj','Trajectory','','⌘2'],['diff','Diff','3','⌘3']].map(([k,l,b,s])=>`<div class="tab ${k==tab?'on':''}">${l}${b?`<span class="badge">${b}</span>`:''}<kbd>${s}</kbd></div>`).join('');
 const w=o.st=='wait';
 document.getElementById(id).innerHTML=`<div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
 <div class="body" style="--h:${h}px">${side(o.st)}<div class="main"><div class="head"><b>Rate limit for /login</b><span style="color:var(--ws-text-faint)">···</span></div><div class="tabs">${tabs}</div>${main}
 <div class="wid"><div class="mono"><b>todo</b><span>✓ limiter</span><span>✓ tests</span><span>${w?'○':'✓'} run tests</span></div></div>
-<div class="act">${w?approval:composer}</div>
-<div class="status"><span style="color:${w?'var(--ws-warning)':'var(--ws-text-muted)'}">● ${w?'Waiting for approval':'Idle · finished 10:43'}</span><span>Context ${w?'7.4k':'9.9k'} / 200k</span><span>Session ${w?'18.3k in · 1.2k out':'28.2k in · 1.6k out'}</span><span>≈ $${w?'0.05':'0.08'}</span><span class="end">${o.keys}</span></div></div></div>`}
+<div class="act">${w?question:composer}</div>
+<div class="status"><span style="color:${w?'var(--ws-warning)':'var(--ws-text-muted)'}">● ${w?'Waiting for you':'Idle · finished 10:43'}</span><span>Context ${w?'7.4k':'9.9k'} / 200k</span><span>Session ${w?'18.3k in · 1.2k out':'28.2k in · 1.6k out'}</span><span>≈ $${w?'0.05':'0.08'}</span><span class="end">${o.keys}</span></div></div></div>`}
 
 frame('w-chat','chat',`<div class="chat"><div class="col">
 <div class="user">Add rate limiting to the /login endpoint (at most 5 failed attempts per minute per IP) and cover it with tests.</div>
@@ -273,52 +271,50 @@ frame('w-chat','chat',`<div class="chat"><div class="col">
 <div class="tool"><span class="ok">✓</span>write <code>src/middleware/rateLimit.ts</code><span class="r"><span class="add">+38</span></span></div>
 <div class="tool"><span class="ok">✓</span>edit <code>test/login.test.ts</code><span class="r"><span class="add">+12</span><span class="del">−3</span></span></div>
 <p class="prose">Now I'll run the login tests.</p>
-<div class="tool wait"><span>◷</span>bash <code>npm test -- login</code><span class="r">waiting for approval</span></div>
 </div></div>`,760,{st:'wait',keys:'⌘K commands · ⌘1–3 tabs · ⌘↑↓ sessions'});
 
 const T=26,P=s=>(s/T*100).toFixed(2)+'%';
 const bars=(segs,c)=>segs.map(([a,b])=>`<i style="left:${P(a)};width:${P(b-a)};background:${c}"></i>`).join('');
 const model=segs=>segs.map(([a,b,t])=>`<i style="left:${P(a)};width:${P(t)};background:color-mix(in srgb,var(--ws-accent) 35%,transparent);border-radius:2px 0 0 2px"></i><i style="left:${P(a+t)};width:${P(b-a-t)};background:var(--ws-accent);border-radius:0 2px 2px 0"></i>`).join('');
-const WAIT='repeating-linear-gradient(45deg,var(--ws-warning) 0 3px,transparent 3px 6px)';
 const axis=`<span></span><div class="trk axis">${[0,5,10,15,20,25].map(x=>`<span class="x" style="left:${P(x)}">${x} s</span>`).join('')}<span class="mark" style="left:${P(2.28)}"></span></div>`;
-const A={m:[[.1,2.2,.7],[2.3,5.7,.9],[5.9,7.1,.4],[23.45,25.9,.6]],t:[[2.25,2.27],[5.75,5.76],[5.8,5.81],[5.85,5.86],[16.6,23.4]],w:[[7.15,16.55]]};
-const B={m:[[.1,2.2,.7],[2.3,5.2,.8],[5.3,6.3,.3],[16.35,18.45,.5]],t:[[2.25,2.27],[5.25,5.26],[5.27,5.28],[10.3,16.3]],w:[[6.35,10.25]]};
+const A={m:[[.1,2.2,.7],[2.3,5.7,.9],[5.9,7.1,.4],[23.45,25.9,.6]],t:[[2.25,2.27],[5.75,5.76],[5.8,5.81],[5.85,5.86],[16.6,23.4]]};
+const B={m:[[.1,2.2,.7],[2.3,5.2,.8],[5.3,6.3,.3],[16.35,18.45,.5]],t:[[2.25,2.27],[5.25,5.26],[5.27,5.28],[10.3,16.3]]};
 const toolbar=c=>`<div class="ttb"><span class="sg2"><span class="on">Real time</span><span>Equal width</span></span><span class="btn ghost">Fold turns <kbd>⌥←</kbd></span><span class="sch"><span>Search steps</span><kbd>/</kbd></span><span class="end">${c?'<span class="chip on">Compare A ↔ B <kbd>C</kbd></span>':'<span class="btn">Compare <kbd>C</kbd></span>'}</span></div>`;
 const LX=[14,32,50],RH=28,GC=['var(--ws-data-1)','var(--ws-data-2)','var(--ws-data-3)'];
 function graph(c){
  const rows=[{l:0,t:'<b style="color:var(--ws-text);font-weight:600">Turn 1</b> Add rate limiting…'},{l:0,n:2,t:'Message'},{l:0,n:3,t:'read login.ts'},
-  {l:0,n:4,t:'Message',sel:!c},{l:0,n:8,t:'Message'},{l:0,n:9,t:'Approval'},{l:0,n:11,ref:'A',name:'sliding window',d:'25.9 s'},
-  {l:1,n:4,t:'Message'},{l:1,n:7,t:'Message'},{l:1,n:10,ref:'B',name:'token bucket',d:'18.5 s'},
+  {l:0,n:4,t:'Message',sel:!c},{l:0,n:8,t:'Message'},{l:0,n:10,ref:'A',name:'sliding window',d:'25.9 s'},
+  {l:1,n:4,t:'Message'},{l:1,n:7,t:'Message'},{l:1,n:9,ref:'B',name:'token bucket',d:'18.5 s'},
   {l:2,n:4,t:'Message'},{l:2,n:9,ref:'C',name:'fixed window',d:'21.0 s'}];
  const cy=i=>i*RH+RH/2;
  let s=`<svg width="64" height="${rows.length*RH}" fill="none" stroke-width="2">`;
- s+=`<path d="M${LX[0]} ${cy(0)}V${cy(6)}" stroke="${GC[0]}"/>`;
- s+=`<path d="M${LX[0]} ${cy(2)}C${LX[0]} ${cy(2)+18} ${LX[1]} ${cy(2)+10} ${LX[1]} ${cy(3)}V${cy(9)}" stroke="${GC[1]}"/>`;
- s+=`<path d="M${LX[0]} ${cy(2)}C${LX[0]} ${cy(2)+22} ${LX[2]} ${cy(2)+12} ${LX[2]} ${cy(3)+4}V${cy(11)}" stroke="${GC[2]}"/>`;
+ s+=`<path d="M${LX[0]} ${cy(0)}V${cy(5)}" stroke="${GC[0]}"/>`;
+ s+=`<path d="M${LX[0]} ${cy(2)}C${LX[0]} ${cy(2)+18} ${LX[1]} ${cy(2)+10} ${LX[1]} ${cy(3)}V${cy(8)}" stroke="${GC[1]}"/>`;
+ s+=`<path d="M${LX[0]} ${cy(2)}C${LX[0]} ${cy(2)+22} ${LX[2]} ${cy(2)+12} ${LX[2]} ${cy(3)+4}V${cy(10)}" stroke="${GC[2]}"/>`;
  rows.forEach((r,i)=>{s+=r.ref?`<circle cx="${LX[r.l]}" cy="${cy(i)}" r="5" fill="${GC[r.l]}"/>`:`<circle cx="${LX[r.l]}" cy="${cy(i)}" r="4" fill="var(--ws-canvas)" stroke="${GC[r.l]}" stroke-width="2"/>`});
  s+='</svg>';
  const pick={A:true,B:true,C:false};
  return `<div class="gg">${s}${rows.map(r=>`<div class="gr ${r.sel?'sel':''}">${r.n?`<span class="n">${r.n}</span>`:''}${r.ref?`<span class="ref" style="background:${GC[r.l]}">${r.ref}</span><span class="nm">${r.name}</span><span class="r">${c?`<span class="cb ${pick[r.ref]?'on':''}">${pick[r.ref]?'✓':''}</span>`:r.d}</span>`:`<span>${r.t}</span>`}</div>`).join('')}</div>`;}
 const tree=c=>`<div class="tree"><div class="th">Session tree <kbd>⌥↑↓</kbd></div>${graph(c)}</div>`;
-const L=[[1,'User','Add rate limiting to the /login endpoint (at most 5 failed attempts…','+0 s','','',''],[2,'Message','I\'ll look at the current handler first.','+2.1 s','4,812','312','0'],[3,'Tool','<code>read · src/routes/login.ts</code>','+18 ms','','',''],[4,'Message','There is no limiter yet. I\'ll add a sliding-window middleware…','+3.4 s','6,140','820','214'],[5,'Tool','<code>edit · src/routes/login.ts</code> <span class="add">+9</span> <span class="del">−2</span>','+9 ms','','',''],[6,'Tool','<code>write · src/middleware/rateLimit.ts</code> <span class="add">+38</span>','+6 ms','','',''],[7,'Tool','<code>edit · test/login.test.ts</code> <span class="add">+12</span> <span class="del">−3</span>','+7 ms','','',''],[8,'Message','Now I\'ll run the login tests.','+1.2 s','7,410','96','0'],[9,'Approval','<code>bash · npm test -- login</code> · allowed once','+9.4 s','','',''],[10,'Tool','<code>bash · npm test -- login</code> · exit 0','+6.8 s','','',''],[11,'Message','Done. The limiter counts failed attempts per IP…','+2.5 s','9,920','410','58']];
+const L=[[1,'User','Add rate limiting to the /login endpoint (at most 5 failed attempts…','+0 s','','',''],[2,'Message','I\'ll look at the current handler first.','+2.1 s','4,812','312','0'],[3,'Tool','<code>read · src/routes/login.ts</code>','+18 ms','','',''],[4,'Message','There is no limiter yet. I\'ll add a sliding-window middleware…','+3.4 s','6,140','820','214'],[5,'Tool','<code>edit · src/routes/login.ts</code> <span class="add">+9</span> <span class="del">−2</span>','+9 ms','','',''],[6,'Tool','<code>write · src/middleware/rateLimit.ts</code> <span class="add">+38</span>','+6 ms','','',''],[7,'Tool','<code>edit · test/login.test.ts</code> <span class="add">+12</span> <span class="del">−3</span>','+7 ms','','',''],[8,'Message','Now I\'ll run the login tests.','+1.2 s','7,410','96','0'],[9,'Tool','<code>bash · npm test -- login</code> · exit 0','+6.8 s','','',''],[10,'Message','Done. The limiter counts failed attempts per IP…','+2.5 s','9,920','410','58']];
 const insp=`<div class="insp"><div class="itabs"><span class="on">Summary</span><span>Context</span><span>Raw</span><span class="end"><span class="btn pri">Branch from here <kbd>B</kbd></span></span></div>
 <div class="igrid"><div><h5>Timing and usage</h5><div class="kv"><span class="t">First token</span><span class="v">0.9 s</span><span class="t">Generation</span><span class="v">2.5 s · 328 tok/s</span><span class="t">Tokens</span><span class="v">6,140 in · 820 out · 214 think</span><span class="t">Cost</span><span class="v">≈ $0.02</span></div></div>
 <div><h5>What the model saw · 6,140 tokens</h5><div class="stack"><span style="flex:2310;background:var(--ws-data-1)"></span><span style="flex:1050;background:var(--ws-data-2)"></span><span style="flex:2780;background:var(--ws-data-3)"></span></div>
 <div class="kv"><span class="t"><span class="sq" style="background:var(--ws-data-1)"></span>System prompt <i>· base, AGENTS.md, 2 skills</i></span><span class="v">2,310</span><span class="t"><span class="sq" style="background:var(--ws-data-2)"></span>Tools <i>· 7</i></span><span class="v">1,050</span><span class="t"><span class="sq" style="background:var(--ws-data-3)"></span>Messages <i>· prompt, 1 reply, 1 tool result</i></span><span class="v">2,780</span></div>
 <div class="newc">New since step 2: result of <span class="mono">read src/routes/login.ts</span> · 2,372 tokens</div></div></div></div>`;
 const rows=L.map(([n,k,s,t,i,o,th])=>`<div class="lr ${n==4?'sel':''} ${n<4||n>8?'dim':''}"><span class="n">${n}</span><span><span class="tg ${k}">${k}</span></span><span>${s}</span><span class="num">${t}</span><span class="num">${i}</span><span class="num">${o}</span><span class="num">${th}</span></div>${n==4?insp:''}`).join('');
-frame('w-traj','traj',`${toolbar(false)}<div class="ov"><div class="ovh"><b>Overview</b><span>branch A · 11 steps · 25.9 s</span><span>drag to focus · scroll to zoom</span><span class="end">2.3–7.1 s · 5 steps <kbd>esc</kbd></span></div>
-<div class="ovg">${axis}<span>Model</span><div class="trk">${model(A.m)}<div class="brush" style="left:${P(2.3)};width:${P(4.8)}"></div></div><span>Tools</span><div class="trk">${bars(A.t,'var(--ws-data-2)')}<div class="brush" style="left:${P(2.3)};width:${P(4.8)}"></div></div><span>You</span><div class="trk">${bars(A.w,WAIT)}<div class="brush" style="left:${P(2.3)};width:${P(4.8)}"></div></div></div></div>
+frame('w-traj','traj',`${toolbar(false)}<div class="ov"><div class="ovh"><b>Overview</b><span>branch A · 10 steps · 25.9 s</span><span>drag to focus · scroll to zoom</span><span class="end">2.3–7.1 s · 5 steps <kbd>esc</kbd></span></div>
+<div class="ovg">${axis}<span>Model</span><div class="trk">${model(A.m)}<div class="brush" style="left:${P(2.3)};width:${P(4.8)}"></div></div><span>Tools</span><div class="trk">${bars(A.t,'var(--ws-data-2)')}<div class="brush" style="left:${P(2.3)};width:${P(4.8)}"></div></div></div></div>
 <div class="tbody"><div class="led"><div class="lr hd"><span>#</span><span>Kind</span><span>Step</span><span class="num">Time</span><span class="num">In</span><span class="num">Out</span><span class="num">Think</span></div>
 <div class="turn"><span style="color:var(--ws-text-faint)">⌄</span><b>Turn 1</b><span class="q">Add rate limiting to the /login endpoint…</span><span class="end">25.9 s · read 1 · edit 2 · write 1 · bash 1</span></div>${rows}</div>${tree(false)}</div>`,1000,{st:'done',keys:'↑↓ step · ←→ fold · ⏎ open · B branch · C compare · / search'});
 
-const lane=(R)=>model(R.m)+bars(R.t,'var(--ws-data-2)')+bars(R.w,WAIT);
-const r1=[['Message','','3.4 s · 6.1k → 820'],['Tool','edit · login.ts','+9 −2'],['Tool','write · rateLimit.ts','+38'],['Tool','edit · login.test.ts','+12 −3','only'],['Message','','1.2 s · 7.4k → 96'],['Approval','bash','allowed once · 9.4 s'],['Tool','bash · npm test','exit 0 · 14 ✓'],['Message','','2.5 s · 9.9k → 410']];
-const r2=[['Message','','2.9 s · 6.2k → 640'],['Tool','write · tokenBucket.ts','+31'],['Tool','edit · login.ts','+6 −2'],null,['Message','','1.0 s · 7.0k → 88'],['Approval','bash','for session · 3.9 s'],['Tool','bash · npm test','exit 0 · 12 ✓'],['Message','','2.1 s · 8.9k → 352']];
+const lane=(R)=>model(R.m)+bars(R.t,'var(--ws-data-2)');
+const r1=[['Message','','3.4 s · 6.1k → 820'],['Tool','edit · login.ts','+9 −2'],['Tool','write · rateLimit.ts','+38'],['Tool','edit · login.test.ts','+12 −3','only'],['Message','','1.2 s · 7.4k → 96'],['Tool','bash · npm test','exit 0 · 14 ✓'],['Message','','2.5 s · 9.9k → 410']];
+const r2=[['Message','','2.9 s · 6.2k → 640'],['Tool','write · tokenBucket.ts','+31'],['Tool','edit · login.ts','+6 −2'],null,['Message','','1.0 s · 7.0k → 88'],['Tool','bash · npm test','exit 0 · 12 ✓'],['Message','','2.1 s · 8.9k → 352']];
 const cell=(x,n)=>x?`<div class="cc ${x[3]?'only':''}"><span style="color:var(--ws-text-faint);width:18px;font-size:13px">${n}</span><span class="tg ${x[0]}">${x[0]}</span>${x[1]?`<code>${esc(x[1])}</code>`:''}${x[3]?'<span class="ftag">only in A</span>':''}<span class="r">${x[2]}</span></div>`:`<div class="cc"></div>`;
-let cr='',m=4;for(let i=0;i<8;i++){cr+=cell(r1[i],i+4)+cell(r2[i],r2[i]?m:'');if(r2[i])m++}
+let cr='',m=4;for(let i=0;i<7;i++){cr+=cell(r1[i],i+4)+cell(r2[i],r2[i]?m:'');if(r2[i])m++}
 frame('w-cmp','traj',`${toolbar(true)}<div class="ov"><div class="ovh"><b>Overview</b><span>A ↔ B on one time axis</span><span>◆ branch point after step 3</span><span class="end" style="color:var(--ws-text-faint)">drag to focus · scroll to zoom</span></div>
-<div class="ovg">${axis}<span>A</span><div class="trk">${lane(A)}</div><span>B</span><div class="trk">${lane(B)}</div><span></span><div style="font-size:11px;display:flex;gap:16px"><span><span class="sq" style="background:var(--ws-accent)"></span>model</span><span><span class="sq" style="background:var(--ws-data-2)"></span>tool</span><span><span class="sq" style="background:var(--ws-warning)"></span>waiting for you</span></div></div></div>
+<div class="ovg">${axis}<span>A</span><div class="trk">${lane(A)}</div><span>B</span><div class="trk">${lane(B)}</div><span></span><div style="font-size:11px;display:flex;gap:16px"><span><span class="sq" style="background:var(--ws-accent)"></span>model</span><span><span class="sq" style="background:var(--ws-data-2)"></span>tool</span></div></div></div>
 <div class="tbody"><div class="cmp"><div class="mets"><div class="met"><div class="l">Duration</div><div class="v">25.9 s<span>→</span>18.5 s</div><div class="d ok">−29 %</div></div><div class="met"><div class="l">Tokens in / out</div><div class="v">28.2k<span>→</span>26.9k</div><div class="d" style="color:var(--ws-text-muted)">1.6k → 1.4k out</div></div><div class="met"><div class="l">Files changed</div><div class="v">3<span>→</span>2</div><div class="d" style="color:var(--ws-warning)">no test changes in B</div></div><div class="met"><div class="l">Tests</div><div class="v">14<span>→</span>12</div><div class="d" style="color:var(--ws-text-muted)">all passed in both</div></div></div>
 <div class="cgrid"><div class="h"><span class="ref" style="background:${GC[0]}">A</span>sliding window</div><div class="h" style="box-shadow:inset 1px 0 0 var(--ws-border)"><span class="ref" style="background:${GC[1]}">B</span><span class="q">“Use a token bucket instead.”</span></div><div class="same">Steps 1–3 shared · prompt, message, read src/routes/login.ts</div>${cr}</div></div>${tree(true)}</div>`,1000,{st:'done',keys:'⌥↑↓ tree · Space select branch · C leave compare'});
 

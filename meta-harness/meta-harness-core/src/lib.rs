@@ -3,7 +3,6 @@
 
 #![deny(missing_docs)]
 
-mod approval;
 mod checkout;
 mod checkpoint;
 mod diff;
@@ -15,7 +14,6 @@ mod session;
 mod stored;
 mod visible;
 
-pub use approval::ApprovalMode;
 pub use checkpoint::{
     Branches, Checkpoint, Checkpoints, CommitFile, CommitPlan, Phase, RevertFile, RevertPlan,
 };
@@ -27,9 +25,9 @@ pub use diff::{
     without_credentials,
 };
 pub use event::{
-    AgentEvent, Answer, ChangedLines, Decision, Delivery, EditChange, EditPreview, EntryKind,
-    ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, Queue, RequestId, RequestKind,
-    SessionTree, TreeNode, TurnId, Usage, UserInput,
+    AgentEvent, Answer, ChangedLines, Delivery, EntryKind, ItemDetail, ItemId, ItemKind,
+    ItemStatus, NotificationLevel, Queue, RequestId, SessionTree, TreeNode, TurnId, Usage,
+    UserInput,
 };
 pub(crate) use framing::{Frame, LineFramer};
 pub use history::{

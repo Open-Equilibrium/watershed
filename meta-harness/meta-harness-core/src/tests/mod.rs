@@ -1,4 +1,3 @@
-mod approval;
 mod branches;
 mod checkpoint;
 mod commit;

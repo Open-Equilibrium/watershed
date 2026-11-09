@@ -189,7 +189,6 @@ String _kindLabel(BridgeTreeNode node) {
     BridgeEntryKind.user => 'prompt',
     BridgeEntryKind.assistant => 'response step',
     BridgeEntryKind.toolResult => 'tool step',
-    BridgeEntryKind.approval => 'approval step',
     _ => 'branch point',
   };
   return node.failed ? '$kind, failed' : kind;
@@ -318,9 +317,7 @@ class _RowContent extends StatelessWidget {
     final isPrompt = node.kind == BridgeEntryKind.user;
     final text = switch (node.kind) {
       BridgeEntryKind.assistant when node.preview.isEmpty => '(tool calls)',
-      BridgeEntryKind.assistant ||
-      BridgeEntryKind.approval ||
-      BridgeEntryKind.toolResult => node.preview,
+      BridgeEntryKind.assistant || BridgeEntryKind.toolResult => node.preview,
       _ => 'Branch point',
     };
     return Row(
@@ -570,8 +567,8 @@ class _RowPainter extends CustomPainter {
     _node(canvas, Offset(x(lane), middle));
   }
 
-  /// The node: a ring for a prompt, a dot for a response, a square for a tool, a diamond for an
-  /// approval; failed ones outlined in red, the selected one outlined in blue.
+  /// The node: a ring for a prompt, a dot for a response and a square for a tool; failed ones
+  /// outlined in red, the selected one outlined in blue.
   void _node(Canvas canvas, Offset center) {
     final fill = Paint();
     final outline = Paint()
@@ -592,14 +589,6 @@ class _RowPainter extends CustomPainter {
         shape = Path()
           ..addRect(Rect.fromCenter(center: center, width: 6.5, height: 6.5));
         fill.color = palette.data2;
-      case BridgeEntryKind.approval:
-        shape = Path()
-          ..moveTo(center.dx, center.dy - 4.5)
-          ..lineTo(center.dx + 4.5, center.dy)
-          ..lineTo(center.dx, center.dy + 4.5)
-          ..lineTo(center.dx - 4.5, center.dy)
-          ..close();
-        fill.color = palette.warning;
       default:
         shape = Path()..addOval(Rect.fromCircle(center: center, radius: 3));
         fill.color = palette.canvas;

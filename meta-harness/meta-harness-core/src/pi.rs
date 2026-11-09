@@ -6,14 +6,11 @@ use serde_json::{Map, Value};
 
 use crate::checkpoint::{Checkpoint, Phase};
 use crate::event::{
-    AgentEvent, ChangedLines, Decision, EditChange, EditPreview, ItemDetail, ItemId, ItemKind,
-    ItemStatus, NotificationLevel, Queue, RequestId, RequestKind, TurnId, Usage, UserInput,
+    AgentEvent, ChangedLines, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, Queue,
+    RequestId, TurnId, Usage, UserInput,
 };
 use crate::history::{first_line, patch_lines};
 use crate::visible::{visible, visible_name};
-
-/// Title prefix of the select dialog Watershed's pi extension uses to ask for an approval.
-pub(crate) const APPROVAL_PREFIX: &str = "watershed.approval ";
 
 /// Title prefix of the input dialog Watershed's pi extension uses to ask for a checkpoint at a
 /// turn's start or end (ADR-0234); the core answers it with `{"ok":true}` or `{"error":…}`.
@@ -73,7 +70,7 @@ impl PiAdapter {
     pub fn translate(&mut self, record: &Map<String, Value>) -> Vec<AgentEvent> {
         let kind = record.get("type").and_then(Value::as_str);
         if kind == Some("extension_ui_request") {
-            return extension_ui(record, &self.tools).into_iter().collect();
+            return extension_ui(record).into_iter().collect();
         }
         if kind == Some("queue_update") {
             return vec![AgentEvent::QueueChanged(queue(&Value::Object(
@@ -357,20 +354,6 @@ pub(crate) fn call_target(arguments: &str) -> String {
     call_argument(arguments).unwrap_or_else(|| first_line(&visible(arguments), TARGET_CHARS))
 }
 
-/// The whole call an approval of `kind` shows: a shell command itself, other calls their
-/// arguments.
-pub(crate) fn call_text(kind: RequestKind, arguments: &str) -> String {
-    let command = (kind == RequestKind::CommandExecutionApproval)
-        .then(|| serde_json::from_str::<Value>(arguments).ok())
-        .flatten();
-    visible(
-        command
-            .as_ref()
-            .and_then(|call| call.get("command")?.as_str())
-            .unwrap_or(arguments),
-    )
-}
-
 /// The arguments that name the file a call of one of pi's file tools changes.
 pub(crate) const PATH_ARGUMENTS: [&str; 2] = ["path", "file_path"];
 
@@ -386,28 +369,8 @@ pub(crate) fn changed_path(tool: &str, arguments: &str) -> Option<String> {
         .map(visible)
 }
 
-/// A decision as Watershed's extension records it.
-pub(crate) fn decision(text: &str) -> Option<Decision> {
-    match text {
-        "allow-once" => Some(Decision::AllowOnce),
-        "allow-session" => Some(Decision::AllowSession),
-        "reject" => Some(Decision::Reject),
-        _ => None,
-    }
-}
-
-/// Classifies one of pi's tool names.
-pub(crate) fn request_kind(tool: &str) -> RequestKind {
-    match item_kind(tool) {
-        ItemKind::CommandExecution => RequestKind::CommandExecutionApproval,
-        ItemKind::FileChange => RequestKind::FileChangeApproval,
-        _ => RequestKind::ToolApproval,
-    }
-}
-
 /// What a call of pi's `tool` does, for live and restored chat items alike. Records name
-/// no tool's source, so an extension's tool of the same name shows the same; only approvals
-/// tell them apart (ADR-0208).
+/// no tool's source, so an extension's tool of the same name shows the same.
 pub(crate) fn item_kind(tool: &str) -> ItemKind {
     match tool {
         "bash" => ItemKind::CommandExecution,
@@ -423,19 +386,13 @@ pub(crate) fn written_lines(tool: &str, arguments: &Value) -> Option<u32> {
 }
 
 /// Translates one extension UI request; unknown methods yield nothing.
-fn extension_ui(
-    record: &Map<String, Value>,
-    tools: &HashMap<String, OpenTool>,
-) -> Option<AgentEvent> {
+fn extension_ui(record: &Map<String, Value>) -> Option<AgentEvent> {
     let request = RequestId(str_field(record, "id").to_owned());
     let text = |field| str_field(record, field).to_owned();
     let input = match str_field(record, "method") {
-        "select" => match str_field(record, "title").strip_prefix(APPROVAL_PREFIX) {
-            Some(payload) => return Some(approval(request, payload, tools)),
-            None => UserInput::Select {
-                title: text("title"),
-                options: strings(record.get("options")).unwrap_or_default(),
-            },
+        "select" => UserInput::Select {
+            title: text("title"),
+            options: strings(record.get("options")).unwrap_or_default(),
         },
         "confirm" => UserInput::Confirm {
             title: text("title"),
@@ -495,85 +452,6 @@ fn model_response(turn: TurnId, record: &Map<String, Value>, events: &mut Vec<Ag
             .and_then(Value::as_str)
             .map(str::to_owned),
     });
-}
-
-/// Reads the approval payload; an unreadable payload still asks the user, so nothing runs
-/// without a decision.
-fn approval(request: RequestId, payload: &str, tools: &HashMap<String, OpenTool>) -> AgentEvent {
-    let payload: Map<String, Value> = serde_json::from_str(payload).unwrap_or_default();
-    let tool = str_field(&payload, "tool");
-    let call = payload.get("arguments");
-    let arguments = call.map(Value::to_string).unwrap_or_default();
-    // Only pi's own tools are what their names say: Allow edits runs file changes without
-    // asking, and a shell command shows only its command. An extension's tool of the same name
-    // asks like any other, with all of its arguments (ADR-0208).
-    let kind = if payload.get("builtin").and_then(Value::as_bool) == Some(true) {
-        request_kind(tool)
-    } else {
-        RequestKind::ToolApproval
-    };
-    AgentEvent::RequestOpened {
-        request,
-        kind,
-        tool: visible_name(tool),
-        text: call_text(kind, &arguments),
-        arguments,
-        read_only: payload.get("readOnly").and_then(Value::as_bool) == Some(true),
-        session: payload
-            .get("session")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        item: tools
-            .get(str_field(&payload, "toolCallId"))
-            .map(|tool| tool.item),
-        edit: (kind == RequestKind::FileChangeApproval)
-            .then(|| {
-                let writes_to = payload.get("writesTo").and_then(Value::as_str);
-                Some(EditPreview {
-                    writes_to: writes_to.map(visible_name),
-                    ..edit_preview(tool, call?)?
-                })
-            })
-            .flatten(),
-    }
-}
-
-/// What a call of pi's own `edit` or `write` changes: its file and each
-/// replacement, as pi hands them to its tool once it brought every form it accepts into one
-/// `edits` array. An edit's carriage returns show as the line breaks pi's tool turns them
-/// into. `None` for any other shape, which the approval then shows as it is.
-fn edit_preview(tool: &str, arguments: &Value) -> Option<EditPreview> {
-    let path = arguments.get("path")?.as_str()?;
-    let text = |value: &Value, field| value.get(field)?.as_str().map(visible);
-    let edited = |value: &Value, field| {
-        let text = value.get(field)?.as_str()?;
-        Some(visible(&text.replace("\r\n", "\n").replace('\r', "\n")))
-    };
-    let changes = match tool {
-        "write" => vec![EditChange {
-            removed: String::new(),
-            added: text(arguments, "content")?,
-        }],
-        "edit" => arguments
-            .get("edits")?
-            .as_array()?
-            .iter()
-            .map(|edit| {
-                Some(EditChange {
-                    removed: edited(edit, "oldText")?,
-                    added: edited(edit, "newText")?,
-                })
-            })
-            .collect::<Option<Vec<_>>>()
-            .filter(|changes| !changes.is_empty())?,
-        _ => return None,
-    };
-    Some(EditPreview {
-        path: visible_name(path),
-        writes_to: None,
-        changes,
-        whole_file: tool == "write",
-    })
 }
 
 fn strings(value: Option<&Value>) -> Option<Vec<String>> {

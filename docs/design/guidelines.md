@@ -31,7 +31,7 @@ References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 
 ## Patterns
 
-- The input area floats at the bottom of each tab's main column, centered within the reading width, as T3 Code's composer does; content runs on beneath it. Approvals and agent dialogs appear inside it, and widgets sit directly above it.
+- The input area floats at the bottom of each tab's main column, centered within the reading width, as T3 Code's composer does; content runs on beneath it. Agent questions appear inside it, and widgets sit directly above it.
 - Filters dim what does not match instead of hiding it; a range set with the timeline's handles limits the list to its steps.
 - A step's kind has one shape and color everywhere: the Kind tags, the timeline and the session tree.
 - A choice of one among a few options uses the shared segments as the [closeout mockups](mockups/liquid-closeout.html) draw them, framed and the same in every view; older mockups that draw it otherwise are superseded.

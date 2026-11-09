@@ -70,12 +70,6 @@ class FakeBackend implements SessionBackend {
   }
 
   @override
-  Future<void> setApprovalMode(BridgeApprovalMode mode) async =>
-      calls.add('mode ${mode.name}');
-  @override
-  Future<void> decide(String request, BridgeDecision decision) async =>
-      calls.add('decide $request ${decision.name}');
-  @override
   Future<void> answerText(String request, String text) async =>
       calls.add('answer $request $text');
   @override
@@ -798,7 +792,6 @@ BridgeRecord record(
   String detail = '',
   String target = '',
   String? changedFile,
-  BridgeDecision? decision,
   BridgeUsage? usage,
   BridgeStepContext? context,
   bool failed = false,
@@ -813,7 +806,6 @@ BridgeRecord record(
   detail: detail,
   target: target,
   changedFile: changedFile,
-  decision: decision,
   startMs: start,
   durationMs: duration,
   firstTokenMs: firstToken,
@@ -860,7 +852,6 @@ BridgeHistory historyOf(
               BridgeRecordKind.user => BridgeEntryKind.user,
               BridgeRecordKind.message => BridgeEntryKind.assistant,
               BridgeRecordKind.tool => BridgeEntryKind.toolResult,
-              BridgeRecordKind.approval => BridgeEntryKind.approval,
             },
             preview: record.label,
           ),

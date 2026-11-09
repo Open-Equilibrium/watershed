@@ -72,11 +72,6 @@ pub(crate) enum Body {
         call: String,
         duration_ms: Option<u64>,
     },
-    Approval {
-        tool: String,
-        decision: String,
-        waited_ms: Option<u64>,
-    },
     /// A checkpoint Watershed's extension recorded at a turn's start or end, or why it could not
     /// be taken.
     Checkpoint {
@@ -428,11 +423,6 @@ fn custom(kind: String, data: Option<&Value>) -> Body {
                 })(),
             }
         }
-        "watershed.approval" => Body::Approval {
-            tool: visible_name(&text("tool")),
-            decision: text("decision"),
-            waited_ms: millis("waitedMs"),
-        },
         _ => Body::Custom,
     }
 }

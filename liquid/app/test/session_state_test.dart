@@ -85,66 +85,39 @@ void main() {
     expect(state.status.value, RunStatus.idle);
   });
 
-  test(
-    'queues approvals and questions and reports waiting for the user',
-    () async {
-      BridgeRequest approval(String id) => BridgeRequest(
-        id: id,
-        approval: BridgeApproval(
-          kind: BridgeRequestKind.commandExecution,
-          tool: 'bash',
-          text: 'npm test',
-        ),
-      );
-      await emit(event(BridgeEventKind.turnStarted));
-      await emit(event(BridgeEventKind.requestOpened, request: approval('a1')));
-      await emit(event(BridgeEventKind.requestOpened, request: approval('a2')));
-      expect(state.status.value, RunStatus.waitingForYou);
-      expect(state.approval.value!.id, 'a1');
-      await state.decide('a1', BridgeDecision.allowOnce);
-      expect(backend.calls.last, 'decide a1 allowOnce');
-      await emit(
-        event(
-          BridgeEventKind.requestResolved,
-          request: BridgeRequest(id: 'a1'),
-        ),
-      );
-      expect(state.approval.value!.id, 'a2');
-      await emit(
-        event(
-          BridgeEventKind.requestResolved,
-          request: BridgeRequest(id: 'a2'),
-        ),
-      );
-      expect(state.approval.value, isNull);
-      expect(state.status.value, RunStatus.running);
-
-      await emit(
-        event(
-          BridgeEventKind.userInputRequested,
-          request: BridgeRequest(
-            id: 'q1',
-            question: BridgeQuestion(
-              kind: BridgeQuestionKind.select,
-              title: 'Pick',
-              detail: '',
-              options: ['A', 'B'],
-            ),
-          ),
-        ),
-      );
-      expect(state.status.value, RunStatus.waitingForYou);
-      await state.answerText('q1', 'B');
-      expect(backend.calls.last, 'answer q1 B');
-      await emit(
-        event(
-          BridgeEventKind.userInputResolved,
-          request: BridgeRequest(id: 'q1'),
-        ),
-      );
-      expect(state.question.value, isNull);
-    },
-  );
+  test('queues questions and reports waiting for the user', () async {
+    BridgeRequest pick(String id) => BridgeRequest(
+      id: id,
+      question: BridgeQuestion(
+        kind: BridgeQuestionKind.select,
+        title: 'Pick',
+        detail: '',
+        options: const ['A', 'B'],
+      ),
+    );
+    await emit(event(BridgeEventKind.turnStarted));
+    await emit(event(BridgeEventKind.userInputRequested, request: pick('q1')));
+    await emit(event(BridgeEventKind.userInputRequested, request: pick('q2')));
+    expect(state.status.value, RunStatus.waitingForYou);
+    expect(state.question.value!.id, 'q1');
+    await state.answerText('q1', 'B');
+    expect(backend.calls.last, 'answer q1 B');
+    await emit(
+      event(
+        BridgeEventKind.userInputResolved,
+        request: BridgeRequest(id: 'q1'),
+      ),
+    );
+    expect(state.question.value!.id, 'q2');
+    await emit(
+      event(
+        BridgeEventKind.userInputResolved,
+        request: BridgeRequest(id: 'q2'),
+      ),
+    );
+    expect(state.question.value, isNull);
+    expect(state.status.value, RunStatus.running);
+  });
 
   test('keeps extension displays, the draft and the exit', () async {
     BridgeDisplay display(
@@ -214,14 +187,8 @@ void main() {
     );
     expect(changes, isEmpty);
     await emit(event(BridgeEventKind.itemCompleted, item: item(1)));
-    await emit(
-      event(
-        BridgeEventKind.requestResolved,
-        request: const BridgeRequest(id: 'a1'),
-      ),
-    );
     await emit(event(BridgeEventKind.turnCompleted));
-    expect(changes, [1, 2, 3]);
+    expect(changes, [1, 2]);
 
     backend.stored = historyOf([]);
     expect((await state.history(['e2'])).leaf, 'e1');
@@ -232,7 +199,7 @@ void main() {
       'transcript',
       'history',
     ], reason: 'a branch rebuilds the chat');
-    expect(changes.last, 4);
+    expect(changes.last, 3);
   });
 
   test(
@@ -925,22 +892,23 @@ void main() {
   test('retires open cards when the agent exits', () async {
     await emit(
       event(
-        BridgeEventKind.requestOpened,
+        BridgeEventKind.userInputRequested,
         request: BridgeRequest(
-          id: 'a1',
-          approval: BridgeApproval(
-            kind: BridgeRequestKind.commandExecution,
-            tool: 'bash',
-            text: '{}',
+          id: 'q1',
+          question: BridgeQuestion(
+            kind: BridgeQuestionKind.confirm,
+            title: 'Sure?',
+            detail: '',
+            options: const [],
           ),
         ),
       ),
     );
-    expect(state.approval.value?.id, 'a1');
+    expect(state.question.value?.id, 'q1');
     await emit(event(BridgeEventKind.exited, success: false));
     expect(
-      (state.approval.value, state.question.value, state.status.value),
-      (null, null, RunStatus.failed),
+      (state.question.value, state.status.value),
+      (null, RunStatus.failed),
     );
   });
 
@@ -1060,24 +1028,8 @@ void main() {
   });
 
   test('a request that ended before it was shown never shows', () async {
-    // Stop can withdraw a request while the core is still reporting it.
+    // Stop can dismiss a question while the core is still reporting it.
     await emit(event(BridgeEventKind.turnStarted));
-    await emit(
-      event(BridgeEventKind.requestResolved, request: BridgeRequest(id: 'a1')),
-    );
-    await emit(
-      event(
-        BridgeEventKind.requestOpened,
-        request: BridgeRequest(
-          id: 'a1',
-          approval: BridgeApproval(
-            kind: BridgeRequestKind.commandExecution,
-            tool: 'bash',
-            text: 'npm test',
-          ),
-        ),
-      ),
-    );
     await emit(
       event(
         BridgeEventKind.userInputResolved,
@@ -1098,7 +1050,7 @@ void main() {
         ),
       ),
     );
-    expect((state.approval.value, state.question.value), (null, null));
+    expect(state.question.value, isNull);
     expect(state.status.value, RunStatus.running);
   });
 

@@ -16,8 +16,6 @@ abstract interface class SessionBackend {
   Future<void> send(String message, {required bool followUp});
   Future<BridgeQueue> clearQueue();
   Future<void> abort();
-  Future<void> setApprovalMode(BridgeApprovalMode mode);
-  Future<void> decide(String request, BridgeDecision decision);
   Future<void> answerText(String request, String text);
   Future<void> answerConfirm(String request, bool confirmed);
   Future<void> dismiss(String request);
@@ -221,12 +219,6 @@ class RustSessionBackend implements SessionBackend {
   Future<BridgeQueue> clearQueue() => _session.clearQueue();
   @override
   Future<void> abort() => _session.abort();
-  @override
-  Future<void> setApprovalMode(BridgeApprovalMode mode) =>
-      _session.setApprovalMode(mode: mode);
-  @override
-  Future<void> decide(String request, BridgeDecision decision) =>
-      _session.decide(request: request, decision: decision);
   @override
   Future<void> answerText(String request, String text) =>
       _session.answerText(request: request, text: text);

@@ -87,15 +87,6 @@ final branchA = [
     context: saw(3, ['result of read']),
   ),
   record(
-    'a1',
-    1,
-    BridgeRecordKind.approval,
-    'bash',
-    5800,
-    duration: 9400,
-    decision: BridgeDecision.allowOnce,
-  ),
-  record(
     'e5',
     1,
     BridgeRecordKind.tool,
@@ -156,7 +147,7 @@ void main() {
     tester,
   ) async {
     await show(tester, historyOf(branchA));
-    expect(find.text('session branch A · 7 steps · 24.5 s'), findsOneWidget);
+    expect(find.text('session branch A · 6 steps · 24.5 s'), findsOneWidget);
     expect(
       find.descendant(
         of: find.byKey(const ValueKey('start')),
@@ -176,7 +167,6 @@ void main() {
       reason: 'the turn line sums what the turn added to the context',
     );
     expect(find.text('read · src/routes/login.ts'), findsOneWidget);
-    expect(find.text('bash · allowed once'), findsOneWidget);
     expect(find.text('+3.4 s'), findsOneWidget);
     expect(find.text('6.1k'), findsOneWidget, reason: 'tokens in');
     expect(
@@ -511,7 +501,7 @@ void main() {
   ) async {
     await show(tester, historyOf(branchA));
     double row(Finder finder) => tester.getCenter(finder).dy;
-    final summary = find.text('session branch A · 7 steps · 24.5 s');
+    final summary = find.text('session branch A · 6 steps · 24.5 s');
     expect(find.text('Fold turns'), findsNothing);
     for (final control in ['Real time', 'Compare']) {
       expect(
@@ -610,7 +600,7 @@ void main() {
       'Could not read the session history: the session file is gone',
     ]);
     expect(
-      find.text('session branch A · 7 steps · 24.5 s'),
+      find.text('session branch A · 6 steps · 24.5 s'),
       findsOneWidget,
       reason: 'the last history stays',
     );
@@ -676,7 +666,6 @@ void main() {
       reason: 'npm test failed',
     );
     expect(inTree(find.bySemanticsLabel('response step')), findsNWidgets(3));
-    expect(inTree(find.bySemanticsLabel('approval step')), findsOneWidget);
     expect(
       inTree(find.text("I'll look first.")),
       findsOneWidget,

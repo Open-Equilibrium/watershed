@@ -5,6 +5,7 @@ import 'package:liquid/src/agent/action_area.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/rust/api/events.dart';
+import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/shortcuts/shortcuts_page.dart';
 import 'package:liquid/src/theme/theme.dart';
@@ -18,9 +19,13 @@ const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
 void main() {
   late FakeBackend backend;
 
-  Future<void> show(WidgetTester tester) async {
+  Future<void> show(
+    WidgetTester tester, {
+    List<BridgeModel> models = const [],
+  }) async {
     await tester.binding.setSurfaceSize(const Size(1600, 900));
     backend = FakeBackend()
+      ..modelList = models
       ..changed = [
         BridgeFileChange(
           path: 'a.txt',
@@ -69,19 +74,23 @@ void main() {
         ),
       );
 
-  BridgeEvent approval(String id, {String command = 'git push'}) => event(
-    BridgeEventKind.requestOpened,
+  BridgeEvent confirm(String id) => event(
+    BridgeEventKind.userInputRequested,
     request: BridgeRequest(
       id: id,
-      approval: BridgeApproval(
-        kind: BridgeRequestKind.commandExecution,
-        tool: 'bash',
-        text: command,
+      question: BridgeQuestion(
+        kind: BridgeQuestionKind.confirm,
+        title: 'Push now?',
+        detail: '',
+        options: const [],
       ),
     ),
   );
 
-  /// Lets an approval take keys.
+  BridgeEvent resolved(String id) =>
+      event(BridgeEventKind.userInputResolved, request: BridgeRequest(id: id));
+
+  /// Lets a question take keys.
   Future<void> read(WidgetTester tester) =>
       tester.pump(const Duration(milliseconds: 500));
 
@@ -175,159 +184,116 @@ void main() {
     expect(focused(tester, const Key('composer')), isTrue);
   });
 
-  testWidgets('a long call in an approval scrolls from the keyboard', (
-    tester,
-  ) async {
-    await show(tester);
-    final command = List.generate(40, (line) => 'echo $line').join('\n');
-    await emit(tester, event(BridgeEventKind.turnStarted));
-    await emit(tester, approval('a1', command: command));
-    await read(tester);
-    final scroll = find
-        .ancestor(
-          of: find.textContaining('echo 39'),
-          matching: find.byType(Scrollable),
-        )
-        .first;
-    double offset() => tester.state<ScrollableState>(scroll).position.pixels;
-    expect(offset(), 0);
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pumpAndSettle();
-    final line = offset();
-    expect(line, greaterThan(0));
-    await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
-    await tester.pumpAndSettle();
-    expect(offset(), greaterThan(line));
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    expect(
-      backend.calls.last,
-      'decide a1 allowOnce',
-      reason: 'the approval keeps the keys',
-    );
-  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
-
-  testWidgets('an approval takes no key pressed before it could be read', (
+  testWidgets('a question takes no key pressed before it could be read', (
     tester,
   ) async {
     await show(tester);
     await emit(tester, event(BridgeEventKind.turnStarted));
-    await emit(tester, approval('a1'));
+    await emit(tester, confirm('q1'));
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
     await read(tester);
     await tester.sendKeyRepeatEvent(LogicalKeyboardKey.enter);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
     expect(
-      backend.calls.where((call) => call.startsWith('decide')),
+      backend.calls.where(
+        (call) => call.startsWith('confirm') || call.startsWith('dismiss'),
+      ),
       isEmpty,
-      reason: 'neither early keys nor a held key decide',
+      reason: 'neither early keys nor a held key answer',
     );
 
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    expect(backend.calls.last, 'decide a1 allowOnce');
-    await emit(
-      tester,
-      event(BridgeEventKind.requestResolved, request: BridgeRequest(id: 'a1')),
-    );
+    expect(backend.calls.last, 'confirm q1 true');
+    await emit(tester, resolved('q1'));
     expect(focused(tester, const Key('composer')), isTrue);
   });
 
-  testWidgets('an approval waits again once Liquid is back in front', (
+  testWidgets('a question waits again once Liquid is back in front', (
     tester,
   ) async {
     await show(tester);
-    await emit(tester, approval('a1'));
+    await emit(tester, confirm('q1'));
     // It arrived while the user worked in another app.
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     await read(tester);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     expect(
-      backend.calls.where((call) => call.startsWith('decide')),
+      backend.calls.where((call) => call.startsWith('confirm')),
       isEmpty,
-      reason: 'the key that brought Liquid back decides nothing',
+      reason: 'the key that brought Liquid back answers nothing',
     );
 
     await read(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    expect(backend.calls.last, 'decide a1 allowOnce');
+    expect(backend.calls.last, 'confirm q1 true');
   });
 
-  testWidgets('an approval closes a menu above it before taking keys', (
+  testWidgets('a question closes a menu above it before taking keys', (
     tester,
   ) async {
-    await show(tester);
-    await emit(tester, event(BridgeEventKind.turnStarted));
-    await tester.tap(find.byTooltip('Approval mode'));
+    await show(
+      tester,
+      models: const [
+        BridgeModel(provider: 'faux', id: 'faux-1', name: 'Faux One'),
+      ],
+    );
+    await tester.tap(find.byTooltip('Model'));
     await tester.pumpAndSettle();
-    expect(find.text('Runs every call without asking.'), findsOneWidget);
+    expect(find.text('Faux One'), findsOneWidget);
 
-    await emit(tester, approval('a1'));
+    await emit(tester, confirm('q1'));
     expect(
-      find.text('Runs every call without asking.'),
+      find.text('Faux One'),
       findsNothing,
-      reason: 'the menu would hide the call it decides',
+      reason: 'the menu would hide the question',
     );
     await read(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    expect(backend.calls.last, 'decide a1 allowOnce');
+    expect(backend.calls.last, 'confirm q1 true');
   });
 
-  testWidgets('a key held past a decision does nothing more', (tester) async {
+  testWidgets('a key held past an answer does nothing more', (tester) async {
     await show(tester);
     await tester.enterText(find.byKey(const Key('composer')), 'half-written');
     await emit(tester, event(BridgeEventKind.turnStarted));
     for (final (id, key) in [
-      ('a1', LogicalKeyboardKey.enter),
-      ('a2', LogicalKeyboardKey.escape),
+      ('q1', LogicalKeyboardKey.enter),
+      ('q2', LogicalKeyboardKey.escape),
     ]) {
-      await emit(tester, approval(id));
+      await emit(tester, confirm(id));
       await read(tester);
       await tester.sendKeyDownEvent(key);
-      await emit(
-        tester,
-        event(BridgeEventKind.requestResolved, request: BridgeRequest(id: id)),
-      );
+      await emit(tester, resolved(id));
       // The key repeats in the input area, which has the keys again; it takes the repeat
       // itself, so the text field types no new line either.
       expect(await tester.sendKeyRepeatEvent(key), isTrue, reason: '$key');
       await tester.sendKeyUpEvent(key);
       await tester.pumpAndSettle();
     }
-    expect(backend.calls, ['decide a1 allowOnce', 'decide a2 reject']);
+    expect(backend.calls, ['confirm q1 true', 'dismiss q2']);
   });
 
-  testWidgets('an approval or a question closes Settings', (tester) async {
+  testWidgets('a question closes Settings', (tester) async {
     await show(tester);
-    for (final (request, shown, resolved) in [
-      (approval('a1'), 'Run a shell command?', BridgeEventKind.requestResolved),
-      (
-        question(BridgeQuestionKind.confirm),
-        'Question',
-        BridgeEventKind.userInputResolved,
-      ),
-    ]) {
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.comma);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-      await tester.pumpAndSettle();
-      expect(find.text('Previous or next file'), findsOneWidget);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.comma);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(find.text('Previous or next file'), findsOneWidget);
 
-      await emit(tester, request);
-      expect(find.text('Previous or next file'), findsNothing);
-      expect(find.text(shown), findsOneWidget);
-      await read(tester);
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await emit(
-        tester,
-        event(resolved, request: BridgeRequest(id: request.request!.id)),
-      );
-      expect(
-        focused(tester, const Key('composer')),
-        isTrue,
-        reason: 'the keys go back to the input area',
-      );
-    }
+    await emit(tester, confirm('q1'));
+    expect(find.text('Previous or next file'), findsNothing);
+    expect(find.text('Push now?'), findsOneWidget);
+    await read(tester);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await emit(tester, resolved('q1'));
+    expect(
+      focused(tester, const Key('composer')),
+      isTrue,
+      reason: 'the keys go back to the input area',
+    );
   });
 
   /// Paints [top] after a box filled with [bottom], so [top] shows on it.
@@ -361,7 +327,7 @@ void main() {
   testWidgets('focus shows on controls inside the input area', (tester) async {
     await show(tester);
     final context = tester.element(find.byType(Composer));
-    await tabTo(tester, find.byType(ModeChip));
+    await tabTo(tester, find.byTooltip('Model'));
     expect(
       find.byType(Composer),
       paintsAbove(context.ws.surface, Theme.of(context).focusColor),
@@ -412,20 +378,18 @@ void main() {
   ) async {
     await show(tester);
     await emit(tester, event(BridgeEventKind.turnStarted));
-    await emit(tester, approval('a1'));
-    await emit(tester, approval('a2'));
+    await emit(tester, confirm('q1'));
+    await emit(tester, confirm('q2'));
     await read(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    // a1 closes; its card stays until the next frame.
-    backend.controller.add(
-      event(BridgeEventKind.requestResolved, request: BridgeRequest(id: 'a1')),
-    );
+    // q1 closes; its card stays until the next frame.
+    backend.controller.add(resolved('q1'));
     await tester.idle();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(backend.calls.where((call) => call.startsWith('decide')), [
-      'decide a1 allowOnce',
-    ], reason: 'a2 was never shown long enough to be read');
+    expect(backend.calls.where((call) => call.startsWith('confirm')), [
+      'confirm q1 true',
+    ], reason: 'q2 was never shown long enough to be read');
   });
 }

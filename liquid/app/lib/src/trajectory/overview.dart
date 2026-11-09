@@ -291,7 +291,6 @@ class _OverviewState extends State<Overview> {
                   for (final (label, color) in [
                     ('model', ws.accent),
                     ('tool', ws.data2),
-                    ('waiting for you', ws.warning),
                   ]) ...[
                     Container(
                       width: 8,
@@ -589,22 +588,6 @@ class _TrackPainter extends CustomPainter {
           );
         case OverviewLane.tools:
           _bar(canvas, rect, palette.data2);
-        case OverviewLane.you:
-          canvas.save();
-          canvas.clipRRect(
-            RRect.fromRectAndRadius(rect, const Radius.circular(2)),
-          );
-          final stripe = Paint()
-            ..color = palette.warning
-            ..strokeWidth = 2.2;
-          for (var at = rect.left - rect.height; at < rect.right; at += 6) {
-            canvas.drawLine(
-              Offset(at, rect.bottom),
-              Offset(at + rect.height, rect.top),
-              stripe,
-            );
-          }
-          canvas.restore();
       }
       if (faint) canvas.restore();
     }

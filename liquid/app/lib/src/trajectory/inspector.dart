@@ -8,7 +8,6 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'context_track.dart';
 import 'ledger.dart';
-import 'step_parts.dart';
 import 'track_cell.dart';
 import 'trajectory_model.dart';
 
@@ -514,7 +513,6 @@ class _ContextTab extends StatelessWidget {
       BridgeRecordKind.message => 'what this response read',
       BridgeRecordKind.tool => 'the request that read this result',
       BridgeRecordKind.user => 'the request this prompt went into',
-      BridgeRecordKind.approval => 'the next request',
     };
     // The window of the model that read it, which an earlier model switch may change.
     final window = windowOf(read.model);
@@ -969,15 +967,6 @@ class _StepSummary extends StatelessWidget {
           BridgeRecordKind.user => [
             const _Heading('Prompt'),
             Text(record.label, maxLines: 6, overflow: TextOverflow.ellipsis),
-          ],
-          BridgeRecordKind.approval => [
-            const _Heading('Approval'),
-            _Pairs([
-              ('Tool', record.label),
-              ('Decision', decisionLabel(record.decision)),
-              if (duration != null)
-                ('Waited for you', formatDuration(duration)),
-            ]),
           ],
           _ => [
             const _Heading('Tool call'),

@@ -161,7 +161,7 @@ Liquid        = local-first workspace and App platform</code></pre>
         <li>Every Workspace write uses the same mutation pipeline and records actor, origin, permission result and reversible change in History.</li>
         <li>Visibility, View placement, Connection existence and sync access never imply execution authority.</li>
         <li>Rights inherit from an area to its Pages and Blocks. A <strong>protected</strong> Page, Block or Source stops inheriting them, so only Roles allowed on it may change it. A Block's rights follow its home, never the Page that shows a View of it. Read access is never finer than an area; in M3 every authorized device holds the complete Workspace, so the Workspace stays the confidentiality boundary (ADR-0235).</li>
-        <li>M3a assigns Roles to Automations; people follow with sync and agent profiles with M3b (ADR-0235). Three editable Role templates follow Notion's access levels: Can view (read), Can edit (read and apply) and Can manage (every capability), so that no template repeats the approval mode Full access. The person who creates a Workspace holds Can manage, which protection never removes, so no one can lock the owner out (<a href="../design/mockups/liquid-workspace-history.html">History and Roles mockups</a>).</li>
+        <li>M3a assigns Roles to Automations; people follow with sync and agent profiles with M3b (ADR-0235). Three editable Role templates follow Notion's access levels: Can view (read), Can edit (read and apply) and Can manage (every capability). The person who creates a Workspace holds Can manage, which protection never removes, so no one can lock the owner out (<a href="../design/mockups/liquid-workspace-history.html">History and Roles mockups</a>).</li>
       </ul>
       <h3>How an agent changes Workspace data</h3>
       <div class="flow">
@@ -224,7 +224,7 @@ Headless replica ┘</code></pre>
         <li>The user selects harness, that adapter's configuration and a location, then names the session by intent, such as “Refactor project X.” Flow Agent requires an explicit Flow from its global authority; other harnesses retain their documented selection model. Global-config management is a separate surface; infrastructure IDs and any device-local Runtime binding remain internal.</li>
         <li>Liquid calls the Meta-Harness that owns the location; a Meta-Harness schedule or event trigger may start the same run.</li>
         <li>Meta-Harness starts, observes and controls the CLI agent on its own host.</li>
-        <li>Liquid shows connection/freshness state, progress, transcript and prompt/steering controls. The user can add follow-ups or supervise approvals.</li>
+        <li>Liquid shows connection/freshness state, progress, transcript and prompt/steering controls. The user can add follow-ups and answer the approvals and questions the harness itself asks (ADR-0252).</li>
         <li>The run proposes or executes project actions and permitted Liquid actions. Liquid changes always use the assigned Role, CLI/API and History pipeline.</li>
         <li>Meta-Harness retains execution/session records; Liquid retains Workspace History and cached projections.</li>
         <li>When a verified terminal checkpoint is available on another device, the user may continue it at a new execution location as a child Run. Liquid renders the resulting Conversation branch and rechecks destination authority rather than presenting a runtime transfer as the same live Run.</li>

@@ -172,7 +172,6 @@ const _steps = {
   BridgeEntryKind.user,
   BridgeEntryKind.assistant,
   BridgeEntryKind.toolResult,
-  BridgeEntryKind.approval,
 };
 
 class _Visit {
@@ -262,7 +261,7 @@ List<TurnGroup> turnGroups(List<BridgeRecord> records) {
 int _end(BridgeRecord record) => record.startMs + (record.durationMs ?? 0);
 
 /// The overview's tracks.
-enum OverviewLane { model, tools, you }
+enum OverviewLane { model, tools }
 
 /// A step's bar on an overview track.
 @immutable
@@ -279,7 +278,7 @@ class Segment {
   final double? firstToken;
 }
 
-/// The bars of every model request, tool call and approval wait, in milliseconds or, with
+/// The bars of every model request and tool call, in milliseconds or, with
 /// `equalWidth`, in one slot per record.
 List<Segment> segments(List<BridgeRecord> records, {required bool equalWidth}) {
   final result = <Segment>[];
@@ -288,7 +287,6 @@ List<Segment> segments(List<BridgeRecord> records, {required bool equalWidth}) {
     final lane = switch (record.kind) {
       BridgeRecordKind.message => OverviewLane.model,
       BridgeRecordKind.tool => OverviewLane.tools,
-      BridgeRecordKind.approval => OverviewLane.you,
       BridgeRecordKind.user => null,
     };
     if (lane == null) continue;

@@ -1,11 +1,8 @@
 import 'dart:async';
-import 'dart:collection';
-import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/diff/diff_view.dart';
@@ -58,13 +55,16 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  BridgeRequest approval(String id, {int? item}) => BridgeRequest(
-    id: id,
-    approval: BridgeApproval(
-      kind: BridgeRequestKind.commandExecution,
-      tool: 'bash',
-      text: 'npm test -- login',
-      item: item,
+  BridgeEvent confirm(String id) => event(
+    BridgeEventKind.userInputRequested,
+    request: BridgeRequest(
+      id: id,
+      question: BridgeQuestion(
+        kind: BridgeQuestionKind.confirm,
+        title: 'Deploy now?',
+        detail: '',
+        options: const [],
+      ),
     ),
   );
 
@@ -355,40 +355,6 @@ void main() {
     );
   });
 
-  testWidgets('the mode menu explains each mode and what Allow edits risks', (
-    tester,
-  ) async {
-    await show(tester);
-    await tester.tap(find.byTooltip('Approval mode'));
-    await tester.pumpAndSettle();
-    expect(
-      find.text('Asks before every call that is not read-only.'),
-      findsOneWidget,
-    );
-    expect(find.text('Changes files without asking.'), findsOneWidget);
-    expect(
-      find.text(
-        'Any file you can change, including settings that run commands, such '
-        'as Git settings Liquid uses for the diff.',
-      ),
-      findsOneWidget,
-    );
-    expect(find.text('Runs every call without asking.'), findsOneWidget);
-    // On the canvas, as the mockup shows menus, the risk text stays readable (AA).
-    final menu = tester.widget<Material>(
-      find
-          .ancestor(
-            of: find.text('Runs every call without asking.'),
-            matching: find.byType(Material),
-          )
-          .last,
-    );
-    expect(
-      (menu.color, menu.surfaceTintColor),
-      (const Color(0xFFFFFFFF), Colors.transparent),
-    );
-  });
-
   testWidgets('focuses the input area with ⌘L from any tab', (tester) async {
     await show(tester);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
@@ -546,7 +512,7 @@ void main() {
     expect(shown(), contains('idle'), reason: 'Esc dismisses');
   });
 
-  testWidgets('the notification list closes for a request, a click or esc', (
+  testWidgets('the notification list closes for a question, a click or esc', (
     tester,
   ) async {
     await show(tester);
@@ -580,14 +546,11 @@ void main() {
     expect(find.text('Notifications'), findsNothing, reason: 'esc');
 
     await open();
-    await emit(
-      tester,
-      event(BridgeEventKind.requestOpened, request: approval('a1')),
-    );
+    await emit(tester, confirm('q1'));
     expect(
       find.text('Notifications'),
       findsNothing,
-      reason: 'it would hide the call',
+      reason: 'it would hide the question',
     );
     await tester.pump(const Duration(seconds: 7));
   });
@@ -616,104 +579,11 @@ void main() {
     expect(find.text('Notifications'), findsNothing);
   });
 
-  testWidgets('decides approvals from the keyboard', (tester) async {
-    await show(tester);
-    await emit(tester, event(BridgeEventKind.turnStarted));
-    for (final (id, keys, decision) in [
-      ('a1', [LogicalKeyboardKey.enter], 'allowOnce'),
-      (
-        'a2',
-        [LogicalKeyboardKey.metaLeft, LogicalKeyboardKey.enter],
-        'allowSession',
-      ),
-      ('a3', [LogicalKeyboardKey.escape], 'reject'),
-    ]) {
-      await emit(
-        tester,
-        event(BridgeEventKind.requestOpened, request: approval(id)),
-      );
-      expect(find.text('Run a shell command?'), findsOneWidget);
-      expect(find.textContaining('npm test -- login'), findsWidgets);
-      // An approval takes keys once it could be read.
-      await tester.pump(const Duration(milliseconds: 500));
-      for (final key in keys) {
-        await tester.sendKeyDownEvent(key);
-      }
-      for (final key in keys.reversed) {
-        await tester.sendKeyUpEvent(key);
-      }
-      await tester.pump();
-      expect(backend.calls.last, 'decide $id $decision');
-      await emit(
-        tester,
-        event(BridgeEventKind.requestResolved, request: BridgeRequest(id: id)),
-      );
-    }
-    expect(find.text('Run a shell command?'), findsNothing);
-    expect(find.byKey(const Key('composer')), findsOneWidget);
-  });
-
-  testWidgets('drops the draft hint before what a session allowance covers', (
+  testWidgets('takes no click or key before a question could be read', (
     tester,
   ) async {
     await show(tester);
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.requestOpened,
-        request: const BridgeRequest(
-          id: 'a1',
-          approval: BridgeApproval(
-            kind: BridgeRequestKind.fileChange,
-            tool: 'edit',
-            text: '{}',
-          ),
-        ),
-      ),
-    );
-    final label = find.text('Allow edit for this session');
-    expect(
-      tester.renderObject<RenderParagraph>(label).didExceedMaxLines,
-      isFalse,
-      reason: 'the button says all it covers',
-    );
-    expect(find.text('your draft is kept'), findsNothing);
-  });
-
-  testWidgets('takes no click or key before a decision could be read', (
-    tester,
-  ) async {
-    await show(tester);
-    await emit(
-      tester,
-      event(BridgeEventKind.requestOpened, request: approval('a1')),
-    );
-    await tester.tap(find.text('Allow once'));
-    await tester.pump();
-    expect(backend.calls.where((call) => call.startsWith('decide')), isEmpty);
-    await tester.pump(const Duration(milliseconds: 500));
-    await tester.tap(find.text('Allow once'));
-    expect(backend.calls.last, 'decide a1 allowOnce');
-    await emit(
-      tester,
-      event(BridgeEventKind.requestResolved, request: BridgeRequest(id: 'a1')),
-    );
-
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.userInputRequested,
-        request: BridgeRequest(
-          id: 'q1',
-          question: BridgeQuestion(
-            kind: BridgeQuestionKind.confirm,
-            title: 'Deploy now?',
-            detail: '',
-            options: const [],
-          ),
-        ),
-      ),
-    );
+    await emit(tester, confirm('q1'));
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.tap(find.text('Yes'));
     await tester.tap(find.text('Dismiss'));
@@ -725,24 +595,25 @@ void main() {
   });
 
   testWidgets(
-    'counts the wait for a decision from its first frame, however late',
+    'counts the wait for an answer from its first frame, however late',
     (tester) async {
       await show(tester);
-      backend.controller.add(
-        event(BridgeEventKind.requestOpened, request: approval('a1')),
-      );
+      backend.controller.add(confirm('q1'));
       await tester.idle();
       // The card is built and laid out now, but its frame, slow to lay out, ends 20 s later.
       tester.binding.buildOwner!.buildScope(tester.binding.rootElement!);
       tester.binding.rootPipelineOwner.flushLayout();
-      expect(find.text('Allow once', skipOffstage: false), findsOneWidget);
+      expect(find.text('Yes', skipOffstage: false), findsOneWidget);
       await tester.pump(const Duration(seconds: 20));
-      await tester.tap(find.text('Allow once'));
+      await tester.tap(find.text('Yes'));
       await tester.pump();
-      expect(backend.calls.where((call) => call.startsWith('decide')), isEmpty);
+      expect(
+        backend.calls.where((call) => call.startsWith('confirm')),
+        isEmpty,
+      );
       await tester.pump(const Duration(milliseconds: 500));
-      await tester.tap(find.text('Allow once'));
-      expect(backend.calls.last, 'decide a1 allowOnce');
+      await tester.tap(find.text('Yes'));
+      expect(backend.calls.last, 'confirm q1 true');
     },
   );
 
@@ -779,51 +650,6 @@ void main() {
       reason: 'a key pressed for the question types',
     );
     await tester.sendKeyUpEvent(LogicalKeyboardKey.keyB);
-  });
-
-  testWidgets('says what allowing a call for the session covers', (
-    tester,
-  ) async {
-    await show(tester);
-    final long = 'mcp__${'long_server_name_' * 3}__run_ta';
-    for (final (kind, tool, label) in [
-      (
-        BridgeRequestKind.commandExecution,
-        'bash',
-        'Allow this command for this session',
-      ),
-      (BridgeRequestKind.fileChange, 'edit', 'Allow edit for this session'),
-      (
-        BridgeRequestKind.tool,
-        long,
-        'Allow ${long.substring(0, 23)}… for this session',
-      ),
-      // Cut by characters, never inside one.
-      (
-        BridgeRequestKind.tool,
-        '${'a' * 22}😀xyz',
-        'Allow ${'a' * 22}😀… for this session',
-      ),
-    ]) {
-      await emit(
-        tester,
-        event(
-          BridgeEventKind.requestOpened,
-          request: BridgeRequest(
-            id: tool,
-            approval: BridgeApproval(kind: kind, tool: tool, text: '{}'),
-          ),
-        ),
-      );
-      expect(find.text(label), findsOneWidget);
-      await emit(
-        tester,
-        event(
-          BridgeEventKind.requestResolved,
-          request: BridgeRequest(id: tool),
-        ),
-      );
-    }
   });
 
   testWidgets('typing in the input area never runs a tab\'s own keys', (
@@ -1051,17 +877,8 @@ void main() {
           ),
         ),
       );
-      await emit(
-        tester,
-        event(BridgeEventKind.requestOpened, request: approval('a1', item: 2)),
-      );
+      await emit(tester, confirm('q1'));
       expect(find.text('Now I run the tests.'), findsOneWidget);
-      expect(find.text('waiting for approval'), findsOneWidget);
-      expect(
-        find.byIcon(LucideIcons.clock),
-        findsOneWidget,
-        reason: 'a tool waiting for approval shows a clock with its text',
-      );
       expect(find.text('todo  ✓ limiter  ○ run tests'), findsOneWidget);
       expect(find.text('● waiting'), findsOneWidget);
     },
@@ -1165,9 +982,7 @@ void main() {
     );
   });
 
-  testWidgets('fits many extension statuses and a long tool name', (
-    tester,
-  ) async {
+  testWidgets('fits many extension statuses', (tester) async {
     await show(tester);
     for (var key = 0; key < 8; key++) {
       await emit(
@@ -1179,508 +994,6 @@ void main() {
         ),
       );
     }
-    // Model APIs allow tool names of up to 64 characters.
-    final tool = 'mcp__${'long_server_name_' * 3}__run_ta';
-    expect(tool.length, 64);
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.requestOpened,
-        request: BridgeRequest(
-          id: 'a1',
-          approval: BridgeApproval(
-            kind: BridgeRequestKind.tool,
-            tool: tool,
-            text: '{}',
-          ),
-        ),
-      ),
-    );
-    expect(find.text('Call $tool?'), findsOneWidget);
-  });
-
-  /// Scrolls an approval's code to `line`, which is built only once it scrolls into view.
-  Future<void> revealLine(WidgetTester tester, String line) =>
-      tester.scrollUntilVisible(
-        find.text(line),
-        20,
-        scrollable: find
-            .descendant(
-              of: find.byType(ActionArea),
-              matching: find.byType(Scrollable),
-            )
-            .first,
-      );
-
-  testWidgets(
-    'names the file a change writes to below a path that does not say so',
-    (tester) async {
-      await show(tester);
-      await emit(
-        tester,
-        event(
-          BridgeEventKind.requestOpened,
-          request: const BridgeRequest(
-            id: 'a1',
-            approval: BridgeApproval(
-              kind: BridgeRequestKind.fileChange,
-              tool: 'edit',
-              text: '{}',
-              edit: BridgeEdit(
-                path: '@~/.zshrc',
-                writesTo: '/Users/me/.zshrc',
-                wholeFile: false,
-                changes: [BridgeEditChange(removed: 'a', added: 'b')],
-              ),
-            ),
-          ),
-        ),
-      );
-      final path = tester.getRect(find.text('@~/.zshrc'));
-      final file = tester.getRect(find.text('writes to /Users/me/.zshrc'));
-      expect(file.top, moreOrLessEquals(path.bottom), reason: 'below the path');
-    },
-  );
-
-  testWidgets('shows a file change as its path and changed lines', (
-    tester,
-  ) async {
-    await show(tester);
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.requestOpened,
-        request: const BridgeRequest(
-          id: 'a1',
-          approval: BridgeApproval(
-            kind: BridgeRequestKind.fileChange,
-            tool: 'edit',
-            text: '{"edits":[],"path":"src/routes/login.ts"}',
-            edit: BridgeEdit(
-              path: 'src/routes/login.ts',
-              wholeFile: false,
-              changes: [
-                BridgeEditChange(
-                  removed: "router.post('/login', login);",
-                  added:
-                      'const limit = rateLimit({ max: 5 });\n'
-                      "router.post('/login', limit, login);",
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-    expect(find.text('src/routes/login.ts'), findsOneWidget);
-    expect(find.text("− router.post('/login', login);"), findsOneWidget);
-    await revealLine(tester, '+ const limit = rateLimit({ max: 5 });');
-    await revealLine(tester, "+ router.post('/login', limit, login);");
-    expect(find.textContaining('"edits"'), findsNothing);
-    await emit(
-      tester,
-      event(BridgeEventKind.requestResolved, request: BridgeRequest(id: 'a1')),
-    );
-
-    // A file's last line break ends its last line; it adds no empty one.
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.requestOpened,
-        request: const BridgeRequest(
-          id: 'a2',
-          approval: BridgeApproval(
-            kind: BridgeRequestKind.fileChange,
-            tool: 'write',
-            text: '{}',
-            edit: BridgeEdit(
-              path: 'notes.md',
-              wholeFile: true,
-              changes: [BridgeEditChange(removed: '', added: 'one\ntwo\n')],
-            ),
-          ),
-        ),
-      ),
-    );
-    expect(find.text('Replaces the whole file'), findsOneWidget);
-    await revealLine(tester, '+ two');
-    expect(find.text('+ '), findsNothing);
-    expect(
-      find.textContaining('more lines'),
-      findsNothing,
-      reason: 'two is last',
-    );
-  });
-
-  testWidgets('marks a line break that ends only one side of a replacement', (
-    tester,
-  ) async {
-    await show(tester);
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.requestOpened,
-        request: const BridgeRequest(
-          id: 'a1',
-          approval: BridgeApproval(
-            kind: BridgeRequestKind.fileChange,
-            tool: 'edit',
-            text: '{}',
-            edit: BridgeEdit(
-              path: 'install.sh',
-              wholeFile: false,
-              changes: [
-                // Would turn the commented line below into a command.
-                BridgeEditChange(
-                  removed: '# disabled: ',
-                  added: '# disabled: \n',
-                ),
-                BridgeEditChange(removed: 'keep\n', added: 'kept\n'),
-                // Would join the line above with the next one.
-                BridgeEditChange(removed: '# on error\n', added: ''),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-    expect(find.text('− # disabled: '), findsOneWidget);
-    await revealLine(tester, '+ # disabled: ↵');
-    final line = tester.widget<RichText>(
-      find.text('+ # disabled: ↵', findRichText: true),
-    );
-    TextSpan? mark;
-    line.text.visitChildren((span) {
-      if (span is TextSpan && span.text == '↵') mark = span;
-      return true;
-    });
-    expect(
-      mark?.style?.color,
-      tester.element(find.byType(ActionArea)).ws.textFaint,
-    );
-    await revealLine(tester, '+ kept');
-    expect(
-      find.text('− keep'),
-      findsOneWidget,
-      reason: 'a line break both sides end with is not marked',
-    );
-    await revealLine(tester, '− # on error↵');
-  });
-
-  testWidgets('says when a write empties the whole file', (tester) async {
-    await show(tester);
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.requestOpened,
-        request: const BridgeRequest(
-          id: 'a1',
-          approval: BridgeApproval(
-            kind: BridgeRequestKind.fileChange,
-            tool: 'write',
-            text: '{}',
-            edit: BridgeEdit(
-              path: '/Users/me/.ssh/authorized_keys',
-              wholeFile: true,
-              changes: [BridgeEditChange(removed: '', added: '')],
-            ),
-          ),
-        ),
-      ),
-    );
-    expect(find.text('Empties the whole file'), findsOneWidget);
-  });
-
-  testWidgets('builds only the lines of a large file change that show', (
-    tester,
-  ) async {
-    await show(tester);
-    final content = [for (var line = 0; line < 5000; line++) 'line $line'];
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.requestOpened,
-        request: BridgeRequest(
-          id: 'a1',
-          approval: BridgeApproval(
-            kind: BridgeRequestKind.fileChange,
-            tool: 'write',
-            text: '{}',
-            edit: BridgeEdit(
-              path: 'big.txt',
-              wholeFile: true,
-              changes: [
-                BridgeEditChange(removed: '', added: content.join('\n')),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-    expect(find.text('Replaces the whole file'), findsOneWidget);
-    expect(
-      find.text('+ line 4999'),
-      findsNothing,
-      reason: 'a line far below is built once it scrolls into view',
-    );
-    expect(find.textContaining('more lines'), findsOneWidget);
-  });
-
-  testWidgets(
-    'counts the lines below a file change by its lines, however they wrap',
-    (tester) async {
-      await show(tester);
-      final lines = [
-        for (var line = 0; line < 6; line++) '$line${'x' * 400}',
-        for (var line = 0; line < 100; line++) 'short $line',
-      ];
-      await emit(
-        tester,
-        event(
-          BridgeEventKind.requestOpened,
-          request: BridgeRequest(
-            id: 'a1',
-            approval: BridgeApproval(
-              kind: BridgeRequestKind.fileChange,
-              tool: 'write',
-              text: '{}',
-              edit: BridgeEdit(
-                path: 'notes.md',
-                wholeFile: true,
-                changes: [
-                  BridgeEditChange(removed: '', added: lines.join('\n')),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-      // Lines leave the tree once they scroll out of view, so the view is found once.
-      final code = tester.getRect(
-        find
-            .ancestor(
-              of: find.text('notes.md'),
-              matching: find.byType(Scrollable),
-            )
-            .first,
-      );
-      Future<void> expectExactHint() async {
-        await tester.pumpAndSettle();
-        final shown = lines.lastIndexWhere((line) {
-          final text = find.text('+ $line');
-          return text.evaluate().isNotEmpty &&
-              tester.getRect(text).top < code.bottom;
-        });
-        final below = lines.length - 1 - shown;
-        expect(find.text('↓ $below more lines'), findsOneWidget);
-      }
-
-      await expectExactHint();
-      await tester.dragFrom(code.center, const Offset(0, -300));
-      await expectExactHint();
-    },
-  );
-
-  Finder callView() => find
-      .descendant(
-        of: find.byType(ActionArea),
-        matching: find.byType(Scrollable),
-      )
-      .first;
-
-  /// The texts the call's view draws, top to bottom, scrolling it through to its end.
-  Future<List<String>> scrollThroughCall(WidgetTester tester) async {
-    final position = tester.state<ScrollableState>(callView()).position;
-    final top = tester.getRect(callView()).top;
-    final drawn = SplayTreeMap<int, String>();
-    while (true) {
-      final texts = find.descendant(
-        of: callView(),
-        matching: find.byType(RichText),
-      );
-      for (final text in texts.evaluate()) {
-        final box = text.renderObject! as RenderBox;
-        final offset =
-            box.localToGlobal(Offset.zero).dy - top + position.pixels;
-        drawn[offset.round()] = (text.widget as RichText).text.toPlainText();
-      }
-      if (position.pixels >= position.maxScrollExtent) {
-        return drawn.values.toList();
-      }
-      position.jumpTo(
-        math.min(
-          position.pixels + position.viewportDimension / 2,
-          position.maxScrollExtent,
-        ),
-      );
-      await tester.pump();
-    }
-  }
-
-  /// `whole` laid out as one text, in the style and at the width of the first piece of it the
-  /// call's view draws.
-  TextPainter oneText(WidgetTester tester, String whole) {
-    final first = find.descendant(
-      of: callView(),
-      matching: find.byWidgetPredicate(
-        (widget) =>
-            widget is RichText && whole.startsWith(widget.text.toPlainText()),
-      ),
-    );
-    final paragraph = tester.renderObject<RenderParagraph>(first.first);
-    final painter = TextPainter(
-      text: TextSpan(text: whole, style: paragraph.text.style),
-      textDirection: TextDirection.ltr,
-      textScaler: paragraph.textScaler,
-    )..layout(maxWidth: paragraph.constraints.maxWidth);
-    addTearDown(painter.dispose);
-    return painter;
-  }
-
-  /// Expects `pieces` to be short and to wrap exactly as `whole` does as one text: each piece
-  /// starts one of its rows, so no piece ends a row early.
-  void expectRowsOfOneText(List<String> pieces, TextPainter whole) {
-    final text = whole.text!.toPlainText();
-    expect(pieces.join(), text);
-    expect(pieces.length, greaterThan(1));
-    var start = 0;
-    for (final piece in pieces) {
-      expect(piece.length, lessThanOrEqualTo(2000));
-      expect(
-        whole.getLineBoundary(TextPosition(offset: start)).start,
-        start,
-        reason: 'the piece at $start starts a row',
-      );
-      start += piece.length;
-    }
-  }
-
-  testWidgets('draws a long call in short pieces that wrap as the call would', (
-    tester,
-  ) async {
-    await show(tester);
-    final token = [
-      for (var char = 0; char < 5000; char++) 'abcdefghij'[char % 10],
-    ].join();
-    final words = [for (var word = 0; word < 150; word++) 'word$word']
-        .join(' ');
-    final command =
-        'curl -fsSL https://dl.example.com/i.sh?t=$token && echo $words';
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.requestOpened,
-        request: BridgeRequest(
-          id: 'a1',
-          approval: BridgeApproval(
-            kind: BridgeRequestKind.commandExecution,
-            tool: 'bash',
-            text: command,
-          ),
-        ),
-      ),
-    );
-    expect(
-      find.textContaining(command.substring(command.length - 40)),
-      findsNothing,
-      reason: "the call's end is built once it scrolls into view",
-    );
-    final whole = oneText(tester, command);
-    final below =
-        ((whole.height +
-                    2 * WsMetrics.space2 -
-                    tester.getSize(callView()).height) /
-                whole.preferredLineHeight)
-            .ceil();
-    expect(
-      find.text('↓ $below more lines'),
-      findsOneWidget,
-      reason: 'the hint counts the rows below',
-    );
-    expectRowsOfOneText(await scrollThroughCall(tester), whole);
-    expect(find.textContaining('more lines'), findsNothing);
-  });
-
-  testWidgets('marks a long changed line\'s line break on its last piece', (
-    tester,
-  ) async {
-    await show(tester);
-    final long = [
-      for (var char = 0; char < 4000; char++) 'abcdefghij'[char % 10],
-    ].join();
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.requestOpened,
-        request: BridgeRequest(
-          id: 'a1',
-          approval: BridgeApproval(
-            kind: BridgeRequestKind.fileChange,
-            tool: 'edit',
-            text: '{}',
-            edit: BridgeEdit(
-              path: 'notes.md',
-              wholeFile: false,
-              changes: [BridgeEditChange(removed: '', added: '$long\n')],
-            ),
-          ),
-        ),
-      ),
-    );
-    final whole = oneText(tester, '+ $long↵');
-    final pieces = await scrollThroughCall(tester);
-    expectRowsOfOneText(
-      pieces.where((text) => text != 'notes.md').toList(),
-      whole,
-    );
-  });
-
-  testWidgets('shows the whole call before it is allowed', (tester) async {
-    await show(tester);
-    final command = [
-      for (var part = 0; part < 30; part++) 'rm -rf /tmp/build-$part',
-    ].join(' && ');
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.requestOpened,
-        request: BridgeRequest(
-          id: 'a1',
-          approval: BridgeApproval(
-            kind: BridgeRequestKind.commandExecution,
-            tool: 'bash',
-            text: command,
-          ),
-        ),
-      ),
-    );
-    expect(find.text(command), findsOneWidget, reason: 'the command itself');
-    expect(find.textContaining('more lines'), findsOneWidget);
-    final view = tester.getRect(
-      find
-          .ancestor(of: find.text(command), matching: find.byType(Scrollable))
-          .first,
-    );
-    expect(
-      tester.getRect(find.textContaining('more lines')).overlaps(view),
-      isFalse,
-      reason: 'the hint covers none of the call',
-    );
-    await tester.drag(
-      find
-          .ancestor(of: find.text(command), matching: find.byType(Scrollable))
-          .first,
-      const Offset(0, -2000),
-    );
-    await tester.pumpAndSettle();
-    expect(
-      find.textContaining('more lines'),
-      findsNothing,
-      reason: 'nothing hidden at the end',
-    );
-    await tester.pump(const Duration(milliseconds: 500));
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    expect(backend.calls.last, 'decide a1 allowOnce');
   });
 
   testWidgets('filters a long selection and picks from the keyboard', (
@@ -1806,39 +1119,6 @@ void main() {
     );
   });
 
-  testWidgets('marks only the call an approval asks about as waiting', (
-    tester,
-  ) async {
-    await show(tester);
-    await emit(tester, event(BridgeEventKind.turnStarted));
-    // pi starts both calls, the first is allowed and the second asks.
-    for (final id in [5, 6]) {
-      await emit(
-        tester,
-        event(
-          BridgeEventKind.itemStarted,
-          item: item(id, kind: BridgeItemKind.commandExecution, tool: 'bash'),
-        ),
-      );
-    }
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.requestOpened,
-        request: BridgeRequest(
-          id: 'a2',
-          approval: BridgeApproval(
-            kind: BridgeRequestKind.commandExecution,
-            tool: 'bash',
-            text: 'pwd',
-            item: 6,
-          ),
-        ),
-      ),
-    );
-    expect(find.text('waiting for approval'), findsOneWidget);
-  });
-
   testWidgets('marks a tool done when only its outcome changes', (
     tester,
   ) async {
@@ -1896,7 +1176,18 @@ void main() {
     await emit(tester, event(BridgeEventKind.turnStarted));
     await emit(
       tester,
-      event(BridgeEventKind.requestOpened, request: approval('a1')),
+      event(
+        BridgeEventKind.userInputRequested,
+        request: BridgeRequest(
+          id: 'q1',
+          question: BridgeQuestion(
+            kind: BridgeQuestionKind.editor,
+            title: 'Commit message',
+            detail: '',
+            options: const [],
+          ),
+        ),
+      ),
     );
     expect(find.text('⌘⏎'), findsNothing, reason: 'hidden by default');
     expect(
