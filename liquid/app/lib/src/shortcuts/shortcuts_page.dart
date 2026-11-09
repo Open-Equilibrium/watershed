@@ -329,56 +329,65 @@ class _SettingsPageState extends State<SettingsPage> {
                   color: ws.subtle,
                   border: Border(right: BorderSide(color: ws.border)),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      'Settings',
-                      style: TextStyle(
-                        color: ws.textFaint,
-                        fontSize: WsMetrics.fsSmall,
+                // Hover and focus ink paints on a Material above the background.
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'Settings',
+                        style: TextStyle(
+                          color: ws.textFaint,
+                          fontSize: WsMetrics.fsSmall,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: WsMetrics.space2),
-                    for (final (label, section) in [
-                      if (widget.appearance != null)
-                        ('Appearance', _Section.appearance),
-                      ('Shortcuts', _Section.shortcuts),
-                      if (widget.worktrees != null)
-                        ('Worktrees', _Section.worktrees),
-                    ])
-                      Semantics(
-                        selected: _section == section,
-                        child: Shortcuts(
-                          shortcuts: activateKeys,
-                          child: InkWell(
-                            onTap: () => setState(() => _section = section),
-                            borderRadius: BorderRadius.circular(
-                              WsMetrics.radiusMd,
-                            ),
-                            child: Container(
-                              height: WsMetrics.rowNav,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: WsMetrics.space3,
+                      const SizedBox(height: WsMetrics.space2),
+                      for (final (label, section) in [
+                        if (widget.appearance != null)
+                          ('Appearance', _Section.appearance),
+                        ('Shortcuts', _Section.shortcuts),
+                        if (widget.worktrees != null)
+                          ('Worktrees', _Section.worktrees),
+                      ])
+                        Semantics(
+                          selected: _section == section,
+                          child: Shortcuts(
+                            shortcuts: activateKeys,
+                            child: InkWell(
+                              onTap: () => setState(() => _section = section),
+                              borderRadius: BorderRadius.circular(
+                                WsMetrics.radiusMd,
                               ),
-                              alignment: Alignment.centerLeft,
-                              decoration: BoxDecoration(
-                                color: _section == section ? ws.selected : null,
-                                borderRadius: BorderRadius.circular(
-                                  WsMetrics.radiusMd,
+                              // Ink, so the highlights paint above the chosen section too.
+                              child: Ink(
+                                height: WsMetrics.rowNav,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: WsMetrics.space3,
                                 ),
-                              ),
-                              child: Text(
-                                label,
-                                style: const TextStyle(
-                                  fontWeight: WsMetrics.fwMedium,
+                                decoration: BoxDecoration(
+                                  color: _section == section
+                                      ? ws.selected
+                                      : null,
+                                  borderRadius: BorderRadius.circular(
+                                    WsMetrics.radiusMd,
+                                  ),
+                                ),
+                                child: Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(
+                                    label,
+                                    style: const TextStyle(
+                                      fontWeight: WsMetrics.fwMedium,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
               Expanded(

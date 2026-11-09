@@ -240,7 +240,8 @@ class _PageRow extends StatelessWidget {
           child: InkWell(
             onTap: onOpen,
             borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-            child: Container(
+            // Ink, so the hover and focus highlights paint above the selected row too.
+            child: Ink(
               height: WsMetrics.rowSide,
               padding: EdgeInsets.only(
                 left: WsMetrics.space3 + depth * 18,

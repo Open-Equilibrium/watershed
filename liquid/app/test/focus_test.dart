@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,6 +12,7 @@ import 'package:liquid/src/shortcuts/shortcuts_page.dart';
 import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
+import 'focus_kit.dart';
 
 const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
 
@@ -296,34 +298,6 @@ void main() {
     );
   });
 
-  /// Paints [top] after a box filled with [bottom], so [top] shows on it.
-  PaintPattern paintsAbove(Color bottom, Color top) {
-    bool fills(Object? paint, Color color) =>
-        paint is Paint && paint.color.toARGB32() == color.toARGB32();
-    return paints
-      ..something(
-        (method, arguments) =>
-            method == #drawRRect && fills(arguments[1], bottom),
-      )
-      ..something(
-        (method, arguments) =>
-            (method == #drawRect || method == #drawRRect) &&
-            fills(arguments[1], top),
-      );
-  }
-
-  /// Presses Tab until the keyboard is on something inside [target].
-  Future<void> tabTo(WidgetTester tester, Finder target) async {
-    final inside = find.descendant(of: target, matching: find.byType(Focus));
-    for (var press = 0; press < 30; press++) {
-      final focus = FocusManager.instance.primaryFocus?.context;
-      if (focus != null && inside.evaluate().contains(focus)) return;
-      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-      await tester.pumpAndSettle();
-    }
-    fail('Tab never reached $target');
-  }
-
   testWidgets('focus shows on controls inside the input area', (tester) async {
     await show(tester);
     final context = tester.element(find.byType(Composer));
@@ -370,6 +344,38 @@ void main() {
       find.byType(SettingsPage),
       paintsAbove(context.ws.warningSubtle, focus),
       reason: 'the highlight is painted above the notice',
+    );
+  });
+
+  testWidgets('focus and hover show in the Settings sections', (tester) async {
+    await show(tester);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.comma);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    final context = tester.element(find.byType(SettingsPage));
+    final theme = Theme.of(context);
+    Finder section(String label) => find.ancestor(
+      of: find
+          .descendant(of: find.byType(SettingsPage), matching: find.text(label))
+          .first,
+      matching: find.byType(InkWell),
+    );
+    await tabTo(tester, section('Shortcuts'));
+    expect(
+      find.byType(SettingsPage),
+      paintsAbove(context.ws.selected, theme.focusColor),
+      reason: 'the highlight is painted above the chosen section',
+    );
+
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: tester.getCenter(section('Shortcuts')));
+    addTearDown(mouse.removePointer);
+    await tester.pumpAndSettle();
+    expect(
+      find.byType(SettingsPage),
+      paintsAbove(context.ws.selected, theme.hoverColor),
+      reason: 'the hover is painted above the chosen section',
     );
   });
 

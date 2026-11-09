@@ -285,66 +285,82 @@ class Sidebar extends StatelessWidget {
           Expanded(
             child: ListView(
               children: [
-                if (workspace case final workspace?) Explorer(state: workspace),
-                if (workspaceProblem case final problem?)
-                  Padding(
-                    padding: const EdgeInsets.only(top: WsMetrics.space3),
-                    child: WarningNotice(problem),
+                // Hover and focus ink paints on a Material above the sidebar's background,
+                // inside the list, whose edges clip it.
+                Material(
+                  type: MaterialType.transparency,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (workspace case final workspace?)
+                        Explorer(state: workspace),
+                      if (workspaceProblem case final problem?)
+                        Padding(
+                          padding: const EdgeInsets.only(top: WsMetrics.space3),
+                          child: WarningNotice(problem),
+                        ),
+                      // A Page shows the Workspace's latest problem itself; without one, it shows
+                      // here.
+                      if (workspace case final workspace?)
+                        ListenableBuilder(
+                          listenable: Listenable.merge([
+                            workspace.problem,
+                            workspace.open,
+                          ]),
+                          builder: (context, _) => switch ((
+                            workspace.problem.value,
+                            workspace.open.value,
+                          )) {
+                            (final problem?, null) => Padding(
+                              padding: const EdgeInsets.only(
+                                top: WsMetrics.space3,
+                              ),
+                              child: WarningNotice(problem),
+                            ),
+                            _ => const SizedBox.shrink(),
+                          },
+                        ),
+                      const SidebarHeading('Agent sessions'),
+                      if ((state, info) case (final state?, final info?))
+                        ..._session(context, state, info, small),
+                    ],
                   ),
-                // A Page shows the Workspace's latest problem itself; without one, it shows
-                // here.
-                if (workspace case final workspace?)
-                  ListenableBuilder(
-                    listenable: Listenable.merge([
-                      workspace.problem,
-                      workspace.open,
-                    ]),
-                    builder: (context, _) => switch ((
-                      workspace.problem.value,
-                      workspace.open.value,
-                    )) {
-                      (final problem?, null) => Padding(
-                        padding: const EdgeInsets.only(top: WsMetrics.space3),
-                        child: WarningNotice(problem),
-                      ),
-                      _ => const SizedBox.shrink(),
-                    },
-                  ),
-                const SidebarHeading('Agent sessions'),
-                if ((state, info) case (final state?, final info?))
-                  ..._session(context, state, info, small),
+                ),
               ],
             ),
           ),
           if (onSettings case final onSettings?)
-            Tooltip(
-              message: 'Settings',
-              child: Shortcuts(
-                shortcuts: activateKeys,
-                child: InkWell(
-                  onTap: onSettings,
-                  borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-                  child: Container(
-                    height: WsMetrics.rowSide,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: WsMetrics.space3,
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          LucideIcons.settings,
-                          size: 14,
-                          color: ws.textMuted,
-                        ),
-                        const SizedBox(width: WsMetrics.space3),
-                        Expanded(
-                          child: Text(
-                            'Settings',
-                            style: TextStyle(color: ws.textMuted),
+            Material(
+              type: MaterialType.transparency,
+              child: Tooltip(
+                message: 'Settings',
+                child: Shortcuts(
+                  shortcuts: activateKeys,
+                  child: InkWell(
+                    onTap: onSettings,
+                    borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+                    child: Container(
+                      height: WsMetrics.rowSide,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: WsMetrics.space3,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            LucideIcons.settings,
+                            size: 14,
+                            color: ws.textMuted,
                           ),
-                        ),
-                        Hint(Keymap.of(context).label(Command.settings)),
-                      ],
+                          const SizedBox(width: WsMetrics.space3),
+                          Expanded(
+                            child: Text(
+                              'Settings',
+                              style: TextStyle(color: ws.textMuted),
+                            ),
+                          ),
+                          Hint(Keymap.of(context).label(Command.settings)),
+                        ],
+                      ),
                     ),
                   ),
                 ),
