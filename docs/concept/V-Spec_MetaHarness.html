@@ -36,7 +36,7 @@
 
     <section id="purpose" class="section"><h2>1. Purpose & scope</h2><div class="body">
       <p><strong>Meta-Harness is a self-contained, host-scoped headless control plane.</strong> It centralizes configuration, starts and monitors CLI agents on its own host, normalizes their events, runs agent schedules and triggers, and computes AgentPulse metrics. External coding agents (Codex CLI, Claude Code and future agents) plug in through adapters — Codex is an adapter/target, not a Flow Agent base or fork.</p>
-      <p>Meta-Harness is the Watershed platform's <strong>control layer</strong> and its orchestration wedge (see <a href="../../PLAN.md">PLAN.md</a>). Standalone job: <em>orchestrate, observe and measure agents of any harness, durably across linked hosts.</em> It is a vendor-neutral, self-hostable control plane for heterogeneous host-local CLI agents, not limited to Flow Agent.</p>
+      <p>Meta-Harness is the Watershed platform's <strong>control layer</strong> and its orchestration wedge (see <a href="../../PLAN.md">PLAN.md</a>). Standalone job: <em>orchestrate, observe and measure agents of any harness, durably across agent hosts.</em> It is a vendor-neutral, self-hostable control plane for heterogeneous host-local CLI agents, not limited to Flow Agent.</p>
       <p>Native targets and current availability follow <a href="../../PLATFORMS.md">PLATFORMS.md</a>. The clean product model across the three Watershed tools:</p>
       <pre><code>Flow Agent    = standalone agent runtime
 Meta-Harness  = standalone headless many-agent control plane
@@ -93,7 +93,7 @@ Meta-Harness
   normalizes events across providers
   resolves shared config to target CLIs
   computes cross-agent metrics</code></pre>
-      <p>Meta-Harness integrates through Flow Agent's <strong>public runtime surfaces</strong>: run/replay/tail/resume and JSONL now; RPC/control and export when implemented; embedding only if D-020 selects it. Its agent executor and each whole CLI agent process share a host, but Meta-Harness never reads Flow Agent's private session store directly or reaches into Flow Agent internals. This process supervisor is not a Flow Executor: it does not select, configure or manage Flow's Tool Sandbox. It also does not replace Flow Agent's runtime kernel, deterministic FSM or transcript persistence. Cross-host process control is outside the architecture.</p>
+      <p>Meta-Harness integrates through Flow Agent's <strong>public runtime surfaces</strong>: run/replay/tail/resume and JSONL now; RPC/control and export when implemented; embedding only if D-020 selects it. Its agent executor and each whole CLI agent process share a host, but Meta-Harness never reads Flow Agent's private session store directly or reaches into Flow Agent internals. It does not replace Flow Agent's runtime kernel, deterministic FSM or transcript persistence. Cross-host process control is outside the architecture.</p>
     </div></section>
 
     <section id="liquid" class="section"><h2>4. Relationship to Liquid</h2><div class="body">
@@ -105,7 +105,7 @@ Meta-Harness
 Liquid
   native UI / workspace
   Pages, Blocks, Views, PowerBar
-  visual session / config / metric / approval surfaces</code></pre>
+  visual session / config / metric surfaces</code></pre>
       <p>Projections from one or more Meta-Harness instances may be combined visually, but every record retains instance identity, freshness and authority; every live command routes back to the owning instance.</p>
       <p>Liquid <strong>must not duplicate</strong> a Meta-Harness session registry, adapter logic, config resolution, AgentPulse engine or scheduling engine, and it must not invent global cross-instance authority.</p>
       <p><strong>Liquid is a standalone local-first workspace product, not merely Meta-Harness's UI.</strong> Workspace sync is independent from this live control plane. When an owning Meta-Harness is unreachable, Liquid may render cached state only as offline/stale and must not queue commands as if success were guaranteed. Meta-Harness and its agents access Liquid only through the workspace CLI/API/mutation pipeline, never Liquid storage internals.</p>
@@ -118,7 +118,7 @@ Liquid
   connects to the local Meta-Harness service
     starts/monitors Flow Agent, Codex CLI, Claude Code, ...
     stores local sessions/config/metrics</code></pre>
-        <p class="muted">Liquid reaches the Meta-Harness on its own host over the private local connection, like any client (ADR-0215); who starts the service is <a href="../decisions/open-decisions.html#d-074">D-074</a>. PowerBar commands go to the service, which owns the CLI processes on that host; Liquid Blocks render sessions, transcripts, metrics and approvals. After local provisioning, this mode may bind Flow Agent to a device-local model runtime and operate its core path with network interfaces disabled.</p>
+        <p class="muted">Liquid reaches the Meta-Harness on its own host over the private local connection, like any client (ADR-0215); who starts the service is <a href="../decisions/open-decisions.html#d-074">D-074</a>. PowerBar commands go to the service, which owns the CLI processes on that host; Liquid Blocks render sessions, transcripts, metrics and the approvals a harness itself asks for. After local provisioning, this mode may bind Flow Agent to a device-local model runtime and operate its core path with network interfaces disabled.</p>
       </div>
       <div class="card"><h3>Mode B — server-host Meta-Harness</h3>
         <pre><code>Liquid Desktop/Mobile → authenticated Meta-Harness API
@@ -146,8 +146,7 @@ meta attach &lt;session-id&gt;
 meta run &lt;agent&gt; ...
 meta schedule ...
 meta config ...
-meta metrics ...
-meta approvals</code></pre></div>
+meta metrics ...</code></pre></div>
         <div class="card"><h3>API / protocol surface</h3><ul>
           <li>session registry;</li>
           <li>live event stream;</li>
@@ -157,7 +156,8 @@ meta approvals</code></pre></div>
           <li>agent schedule and trigger control;</li>
           <li>AgentPulse metric queries;</li>
           <li>BYOA command surface;</li>
-          <li>approval/rejection/revert actions.</li>
+          <li>answers to a harness's own approvals and questions;</li>
+          <li>approval, rejection and revert of configuration-change proposals.</li>
         </ul></div>
       </div>
       <h3>Service / daemon surface</h3>
@@ -192,10 +192,10 @@ liquid integration
       <ul>
         <li><strong>Control plane:</strong> session registry, task state, attention state and schedules for this instance/host.</li>
         <li><strong>Config resolver:</strong> maps Watershed building blocks to agent-specific CLI config and launch commands.</li>
-        <li><strong>Meta-Harness agent executor:</strong> host-local supervisor for whole CLI agents. It validates that every launched or controlled CLI process belongs to this instance's host; cross-host execution is outside the architecture. It is not a Flow Executor and has no Tool-Sandbox responsibility.</li>
+        <li><strong>Meta-Harness agent executor:</strong> host-local supervisor for whole CLI agents. It validates that every launched or controlled CLI process belongs to this instance's host; cross-host execution is outside the architecture.</li>
         <li><strong>Adapters:</strong> normalize native events into <a href="../../PROTOCOL.md">PROTOCOL.md</a> families.</li>
         <li><strong>Artifact index:</strong> logs, summaries, checkpoints, handoff packs and host-provided diffs.</li>
-        <li><strong>Policy gate:</strong> config writes and sensitive commands follow the review/audit rules in <a href="../../SECURITY.md">SECURITY.md</a>.</li>
+        <li><strong>Policy gate:</strong> configuration-change proposals (ADR-0227) and control commands follow the review/audit rules in <a href="../../SECURITY.md#meta-agent-configuration-writes">SECURITY.md</a>.</li>
       </ul>
     </div></section>
 
@@ -229,13 +229,13 @@ liquid integration
         <li>policy-gated config-improvement proposals.</li>
       </ul>
       <h3 id="orchestration">Agents orchestrating agents</h3>
-      <p>Accepted target (ADR-0253), with T3 Code as the model: an agent starts, messages, reads, steers and stops other threads across harnesses, model providers and linked devices. A Codex thread on a Mac can start a Claude Code subagent on a linked Windows 11 computer, whose Meta-Harness runs in WSL, talk with it and steer it.</p>
+      <p>Accepted target (ADR-0253), with T3 Code as the model: an agent starts, messages, reads, steers and stops other threads across harnesses, model providers and agent hosts. A Codex thread on a Mac can start a Claude Code subagent on a Windows 11 computer linked as an agent host, whose Meta-Harness runs in WSL, talk with it and steer it.</p>
       <ul>
-        <li><strong>Tools:</strong> Meta-Harness offers every session it starts its orchestration as MCP tools, as T3 Code offers its agents: list the linked hosts and the harnesses and models each offers; start a thread with a harness, model, host and first message as the caller's subagent; send it a message, also while it runs; read its messages and state; wait for its result; stop it; ask to link another host.</li>
-        <li><strong>Execution:</strong> a call goes to the caller's own Meta-Harness, which forwards it to the linked host; that host starts and supervises the harness itself, so execution stays host-local and a process another host claims is refused.</li>
+        <li><strong>Tools:</strong> Meta-Harness offers every session it starts its orchestration as MCP tools, as T3 Code offers its agents: list the agent hosts and the harnesses and models each offers; start a thread with a harness, model, host and first message as the caller's subagent; send it a message, also while it runs; read its messages and state; wait for its result; stop it; ask to link another agent host.</li>
+        <li><strong>Execution:</strong> a call goes to the caller's own Meta-Harness, which forwards it to the other agent host; that host starts and supervises the harness itself, so execution stays host-local and a process another host claims is refused.</li>
         <li><strong>Subagents and messages:</strong> a subagent is a thread with its parent; each message is attributed to the thread that sent it, and the subagent's results reach the parent as messages, as T3 Code delivers a delegated task's result.</li>
         <li><strong>Authority:</strong> a subagent's grant comes from its parent's grant and is never larger (ADR-0223); the person sees and stops every thread in Liquid.</li>
-        <li><strong>Linked hosts:</strong> paired over the authenticated remote connection (ADR-0185), as T3 Code links environments: an agent may only ask to link a host, and the person completes the pairing on that host; each host keeps its own credentials.</li>
+        <li><strong>Linking agent hosts:</strong> they pair over the authenticated remote connection (ADR-0185), as T3 Code links environments: an agent may only ask to link an agent host, and the person completes the pairing on that host; each host keeps its own credentials.</li>
       </ul>
     </div></section>
 
@@ -258,7 +258,7 @@ liquid integration
         <li><strong>A · Switch the client:</strong> Meta-Harness runs as a service; Liquid on any device attaches over the authenticated remote connection (ADR-0185) and sees the same live session. The Workspace copy of the session record lets every device show its history without a connection.</li>
         <li><strong>B · Survive a crash:</strong> every harness event is journaled before Liquid shows it, in short group commits rather than once per token, and every tool intent before the tool runs. After a crash Meta-Harness restarts the harness with its session; pi's own reading tools and Tools declared replay-safe run again, any other tool reports "interrupted" to the model, which continues without a restart click. A model answer cut off mid-stream is requested again.</li>
         <li><strong>C · Move an agent:</strong> at a turn boundary another of the person's hosts takes the session over: the record from Liquid, the files from the Git checkpoint ref (ADR-0220), its own credentials and the person's grant (ADR-0223). The Sync Server gives the session to one host; two hosts continuing offline create two branches.</li>
-        <li><strong>D · Several hosts:</strong> linked Meta-Harness hosts hand each other tasks and messages and return results, as T3 Code's linked environments do; a harness's own approvals stay with the host that runs the work. Running single tools on another host follows later.</li>
+        <li><strong>D · Several hosts:</strong> agent hosts hand each other tasks and messages and return results, as T3 Code's linked environments do; a harness's own approvals stay with the host that runs the work. Running single tools on another host follows later.</li>
       </ul>
       <div style="overflow-x:auto">
       <table>
@@ -281,7 +281,7 @@ liquid integration
         <li>an external tool queries AgentPulse;</li>
         <li>an external CLI monitors live transcripts.</li>
       </ul>
-      <p>All sensitive commands go through the permission/policy gates in <a href="../../SECURITY.md">SECURITY.md</a>.</p>
+      <p>Configuration-change proposals and control commands go through the policy gate in <a href="../../SECURITY.md#meta-agent-configuration-writes">SECURITY.md</a>.</p>
     </div></section>
 
     <section id="m2" class="section"><h2>13. M2 implementation reference</h2><div class="body">

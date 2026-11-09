@@ -45,7 +45,7 @@
         <div class="card"><h3 class="good">Flow Agent owns</h3><ul>
           <li>fixture-bounded local execution in M1;</li>
           <li>productive provider and bounded Tool execution in M1.1;</li>
-          <li>Executor selection, lifecycle, protocol and the official Default Sandbox Executor in M1.2;</li>
+          <li>Executor selection, lifecycle, protocol and the official Default Executor in M1.2;</li>
           <li>deterministic FSM behavior;</li>
           <li>the building-block / script runtime;</li>
           <li>deterministic in-process policy enforcement/emulation in M1;</li>
@@ -62,7 +62,7 @@
         <div class="card"><h3 class="good">M1 can</h3><p>Load strictly validated Flow definitions; build deterministic Flow structures and context manifests; execute fixture/stub Flows; persist and stream canonical events; replay, tail and resume sessions; and evaluate declared policies deterministically in process.</p></div>
         <div class="card"><h3 class="bad">M1 cannot</h3><p>Call a real provider; run arbitrary external tools or processes; provide a complete POSIX shell; guarantee OS isolation; allow positive network destinations; or export, delete and prune Run bundles.</p></div>
       </div>
-      <p>Meta-Harness consumes Flow Agent's public surfaces from the same host (see <a href="V-Spec_MetaHarness.html">Meta-Harness V-Spec</a>); it does not own runtime internals, Executor selection or Tool Sandboxes. M1 ships the human CLI plus machine-readable event stream. Local machine control is a designed-for seam; direct Rust embedding remains <a href="../decisions/open-decisions.html#d-020">open</a>.</p>
+      <p>Meta-Harness consumes Flow Agent's public surfaces from the same host (see <a href="V-Spec_MetaHarness.html">Meta-Harness V-Spec</a>); it does not own runtime internals or Executor selection. M1 ships the human CLI plus machine-readable event stream. Local machine control is a designed-for seam; direct Rust embedding remains <a href="../decisions/open-decisions.html#d-020">open</a>.</p>
     </div></section>
 
     <section id="surfaces" class="section"><h2>3. Standalone runtime surfaces</h2><div class="body">

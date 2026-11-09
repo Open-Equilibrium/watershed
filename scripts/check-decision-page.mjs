@@ -18,7 +18,7 @@ export async function assertDecisionPage(page) {
   for (const [id, heading] of [
     ["d-066", "Flow Agent - First Release"],
     ["d-065", "Watershed - Shared Release Safeguards"],
-    ["d-067", "Flow Agent - Permissions, Integrations And Offline Use"],
+    ["d-074", "M2 - Meta-Harness"],
     ["d-020", "Flow Agent - Permissions, Integrations And Offline Use"],
     ["d-059", "Flow Agent - Permissions, Integrations And Offline Use"],
   ]) {
@@ -39,29 +39,29 @@ export async function assertDecisionPage(page) {
   assert.equal(await page.locator("#d-063").count(), 0, "the decided protection scope leaves the live index");
 
   const url = page.url().split("#")[0];
-  await page.goto(`${url}#d-067`, { waitUntil: "load" });
-  const marketplace = page.locator("#d-067");
-  assert.equal(await marketplace.locator("p").first().isVisible(), true, "direct links reveal their question");
+  await page.goto(`${url}#d-074`, { waitUntil: "load" });
+  const serviceStart = page.locator("#d-074");
+  assert.equal(await serviceStart.locator("p").first().isVisible(), true, "direct links reveal their question");
   assert.equal(await page.locator("#d-065 p").first().isVisible(), false, "questions stay independent");
-  const toolsLink = marketplace.getByRole("link", { name: "D-066", exact: true });
-  await toolsLink.click();
-  assert.equal(new URL(page.url()).hash, "#d-066", "question links update the address");
-  const standardTools = page.locator("#d-066");
-  assert.equal(await standardTools.locator("p").first().isVisible(), true, "in-page links reveal their question");
-  await standardTools.locator("summary").press("Space");
-  assert.equal(await standardTools.locator("p").first().isVisible(), false);
-  await toolsLink.click();
-  assert.equal(await standardTools.locator("p").first().isVisible(), true, "repeated links reopen a collapsed question");
-  await marketplace.locator("summary").press("Enter");
-  assert.equal(await marketplace.locator("p").first().isVisible(), false);
+  const packagingLink = serviceStart.getByRole("link", { name: "D-021", exact: true });
+  await packagingLink.click();
+  assert.equal(new URL(page.url()).hash, "#d-021", "question links update the address");
+  const packaging = page.locator("#d-021");
+  assert.equal(await packaging.locator("p").first().isVisible(), true, "in-page links reveal their question");
+  await packaging.locator("summary").press("Space");
+  assert.equal(await packaging.locator("p").first().isVisible(), false);
+  await packagingLink.click();
+  assert.equal(await packaging.locator("p").first().isVisible(), true, "repeated links reopen a collapsed question");
+  await serviceStart.locator("summary").press("Enter");
+  assert.equal(await serviceStart.locator("p").first().isVisible(), false);
   await page.goBack();
-  assert.equal(new URL(page.url()).hash, "#d-067", "reopening the same question adds no history entry");
-  await marketplace.locator("p").first().waitFor({ state: "visible" });
-  await standardTools.locator("summary").press("Enter");
-  assert.equal(await standardTools.locator("p").first().isVisible(), false);
+  assert.equal(new URL(page.url()).hash, "#d-074", "reopening the same question adds no history entry");
+  await serviceStart.locator("p").first().waitFor({ state: "visible" });
+  await packaging.locator("summary").press("Enter");
+  assert.equal(await packaging.locator("p").first().isVisible(), false);
   await page.goForward();
-  assert.equal(new URL(page.url()).hash, "#d-066", "forward navigation restores the question address");
-  await standardTools.locator("p").first().waitFor({ state: "visible" });
+  assert.equal(new URL(page.url()).hash, "#d-021", "forward navigation restores the question address");
+  await packaging.locator("p").first().waitFor({ state: "visible" });
 
   await page.goto(url, { waitUntil: "load" });
   for (const decision of await page.locator(".decision").all()) {

@@ -20,9 +20,9 @@ Flow Agent is a **standalone host-local product**, and its event stream is a pub
 - API reachability is independent of execution locality: Liquid or BYOA may call a Meta-Harness from another device when authenticated transport exists.
 - Liquid routes every live command to the Meta-Harness instance that owns the addressed session or configuration. A merged projection never creates cross-instance authority.
 - Liquid replicas connect to the Sync Server, never directly to one another. The M3 MVP replication unit is an authorized Workspace, not a hand-selected set of Blocks.
-- M3 MVP user devices sync each authorized Workspace in full. Resource-scoped Roles govern Liquid reads and actions but are not a confidentiality boundary against the authorized device owner or same-identity local processes inspecting replica bytes. A headless Liquid replica requires explicit workspace-level opt-in before it receives that Workspace.
+- M3 MVP user devices sync each authorized Workspace in full. Resource-scoped Roles govern Liquid reads and actions but are not a confidentiality boundary against the authorized device owner or same-identity local processes inspecting replica bytes. A headless replica requires explicit workspace-level opt-in before it receives that Workspace.
 - Workspace admission and resource authorization remain separate. Replicated resources retain stable identities, committed changes remain resource-addressed and sync remains versioned so a later protocol can define a finite authorized-resource closure without replacing the object or History model. Selective replication is not part of the MVP.
-- The Sync Server and headless Liquid replica are separate logical participants even when one deployment co-locates them.
+- The Sync Server and a headless replica are separate logical participants even when one deployment co-locates them.
 - Workspace sync and live agent control are separate planes. Sync exchanges Liquid Actions/state; it does not tunnel Meta-Harness commands or imply that cached agent state is controllable offline.
 - Loss of sync connectivity does not change a Liquid replica's working store: local reads and mutations continue, while resumable exchange waits for connectivity.
 - Agents use Liquid through the Workspace CLI/API and effective Roles. No visibility, View placement, Connection or Meta-Harness reachability grants implicit Workspace authority.
@@ -415,7 +415,7 @@ All listed payload fields are strings unless noted otherwise; string arrays are 
 - `artifact.logged`: `artifact_id`, `artifact_type`, `uri`.
 - `attention.requested`: `request_id`, `reason`.
 - `metric.sample`: `metric_name`, `value`.
-- `error`: `code`, `message`, optional `data`. M1 uses `execution_backend_unavailable` when a non-fixture workspace requests productive provider/Tool execution that M1 does not implement; the failure occurs before those side effects and cannot be followed by successful Flow/session completion.
+- `error`: `code`, `message`, optional `data`. `execution_backend_unavailable` reports that productive execution is unavailable on this platform or that a Fixture resume lacks the explicit stub-model fixture profile; the failure occurs before provider or Tool side effects and cannot be followed by successful Flow/session completion.
 
 ## CLI exit status
 
@@ -445,7 +445,7 @@ Canonical byte limits count only the serialized JSON value, excluding record fra
 - **Artifact contract over runtime parity.** Agents differ in runtime semantics; they must agree only on this message contract.
 - **Deterministic ordering within a session.** A participant must follow the event envelope's `sequence` rule per session.
 - **No exfiltration via protocol.** Events and future commands carrying writes are subject to the security policy in `SECURITY.md`.
-- **No private-store or implicit co-location coupling.** A protocol client must not infer shared filesystem/process access from API reachability. All cross-tool state is addressed by IDs and public surfaces; a tool never reads another tool's local store directly. The only deliberate process co-location is Meta-Harness's own agent executor supervising whole CLI agents on the same host. That component is unrelated to Flow's Executor protocol and has no Tool-Sandbox authority. Remote Liquid/Meta-Harness clients remain possible without remote agent-process ownership.
+- **No private-store or implicit co-location coupling.** A protocol client must not infer shared filesystem/process access from API reachability. All cross-tool state is addressed by IDs and public surfaces; a tool never reads another tool's local store directly. The only deliberate process co-location is Meta-Harness's own agent executor supervising whole CLI agents on the same host. Remote Liquid/Meta-Harness clients remain possible without remote agent-process ownership.
 
 ## Implementation constraints
 
