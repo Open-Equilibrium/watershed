@@ -37,6 +37,7 @@ pub use pulls::{
     Comparison, PullRequest, PullRequestDraft, PullRequestError, PullRequestPlan, PullRequestState,
     ReviewDecision,
 };
+pub use revert::RevertConfirmation;
 
 pub use stash::Stash;
 #[cfg(test)]
@@ -142,6 +143,8 @@ pub enum DiffError {
     NotReverted(Vec<String>),
     /// Git failed or was stopped while it wrote the files back, so some may be reverted.
     PartlyReverted(Box<DiffError>),
+    /// The project no longer matches the confirmed revert plan, so nothing was reverted.
+    PlanChanged,
     /// Git refused, as it would overwrite the uncommitted changes in these files; nothing
     /// changed.
     WouldOverwrite(Vec<String>),
@@ -216,6 +219,7 @@ impl fmt::Display for DiffError {
             Self::AgentRunning(_) => f.write_str("an agent runs in this checkout"),
             Self::NotReverted(paths) => write!(f, "Git could not revert {}", paths.join(", ")),
             Self::PartlyReverted(error) => write!(f, "the files may be partly reverted: {error}"),
+            Self::PlanChanged => f.write_str("files changed since you confirmed"),
             Self::WouldOverwrite(paths) => write!(
                 f,
                 "Git would overwrite your uncommitted changes in {}",

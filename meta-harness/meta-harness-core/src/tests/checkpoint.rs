@@ -3,7 +3,8 @@ use std::process::Command;
 use std::time::Duration;
 
 use crate::{
-    ChangeStatus, Checkpoint, Checkpoints, DiffError, FileChange, Phase, RevertPlan, Whitespace,
+    ChangeStatus, Checkpoint, Checkpoints, DiffError, FileChange, Phase, RevertConfirmation,
+    RevertPlan, Whitespace,
 };
 
 /// A throwaway Git repository with one committed file, `a.txt`.
@@ -105,6 +106,12 @@ async fn turn(checkpoints: &Checkpoints, turn: &str, work: impl FnOnce()) {
         .capture(&at(turn, Phase::End))
         .await
         .expect("end captured");
+}
+
+/// Reverts to `to` with the plan read just before, as a person confirms it at once.
+async fn revert_now(checkpoints: &Checkpoints, to: &Checkpoint) -> Result<(), DiffError> {
+    let plan = checkpoints.revert_plan(to, None).await?;
+    checkpoints.revert(to, &plan.confirmation).await
 }
 
 async fn changes_of(checkpoints: &Checkpoints, id: &str) -> Result<Vec<FileChange>, DiffError> {
@@ -913,7 +920,7 @@ fn reverting_to_before_a_turn_restores_its_files_and_leaves_git_alone() {
         );
 
         checkpoints
-            .revert(&at("t1", Phase::Start))
+            .revert(&at("t1", Phase::Start), &plan.confirmation)
             .await
             .expect("reverted");
         let read = |path: &str| std::fs::read_to_string(repo.path().join(path)).ok();
@@ -969,14 +976,16 @@ fn a_revert_changes_only_files_below_the_working_folder() {
             .expect("plan");
         let paths: Vec<_> = plan.files.iter().map(|file| file.path.as_str()).collect();
         assert_eq!(paths, ["app/extra.txt", "app/main.txt"]);
+        // An edit outside the working folder leaves the confirmed plan as it was.
+        repo.write("a.txt", "outside, edited\n");
         checkpoints
-            .revert(&at("t1", Phase::Start))
+            .revert(&at("t1", Phase::Start), &plan.confirmation)
             .await
             .expect("reverted");
         let read = |path: &str| std::fs::read_to_string(repo.path().join(path)).ok();
         assert_eq!(read("app/main.txt").as_deref(), Some("old\n"));
         assert_eq!(read("app/extra.txt"), None);
-        assert_eq!(read("a.txt").as_deref(), Some("outside\n"));
+        assert_eq!(read("a.txt").as_deref(), Some("outside, edited\n"));
     });
 }
 
@@ -1002,7 +1011,7 @@ fn a_revert_is_refused_while_an_agent_runs_in_the_checkout() {
         assert_eq!(plan.running, ["s2"]);
         assert_eq!(plan.files.len(), 1, "the files still show");
         assert!(matches!(
-            mine.revert(&at("t1", Phase::Start)).await,
+            mine.revert(&at("t1", Phase::Start), &plan.confirmation).await,
             Err(DiffError::AgentRunning(running)) if running == ["s2"]
         ));
         assert_eq!(
@@ -1016,14 +1025,14 @@ fn a_revert_is_refused_while_an_agent_runs_in_the_checkout() {
             .await
             .expect("started");
         assert!(matches!(
-            mine.revert(&at("t1", Phase::Start)).await,
+            mine.revert(&at("t1", Phase::Start), &plan.confirmation).await,
             Err(DiffError::AgentRunning(running)) if running == ["s1"]
         ));
         // A session that ends, even without its turn's end, no longer runs there.
         mine.close().await;
         let later = Checkpoints::new(repo.path());
         later
-            .revert(&at("t1", Phase::Start))
+            .revert(&at("t1", Phase::Start), &plan.confirmation)
             .await
             .expect("reverted once nothing runs");
         assert_eq!(
@@ -1044,7 +1053,9 @@ fn a_revert_to_a_removed_checkpoint_is_reported() {
             Err(DiffError::NoCheckpoint)
         ));
         assert!(matches!(
-            checkpoints.revert(&at("t1", Phase::Start)).await,
+            checkpoints
+                .revert(&at("t1", Phase::Start), &RevertConfirmation::default())
+                .await,
             Err(DiffError::NoCheckpoint)
         ));
     });
@@ -1128,7 +1139,7 @@ fn a_revert_leaves_submodules_and_their_work_alone() {
             "a submodule is left alone"
         );
         checkpoints
-            .revert(&at("t1", Phase::Start))
+            .revert(&at("t1", Phase::Start), &plan.confirmation)
             .await
             .expect("reverted");
         assert_eq!(
@@ -1161,7 +1172,7 @@ fn a_revert_that_git_could_not_finish_names_the_files_left() {
         // Git cannot delete a file in a folder it may not write, but still exits with 0.
         let folder = repo.path().join("ro");
         std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).expect("mode");
-        let reverted = checkpoints.revert(&at("t1", Phase::Start)).await;
+        let reverted = revert_now(&checkpoints, &at("t1", Phase::Start)).await;
         std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).expect("mode");
         assert!(
             matches!(&reverted, Err(DiffError::NotReverted(left)) if left == &["ro/new.txt"]),
@@ -1206,6 +1217,70 @@ fn a_revert_lists_ignored_files_in_the_way_of_restored_ones() {
                 ("data/", ChangeStatus::Deleted, true),
             ]
         );
+    });
+}
+
+#[test]
+fn a_revert_refuses_before_any_write_once_the_project_left_the_confirmed_plan() {
+    run(async {
+        // What changes between the plan and its confirmation, and the file that must stay.
+        type Change = fn(&Repo);
+        let cases: [(&str, Change, &str); 3] = [
+            ("edited", |repo| repo.write("a.txt", "edited\n"), "a.txt"),
+            ("added", |repo| repo.write("b.txt", "unlisted\n"), "b.txt"),
+            (
+                "ignored",
+                |repo| {
+                    std::fs::create_dir(repo.path().join("f")).expect("folder");
+                    repo.write("f/keep.db", "ignored\n");
+                },
+                "f/keep.db",
+            ),
+        ];
+        for (name, change, stays) in cases {
+            let repo = Repo::new(&format!("revert-confirmed-{name}"));
+            repo.write(".gitignore", "/f/\n");
+            repo.write("f", "returns\n");
+            repo.git(&["add", "."]);
+            repo.git(&["commit", "-q", "-m", "files"]);
+            let checkpoints = Checkpoints::new(repo.path());
+            turn(&checkpoints, "t1", || {
+                repo.write("a.txt", "new\n");
+                std::fs::remove_file(repo.path().join("f")).expect("removed");
+            })
+            .await;
+            let plan = checkpoints
+                .revert_plan(&at("t1", Phase::Start), None)
+                .await
+                .expect("plan");
+            change(&repo);
+            let read = |path: &str| std::fs::read_to_string(repo.path().join(path)).ok();
+            let (a, kept) = (read("a.txt"), read(stays));
+
+            let reverted = checkpoints
+                .revert(&at("t1", Phase::Start), &plan.confirmation)
+                .await;
+            assert!(
+                matches!(reverted, Err(DiffError::PlanChanged)),
+                "{name}: {reverted:?}"
+            );
+            assert_eq!(
+                (read("a.txt"), read(stays)),
+                (a, kept),
+                "{name}: nothing written"
+            );
+            assert!(!repo.path().join("f").is_file(), "{name}: nothing restored");
+            // Confirming the plan read now reverts.
+            let plan = checkpoints
+                .revert_plan(&at("t1", Phase::Start), None)
+                .await
+                .expect("plan");
+            checkpoints
+                .revert(&at("t1", Phase::Start), &plan.confirmation)
+                .await
+                .expect("reverted");
+            assert_eq!(read("a.txt").as_deref(), Some("old\n"), "{name}");
+        }
     });
 }
 
@@ -1343,7 +1418,7 @@ fn a_revert_never_writes_into_a_repository_a_turn_made() {
             "{plan:?}"
         );
         checkpoints
-            .revert(&at("t1", Phase::Start))
+            .revert(&at("t1", Phase::Start), &plan.confirmation)
             .await
             .expect("reverted");
         let read = |path: &str| std::fs::read_to_string(repo.path().join(path)).ok();
@@ -1365,8 +1440,8 @@ fn a_restored_file_git_now_ignores_counts_as_reverted() {
             std::fs::write(repo.path().join(".git/info/exclude"), "notes.txt\n").expect("exclude");
         })
         .await;
-        checkpoints
-            .revert(&at("t1", Phase::Start))
+
+        revert_now(&checkpoints, &at("t1", Phase::Start))
             .await
             .expect("reverted");
         assert_eq!(
@@ -1439,7 +1514,7 @@ fn a_turn_whose_name_cannot_be_written_still_holds_reverts_off() {
             .await
             .expect("started");
         assert!(matches!(
-            mine.revert(&at("t1", Phase::Start)).await,
+            revert_now(&mine, &at("t1", Phase::Start)).await,
             Err(DiffError::AgentRunning(running)) if running.is_empty()
         ));
     });
@@ -1462,7 +1537,7 @@ fn a_revert_that_git_stopped_midway_says_the_files_may_be_partly_reverted() {
         // Git cannot replace a file in a folder it may not write, and fails.
         let folder = repo.path().join("ro");
         std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).expect("mode");
-        let reverted = checkpoints.revert(&at("t1", Phase::Start)).await;
+        let reverted = revert_now(&checkpoints, &at("t1", Phase::Start)).await;
         std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).expect("mode");
         assert!(
             matches!(reverted, Err(DiffError::PartlyReverted(_))),
@@ -1524,7 +1599,7 @@ fn a_returning_file_deletes_no_repository_in_its_place() {
             "{plan:?}"
         );
         checkpoints
-            .revert(&at("t1", Phase::Start))
+            .revert(&at("t1", Phase::Start), &plan.confirmation)
             .await
             .expect("reverted");
         for kept in [
@@ -1583,7 +1658,7 @@ fn a_repository_is_found_as_git_finds_it_and_links_are_not_followed() {
         );
         assert_eq!(kept.contains(&"caps"), blind, "{plan:?}");
         checkpoints
-            .revert(&at("t1", Phase::Start))
+            .revert(&at("t1", Phase::Start), &plan.confirmation)
             .await
             .expect("reverted");
         assert_eq!(
@@ -1628,7 +1703,7 @@ fn a_revert_reads_paths_as_git_writes_them_whatever_their_order_or_links() {
         assert_eq!(reverted, ["d", "d/f.txt"], "{plan:?}");
         assert_eq!(kept, ["p", "p/README.md"], "{plan:?}");
         checkpoints
-            .revert(&at("t1", Phase::Start))
+            .revert(&at("t1", Phase::Start), &plan.confirmation)
             .await
             .expect("reverted");
         assert_eq!(
@@ -1672,7 +1747,7 @@ fn a_folder_holding_a_submodule_stays_whole_when_a_turn_replaces_it() {
         assert!(reverted.is_empty(), "{plan:?}");
         assert!(kept.contains(&"d/x"), "{plan:?}");
         checkpoints
-            .revert(&at("t1", Phase::Start))
+            .revert(&at("t1", Phase::Start), &plan.confirmation)
             .await
             .expect("nothing promised is skipped");
     });
@@ -1713,7 +1788,7 @@ fn a_revert_leaves_bare_repositories_alone_as_git_finds_them() {
         assert_eq!(reverted, ["a.txt"], "{plan:?}");
         assert_eq!(kept, ["clone"], "{plan:?}");
         checkpoints
-            .revert(&at("t1", Phase::Start))
+            .revert(&at("t1", Phase::Start), &plan.confirmation)
             .await
             .expect("reverted");
         assert!(repo.path().join("clone/HEAD").exists(), "its history stays");
@@ -1749,7 +1824,7 @@ fn a_turns_end_releases_only_its_own_turn() {
         let other = Checkpoints::new(repo.path());
         assert!(
             matches!(
-                other.revert(&at("t0", Phase::Start)).await,
+                revert_now(&other, &at("t0", Phase::Start)).await,
                 Err(DiffError::AgentRunning(_))
             ),
             "turn t2 still runs"
@@ -1942,7 +2017,7 @@ fn a_turns_end_releases_only_the_same_sessions_turn() {
         let other = Checkpoints::new(repo.path());
         assert!(
             matches!(
-                other.revert(&at("t0", Phase::Start)).await,
+                revert_now(&other, &at("t0", Phase::Start)).await,
                 Err(DiffError::AgentRunning(_))
             ),
             "session s2's turn still runs"

@@ -19,8 +19,8 @@ pub use git::{CommitFile, CommitPlan};
 
 use crate::checkout::{Alone, Checkout, RETRY, Running};
 use crate::diff::{
-    Branch, BranchTarget, ChangeStatus, Changes, DiffError, FileChange, GitStatus, Stash,
-    Whitespace, WorkingTree,
+    Branch, BranchTarget, ChangeStatus, Changes, DiffError, FileChange, GitStatus,
+    RevertConfirmation, Stash, Whitespace, WorkingTree,
 };
 
 /// Longest one Git command on the project may take; Git is then stopped with the programs it
@@ -99,6 +99,8 @@ pub struct RevertPlan {
     pub running: Vec<String>,
     /// The branch checked out, or none when HEAD names a commit.
     pub branch: Option<String>,
+    /// The state the plan was read in, which [`Checkpoints::revert`] must be given unchanged.
+    pub confirmation: RevertConfirmation,
 }
 
 /// One file a revert would change.
@@ -304,8 +306,8 @@ impl Checkpoints {
                 .collect(),
             None => Default::default(),
         };
-        let revertable = self.bounded(tree.revertable(&now, &target)).await?;
-        let (replaced, removed) = self.bounded(tree.in_the_way(&revertable.changes)).await?;
+        let revertable = self.bounded(tree.revert_planned(&now, &target)).await?;
+        let (replaced, removed) = (revertable.replaced, revertable.removed);
         let kept = revertable.kept.into_iter().map(|change| (change, true));
         let mut files: Vec<RevertFile> = revertable
             .changes
@@ -333,14 +335,20 @@ impl Checkpoints {
         Ok(RevertPlan {
             files,
             running: tree.checkout().running(),
-            branch: self.bounded(tree.branch()).await?,
+            branch: revertable.confirmation.branch.clone(),
+            confirmation: revertable.confirmation,
         })
     }
 
     /// Reverts the files below the working folder to `to`: files it holds are written back and
     /// the others Git does not ignore are deleted; the project's index, HEAD and branches stay.
-    /// Refused while an agent, this session's too, runs in the checkout.
-    pub async fn revert(&self, to: &Checkpoint) -> Result<(), DiffError> {
+    /// Refused while an agent, this session's too, runs in the checkout, and before any write
+    /// once the project no longer matches the plan `confirmed` comes from (ADR-0256).
+    pub async fn revert(
+        &self,
+        to: &Checkpoint,
+        confirmed: &RevertConfirmation,
+    ) -> Result<(), DiffError> {
         let tree = self.tree().await?;
         let target = self.read(&tree, to).await?;
         // Held alone, so no turn starts in the checkout until the files are back.
@@ -349,7 +357,10 @@ impl Checkpoints {
             .until_closed(async { Ok(self.captures.lock().await) })
             .await?;
         let started = std::sync::atomic::AtomicBool::new(false);
-        match self.bounded(tree.restore(&target, &started)).await {
+        match self
+            .bounded(tree.restore(&target, confirmed, &started))
+            .await
+        {
             Err(error @ DiffError::NotReverted(_)) => Err(error),
             // A time limit or a close can stop Git midway too.
             Err(error) if started.load(std::sync::atomic::Ordering::Relaxed) => {

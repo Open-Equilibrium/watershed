@@ -20,8 +20,8 @@ pub use checkpoint::{
 pub use diff::{
     Branch, BranchTarget, ChangeStatus, Changes, Commit, Comparison, DiffError, FileChange,
     GitStatus, GitTransfer, PullRequest, PullRequestDraft, PullRequestError, PullRequestPlan,
-    PullRequestState, PullRequestText, PushConfirmation, ReviewDecision, Stash, Whitespace,
-    Worktree, WorktreeFile, WorktreeFileState, WorktreeRemoval, WorktreeRemoved,
+    PullRequestState, PullRequestText, PushConfirmation, RevertConfirmation, ReviewDecision, Stash,
+    Whitespace, Worktree, WorktreeFile, WorktreeFileState, WorktreeRemoval, WorktreeRemoved,
     without_credentials,
 };
 pub use event::{

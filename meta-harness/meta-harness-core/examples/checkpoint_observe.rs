@@ -178,7 +178,7 @@ async fn observe(dir: &Path) {
         let plan_ms = ms(started);
         let started = Instant::now();
         checkpoints
-            .revert(&at(Phase::Start))
+            .revert(&at(Phase::Start), &plan.confirmation)
             .await
             .expect("reverted");
         let revert_ms = ms(started);

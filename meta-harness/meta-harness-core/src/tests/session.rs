@@ -788,7 +788,9 @@ IFS= read -r line
                     independent
                         .switch_branch(&BranchTarget::Local("other".to_owned()), Changes::Bring)
                         .await,
-                    independent.revert(&at("base", Phase::Start)).await,
+                    independent
+                        .revert(&at("base", Phase::Start), &Default::default())
+                        .await,
                     independent.restore_stash("missing").await,
                     independent.discard_stash("missing").await,
                 ] {

@@ -14,8 +14,8 @@ use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use crate::api::history::{
-    BridgeChangesState, BridgeEntryKind, BridgeRecordKind, BridgeRevertFile, BridgeRunningAgent,
-    BridgeTurn, BridgeTurnChanges,
+    BridgeChangesState, BridgeEntryKind, BridgeRecordKind, BridgeRevertConfirmation,
+    BridgeRevertFile, BridgeRunningAgent, BridgeTurn, BridgeTurnChanges,
 };
 use crate::api::session::{
     AgentSession, BridgeCheckpointSession, BridgeModel, BridgeStoredSession, SessionConfig,
@@ -684,6 +684,19 @@ fn entries_at(id: u32, entries: &str, leaf: &str) -> String {
 /// The entries of turn `T1`: its start checkpoint, its prompt and its end checkpoint.
 const TURN: &str = r#"{"type":"custom","id":"c1","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T1","phase":"start"}},{"type":"message","id":"u1","parentId":"c1","timestamp":"2026-11-01T10:00:00.100Z","message":{"role":"user","content":"edit"}},{"type":"custom","id":"c2","parentId":"u1","timestamp":"2026-11-01T10:00:05.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T1","phase":"end","files":1,"added":1,"removed":1}}"#;
 
+/// The confirmation of reverting `repo` to before turn `T1`, as the dialog reads it now.
+fn confirmed(repo: &std::path::Path) -> BridgeRevertConfirmation {
+    let checkpoints = meta_harness_core::Checkpoints::new(repo);
+    let start = meta_harness_core::Checkpoint {
+        session: "s1".to_owned(),
+        turn: "T1".to_owned(),
+        phase: meta_harness_core::Phase::Start,
+    };
+    let plan = call(checkpoints.revert_plan(&start, None)).expect("plan");
+    call(checkpoints.close());
+    plan.confirmation.into()
+}
+
 /// Waits until the stand-in agent created `marker`.
 fn reached(marker: &std::path::Path) {
     let started = std::time::Instant::now();
@@ -830,7 +843,7 @@ printf '%s\n' '{"id":"8","type":"response","command":"prompt","success":true,"da
     );
     assert!(plan.branch.is_some());
     assert!(
-        matches!(session.revert_to_turn("T1".to_owned()), Err(error) if error.contains("an agent runs in this checkout")),
+        matches!(session.revert_to_turn("T1".to_owned(), plan.confirmation.clone()), Err(error) if error.contains("an agent runs in this checkout")),
         "refused"
     );
     assert_eq!(
@@ -839,7 +852,10 @@ printf '%s\n' '{"id":"8","type":"response","command":"prompt","success":true,"da
     );
 
     call(other.capture(&theirs(meta_harness_core::Phase::End))).expect("ended");
-    assert_eq!(session.revert_to_turn("T1".to_owned()), Ok(()));
+    assert_eq!(
+        session.revert_to_turn("T1".to_owned(), plan.confirmation.clone()),
+        Ok(())
+    );
     assert_eq!(
         std::fs::read_to_string(repo.join("a.txt")).expect("a"),
         "old\n"
@@ -871,7 +887,7 @@ printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":true,"da
     .concat();
     let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
     reached(&repo.join(".git/checkpointed"));
-    let reverted = session.revert_to_turn("T1".to_owned());
+    let reverted = session.revert_to_turn("T1".to_owned(), confirmed(&repo));
     assert!(
         matches!(&reverted, Err(error) if error.starts_with("the files were reverted, but the session could not continue")),
         "{reverted:?}"
@@ -879,6 +895,41 @@ printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":true,"da
     assert_eq!(
         std::fs::read_to_string(repo.join("a.txt")).expect("a"),
         "old\n"
+    );
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn refuses_a_revert_once_the_files_left_the_confirmed_plan() {
+    let repo = repository("revert-stale");
+    let script = [
+        checkpoint("q1", "T1", "start", r#"\"ok\":true"#),
+        "printf 'new\\n' > a.txt\n".to_owned(),
+        checkpoint("q2", "T1", "end", r#"\"files\":1"#),
+        "touch .git/checkpointed\n".to_owned(),
+        no_session_file(2),
+        entries(3, TURN),
+        "IFS= read -r line || exit 0".to_owned(),
+    ]
+    .concat();
+    let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
+    reached(&repo.join(".git/checkpointed"));
+    let confirmed = confirmed(&repo);
+    std::fs::write(repo.join("b.txt"), "unlisted\n").expect("file");
+
+    assert_eq!(
+        session.revert_to_turn("T1".to_owned(), confirmed),
+        Err(
+            "nothing was reverted: files changed since you confirmed. Open Revert again to see \
+             the current list."
+                .to_owned()
+        )
+    );
+    let read = |path: &str| std::fs::read_to_string(repo.join(path)).expect(path);
+    assert_eq!(
+        (read("a.txt"), read("b.txt")),
+        ("new\n".to_owned(), "unlisted\n".to_owned())
     );
     assert!(call(session.shutdown()));
     let _ = std::fs::remove_dir_all(&repo);
@@ -919,7 +970,8 @@ IFS= read -r line || exit 0"#
     reached(&repo.join(".git/checkpointed"));
     let reverting = {
         let session = Arc::clone(&session);
-        std::thread::spawn(move || session.revert_to_turn("T1".to_owned()))
+        let confirmed = confirmed(&repo);
+        std::thread::spawn(move || session.revert_to_turn("T1".to_owned(), confirmed))
     };
     reached(&repo.join(".git/asked"));
     let sending = {
@@ -955,7 +1007,7 @@ IFS= read -r line || exit 0"#
     .concat();
     let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
     reached(&repo.join(".git/checkpointed"));
-    let reverted = session.revert_to_turn("T1".to_owned());
+    let reverted = session.revert_to_turn("T1".to_owned(), confirmed(&repo));
     assert!(
         matches!(&reverted, Err(error) if error.starts_with("the files were reverted, but the session could not continue")),
         "{reverted:?}"

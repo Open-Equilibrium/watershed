@@ -667,9 +667,16 @@ class FakeBackend implements SessionBackend {
     return revertPlanned;
   }
 
+  /// The confirmation the last revert received.
+  BridgeRevertConfirmation? revertedWith;
+
   @override
-  Future<void> revertToTurn(String turn) async {
+  Future<void> revertToTurn(
+    String turn,
+    BridgeRevertConfirmation confirmation,
+  ) async {
     calls.add('revert $turn');
+    revertedWith = confirmation;
     if (revertError case final error?) throw error;
   }
 
@@ -901,6 +908,13 @@ BridgeRevertPlan revertPlanOf({
   files: files,
   running: running,
   branch: branch,
+  confirmation: BridgeRevertConfirmation(
+    target: 'target',
+    checkout: 'checkout',
+    branch: branch,
+    kept: const [],
+    ignored: const [],
+  ),
 );
 
 /// A file a revert changes as `status` says.

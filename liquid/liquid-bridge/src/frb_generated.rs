@@ -1972,6 +1972,8 @@ fn wire__crate__api__session__AgentSession_revert_to_turn_impl(
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>,
             >>::sse_decode(&mut deserializer);
             let api_turn = <String>::sse_decode(&mut deserializer);
+            let api_confirmation =
+                <crate::api::history::BridgeRevertConfirmation>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
@@ -1992,6 +1994,7 @@ fn wire__crate__api__session__AgentSession_revert_to_turn_impl(
                     let output_ok = crate::api::session::AgentSession::revert_to_turn(
                         &*api_that_guard,
                         api_turn,
+                        api_confirmation,
                     )?;
                     std::result::Result::Ok(output_ok)
                 })())
@@ -4831,6 +4834,24 @@ impl SseDecode for crate::api::workspace::BridgeResourceKind {
     }
 }
 
+impl SseDecode for crate::api::history::BridgeRevertConfirmation {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_target = <String>::sse_decode(deserializer);
+        let mut var_checkout = <String>::sse_decode(deserializer);
+        let mut var_branch = <Option<String>>::sse_decode(deserializer);
+        let mut var_kept = <Vec<String>>::sse_decode(deserializer);
+        let mut var_ignored = <Vec<String>>::sse_decode(deserializer);
+        return crate::api::history::BridgeRevertConfirmation {
+            target: var_target,
+            checkout: var_checkout,
+            branch: var_branch,
+            kept: var_kept,
+            ignored: var_ignored,
+        };
+    }
+}
+
 impl SseDecode for crate::api::history::BridgeRevertFile {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4861,11 +4882,14 @@ impl SseDecode for crate::api::history::BridgeRevertPlan {
         let mut var_running =
             <Vec<crate::api::history::BridgeRunningAgent>>::sse_decode(deserializer);
         let mut var_branch = <Option<String>>::sse_decode(deserializer);
+        let mut var_confirmation =
+            <crate::api::history::BridgeRevertConfirmation>::sse_decode(deserializer);
         return crate::api::history::BridgeRevertPlan {
             state: var_state,
             files: var_files,
             running: var_running,
             branch: var_branch,
+            confirmation: var_confirmation,
         };
     }
 }
@@ -8127,6 +8151,30 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::workspace::BridgeResourceKind
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeRevertConfirmation {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.target.into_into_dart().into_dart(),
+            self.checkout.into_into_dart().into_dart(),
+            self.branch.into_into_dart().into_dart(),
+            self.kept.into_into_dart().into_dart(),
+            self.ignored.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::history::BridgeRevertConfirmation
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::history::BridgeRevertConfirmation>
+    for crate::api::history::BridgeRevertConfirmation
+{
+    fn into_into_dart(self) -> crate::api::history::BridgeRevertConfirmation {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeRevertFile {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -8160,6 +8208,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeRevertPlan {
             self.files.into_into_dart().into_dart(),
             self.running.into_into_dart().into_dart(),
             self.branch.into_into_dart().into_dart(),
+            self.confirmation.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -9764,6 +9813,17 @@ impl SseEncode for crate::api::workspace::BridgeResourceKind {
     }
 }
 
+impl SseEncode for crate::api::history::BridgeRevertConfirmation {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.target, serializer);
+        <String>::sse_encode(self.checkout, serializer);
+        <Option<String>>::sse_encode(self.branch, serializer);
+        <Vec<String>>::sse_encode(self.kept, serializer);
+        <Vec<String>>::sse_encode(self.ignored, serializer);
+    }
+}
+
 impl SseEncode for crate::api::history::BridgeRevertFile {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -9784,6 +9844,7 @@ impl SseEncode for crate::api::history::BridgeRevertPlan {
         <Vec<crate::api::history::BridgeRevertFile>>::sse_encode(self.files, serializer);
         <Vec<crate::api::history::BridgeRunningAgent>>::sse_encode(self.running, serializer);
         <Option<String>>::sse_encode(self.branch, serializer);
+        <crate::api::history::BridgeRevertConfirmation>::sse_encode(self.confirmation, serializer);
     }
 }
 

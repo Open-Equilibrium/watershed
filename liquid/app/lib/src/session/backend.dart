@@ -50,8 +50,9 @@ abstract interface class SessionBackend {
   Future<BridgeRevertPlan> revertPlan(String turn);
 
   /// Reverts the files to before turn `turn` and continues the session from before its
-  /// prompt, which returns to the input area.
-  Future<void> revertToTurn(String turn);
+  /// prompt, which returns to the input area; refused once the files left the plan
+  /// `confirmation` came with.
+  Future<void> revertToTurn(String turn, BridgeRevertConfirmation confirmation);
 
   /// The sessions with checkpoints in the project's repository.
   Future<List<BridgeCheckpointSession>> checkpointSessions();
@@ -267,7 +268,10 @@ class RustSessionBackend implements SessionBackend {
   Future<BridgeRevertPlan> revertPlan(String turn) =>
       _session.revertPlan(turn: turn);
   @override
-  Future<void> revertToTurn(String turn) => _session.revertToTurn(turn: turn);
+  Future<void> revertToTurn(
+    String turn,
+    BridgeRevertConfirmation confirmation,
+  ) => _session.revertToTurn(turn: turn, confirmation: confirmation);
   @override
   Future<List<BridgeCheckpointSession>> checkpointSessions() =>
       _session.checkpointSessions();

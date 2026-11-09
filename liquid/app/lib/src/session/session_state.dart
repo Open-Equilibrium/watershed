@@ -698,9 +698,12 @@ class SessionState {
       _backend.revertPlan(turn.id);
 
   /// Reverts the files to before `turn` and continues the session on a new branch from before
-  /// its prompt, which returns to the input area (ADR-0234). Returns whether it reverted; a
-  /// failure is reported.
-  Future<bool> revert(BridgeTurn turn) async {
+  /// its prompt, which returns to the input area (ADR-0234). Only the plan `confirmation` came
+  /// with runs (ADR-0256). Returns whether it reverted; a failure is reported.
+  Future<bool> revert(
+    BridgeTurn turn,
+    BridgeRevertConfirmation confirmation,
+  ) async {
     if (_branching != null || _switching != null) {
       notify(
         BridgeLevel.info,
@@ -708,7 +711,9 @@ class SessionState {
       );
       return false;
     }
-    final reverting = _backend.revertToTurn(turn.id).then((_) => true);
+    final reverting = _backend
+        .revertToTurn(turn.id, confirmation)
+        .then((_) => true);
     _branching = reverting;
     try {
       await reverting;

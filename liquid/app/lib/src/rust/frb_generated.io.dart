@@ -177,6 +177,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeResource dco_decode_box_autoadd_bridge_resource(dynamic raw);
 
   @protected
+  BridgeRevertConfirmation dco_decode_box_autoadd_bridge_revert_confirmation(
+    dynamic raw,
+  );
+
+  @protected
   BridgeReviewDecision dco_decode_box_autoadd_bridge_review_decision(
     dynamic raw,
   );
@@ -403,6 +408,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeResourceKind dco_decode_bridge_resource_kind(dynamic raw);
+
+  @protected
+  BridgeRevertConfirmation dco_decode_bridge_revert_confirmation(dynamic raw);
 
   @protected
   BridgeRevertFile dco_decode_bridge_revert_file(dynamic raw);
@@ -894,6 +902,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeRevertConfirmation sse_decode_box_autoadd_bridge_revert_confirmation(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeReviewDecision sse_decode_box_autoadd_bridge_review_decision(
     SseDeserializer deserializer,
   );
@@ -1162,6 +1175,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeResourceKind sse_decode_bridge_resource_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeRevertConfirmation sse_decode_bridge_revert_confirmation(
     SseDeserializer deserializer,
   );
 
@@ -1795,6 +1813,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_revert_confirmation(
+    BridgeRevertConfirmation self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_review_decision(
     BridgeReviewDecision self,
     SseSerializer serializer,
@@ -2163,6 +2187,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_resource_kind(
     BridgeResourceKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_revert_confirmation(
+    BridgeRevertConfirmation self,
     SseSerializer serializer,
   );
 

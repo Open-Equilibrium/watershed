@@ -15,8 +15,8 @@ use tokio::sync::{Mutex, mpsc};
 
 use crate::api::events::{BridgeEvent, BridgeQueue};
 use crate::api::history::{
-    BridgeChangesState, BridgeContextDetail, BridgeHistory, BridgeRevertPlan, BridgeRunningAgent,
-    BridgeTranscript, BridgeTurn, BridgeTurnChanges,
+    BridgeChangesState, BridgeContextDetail, BridgeHistory, BridgeRevertConfirmation,
+    BridgeRevertPlan, BridgeRunningAgent, BridgeTranscript, BridgeTurn, BridgeTurnChanges,
 };
 use crate::convert::describe;
 use crate::frb_generated::StreamSink;
@@ -320,6 +320,8 @@ impl AgentSession {
                         files: Vec::new(),
                         running: Vec::new(),
                         branch: None,
+                        // Nothing to confirm, as no revert is offered.
+                        confirmation: meta_harness_core::RevertConfirmation::default().into(),
                     });
                 }
             };
@@ -338,15 +340,20 @@ impl AgentSession {
                 files: plan.files.into_iter().map(Into::into).collect(),
                 running,
                 branch: plan.branch.as_deref().map(visible_name),
+                confirmation: plan.confirmation.into(),
             })
         })
     }
 
     /// Reverts the files to before turn `turn` of the current branch and continues the session
     /// from before its prompt, which returns to the input area; the undone turns keep their
-    /// branch. Refused while an agent runs in the checkout. Each error says whether the files
-    /// changed.
-    pub fn revert_to_turn(&self, turn: String) -> Result<(), String> {
+    /// branch. Refused while an agent runs in the checkout, and once the files no longer match
+    /// the plan `confirmation` came with (ADR-0256). Each error says whether the files changed.
+    pub fn revert_to_turn(
+        &self,
+        turn: String,
+        confirmation: BridgeRevertConfirmation,
+    ) -> Result<(), String> {
         RUNTIME.block_on(async {
             let not_reverted = |error: String| format!("the files were not reverted: {error}");
             // Held until the session moved, so a prompt or move sent meanwhile starts after it;
@@ -358,9 +365,13 @@ impl AgentSession {
                 not_reverted(format!("turn {turn} has no prompt to continue before"))
             })?;
             self.checkpoints
-                .revert(&checkpoint(found, Phase::Start))
+                .revert(&checkpoint(found, Phase::Start), &confirmation.into())
                 .await
                 .map_err(|error| match error {
+                    DiffError::PlanChanged => "nothing was reverted: files changed since you \
+                                               confirmed. Open Revert again to see the current \
+                                               list."
+                        .to_owned(),
                     DiffError::NotReverted(paths) => left_unreverted(&paths),
                     DiffError::PartlyReverted(error) => format!(
                         "the files may be partly reverted ({}); reverting again finishes it",
