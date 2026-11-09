@@ -322,6 +322,8 @@ class _AgentShellState extends State<AgentShell> {
           child: Focus(
             focusNode: _focus,
             autofocus: true,
+            // The whole window shows no focus, so Tab passes over it.
+            skipTraversal: true,
             child: Material(
               color: ws.canvas,
               child: Row(

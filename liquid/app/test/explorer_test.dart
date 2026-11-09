@@ -15,6 +15,7 @@ import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'fake_backend.dart';
 import 'fake_workspace.dart';
+import 'focus_kit.dart';
 
 const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
 
@@ -286,5 +287,45 @@ void main() {
     await tester.pumpAndSettle();
     expect(fake.pages.values.single.single.title, 'Pl');
     expect(tester.widget<TextField>(title()).controller!.text, 'Pl');
+  });
+
+  testWidgets('focus and hover show in the sidebar', (tester) async {
+    await show(tester);
+    final context = tester.element(find.byType(Sidebar));
+    final theme = Theme.of(context);
+    await tabTo(
+      tester,
+      find.ancestor(of: inSidebar('Untitled'), matching: find.byType(InkWell)),
+    );
+    expect(
+      find.byType(Sidebar),
+      paintsAbove(context.ws.selected, theme.focusColor),
+      reason: 'the highlight is painted above the open Page\'s row',
+    );
+
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: tester.getCenter(inSidebar('Settings')));
+    addTearDown(mouse.removePointer);
+    await tester.pumpAndSettle();
+    expect(
+      find.byType(Sidebar),
+      paintsAbove(context.ws.subtle, theme.hoverColor),
+      reason: 'the hover is painted above the sidebar',
+    );
+  });
+
+  testWidgets('every Tab stop around the sidebar shows where it is', (
+    tester,
+  ) async {
+    await show(tester);
+    for (var press = 0; press < 8; press++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pumpAndSettle();
+      expect(
+        FocusManager.instance.primaryFocus?.debugLabel,
+        isNot('shell'),
+        reason: 'the whole window is no Tab stop',
+      );
+    }
   });
 }
