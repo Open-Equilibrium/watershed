@@ -125,7 +125,7 @@ No implementation or release claim follows from a documentation decision alone. 
 
 **Current implementation:** One shared one-shot lifecycle uses Linux Bubblewrap/seccomp or macOS Seatbelt to protect this installation's Flow-owned objects. Tool commands and typed parameters, Ready/Start, durable intent, bounded results and self-protection receipts replace broad mount/profile/network/process-capacity policy. Schemas reject removed requirements rather than ignoring them. The wire contract is canonical in [PROTOCOL.md](PROTOCOL.md#m12-executor-protocol); [TESTING.md](TESTING.md#m12-transition-and-executor-evidence) owns executable evidence.
 
-**Contract:** The [security contract](SECURITY.md#accepted-flow-agent-security-target) and [execution/security architecture](docs/concept/flow-agent-executor-architecture.md) define guarantees and Engineer responsibilities. The unreleased migration adds no compatibility aliases.
+**Contract:** The [security contract](SECURITY.md#accepted-flow-agent-security-target) defines guarantees and Engineer responsibilities. The unreleased migration adds no compatibility aliases.
 
 **DoD:** Verify the accepted boundary on both native Flow Agent targets in [PLATFORMS.md](PLATFORMS.md), prove the prebuilt installation contract, and complete the canonical test, performance and review gates. Cross-compilation, historical isolation tests and mechanism experiments do not prove the replacement. Meta-Harness and Liquid never acquire ownership of Flow's Executor or Tool protection.
 

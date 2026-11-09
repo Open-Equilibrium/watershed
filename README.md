@@ -75,7 +75,7 @@ Alternatively, omit the Default Executor explicitly and select an administrator-
 "$HOME/.local/watershed/bin/flow" executor check
 ```
 
-`/bin/sh install/install.sh --help` is the canonical option summary. Custom Executor readiness validates the protocol boundary but is not a compatibility or security certification; see the [Executor architecture](docs/concept/flow-agent-executor-architecture.md).
+`/bin/sh install/install.sh --help` is the canonical option summary. Custom Executor readiness validates the protocol boundary but is not a compatibility or security certification; see the [Executor protocol](PROTOCOL.md#m12-executor-protocol).
 
 ### Developer/test installation on Linux or macOS
 
