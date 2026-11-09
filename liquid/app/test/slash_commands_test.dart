@@ -655,4 +655,55 @@ void main() {
     expect(styleOf(0), BridgeTextStyle.heading1);
     expect(fake.textsOf(page), ['']);
   });
+
+  testWidgets('a quickly typed /ta on a blank Page opens the menu filtered', (
+    tester,
+  ) async {
+    await show(tester, []);
+    // The keys typed while the first Text Block is made arrive together.
+    await tester.enterText(find.byKey(const Key('first-line')), '/ta');
+    await tester.pumpAndSettle();
+    expect(item('Table'), findsOneWidget);
+    expect(item('Text'), findsNothing);
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(fake.views[page]!.first.kind, BridgeBlockKind.database);
+  });
+
+  testWidgets('near the window\'s bottom, the menu opens above the line', (
+    tester,
+  ) async {
+    await show(tester, [
+      for (var line = 0; line < 20; line++) 'Line $line',
+      '',
+    ]);
+    await type(tester, 20, '/');
+    final line = tester.getRect(block(20));
+    final shown = tester.getRect(menu);
+    expect(line.top, greaterThan(450), reason: 'the line is low');
+    expect(shown.bottom, lessThanOrEqualTo(line.top));
+    expect(shown.top, greaterThanOrEqualTo(0));
+  });
+
+  testWidgets('in a low window, the menu scrolls to the chosen command', (
+    tester,
+  ) async {
+    await show(tester, ['']);
+    await tester.binding.setSurfaceSize(const Size(1400, 420));
+    await tester.pumpAndSettle();
+    await type(tester, 0, '/');
+    final shown = tester.getRect(menu);
+    expect(shown.bottom, lessThanOrEqualTo(420), reason: 'it fits the window');
+    expect(
+      tester.getRect(find.text('Type to filter · ↑↓ · ⏎')).bottom,
+      lessThanOrEqualTo(shown.bottom),
+    );
+    // ↑ from the first command chooses the last.
+    await key(tester, LogicalKeyboardKey.arrowUp);
+    final table = tester.getRect(item('Table'));
+    expect(table.top, greaterThanOrEqualTo(shown.top));
+    expect(table.bottom, lessThanOrEqualTo(shown.bottom));
+    await key(tester, LogicalKeyboardKey.arrowDown);
+    final text = tester.getRect(item('Text'));
+    expect(text.top, greaterThanOrEqualTo(shown.top));
+  });
 }

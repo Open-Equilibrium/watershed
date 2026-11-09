@@ -84,7 +84,7 @@ List<SlashCommand> slashCommandsFor(String query) => [
 /// The slash command menu that `/` opens in an empty Text Block, as in Notion and T3 Code
 /// (approved Table View
 /// mockups, section 2): the Text Block styles, then Table, filtered by what follows `/`.
-class SlashCommands extends StatelessWidget {
+class SlashCommands extends StatefulWidget {
   const SlashCommands({
     super.key,
     required this.choices,
@@ -100,10 +100,83 @@ class SlashCommands extends StatelessWidget {
   final ValueChanged<SlashCommand> onChoose;
   final ValueChanged<int> onHover;
 
+  static const _labelHeight = 26.0;
+  static const _footerHeight = 26.0;
+
+  /// A command's height, taller with a description below its label.
+  static double _itemHeight(SlashCommand choice) =>
+      choice.description == null ? 36 : 40;
+
+  /// The height the menu takes with `choices`.
+  static double heightFor(List<SlashCommand> choices) =>
+      2 * WsMetrics.space2 +
+      {for (final choice in choices) choice.style == null}.length *
+          _labelHeight +
+      choices.fold(0.0, (height, choice) => height + _itemHeight(choice)) +
+      WsMetrics.space3 +
+      _footerHeight;
+
+  @override
+  State<SlashCommands> createState() => _SlashCommandsState();
+}
+
+class _SlashCommandsState extends State<SlashCommands> {
+  final _list = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _reveal();
+  }
+
+  @override
+  void didUpdateWidget(SlashCommands old) {
+    super.didUpdateWidget(old);
+    if (widget.chosen != old.chosen || widget.choices != old.choices) _reveal();
+  }
+
+  @override
+  void dispose() {
+    _list.dispose();
+    super.dispose();
+  }
+
+  /// Scrolls the commands to keep the chosen one in view, with its group's label when it
+  /// is the group's first.
+  void _reveal() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_list.hasClients) return;
+      final choices = widget.choices;
+      final index = widget.chosen;
+      if (index >= choices.length) return;
+      final choice = choices[index];
+      final table = choice.style == null;
+      final labels = table && choices.first.style != null ? 2 : 1;
+      final item =
+          labels * SlashCommands._labelHeight +
+          choices
+              .take(index)
+              .fold(
+                0.0,
+                (top, above) => top + SlashCommands._itemHeight(above),
+              );
+      final first = index == 0 || (choices[index - 1].style == null) != table;
+      final position = _list.position;
+      final top = first ? item - SlashCommands._labelHeight : item;
+      final bottom =
+          item + SlashCommands._itemHeight(choice) - position.viewportDimension;
+      if (top < position.pixels) position.jumpTo(top);
+      if (bottom > position.pixels) position.jumpTo(bottom);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    Widget label(String text) => Padding(
+    final SlashCommands(:choices, :chosen, :onChoose, :onHover) = widget;
+    Widget label(String text) => Container(
+      height: SlashCommands._labelHeight,
+      alignment: Alignment.bottomLeft,
       padding: const EdgeInsets.fromLTRB(
         WsMetrics.space3,
         WsMetrics.space2,
@@ -125,7 +198,7 @@ class SlashCommands extends StatelessWidget {
         child: GestureDetector(
           onTap: () => onChoose(choice),
           child: Container(
-            constraints: const BoxConstraints(minHeight: 36),
+            height: SlashCommands._itemHeight(choice),
             padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
             decoration: BoxDecoration(
               color: index == chosen ? ws.hover : null,
@@ -190,14 +263,30 @@ class SlashCommands extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (texts.isNotEmpty) ...[label('Text'), ...texts.map(item)],
-            if (tables.isNotEmpty) ...[label('Table'), ...tables.map(item)],
-            Divider(height: WsMetrics.space3, color: ws.border),
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: WsMetrics.space3,
-                vertical: WsMetrics.space1,
+            // The commands scroll in the height the menu has.
+            Flexible(
+              child: SingleChildScrollView(
+                controller: _list,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (texts.isNotEmpty) ...[
+                      label('Text'),
+                      ...texts.map(item),
+                    ],
+                    if (tables.isNotEmpty) ...[
+                      label('Table'),
+                      ...tables.map(item),
+                    ],
+                  ],
+                ),
               ),
+            ),
+            Divider(height: WsMetrics.space3, color: ws.border),
+            Container(
+              height: SlashCommands._footerHeight,
+              alignment: Alignment.centerLeft,
+              padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
               child: Text(
                 'Type to filter · ↑↓ · ⏎',
                 style: TextStyle(
