@@ -18,15 +18,12 @@ pub struct Revertable {
 }
 
 impl WorkingTree {
-    /// Repositories a whole-checkout reset could overwrite. Share the revert's bounded,
-    /// link-aware search, without restricting it to the session's working folder.
+    /// Repositories a whole-checkout reset could overwrite or delete from. Share the revert's
+    /// bounded, link-aware search, without restricting it to the session's working folder.
     pub(super) fn repositories_in_the_way(&self, changes: &[FileChange]) -> BTreeSet<String> {
         let mut kept = BTreeSet::new();
         let mut budget = MAX_SEARCHED_ENTRIES;
-        for change in changes
-            .iter()
-            .filter(|change| change.status != ChangeStatus::Deleted)
-        {
+        for change in changes {
             if let Some(path) = self.repository_near(&change.path, &kept, &mut budget) {
                 kept.insert(path);
             }

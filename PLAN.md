@@ -67,7 +67,6 @@ Completes the Git integration for the agent's Git project (ADR-0190, ADR-0191, A
 
 Open weaknesses from reviews, fixed in the next bugfix pass:
 
-- Stash restoration skips deleted paths in `diff/revert.rs::repositories_in_the_way`; reject stashed deletions inside nested repositories before mutation, preserving their files, index and stash.
 - A confirmed default-branch push is not bound to the resolved repository, and symbolic push refs are not resolved before that check (`diff/sync.rs`).
 - Push destinations compare SSH URLs without their user names (`diff/sync.rs`).
 - A fast-forward pull can overwrite ignored local files (`diff/sync.rs`).

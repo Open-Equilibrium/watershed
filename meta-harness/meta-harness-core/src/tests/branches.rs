@@ -3215,3 +3215,46 @@ fn automatic_fetch_never_writes_through_a_linked_remote_ref_directory() {
         }
     });
 }
+
+#[test]
+fn restoring_never_applies_a_stashed_deletion_inside_a_nested_repository() {
+    run(async {
+        let repo = Repo::new("stash-deletion-in-repository");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        std::fs::create_dir(repo.path().join("dir")).expect("folder");
+        repo.write("dir/x.txt", "tracked\n");
+        repo.git(&["add", "dir/x.txt"]);
+        repo.git(&["commit", "-qm", "track dir/x.txt"]);
+        repo.git(&["branch", "other"]);
+        std::fs::remove_file(repo.path().join("dir/x.txt")).expect("delete");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("left");
+        checkpoints
+            .switch_branch(&local(&main), Changes::Bring)
+            .await
+            .expect("back");
+        // Meanwhile the folder became a repository of its own, which tracks the file.
+        let nested = Repo(repo.path().join("dir"));
+        nested.git(&["init", "-q"]);
+        nested.git(&["add", "x.txt"]);
+        nested.git(&["commit", "-qm", "nested"]);
+        let nested_index = std::fs::read(nested.path().join(".git/index")).expect("index");
+        let stash = stash_of(&checkpoints).await;
+
+        let restored = checkpoints.restore_stash(&stash).await;
+
+        assert!(
+            matches!(restored, Err(DiffError::WouldOverwrite(ref paths)) if paths == &["dir"]),
+            "{restored:?}"
+        );
+        assert_eq!(read(&repo, "dir/x.txt"), "tracked\n");
+        assert_eq!(
+            std::fs::read(nested.path().join(".git/index")).expect("index"),
+            nested_index
+        );
+        assert_eq!(repo.git(&["rev-parse", "refs/stash"]).trim(), stash);
+    });
+}
