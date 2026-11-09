@@ -56,5 +56,5 @@ flowchart TD
 
 ## Risks against the current V-Spec
 
-- **CRDT merge versus Roles:** every replica applies received changes through its own mutation pipeline ([`SECURITY.md`](../../SECURITY.md)), so a change one replica rejects and another accepts breaks convergence. ADR-0238's spike must prove that Roles reject such a change identically on every replica.
+- **CRDT merge versus Roles:** every replica applies received changes through its own mutation pipeline ([`SECURITY.md`](../../SECURITY.md)), so a change one replica rejects and another accepts breaks convergence. Roles must therefore reject such a change identically on every replica, as ADR-0238's spike showed with rule 11.
 - **Variable-height virtualization:** Views whose height is unknown until built cause scroll jumps; rule 5's persisted heights are the mitigation and need observational evidence.
