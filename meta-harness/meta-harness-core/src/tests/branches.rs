@@ -2623,6 +2623,85 @@ fn a_stash_another_git_stores_meanwhile_survives_a_discard_and_a_restore() {
 }
 
 #[test]
+fn discarding_drops_liquids_entry_not_a_personal_one_of_the_same_commit() {
+    run(async {
+        let repo = Repo::new("stash-shared-commit");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.git(&["branch", "other"]);
+        repo.write("a.txt", "mine\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("left");
+        checkpoints
+            .switch_branch(&local(&main), Changes::Bring)
+            .await
+            .expect("back");
+        let mine = stash_of(&checkpoints).await;
+        // The user keeps the same commit as a stash of their own, newest in the list.
+        let theirs = external_stash(&repo, "theirs\n");
+        repo.git(&["stash", "store", "-m", "theirs", &theirs]);
+        repo.git(&["stash", "store", "-m", "personal", &mine]);
+
+        checkpoints.discard_stash(&mine).await.expect("discarded");
+
+        assert_eq!(
+            repo.git(&["stash", "list", "--format=%H %gs"]),
+            format!("{mine} personal\n{theirs} theirs\n")
+        );
+    });
+}
+
+#[test]
+fn a_stash_liquid_cannot_put_back_is_named_for_recovery() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        let repo = Repo::new("stash-repair-fails");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.git(&["branch", "other"]);
+        repo.write("a.txt", "mine\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("left");
+        checkpoints
+            .switch_branch(&local(&main), Changes::Bring)
+            .await
+            .expect("back");
+        let mine = stash_of(&checkpoints).await;
+        let theirs = external_stash(&repo, "theirs\n");
+        let root = repo.path().to_owned();
+        let stored = theirs.clone();
+        // Another Git stores a stash on top, then refuses every later stash update.
+        crate::diff::before_drop(repo.path(), move || {
+            let external = Repo(root.clone());
+            external.git(&["stash", "store", "-m", "theirs", &stored]);
+            std::mem::forget(external);
+            let hook = root.join(".git/hooks/reference-transaction");
+            std::fs::write(
+                &hook,
+                "#!/bin/sh\n[ \"$1\" = prepared ] && grep -q refs/stash && exit 1\nexit 0\n",
+            )
+            .expect("hook");
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755))
+                .expect("executable");
+        });
+
+        let discarded = checkpoints.discard_stash(&mine).await;
+
+        let error = discarded
+            .expect_err("the other stash was not put back")
+            .to_string();
+        assert!(
+            error.contains(&format!("git stash store {theirs}")),
+            "{error}"
+        );
+    });
+}
+
+#[test]
 fn a_concurrent_store_during_save_preserves_the_own_stash_and_index() {
     run(async {
         for refused in [false, true] {

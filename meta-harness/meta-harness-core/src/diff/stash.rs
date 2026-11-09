@@ -351,7 +351,13 @@ impl WorkingTree {
                 &self.root,
                 &["stash", "store", "-m", subject.trim_end(), dropped],
             )
-            .await?;
+            .await
+            .map_err(|error| {
+                DiffError::Git(format!(
+                    "Git dropped another stash while Liquid dropped its own, and could not put \
+                     it back ({error}). Recover it with `git stash store {dropped}`."
+                ))
+            })?;
         }
         Err(DiffError::Git(
             "the stash list kept changing while Liquid dropped its stash".to_owned(),
@@ -506,19 +512,7 @@ impl WorkingTree {
     /// Deletes the stashed changes `id` left on a branch.
     pub async fn discard_stash(&self, id: &str) -> Result<(), DiffError> {
         let _stash = self.checkout().stash_alone().await?;
-        self.liquid_stash(id).await?;
         self.drop_stash(id).await
-    }
-
-    /// Refuses `id` unless it names changes Liquid left on a branch, so no stash of the user's
-    /// own is popped or dropped.
-    async fn liquid_stash(&self, id: &str) -> Result<(), DiffError> {
-        self.stashes()
-            .await?
-            .into_iter()
-            .any(|entry| entry.id == id && entry.branch.is_some())
-            .then_some(())
-            .ok_or(DiffError::NoStash)
     }
 
     /// The entry Liquid left for the branch checked out.
@@ -533,12 +527,13 @@ impl WorkingTree {
             .find(|entry| entry.branch.as_deref() == Some(branch.as_str())))
     }
 
-    /// The current place of the stash commit `id`.
+    /// The current place of the stash commit `id` among the changes Liquid left on a branch,
+    /// so no stash of the user's own is popped or dropped, even one of the same commit.
     async fn place_of(&self, id: &str) -> Result<String, DiffError> {
         self.stashes()
             .await?
             .into_iter()
-            .find(|entry| entry.id == id)
+            .find(|entry| entry.id == id && entry.branch.is_some())
             .map(|entry| entry.place)
             .ok_or(DiffError::NoStash)
     }
