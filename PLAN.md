@@ -68,7 +68,6 @@ Completes the Git integration for the agent's Git project (ADR-0190, ADR-0191, A
 Open weaknesses from reviews, fixed in the next bugfix pass:
 
 - Commits pushed from elsewhere between the recheck and the pull request creation request join the new pull request unreviewed.
-- `liquid/liquid-bridge/src/ready.rs` does not enforce the startup event limit, so an agent process can exceed the bound before the session is ready.
 - Pending bridge queries block Stop and answers, so a user cannot stop a running agent while a query is pending.
 
 #### M3a — Local Workspace foundation

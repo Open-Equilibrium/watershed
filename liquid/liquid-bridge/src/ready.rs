@@ -12,9 +12,9 @@ pub(crate) const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 /// Time an agent gets to confirm Watershed's extension after it starts.
 #[cfg(not(test))]
-pub(crate) const START_TIMEOUT: Duration = Duration::from_secs(30);
+const START_TIMEOUT: Duration = Duration::from_secs(30);
 #[cfg(test)]
-pub(crate) const START_TIMEOUT: Duration = Duration::from_secs(2);
+const START_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Most events kept from an agent that is starting; one that says more is not ready.
 const EARLY_EVENTS: usize = 4096;
@@ -36,28 +36,33 @@ pub(crate) async fn error_output(receiver: &mut mpsc::Receiver<SessionEvent>) ->
 }
 
 /// Waits until the agent confirms Watershed's extension, keeping the events it sends meanwhile
-/// so they cannot fill the session's channel; `None` when it does not answer in time or says
-/// too much first.
+/// so they cannot fill the session's channel; why it is not ready when it does not answer in
+/// time or says too much first.
 pub(crate) async fn ready(
     session: &mut Session,
     receiver: &mut mpsc::Receiver<SessionEvent>,
-) -> (Option<Result<(), CommandError>>, Vec<SessionEvent>) {
+) -> (Result<Result<(), CommandError>, String>, Vec<SessionEvent>) {
     let mut early = Vec::new();
     // Boxed rather than `pin!`, which flutter_rust_bridge's code generator cannot parse.
     let mut check = Box::pin(session.require_extension());
     let mut limit = Box::pin(tokio::time::sleep(START_TIMEOUT));
     let gate = std::future::poll_fn(|context| {
         if let Poll::Ready(gate) = check.as_mut().poll(context) {
-            return Poll::Ready(Some(gate));
+            return Poll::Ready(Ok(gate));
         }
-        while early.len() < EARLY_EVENTS {
-            match receiver.poll_recv(context) {
-                Poll::Ready(Some(event)) => early.push(event),
-                _ => break,
+        while let Poll::Ready(Some(event)) = receiver.poll_recv(context) {
+            if early.len() == EARLY_EVENTS {
+                return Poll::Ready(Err(format!(
+                    "pi sent more than {EARLY_EVENTS} events before it was ready"
+                )));
             }
+            early.push(event);
         }
         if limit.as_mut().poll(context).is_ready() {
-            return Poll::Ready(None);
+            return Poll::Ready(Err(format!(
+                "pi did not answer within {} s of starting",
+                START_TIMEOUT.as_secs()
+            )));
         }
         Poll::Pending
     })

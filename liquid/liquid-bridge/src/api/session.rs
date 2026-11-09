@@ -20,7 +20,7 @@ use crate::api::history::{
 };
 use crate::convert::describe;
 use crate::frb_generated::StreamSink;
-use crate::ready::{SHUTDOWN_GRACE, START_TIMEOUT, error_output, ready};
+use crate::ready::{SHUTDOWN_GRACE, error_output, ready};
 use crate::stream::{STREAM_WINDOW, gather, push};
 
 pub(crate) static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
@@ -122,9 +122,9 @@ impl AgentSession {
         // it within a time limit; dropping the session ends the agent.
         let (gate, mut early) = RUNTIME.block_on(ready(&mut session, &mut receiver));
         match gate {
-            Some(Ok(())) => {}
+            Ok(Ok(())) => {}
             // An agent that ended at once says why on its error output.
-            Some(Err(CommandError::Closed)) => {
+            Ok(Err(CommandError::Closed)) => {
                 let output = early
                     .iter()
                     .find_map(|event| match event {
@@ -136,13 +136,8 @@ impl AgentSession {
                     .filter(|output| !output.is_empty())
                     .unwrap_or_else(|| describe(CommandError::Closed)));
             }
-            Some(Err(error)) => return Err(describe(error)),
-            None => {
-                return Err(format!(
-                    "pi did not answer within {} s of starting",
-                    START_TIMEOUT.as_secs()
-                ));
-            }
+            Ok(Err(error)) => return Err(describe(error)),
+            Err(not_ready) => return Err(not_ready),
         }
         early.shrink_to_fit();
         let stopper = session.stopper();

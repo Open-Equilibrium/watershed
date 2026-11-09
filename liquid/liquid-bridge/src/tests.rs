@@ -1391,6 +1391,19 @@ fn starts_after_an_agent_says_much_before_it_is_ready() {
 }
 
 #[test]
+fn refuses_an_agent_that_says_too_much_before_it_is_ready() {
+    // One event more than a starting agent may send, then the answer to the start check.
+    let script = r#"i=0; while [ $i -le 4096 ]; do printf '%s\n' "{\"type\":\"extension_ui_request\",\"id\":\"s$i\",\"method\":\"setStatus\",\"statusKey\":\"k\",\"statusText\":\"$i\"}"; i=$((i+1)); done
+"#
+    .to_owned()
+        + &gated("IFS= read -r line || exit 0");
+    let error = launch(script, std::env::temp_dir().display().to_string())
+        .err()
+        .expect("no session starts");
+    assert!(error.contains("4096 events"), "{error}");
+}
+
+#[test]
 fn gives_up_on_an_agent_that_never_says_it_is_ready() {
     let (done, started) = mpsc::channel();
     std::thread::spawn(move || {
