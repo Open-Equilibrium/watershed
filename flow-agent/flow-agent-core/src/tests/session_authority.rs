@@ -55,6 +55,25 @@ fn private_ownership_observer_tracks_the_canonical_workspace_path_after_replacem
     );
 }
 
+#[test]
+fn observer_opened_before_first_lease_tracks_later_ownership() {
+    let workspace = empty_workspace("ownership-observer-before-first-lease");
+    let session_id = "ownershipobserverfirst001";
+    let observer = SessionOwnershipObserver::open(&workspace, session_id)
+        .expect("observer opens before any lease exists");
+    assert!(!observer.is_active().expect("absent authority reads"));
+
+    let marker = workspace.join("first.lock");
+    let lease = SessionOwnershipLease::acquire(&workspace, session_id, &marker)
+        .expect("first lease acquires");
+    assert!(
+        observer.is_active().expect("held lease reads"),
+        "an observer opened before the first lease must see it"
+    );
+    lease.release().expect("first lease releases");
+    assert!(!observer.is_active().expect("released lease reads"));
+}
+
 const OWNERSHIP_CHILD_WORKSPACE: &str = "WATERSHED_TEST_OWNERSHIP_CHILD_WORKSPACE";
 const OWNERSHIP_CHILD_SESSION_ID: &str = "WATERSHED_TEST_OWNERSHIP_CHILD_SESSION_ID";
 
