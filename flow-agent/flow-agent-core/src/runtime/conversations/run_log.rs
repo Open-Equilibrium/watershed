@@ -304,6 +304,9 @@ pub(crate) fn project_tool_run_log_page(
             page.continuation_cursor = None;
         }
         let Some(next) = next_quantum else {
+            if source_index == 0 {
+                return Err(protocol("run log must begin with a definition record"));
+            }
             return Ok(page);
         };
         quantum_cursor = Some(next);
