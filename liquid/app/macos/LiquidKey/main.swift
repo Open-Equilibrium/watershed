@@ -170,6 +170,8 @@ signal(SIGTERM, SIG_IGN)
 register(shiftKey, shiftedID, &shifted)
 follow(NSWorkspace.shared.frontmostApplication)
 remap()
+// Keyboards attached before the start may get their HID service later too.
+remapLater()
 let workspace = NSWorkspace.shared.notificationCenter
 workspace.addObserver(
     forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
