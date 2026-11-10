@@ -101,7 +101,7 @@ class EditorTarget {
     required this.caret,
     required this.style,
     this.boundary = false,
-    this.first = false,
+    this.slash = false,
   });
 
   final String view;
@@ -112,8 +112,9 @@ class EditorTarget {
   BridgeTextStyle style;
   bool boundary;
 
-  /// Whether an empty Page's first line made it.
-  final bool first;
+  /// Whether an empty Page's first line made it from `/` alone, which opens slash commands
+  /// filtered by what is typed after it.
+  final bool slash;
 }
 
 /// A key waiting for the change before it, with what its field held when it was pressed.
@@ -310,7 +311,7 @@ class PageEditor {
           text: first.text,
           caret: _caret(first),
           style: BridgeTextStyle.paragraph,
-          first: true,
+          slash: first.text == '/',
         );
         _known[target.block] = target.text;
         await _markdown(target, '');
@@ -421,7 +422,7 @@ class PageEditor {
     target.caret,
     text: target.text,
     style: target.style,
-    first: target.first,
+    slash: target.slash,
   );
 
   /// Offers the caret to the target's Text Block. True once it took it or the Page closed;

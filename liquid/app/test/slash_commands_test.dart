@@ -660,13 +660,29 @@ void main() {
     tester,
   ) async {
     await show(tester, []);
-    // The keys typed while the first Text Block is made arrive together.
-    await tester.enterText(find.byKey(const Key('first-line')), '/ta');
+    fake
+      ..gate = Completer()
+      ..gatedKinds = {BridgeMutationKind.addTextBlock};
+    final first = find.byKey(const Key('first-line'));
+    await tester.enterText(first, '/');
+    await tester.pump();
+    // Keys typed while the first Text Block is made arrive with it.
+    await tester.enterText(first, '/ta');
+    await tester.pump();
+    fake.gate!.complete();
     await tester.pumpAndSettle();
     expect(item('Table'), findsOneWidget);
     expect(item('Text'), findsNothing);
     await key(tester, LogicalKeyboardKey.enter);
     expect(fake.views[page]!.first.kind, BridgeBlockKind.database);
+  });
+
+  testWidgets('text pasted on a blank Page opens no menu', (tester) async {
+    await show(tester, []);
+    await tester.enterText(find.byKey(const Key('first-line')), '/quote');
+    await tester.pumpAndSettle();
+    expect(menu, findsNothing);
+    expect(fake.textsOf(page), ['/quote']);
   });
 
   testWidgets('a line left alone by a join opens no menu', (tester) async {

@@ -482,7 +482,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     _focus.requestFocus();
     // `/` typed on a blank Page opens the slash command menu in the Text Block it made, also
     // with the keys typed after it while the Block was made.
-    if (caret.text case final text? when caret.first) {
+    if (caret.text case final text? when caret.slash) {
       _offer(text, '', handed: true);
     }
     final length = _text.text.length;

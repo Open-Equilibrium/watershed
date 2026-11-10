@@ -16,7 +16,7 @@ class Caret {
     this.offset, {
     this.text,
     this.style,
-    this.first = false,
+    this.slash = false,
   });
 
   final String view;
@@ -31,8 +31,9 @@ class Caret {
   /// How that Text Block reads, as the input queue last set it.
   final BridgeTextStyle? style;
 
-  /// Whether an empty Page's first line made that Text Block, handing over what was typed.
-  final bool first;
+  /// Whether an empty Page's first line made that Text Block from `/` alone, handing over
+  /// what was typed after it.
+  final bool slash;
 }
 
 /// An open Page's Views in order, read in windows as the Page scrolls to them, and reread
