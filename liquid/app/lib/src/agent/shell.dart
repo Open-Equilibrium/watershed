@@ -168,8 +168,10 @@ class _AgentShellState extends State<AgentShell> {
     final state = widget.state!;
     final draft = state.draft.value;
     if (draft == null) return;
-    final typed = _composer.text.trim();
-    final text = typed.isEmpty || typed == draft ? draft : '$draft\n\n$typed';
+    final typed = _composer.text;
+    final bare = typed.trim();
+    // The typed text comes back as it was typed; only the emptiness and equality checks trim it.
+    final text = bare.isEmpty || bare == draft ? draft : '$draft\n\n$typed';
     _composer.value = TextEditingValue(
       text: text,
       selection: TextSelection.collapsed(offset: text.length),
