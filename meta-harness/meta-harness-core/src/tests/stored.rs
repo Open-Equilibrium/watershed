@@ -174,6 +174,33 @@ fn lists_a_linked_session_file_but_not_a_linked_pipe() {
 }
 
 #[test]
+fn leaves_out_the_open_session_also_through_a_link() {
+    let dir = std::env::temp_dir().join(format!("watershed-open-link-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("directory");
+    let prompt = r#"{"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Open now"}}"#;
+    session(&dir, "open", "/work/acme-api", &[prompt], 3_000);
+    std::os::unix::fs::symlink(dir.join("open.jsonl"), dir.join("linked.jsonl")).expect("link");
+    session(&dir, "other", "/work/acme-api", &[prompt], 1_000);
+    let recent = recent_sessions(
+        &dir,
+        Path::new("/work/acme-api"),
+        Some(&dir.join("open.jsonl")),
+        1,
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(
+        recent
+            .expect("listing")
+            .into_iter()
+            .map(|session| session.path)
+            .collect::<Vec<_>>(),
+        [dir.join("other.jsonl")],
+        "a link to the open session is the open session, so another one fills the limit"
+    );
+}
+
+#[test]
 fn names_the_open_session_as_the_start_page_does() {
     let dir = std::env::temp_dir().join(format!("watershed-title-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

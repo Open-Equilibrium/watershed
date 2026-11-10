@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -42,11 +42,22 @@ pub fn recent_sessions(
     exclude: Option<&Path>,
     limit: usize,
 ) -> std::io::Result<Vec<StoredSession>> {
+    // Left out by file rather than by spelling, so a link to the open session does not list it.
+    let open = exclude
+        .and_then(|path| path.metadata().ok())
+        .map(|file| (file.dev(), file.ino()));
     let mut files: Vec<(u64, PathBuf)> = session_files(dir)?
-        .filter(|path| Some(path.as_path()) != exclude)
         .filter_map(|path| {
-            let modified = path.metadata().ok()?.modified().ok()?;
-            let millis = modified.duration_since(UNIX_EPOCH).ok()?.as_millis();
+            let file = path.metadata().ok()?;
+            if Some((file.dev(), file.ino())) == open {
+                return None;
+            }
+            let millis = file
+                .modified()
+                .ok()?
+                .duration_since(UNIX_EPOCH)
+                .ok()?
+                .as_millis();
             Some((u64::try_from(millis).ok()?, path))
         })
         .collect();
