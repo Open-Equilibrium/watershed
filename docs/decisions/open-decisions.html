@@ -41,15 +41,15 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
       </details>
       <details id="d-077" class="decision">
         <summary><h3>D-077 - Unicode Form Of Tool Scripts And Arguments</h3></summary>
-        <p><strong>Status:</strong> Open before the first Flow Agent release. The same letter can be stored as different bytes, for example "é" as one character or as "e" plus an accent; Unicode NFC is the form that always uses the single character. <a href="../../PROTOCOL.md#m11-authoring-cli-grammar">PROTOCOL.md</a> says Tool text "is preserved as exact UTF-8", but building the registry converts every own-script body and argument literal to NFC, and a <code>core-script</code> test asserts that conversion. The published file keeps the authored bytes, so the bytes that run can differ from the bytes on disk. Host paths in an Executor request are already refused when they are not NFC.</p>
-        <p><strong>Question:</strong> May Flow Agent change the bytes of a Tool's script body and arguments to NFC before running them?</p>
+        <p><strong>Status:</strong> Open before the first Flow Agent release. The same letter can be stored as different bytes, for example "é" as one character or as "e" plus an accent; Unicode NFC is the form that always uses the single character. <a href="../../PROTOCOL.md#m11-authoring-cli-grammar">PROTOCOL.md</a> says Tool text "is preserved as exact UTF-8", but building the registry converts every own-script body and argument literal to NFC, and a <code>core-script</code> test asserts that conversion. The request Flow Agent sends the Executor also converts each argument and environment value to NFC, and environment values come from the host, where they can be in the other form. The published file keeps the authored bytes, so the bytes that run can differ from the bytes on disk. Host paths in an Executor request are already refused when they are not NFC.</p>
+        <p><strong>Question:</strong> May Flow Agent change the bytes of a Tool's script body, arguments and environment values to NFC before running them?</p>
         <ul>
-          <li><strong>A: Refuse script bodies and arguments that are not NFC</strong> when the Tool is created or validated. Pro: the stored and the executed bytes always match, and nothing is rewritten silently. Con: an Engineer whose editor or file system produced the other form must convert the text once.</li>
+          <li><strong>A: Refuse script bodies, arguments and environment values that are not NFC</strong> when the Tool is created or validated, or, for a value from the host, before the Tool starts. Pro: the stored and the executed bytes always match, and nothing is rewritten silently. Con: an Engineer whose editor or file system produced the other form must convert the text once.</li>
           <li><strong>B: Keep converting, and say so in PROTOCOL.md.</strong> Pro: no change for existing definitions. Con: a script that names a file whose name uses the other form opens a different or missing file on Linux, and the executed text is not the reviewed text.</li>
           <li><strong>C: Stop converting these fields</strong> and run the authored bytes. Pro: matches the documented sentence. Con: the canonical hash of a definition then depends on the form, so two definitions that look identical get different hashes.</li>
         </ul>
         <p><strong>Recommendation:</strong> A, the rule the Executor request already follows for paths.</p>
-        <p><strong>Acceptance criterion:</strong> PROTOCOL.md states one rule for script bodies, argument literals, patterns and allowed values; a test shows a definition in the other form is refused (A), runs converted (B) or runs unchanged (C), and the contradicting test or sentence is gone.</p>
+        <p><strong>Acceptance criterion:</strong> PROTOCOL.md states one rule for script bodies, argument literals, patterns, allowed values and the Executor request's arguments and environment values; a test shows a definition in the other form is refused (A), runs converted (B) or runs unchanged (C), and the contradicting test or sentence is gone.</p>
       </details>
       <details id="d-078" class="decision">
         <summary><h3>D-078 - A Cut-Off Last Line In A Run's Event Log</h3></summary>
@@ -85,6 +85,17 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         </ul>
         <p><strong>Recommendation:</strong> B, with the Run stopping after it records the answer.</p>
         <p><strong>Acceptance criterion:</strong> A macOS test with a child that cannot be ended shows the chosen behavior, and SECURITY.md states it under effects and recovery.</p>
+      </details>
+      <details id="d-082" class="decision">
+        <summary><h3>D-082 - Replaying A Tool Cancelled Before It Started</h3></summary>
+        <p><strong>Status:</strong> Open before the first Flow Agent release. When a Tool call is cancelled before the Executor started it, the live Run records no "Tool started" event. After a crash, recovery replays the call from its durable record, which <a href="../../PROTOCOL.md#local-run-storage-and-m11-conversation-trees">PROTOCOL.md</a> fixes as exactly <code>{"schema":"flow-attempt-cancelled-v0"}</code> for every stage, so recovery cannot tell when the cancellation happened and always replays a "Tool started" event first. The replayed history then shows a start that never happened.</p>
+        <p><strong>Question:</strong> Should the cancelled record say at which stage the call was cancelled?</p>
+        <ul>
+          <li><strong>A: Add the stage</strong> (before start or after start) in a new version of the record, as the Executor's stage errors already do. Pro: replay matches what happened. Con: one more durable format version to read and test.</li>
+          <li><strong>B: Keep the record and document</strong> that a recovered early cancellation replays with a start event. Pro: no format change. Con: recovered history contains an event that never happened.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> A.</p>
+        <p><strong>Acceptance criterion:</strong> PROTOCOL.md defines the record; a test cancels a call before and after start, recovers both Runs and shows the replayed events match the live ones (A), or PROTOCOL.md states the difference (B).</p>
       </details>
     </div>
   </section>
@@ -148,6 +159,42 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <p><strong>Recommendation:</strong> B, which matches the background service <a href="#d-021">D-021</a> recommends: agents survive the window, and the operating system supervises the service instead of our own restart code.</p>
         <p><strong>Acceptance criterion:</strong> The ADR log names who starts and stops the service, and tests show Liquid connecting to a running service and reporting one it cannot reach.</p>
       </details>
+      <details id="d-083" class="decision">
+        <summary><h3>D-083 - Where The Lock For Folders Outside Git Lives</h3></summary>
+        <p><strong>Status:</strong> Open. In a folder without Git, Meta-Harness stops a session from being deleted or Git from being set up while an agent works there through a lock file in the system's temporary folder (<a href="../../SECURITY.md#mvp-vcs-boundary">SECURITY.md</a>). That folder comes from the <code>TMPDIR</code> setting, which can differ between two programs of the same person, for example on Linux when Liquid is started once from a terminal and once from the desktop. The two then use different lock files and do not see each other's agent.</p>
+        <p><strong>Question:</strong> Where should that lock live?</p>
+        <ul>
+          <li><strong>A: Keep the temporary folder</strong> and record the gap as an accepted risk in SECURITY.md. Pro: no change. Con: the protection depends on how the app was started.</li>
+          <li><strong>B: A fixed per-user folder</strong> that does not depend on <code>TMPDIR</code> (<code>XDG_RUNTIME_DIR</code> on Linux, Liquid's per-user support folder on macOS), with today's owner-only checks. Pro: every program of the person finds the same lock. Con: one more place Watershed owns, and a one-time switch while an old version still runs.</li>
+          <li><strong>C: The operating system's own per-user temporary folder</strong>, ignoring <code>TMPDIR</code>. Pro: no new folder. Con: differs per OS and is less obvious to a reader.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> B.</p>
+        <p><strong>Acceptance criterion:</strong> SECURITY.md names the lock's place; a test starts two processes with different <code>TMPDIR</code> values and shows one refusing to delete a session the other's agent uses (B, C), or SECURITY.md lists the accepted risk (A).</p>
+      </details>
+      <details id="d-084" class="decision">
+        <summary><h3>D-084 - Commit Attribution When A Turn's Start Checkpoint Is Gone</h3></summary>
+        <p><strong>Status:</strong> Open. The commit dialog marks each file as changed by the agent's turns, by the person, or both, by comparing the checkpoints taken at the start and end of each turn. When a turn's start checkpoint is missing, for example after its removal, that turn is skipped and the comparison restarts at the next one. Files changed during the uncovered stretch are then labeled as if attribution were complete, and a test deliberately labels changes before the first available start as the person's.</p>
+        <p><strong>Question:</strong> What should the dialog say about files whose changes fall into a stretch without checkpoints?</p>
+        <ul>
+          <li><strong>A: Attribution unavailable for the whole commit</strong> when any start checkpoint is missing. Pro: simplest and never wrong. Con: one old gap hides every label.</li>
+          <li><strong>B: Unavailable only for the files changed in the uncovered stretch</strong>; the others keep their labels. Pro: precise. Con: the existing test and the dialog's notes change.</li>
+          <li><strong>C: Keep today's labels</strong> and document them. Pro: no change. Con: a label can name the person for an agent's edit.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> B.</p>
+        <p><strong>Acceptance criterion:</strong> The Meta-Harness V-Spec states the rule; a test removes one start checkpoint and shows the chosen labels.</p>
+      </details>
+      <details id="d-085" class="decision">
+        <summary><h3>D-085 - A Byte Limit For Buffered Agent Events</h3></summary>
+        <p><strong>Status:</strong> Open. While a session starts, Meta-Harness keeps up to 4,096 agent events until Liquid listens, and later up to 256; each event may be up to 16 MiB. The limits count events, not bytes, so an agent that sends huge events can make Liquid hold many gigabytes. The agent itself runs with the person's permissions (ADR-0252, ADR-0254), so it could exhaust memory in other ways too.</p>
+        <p><strong>Question:</strong> Should buffered agent events have a byte limit?</p>
+        <ul>
+          <li><strong>A: A byte limit for the startup buffer only.</strong> Pro: small. Con: the later buffer stays unbounded in bytes.</li>
+          <li><strong>B: One byte limit per session</strong> for every buffered event, in the core and the bridge. Pro: complete. Con: more code, and a limit to choose and explain.</li>
+          <li><strong>C: Record agent output volume as an accepted risk</strong> of a trusted agent in SECURITY.md. Pro: no code. Con: a misbehaving extension can still freeze Liquid.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> C now, since the agent is trusted by design; B if agents become untrusted.</p>
+        <p><strong>Acceptance criterion:</strong> SECURITY.md states the bound or the accepted risk; for A or B a test shows the limit refusing the event that crosses it.</p>
+      </details>
     </div>
   </section>
 
@@ -172,6 +219,30 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         </ul>
         <p><strong>Recommendation:</strong> A.</p>
         <p><strong>Acceptance criterion:</strong> A test opens a Workspace, moves its folder and opens it again; SECURITY.md says what identifies the key.</p>
+      </details>
+      <details id="d-086" class="decision">
+        <summary><h3>D-086 - Restoring A Chat While A Turn Ends</h3></summary>
+        <p><strong>Status:</strong> Open. When Liquid opens or restores a Chat, it reads the conversation, the token usage and the turns in three separate requests. If a turn ends or usage changes between them, Liquid can miss that change until the next restore. Every restore Liquid starts itself runs while the agent is idle, so this happens only when something outside Liquid starts a turn, such as a pi extension.</p>
+        <p><strong>Question:</strong> Should Liquid close this gap?</p>
+        <ul>
+          <li><strong>A: One read that names the last event it covers</strong>, with newer events applied on top. Pro: exact. Con: a new bridge method and more code.</li>
+          <li><strong>B: Hold live events during the restore</strong> and apply them after. Pro: no new bridge method. Con: some events can count twice.</li>
+          <li><strong>C: Record it as an accepted limit</strong> while extensions cannot start turns in the MVP. Pro: no code. Con: totals can be off until the next restore.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> C, unless turns started by extensions are in MVP scope.</p>
+        <p><strong>Acceptance criterion:</strong> The Meta-Harness V-Spec states the limit (C), or a test ends a turn during a restore and shows it counted once (A, B).</p>
+      </details>
+      <details id="d-087" class="decision">
+        <summary><h3>D-087 - The Dark Yellow Tag's Contrast</h3></summary>
+        <p><strong>Status:</strong> Open. The <a href="../design/guidelines.md">design guidelines</a> require WCAG AA text contrast (4.5:1). In dark mode, tag text on the yellow tag color <code>--ws-tag-4</code> reaches 4.18:1; every other tag passes, the lowest at 5.16:1. No test checks tag colors yet.</p>
+        <p><strong>Question:</strong> How should the yellow tag reach AA?</p>
+        <ul>
+          <li><strong>A: Darken the dark yellow</strong> slightly, toward <code>#7d5a26</code>. Pro: smallest change; the other nine tags keep Notion's look. Con: yellow looks a little browner.</li>
+          <li><strong>B: Make dark tag text brighter</strong> for every tag. Pro: one value. Con: every tag changes.</li>
+          <li><strong>C: Keep Notion's color</strong> as a recorded exception. Pro: Notion parity. Con: breaks the guidelines' own rule.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> A.</p>
+        <p><strong>Acceptance criterion:</strong> A design-token test checks every tag pair in both themes and passes.</p>
       </details>
     </div>
   </section>
