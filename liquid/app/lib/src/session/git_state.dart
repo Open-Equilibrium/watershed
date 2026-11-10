@@ -251,8 +251,9 @@ class GitState {
     }
   }
 
-  /// Waits until the most recent read has published before settling a write.
-  Future<void> _refreshAfterWrite() async {
+  /// Reads again and waits until the most recent read has published, which a poll started
+  /// meanwhile can overtake; a write settles on it, and a choice reads what it decides on.
+  Future<void> refreshSettled() async {
     var pending = refresh();
     while (true) {
       await pending;
@@ -465,7 +466,7 @@ class GitState {
           'Could not $action: $error${nothingTransferred(action)}',
         );
         // Git may have changed something before it failed.
-        await _refreshAfterWrite();
+        await refreshSettled();
         return null;
       }
       if (outcome.transfer case final transfer?
@@ -479,7 +480,7 @@ class GitState {
         _fetched = DateTime.now();
         _fetchedRemote = transfer.remote;
       }
-      await _refreshAfterWrite();
+      await refreshSettled();
       final now = problem.value == null ? status.value : null;
       final files = outcome.files.join(', ');
       switch (outcome.kind) {

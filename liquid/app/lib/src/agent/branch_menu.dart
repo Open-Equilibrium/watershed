@@ -177,7 +177,7 @@ Future<void> _switch(
 ) async {
   final git = state.git;
   // Read again, since a change saved while the menu was open must be asked about.
-  await git.refresh();
+  await git.refreshSettled();
   if (!context.mounted) return;
   if (git.problem.value case final problem?) {
     state.notify(BridgeLevel.error, 'Could not read the checkout: $problem');

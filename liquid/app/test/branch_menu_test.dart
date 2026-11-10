@@ -284,6 +284,32 @@ void main() {
     await tester.pump(const Duration(seconds: 7));
   });
 
+  testWidgets('a read overtaken by a newer one still asks about changes', (
+    tester,
+  ) async {
+    await show(tester, git: gitStatusOf());
+    await openMenu(tester);
+    final changed = await (FakeBackend()..git = gitStatusOf(changed: 4))
+        .gitStatus();
+    final selection = backend.statusGate = Completer();
+    await tester.tap(find.text('origin/release-1.2'));
+    await tester.pump();
+    // A poll starts while the switch's own read is pending and outlives it.
+    final poll = backend.statusGate = Completer();
+    unawaited(state.git.refresh());
+    selection.complete(changed);
+    await tester.pump();
+    poll.complete(changed);
+    await tester.pumpAndSettle();
+    expect(find.text('Leave my changes on main'), findsOneWidget);
+    expect(
+      backend.calls.where((call) => call.startsWith('switch')),
+      isEmpty,
+      reason: 'nothing switches before the person chooses',
+    );
+    await tester.pump(const Duration(seconds: 7));
+  });
+
   testWidgets('a checkout that cannot be read again stops the switch', (
     tester,
   ) async {
