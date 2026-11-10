@@ -855,4 +855,60 @@ mod tests {
         assert!(shared.replies.as_ref().is_some_and(HashMap::is_empty));
         assert!(!shared.stopping);
     }
+
+    #[test]
+    fn an_answered_or_expired_question_keeps_no_timer() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("test runtime starts");
+        runtime.block_on(async {
+            let state = State(Arc::new(Mutex::new(Shared {
+                replies: Some(HashMap::new()),
+                ..Shared::default()
+            })));
+            let (events, mut received) = mpsc::channel(4);
+            let supervisor = Supervisor {
+                events,
+                ended: Arc::default(),
+                writer: mpsc::channel(1).0,
+                state: state.clone(),
+                adapter: crate::PiAdapter::new(),
+                killed: None,
+                kill_requested: false,
+                error_output: Arc::default(),
+                error_reader: tokio::spawn(async {}),
+                input_writer: tokio::spawn(async {}),
+                captures: mpsc::channel(1).0,
+                checkpoints: Arc::new(Checkpoints::new(Path::new("."))),
+            };
+            // A question the user answered before its timer started keeps no timer.
+            let answered = RequestId("answered".to_owned());
+            supervisor.expire(
+                answered,
+                tokio::time::Instant::now() + Duration::from_secs(60),
+            );
+            assert!(
+                state.lock().expiries.is_empty(),
+                "an answered question keeps no timer"
+            );
+            // A question whose time is up is resolved, and its timer ends with nothing kept.
+            let late = RequestId("late".to_owned());
+            state.lock().questions.insert(late.clone());
+            supervisor.expire(late.clone(), tokio::time::Instant::now());
+            let resolved = tokio::time::timeout(Duration::from_secs(10), received.recv())
+                .await
+                .expect("the timer resolves the question")
+                .expect("the session is open");
+            assert_eq!(
+                resolved,
+                SessionEvent::Agent(AgentEvent::UserInputResolved { request: late })
+            );
+            assert!(
+                state.lock().expiries.is_empty(),
+                "an expired question keeps no timer"
+            );
+        });
+    }
 }

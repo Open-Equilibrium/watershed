@@ -295,9 +295,15 @@ impl Supervisor {
 
     /// Forgets a question at `deadline`: pi then answers it itself without telling. An
     /// answered question or the agent's exit ends the timer, so it keeps nothing alive.
-    fn expire(&self, request: RequestId, deadline: Instant) {
+    pub(super) fn expire(&self, request: RequestId, deadline: Instant) {
         let (state, events, ended) = (self.state.clone(), self.events.clone(), self.ended.clone());
         let expired = request.clone();
+        // Held until the timer's handle is registered, so the timer's own removal cannot run
+        // first and leave the handle behind; a question answered meanwhile gets no timer.
+        let mut shared = self.state.lock();
+        if !shared.questions.contains(&request) {
+            return;
+        }
         let timer = tokio::spawn(async move {
             tokio::time::sleep_until(deadline).await;
             // Like a user's answer, it never follows the exit.
@@ -313,10 +319,7 @@ impl Supervisor {
                 let _ = events.send(SessionEvent::Agent(resolved)).await;
             }
         });
-        self.state
-            .lock()
-            .expiries
-            .insert(request, timer.abort_handle());
+        shared.expiries.insert(request, timer.abort_handle());
     }
 
     /// Fails the command an oversized response answers, or reports a skipped event; returns
