@@ -54,7 +54,8 @@ pub(super) fn exit_code(output: &str) -> Option<i32> {
 /// Passed and failed tests in the output of cargo, jest, vitest, pytest, node --test, go test
 /// -v or flutter test; other output yields nothing.
 pub(crate) fn test_counts(output: &str) -> Option<TestCount> {
-    let lines: Vec<&str> = output.lines().map(str::trim).collect();
+    // flutter test rewrites its progress line with carriage returns, so each update is a line.
+    let lines: Vec<&str> = output.split(['\r', '\n']).map(str::trim).collect();
     cargo(&lines)
         .or_else(|| summary(&lines))
         .or_else(|| node(&lines))

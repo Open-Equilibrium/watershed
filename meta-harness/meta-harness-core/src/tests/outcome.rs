@@ -32,3 +32,21 @@ fn reads_test_counts_of_common_runners() {
         assert_eq!(test_counts(output), expected, "{output}");
     }
 }
+
+#[test]
+fn flutter_counts_come_from_the_final_carriage_return_update() {
+    let count = |passed, failed| Some(TestCount { passed, failed });
+    let cases = [
+        (
+            "00:00 +0: loading\r00:01 +37: All tests passed!\n",
+            count(37, 0),
+        ),
+        (
+            "00:01 +12 -1: x\r00:02 +30 -2: Some tests failed.",
+            count(30, 2),
+        ),
+    ];
+    for (output, expected) in cases {
+        assert_eq!(test_counts(output), expected, "{output:?}");
+    }
+}
