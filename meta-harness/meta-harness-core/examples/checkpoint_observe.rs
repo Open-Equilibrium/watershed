@@ -100,6 +100,10 @@ fn write_project(dir: &Path) {
             ])
             .args(args)
             .current_dir(dir)
+            // No inherited variable, such as GIT_INDEX_FILE from a Git hook, may point these
+            // commands at another repository.
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .status()
             .expect("git runs");
