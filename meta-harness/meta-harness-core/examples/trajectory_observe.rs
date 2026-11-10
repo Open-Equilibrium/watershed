@@ -67,14 +67,26 @@ async fn observe() {
     let leaves = String::from_utf8(written.stdout).expect("leaf ids");
     let (leaf, fork_leaf) = leaves.trim().split_once(' ').expect("two leaves");
     let file_bytes = std::fs::metadata(&file).expect("session file").len();
-    // Reports the session file, then answers each read with nothing newer than it.
+    // Reports the session file, then answers each read with nothing newer than it. The first
+    // response is passed as an argument, so no character of the path can break the script or JSON.
+    let state = json!({
+        "id": "1",
+        "type": "response",
+        "command": "get_state",
+        "success": true,
+        "data": {"sessionId": "observe", "isStreaming": false, "sessionFile": file.display().to_string()},
+    });
     let script = format!(
-        "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"1\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"observe\",\"isStreaming\":false,\"sessionFile\":\"{}\"}}}}'\ni=2\nwhile IFS= read -r line; do\nprintf '%s\\n' '{{\"id\":\"'$i'\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[],\"leafId\":\"{leaf}\"}}}}'\ni=$((i+1))\ndone",
-        file.display()
+        "IFS= read -r line\nprintf '%s\\n' \"$1\"\ni=2\nwhile IFS= read -r line; do\nprintf '%s\\n' '{{\"id\":\"'$i'\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[],\"leafId\":\"{leaf}\"}}}}'\ni=$((i+1))\ndone"
     );
     let command = AgentCommand {
         program: "/bin/sh".into(),
-        args: vec!["-c".into(), script.into()],
+        args: vec![
+            "-c".into(),
+            script.into(),
+            "sh".into(),
+            state.to_string().into(),
+        ],
         extension: "/watershed.ts".into(),
         session: None,
         cwd: dir.clone(),
