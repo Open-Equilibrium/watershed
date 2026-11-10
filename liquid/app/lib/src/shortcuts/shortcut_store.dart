@@ -123,13 +123,16 @@ class ShortcutController extends SavedSettings<ShortcutSettings> {
   /// Whether this computer has the Liquid key on, as far as Liquid turned it.
   bool _applied = false;
 
-  /// The settings in effect before the latest change, which a failed one returns to.
+  /// The settings that match the computer's Liquid key, which a failed change returns to.
   ShortcutSettings _settled;
   Future<void> _pending = Future.value();
 
   @override
   Future<void> change(ShortcutSettings next) {
-    value = next;
+    // Where the Liquid key does not exist, a kept Custom profile with it stays off too.
+    value = liquidKeyAvailable || _host == null
+        ? next
+        : next.withoutLiquidKey();
     firstStart = false;
     liquidKeyProblem.value = null;
     return _sync(store: true);
@@ -143,7 +146,8 @@ class ShortcutController extends SavedSettings<ShortcutSettings> {
   /// no ordering here.
   Future<void> _sync({required bool store}) =>
       _pending = _pending.then((_) async {
-        final want = value.liquidKey;
+        final next = value;
+        final want = next.liquidKey;
         var changed = false;
         if (want != _applied) {
           if (await _apply(want)) {
@@ -153,7 +157,9 @@ class ShortcutController extends SavedSettings<ShortcutSettings> {
             changed = true;
           }
         }
-        _settled = value;
+        // A newer change may have replaced value meanwhile; what settled is what the computer
+        // has, and the newer change settles on its own turn.
+        _settled = value.liquidKey == _applied ? value : next;
         if (store || changed) await save();
       });
 
