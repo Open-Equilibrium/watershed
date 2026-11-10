@@ -116,8 +116,11 @@ SessionGraph sessionGraph(List<BridgeTreeNode> nodes, String? leaf) {
     final turn = visit.turn + (isUser ? 1 : 0);
     final step = visit.step + (isStep ? 1 : 0);
     final prompt = isUser ? node.preview : visit.prompt;
-    // Durations count from the first prompt, like the Trajectory.
-    final startAt = visit.startAt ?? (isUser ? node.atMs : null);
+    // Durations count from the first prompt, or from the first timestamp on the path when that
+    // prompt has none, as the Trajectory does.
+    final startAt = isUser && visit.turn == 0 && node.atMs != null
+        ? node.atMs
+        : visit.startAt ?? node.atMs;
     var parentRow = visit.parentRow;
     // Forks outside steps keep a row, so their branches stay connected.
     if (isStep || kids.length != 1 || node.id == leaf) {

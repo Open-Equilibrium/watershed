@@ -97,6 +97,24 @@ void main() {
       expect((row.pending, row.branch), (true, null));
       expect(graph.branchOf('e3')?.ref, 'A');
     });
+
+    test(
+      'a duration counts like the Trajectory when the first prompt has no time',
+      () {
+        final graph = sessionGraph([
+          node('u1', null, BridgeEntryKind.user, preview: 'Go'),
+          node('a1', 'u1', BridgeEntryKind.assistant, at: 1000),
+          node('u2', 'a1', BridgeEntryKind.user, preview: 'Again', at: 2000),
+          node('a2', 'u2', BridgeEntryKind.assistant, at: 3000),
+        ], 'a2');
+        expect(
+          graph.branches.single.durationMs,
+          2000,
+          reason:
+              'the base is the first timestamp on the path, not a later prompt',
+        );
+      },
+    );
   });
 
   test('marks where the current branch leaves the others', () {
