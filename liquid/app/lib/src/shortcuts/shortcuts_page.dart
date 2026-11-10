@@ -215,9 +215,11 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
     }
   }
 
-  /// A profile chosen meanwhile settles the question whether to replace Custom.
+  /// A profile chosen meanwhile settles the question whether to replace Custom, and ends a
+  /// recording whose conflict names the owner under the profile before.
   void _settingsChanged() {
     if (_replacing != null && _shortcuts.value.replaced == null) _done();
+    if (_conflict != null) _stop();
   }
 
   /// Changes `command`'s keys, after asking when that replaces the kept Custom profile.

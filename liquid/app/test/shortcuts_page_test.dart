@@ -189,6 +189,45 @@ void main() {
     },
   );
 
+  testWidgets('choosing a profile while a conflict is shown cancels it', (
+    tester,
+  ) async {
+    // Custom gives ⌘N to Focus Input, which Standard gives to New Session.
+    await show(
+      tester,
+      ShortcutSettings.standard()
+          .change(
+            Command.focusInput,
+            const Keys(LogicalKeyboardKey.keyN, meta: true),
+            clear: Command.newSession,
+          )
+          .choose(Profile.standard),
+    );
+    await openSettings(tester);
+    await tester.tap(find.text('⌘3'));
+    await tester.pumpAndSettle();
+    await press(
+      tester,
+      LogicalKeyboardKey.keyN,
+      holding: LogicalKeyboardKey.metaLeft,
+    );
+    expect(find.text('Use anyway, clear New Session'), findsOneWidget);
+
+    await tester.tap(find.text('Custom'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Use anyway, clear New Session'),
+      findsNothing,
+      reason: 'in Custom, Focus Input owns ⌘N, so the old owner is stale',
+    );
+    expect(shortcuts.value.bindings(Command.diff), [
+      const Keys(LogicalKeyboardKey.digit3, meta: true),
+    ]);
+    expect(shortcuts.value.bindings(Command.focusInput), [
+      const Keys(LogicalKeyboardKey.keyN, meta: true),
+    ]);
+  });
+
   testWidgets('recording the keys a command already has changes nothing', (
     tester,
   ) async {
