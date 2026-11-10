@@ -134,32 +134,36 @@ fn decrement(int: &[u8]) -> Option<Vec<u8>> {
     }
 }
 
-/// A fraction strictly between `before` and `after`, which never ends in `0`.
-fn midpoint(before: &[u8], after: Option<&[u8]>) -> Vec<u8> {
+/// A fraction strictly between `before` and `after`, which never ends in `0`. A loop rather
+/// than recursion, so a long fraction costs no stack.
+fn midpoint(mut before: &[u8], mut after: Option<&[u8]>) -> Vec<u8> {
     let digit = |key: &[u8], i: usize| key.get(i).copied().unwrap_or(DIGITS[0]);
-    if let Some(after) = after {
-        let shared = (0..after.len())
-            .take_while(|&i| digit(before, i) == after[i])
-            .count();
-        if shared > 0 {
-            let mut key = after[..shared].to_vec();
-            key.extend(midpoint(
-                before.get(shared..).unwrap_or(&[]),
-                Some(&after[shared..]),
-            ));
+    let mut key = Vec::new();
+    loop {
+        if let Some(bound) = after {
+            let shared = (0..bound.len())
+                .take_while(|&i| digit(before, i) == bound[i])
+                .count();
+            if shared > 0 {
+                key.extend_from_slice(&bound[..shared]);
+                before = before.get(shared..).unwrap_or(&[]);
+                after = Some(&bound[shared..]);
+                continue;
+            }
+        }
+        let low = value(digit(before, 0));
+        let high = after.map_or(DIGITS.len(), |after| value(after[0]));
+        if high - low > 1 {
+            key.push(DIGITS[(low + high).div_ceil(2)]);
             return key;
         }
-    }
-    let low = value(digit(before, 0));
-    let high = after.map_or(DIGITS.len(), |after| value(after[0]));
-    if high - low > 1 {
-        vec![DIGITS[(low + high).div_ceil(2)]]
-    } else if let Some(after) = after.filter(|after| after.len() > 1) {
-        vec![after[0]]
-    } else {
-        let mut key = vec![DIGITS[low]];
-        key.extend(midpoint(before.get(1..).unwrap_or(&[]), None));
-        key
+        if let Some(after) = after.filter(|after| after.len() > 1) {
+            key.push(after[0]);
+            return key;
+        }
+        key.push(DIGITS[low]);
+        before = before.get(1..).unwrap_or(&[]);
+        after = None;
     }
 }
 
@@ -204,5 +208,11 @@ mod tests {
     #[test]
     fn equal_neighbors_get_a_key_after_both() {
         assert!(between(Some("a1"), Some("a1")).as_str() > "a1");
+    }
+
+    #[test]
+    fn a_long_fraction_still_gets_a_key() {
+        let lower = format!("a0{}", "z".repeat(100_000));
+        assert_eq!(between(Some(&lower), Some("a1")), format!("{lower}V"));
     }
 }
