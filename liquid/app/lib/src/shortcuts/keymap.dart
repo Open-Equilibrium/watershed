@@ -352,7 +352,11 @@ enum Command {
     Area.trajectory,
     Keys(LogicalKeyboardKey.keyF, meta: true),
   ),
-  closeStep('Close the step', Area.trajectory, Keys(LogicalKeyboardKey.escape)),
+  closeStep(
+    'Close the step, range or filter',
+    Area.trajectory,
+    Keys(LogicalKeyboardKey.escape),
+  ),
   branch(
     'Branch from the step',
     Area.trajectory,

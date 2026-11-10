@@ -75,6 +75,11 @@ void main() {
     expect(find.text('Fold or unfold the folder'), findsOneWidget);
     expect(find.text('Collapse or expand the turn'), findsOneWidget);
     expect(find.text('Collapse all turns'), findsOneWidget);
+    expect(
+      find.text('Close the step, range or filter'),
+      findsOneWidget,
+      reason: 'esc closes the inspector, the range and the filter row',
+    );
 
     await press(tester, LogicalKeyboardKey.escape);
     expect(find.text('tap ⇪'), findsNothing);
