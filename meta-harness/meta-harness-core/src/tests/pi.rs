@@ -714,6 +714,44 @@ fn shows_tool_names_with_hiding_characters_written_out() {
 }
 
 #[test]
+fn every_live_tool_call_with_a_repeated_id_completes() {
+    // Servers that send no call ids give every parallel call the same empty one; the earliest
+    // open call with an id gets the next end, as the stored history matches results.
+    let events = translate(&[
+        r#"{"type":"agent_start"}"#,
+        r#"{"type":"tool_execution_start","toolCallId":"","toolName":"bash","args":{"command":"ls"}}"#,
+        r#"{"type":"tool_execution_start","toolCallId":"","toolName":"bash","args":{"command":"make"}}"#,
+        r#"{"type":"tool_execution_end","toolCallId":"","toolName":"bash","result":{"content":[{"type":"text","text":"listed"}]},"isError":false}"#,
+        r#"{"type":"tool_execution_end","toolCallId":"","toolName":"bash","result":{"content":[{"type":"text","text":"built"}]},"isError":false}"#,
+        r#"{"type":"agent_settled"}"#,
+    ]);
+    let starts = events
+        .iter()
+        .filter(|event| matches!(event, AgentEvent::ItemStarted { .. }))
+        .count();
+    let completions: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::ItemCompleted {
+                item, status, text, ..
+            } => Some((item.0, *status, text.as_str())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        (starts, completions),
+        (
+            2,
+            vec![
+                (1, ItemStatus::Completed, "listed"),
+                (2, ItemStatus::Completed, "built"),
+            ]
+        ),
+        "each started call completes once with its own result, none is left running"
+    );
+}
+
+#[test]
 fn ends_the_items_an_abort_leaves_open() {
     let events = translate(&[
         r#"{"type":"agent_start"}"#,

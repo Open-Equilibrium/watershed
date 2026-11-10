@@ -1,6 +1,6 @@
 //! Adapter from pi's RPC session events to agent-neutral agent events.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use serde_json::{Map, Value};
 
@@ -56,8 +56,9 @@ pub struct PiAdapter {
     /// Open content blocks of the streaming assistant message, keyed by content index, with
     /// their text so far.
     blocks: HashMap<u64, (ItemId, ItemKind, String)>,
-    /// Running tool calls, keyed by pi's tool call id.
-    tools: HashMap<String, OpenTool>,
+    /// Running tool calls, keyed by pi's tool call id. Calls that share an id wait in the order
+    /// they started, as the stored history pairs them.
+    tools: HashMap<String, VecDeque<OpenTool>>,
 }
 
 impl PiAdapter {
@@ -107,7 +108,8 @@ impl PiAdapter {
                 let open = self.blocks.drain().map(|(_, block)| block).chain(
                     self.tools
                         .drain()
-                        .map(|(_, tool)| (tool.item, tool.kind, tool.output)),
+                        .flat_map(|(_, queue)| queue)
+                        .map(|tool| (tool.item, tool.kind, tool.output)),
                 );
                 fail(turn, open, &mut events);
                 events.push(
@@ -142,7 +144,11 @@ impl PiAdapter {
             }
             Some("tool_execution_start") => self.tool_start(turn, record, &mut events),
             Some("tool_execution_update") => {
-                if let Some(tool) = self.tools.get_mut(str_field(record, "toolCallId")) {
+                if let Some(tool) = self
+                    .tools
+                    .get_mut(str_field(record, "toolCallId"))
+                    .and_then(VecDeque::front_mut)
+                {
                     tool.output =
                         content_text(record.get("partialResult").and_then(|r| r.get("content")));
                     events.push(AgentEvent::ItemUpdated {
@@ -152,7 +158,7 @@ impl PiAdapter {
                 }
             }
             Some("tool_execution_end") => {
-                if let Some(tool) = self.tools.remove(str_field(record, "toolCallId")) {
+                if let Some(tool) = self.take_tool(str_field(record, "toolCallId")) {
                     let failed = record.get("isError").and_then(Value::as_bool) == Some(true);
                     // An edit's patch counts its lines, a written file its own.
                     let patch = record
@@ -260,15 +266,15 @@ impl PiAdapter {
         let written = record
             .get("args")
             .and_then(|arguments| written_lines(name, arguments));
-        self.tools.insert(
-            str_field(record, "toolCallId").to_owned(),
-            OpenTool {
+        self.tools
+            .entry(str_field(record, "toolCallId").to_owned())
+            .or_default()
+            .push_back(OpenTool {
                 item,
                 kind,
                 written,
                 output: String::new(),
-            },
-        );
+            });
         let arguments = record.get("args").map(Value::to_string).unwrap_or_default();
         let detail = ItemDetail::Tool {
             name: visible_name(name),
@@ -280,6 +286,16 @@ impl PiAdapter {
     fn next_item(&mut self) -> ItemId {
         self.items += 1;
         ItemId(self.items)
+    }
+
+    /// Takes the earliest running call with `id`, dropping the id once none is left.
+    fn take_tool(&mut self, id: &str) -> Option<OpenTool> {
+        let queue = self.tools.get_mut(id)?;
+        let tool = queue.pop_front();
+        if queue.is_empty() {
+            self.tools.remove(id);
+        }
+        tool
     }
 }
 
