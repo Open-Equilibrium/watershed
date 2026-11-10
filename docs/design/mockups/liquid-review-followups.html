@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Liquid: review follow-up mockups</title>
+<link rel="stylesheet" href="mockup.css">
+<style>
+.gal{grid-template-columns:repeat(auto-fill,minmax(min(100%,420px),1fr))}
+.gcell .lbl2{font-size:var(--ws-fs-small);color:var(--ws-text-faint);font-weight:var(--ws-fw-medium)}
+.sb{width:var(--ws-width-side);background:var(--ws-subtle);border-radius:var(--ws-radius-lg);padding:var(--ws-space-3);box-sizing:border-box;font-size:var(--ws-fs-side);line-height:var(--ws-lh-side)}
+.sh{font-size:var(--ws-fs-small);line-height:var(--ws-lh-small);color:var(--ws-text-faint);font-weight:var(--ws-fw-medium);padding:var(--ws-space-5) var(--ws-space-3) var(--ws-space-2)}
+.prow{height:var(--ws-row-side);display:flex;align-items:center;gap:var(--ws-space-2);padding:0 var(--ws-space-3) 0 calc(var(--ws-space-3) + var(--d,0) * 18px);border-radius:var(--ws-radius-md);color:var(--ws-text-muted);position:relative}
+.prow .tw{width:12px;font-size:11px;color:var(--ws-text-faint);text-align:center}
+.prow .ic{width:18px;display:inline-flex;justify-content:center;color:var(--ws-text-faint)}
+.prow .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prow.on{background:var(--ws-selected);color:var(--ws-text)}
+.prow.hv{background:var(--ws-hover)}
+.wrap{display:flex;align-items:center}.wrap>:first-child{flex:1;min-width:0}
+.more{width:22px;height:22px;border-radius:var(--ws-radius-sm);display:inline-grid;place-items:center;color:var(--ws-text-muted);flex:none}
+.more.on{background:var(--ws-hover)}.more.in{background:color-mix(in srgb,var(--ws-text) 8%,transparent)}
+.focus{box-shadow:0 0 0 2px var(--ws-accent)}
+.card2{border-radius:var(--ws-radius-md);padding:var(--ws-space-2) var(--ws-space-3) var(--ws-space-2) var(--ws-space-6);position:relative}
+.card2.on{background:var(--ws-hover)}
+.card2 .l1{display:flex;align-items:center;gap:var(--ws-space-3)}.card2 .l1 b{flex:1;font-weight:var(--ws-fw-regular);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card2 .l2{padding-left:15px;font-size:var(--ws-fs-small);line-height:var(--ws-lh-small);color:var(--ws-text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st{font-size:var(--ws-fs-small);color:var(--ws-accent)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ws-accent);flex:none}
+.proj{padding:var(--ws-space-2) var(--ws-space-3);color:var(--ws-text-muted);font-weight:var(--ws-fw-medium);display:flex;align-items:center}
+.proj span{flex:1}
+.menu{position:absolute;z-index:3;width:200px;right:-150px;top:30px}
+.ann{font-size:var(--ws-fs-small);line-height:var(--ws-lh-small);color:var(--ws-text-muted)}
+.ann b{color:var(--ws-text);font-weight:var(--ws-fw-semibold)}
+/* Settings */
+.set{display:flex;border-radius:var(--ws-radius-lg);overflow:hidden;box-shadow:0 0 0 1px var(--ws-border);height:300px}
+.set .nv{width:150px;flex:none;background:var(--ws-subtle);box-shadow:inset -1px 0 0 var(--ws-border);padding:var(--ws-space-4);box-sizing:border-box;display:flex;flex-direction:column;gap:1px}
+.set .nv .h{font-size:var(--ws-fs-small);color:var(--ws-text-faint);margin-bottom:var(--ws-space-2)}
+.set .nv .it{height:var(--ws-row-nav);display:flex;align-items:center;padding:0 var(--ws-space-3);border-radius:var(--ws-radius-md);font-weight:var(--ws-fw-medium)}
+.set .nv .it.on{background:var(--ws-selected)}
+.set .ct{flex:1;padding:var(--ws-space-6);display:flex;flex-direction:column;gap:var(--ws-space-4);min-width:0}
+.set h2{margin:0;font-size:var(--ws-fs-h3);line-height:var(--ws-lh-h3);font-weight:var(--ws-fw-semibold)}
+.set .rw{display:flex;align-items:center;gap:var(--ws-space-4)}.set .rw .k{width:90px;flex:none;color:var(--ws-text-muted)}
+.sgm{display:inline-flex;background:var(--ws-subtle);border-radius:var(--ws-radius-md);padding:2px;font-size:var(--ws-fs-compact)}
+.sgm span{padding:0 var(--ws-space-4);line-height:24px;border-radius:var(--ws-radius-sm);color:var(--ws-text-muted)}.sgm span.on{background:var(--ws-surface);color:var(--ws-text);box-shadow:0 0 0 1px var(--ws-border)}
+.notice{display:flex;gap:var(--ws-space-3);align-items:flex-start;padding:var(--ws-space-2) var(--ws-space-3);border-radius:var(--ws-radius-md);background:var(--ws-warning-subtle);color:var(--ws-warning);font-size:var(--ws-fs-small);line-height:var(--ws-lh-small)}
+.notice.err{background:var(--ws-danger-subtle);color:var(--ws-danger)}
+.notice .tx{flex:1}.notice a{color:var(--ws-accent);text-decoration:none}
+.notice .x{color:var(--ws-text-faint)}
+/* Trajectory */
+.tl{border-radius:var(--ws-radius-lg);background:var(--ws-canvas);box-shadow:0 0 0 1px var(--ws-border);padding:var(--ws-space-3) var(--ws-space-4);font-size:var(--ws-fs-small);line-height:var(--ws-lh-small)}
+.axis{display:flex;justify-content:space-between;color:var(--ws-text-faint);font-size:var(--ws-fs-caption);margin-left:64px;padding-bottom:var(--ws-space-2)}
+.trk{display:flex;align-items:center;height:20px}.trk .n{width:64px;flex:none;color:var(--ws-text-muted)}
+.trk .lane{flex:1;position:relative;height:12px}
+.trk .lane i{position:absolute;top:2px;height:8px;border-radius:2px}
+.k-u{background:var(--ws-data-2)}.k-m{background:var(--ws-data-1)}.k-t{background:var(--ws-data-3)}
+.tracks{position:relative}
+.brush{position:absolute;top:-4px;bottom:-2px;border-radius:var(--ws-radius-sm);background:color-mix(in srgb,var(--ws-accent) 8%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ws-accent) 55%,transparent)}
+.hd{position:absolute;top:50%;width:7px;height:18px;margin:-9px 0 0 -4px;border-radius:3px;background:var(--ws-surface);box-shadow:inset 0 0 0 1px var(--ws-accent)}
+.hd.f{box-shadow:inset 0 0 0 1px var(--ws-accent),0 0 0 2px var(--ws-canvas),0 0 0 4px var(--ws-accent)}
+.tip{position:absolute;top:-34px;transform:translateX(-50%);white-space:nowrap;background:var(--ws-text);color:var(--ws-canvas);border-radius:var(--ws-radius-sm);padding:2px 6px;font-size:var(--ws-fs-small)}
+.keys{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:var(--ws-fs-small);line-height:var(--ws-lh-small);color:var(--ws-text-muted)}
+.keys kbd{justify-self:start}
+.sr{font-family:var(--ws-font-mono);font-size:var(--ws-fs-small);background:var(--ws-subtle);border-radius:var(--ws-radius-md);padding:var(--ws-space-2) var(--ws-space-3);color:var(--ws-text-muted)}
+/* Comparison at the smallest window */
+.frame{position:relative;width:1050px;height:640px;border-radius:var(--ws-radius-xl);background:var(--ws-canvas);box-shadow:var(--ws-shadow);overflow:hidden;font-size:var(--ws-fs-ui)}
+.fr-side{position:absolute;left:0;top:0;bottom:0;width:var(--ws-width-side);background:var(--ws-subtle);box-shadow:inset -1px 0 0 var(--ws-border)}
+.fr-main{position:absolute;left:var(--ws-width-side);right:0;top:0;bottom:0;display:flex;flex-direction:column}
+.fr-tabs{height:38px;flex:none;background:var(--ws-subtle);box-shadow:inset 0 -1px 0 var(--ws-border);display:flex;align-items:flex-end;gap:2px;padding:0 8px;font-size:var(--ws-fs-compact)}
+.fr-tabs span{height:30px;display:flex;align-items:center;padding:0 10px;color:var(--ws-text-muted)}.fr-tabs span.on{background:var(--ws-canvas);color:var(--ws-text);border-radius:7px 7px 0 0}
+.fr-tool{height:40px;flex:none;display:flex;align-items:center;gap:var(--ws-space-3);padding:0 var(--ws-space-5);font-size:var(--ws-fs-compact);color:var(--ws-text-muted)}
+.fr-ov{margin:0 var(--ws-space-5);flex:none}
+.fr-body{padding:14px var(--ws-space-5) 0;display:flex;flex-direction:column;gap:var(--ws-space-4)}
+.mets{display:flex;gap:10px}.met{flex:1;background:var(--ws-subtle);border-radius:var(--ws-radius-lg);padding:var(--ws-space-3) var(--ws-space-4)}
+.met .a{font-size:var(--ws-fs-small);color:var(--ws-text-muted)}.met{min-width:0}.met .v{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:var(--ws-fs-h3);line-height:24px;font-weight:var(--ws-fw-semibold);font-variant-numeric:tabular-nums}.met .c{font-size:var(--ws-fs-small);color:var(--ws-text-muted)}
+.met .c.g{color:var(--ws-success)}.met .c.w{color:var(--ws-warning)}
+.mline{display:flex;gap:var(--ws-space-5);align-items:baseline;background:var(--ws-subtle);border-radius:var(--ws-radius-lg);padding:var(--ws-space-2) var(--ws-space-4);font-size:var(--ws-fs-compact);white-space:nowrap;overflow:hidden}
+.mline .a{color:var(--ws-text-muted)}.mline b{font-weight:var(--ws-fw-semibold);font-variant-numeric:tabular-nums}.mline .g{color:var(--ws-success)}.mline .w{color:var(--ws-warning)}
+.ctab{border-radius:var(--ws-radius-lg);box-shadow:0 0 0 1px var(--ws-border);overflow:hidden}
+.ctab .r{display:grid;grid-template-columns:1fr 1fr;height:var(--ws-row-table);box-shadow:inset 0 -1px 0 var(--ws-border);font-size:var(--ws-fs-compact)}
+.ctab .r>span{display:flex;align-items:center;gap:var(--ws-space-3);padding:0 var(--ws-space-4)}.ctab .r>span+span{box-shadow:inset 1px 0 0 var(--ws-border)}
+.ctab .h{background:var(--ws-subtle);font-weight:var(--ws-fw-semibold)}
+.ctab .lg{display:block;height:30px;line-height:30px;text-align:center;font-size:var(--ws-fs-small);color:var(--ws-text-faint);box-shadow:inset 0 -1px 0 var(--ws-border)}
+.bdg{font-size:var(--ws-fs-caption);font-weight:var(--ws-fw-semibold);padding:0 5px;border-radius:var(--ws-radius-sm);background:var(--ws-accent-subtle);color:var(--ws-accent)}
+.kd{width:8px;height:8px;border-radius:2px;flex:none}
+.fr-input{position:absolute;left:calc(50% - 300px);width:600px;bottom:36px;height:196px;border-radius:var(--ws-radius-xl);background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:var(--ws-space-4);box-sizing:border-box;color:var(--ws-text-faint)}
+.fr-status{position:absolute;left:0;right:0;bottom:0;height:24px;box-shadow:inset 0 1px 0 var(--ws-border);background:var(--ws-subtle)}
+.cut{position:absolute;left:0;right:0;border-top:1px dashed var(--ws-danger);font-size:var(--ws-fs-caption);color:var(--ws-danger);text-align:right;padding-right:8px}
+.fscale{transform:scale(.6);transform-origin:0 0;width:630px;height:384px}
+.fbox{width:630px;height:384px;overflow:hidden}
+.fr-filter{height:40px;flex:none;display:flex;align-items:center;gap:var(--ws-space-3);padding:0 var(--ws-space-5);font-size:var(--ws-fs-compact);color:var(--ws-text-faint)}
+/* Base branch */
+.dlg2{border-radius:var(--ws-radius-xl);background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:var(--ws-space-6);display:flex;flex-direction:column;gap:var(--ws-space-3);font-size:var(--ws-fs-ui)}
+.dlg2 h4{margin:0;font-size:var(--ws-fs-prose);font-weight:var(--ws-fw-semibold)}
+.inp{height:32px;border-radius:var(--ws-radius-md);box-shadow:inset 0 0 0 1px var(--ws-accent);display:flex;align-items:center;gap:var(--ws-space-3);padding:0 var(--ws-space-3);color:var(--ws-text)}
+.inp .ph{color:var(--ws-text-faint)}.inp .sp2{margin-left:auto;font-size:var(--ws-fs-small);color:var(--ws-text-faint)}
+.brow{height:28px;display:flex;align-items:center;gap:var(--ws-space-3);padding:0 var(--ws-space-2);border-radius:var(--ws-radius-md);font-family:var(--ws-font-mono);font-size:var(--ws-fs-mono)}
+.brow.on{background:var(--ws-hover)}.brow .d{margin-left:auto;font-family:var(--ws-font-ui);font-size:var(--ws-fs-small);color:var(--ws-text-faint)}
+.brow mark{background:none;color:var(--ws-text);font-weight:var(--ws-fw-semibold)}
+.small{font-size:var(--ws-fs-small);line-height:var(--ws-lh-small);color:var(--ws-text-muted)}
+</style></head>
+<body class="theme-light chrome">
+<div class="page">
+  <div class="toolbar">
+    <div>Theme <span class="seg" id="theme"><button data-v="light">Light</button><button data-v="dark">Dark</button><button data-v="system" class="on">System</button></span></div>
+  </div>
+  <section>
+    <h1>Review follow-ups: mockups</h1>
+    <p class="sub">Proposals for open items of issues <a href="https://github.com/Open-Equilibrium/watershed/issues/62">#62</a>, <a href="https://github.com/Open-Equilibrium/watershed/issues/64">#64</a> and <a href="https://github.com/Open-Equilibrium/watershed/issues/66">#66</a>, drawn on the shipped app: the sidebar, Settings, the Trajectory tab and the pull request dialog. Each section shows what Liquid draws today and the proposal. <b>Not approved yet.</b> Names, times and numbers are examples.</p>
+  </section>
+
+  <section id="rows">
+    <h3 class="sec">1 · A row's ··· sits inside the row</h3>
+    <p class="sub">Today the menu button of the session card and of each Page row sits right of the row, outside its highlight. Proposal, as Notion does: hover or keyboard focus shows ··· inside the row at its right end. On the session card it takes the place of the status word while shown; the colored dot still shows the status (principle 5). The row's highlight covers the button. Right-click keeps opening the same menu.</p>
+    <div class="gal">
+      <div class="gcell"><h4>Today <span>hovered session card and Page row</span></h4>
+        <div class="sb"><div class="sh">Pages</div>
+          <div class="wrap"><div class="prow on"><span class="tw"></span><span class="ic">▤</span><span class="t">Roadmap</span></div></div>
+          <div class="wrap"><div class="prow hv" style="--d:0"><span class="tw">›</span><span class="ic">▤</span><span class="t">Release notes</span></div><span class="more">···</span></div>
+          <div class="sh">Agent sessions</div>
+          <div class="proj"><span>acme-api</span></div>
+          <div class="wrap"><div class="card2 on"><div class="l1"><span class="dot"></span><b>Rate limit for /login</b><span class="st">running</span></div><div class="l2">pi · feature/retry-after · MacBook</div></div><span class="more">···</span></div>
+        </div>
+        <span class="cap">The ··· is outside the highlight, and the card's highlight stops 22 px short of the sidebar's edge.</span>
+      </div>
+      <div class="gcell"><h4>Proposal <span>hovered</span></h4>
+        <div class="sb"><div class="sh">Pages</div>
+          <div class="prow on"><span class="tw"></span><span class="ic">▤</span><span class="t">Roadmap</span></div>
+          <div class="prow hv"><span class="tw">›</span><span class="ic">▤</span><span class="t">Release notes</span><span class="more in">···</span></div>
+          <div class="sh">Agent sessions</div>
+          <div class="proj"><span>acme-api</span></div>
+          <div class="card2 on"><div class="l1"><span class="dot"></span><b>Rate limit for /login</b><span class="more in">···</span></div><div class="l2">pi · feature/retry-after · MacBook</div></div>
+        </div>
+        <span class="cap">The row keeps its full width; the status word returns when the pointer leaves.</span>
+      </div>
+      <div class="gcell"><h4>Proposal <span>keyboard focus on ···, menu open</span></h4>
+        <div class="sb" style="position:relative"><div class="sh">Agent sessions</div>
+          <div class="proj"><span>acme-api</span></div>
+          <div class="card2 on"><div class="l1"><span class="dot"></span><b>Rate limit for /login</b><span class="more in focus">···</span></div><div class="l2">pi · feature/retry-after · MacBook</div></div>
+          <div class="pop menu" style="right:-60px;top:118px"><div class="it on" style="color:var(--ws-danger)">Delete session…</div></div>
+          <div style="height:60px"></div>
+        </div>
+        <span class="cap">Tab reaches the row, then its ···; ⏎ or space opens the menu, esc closes it. Screen readers hear “More actions, button”, as today.</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="settings-notice">
+    <h3 class="sec">2 · A failed save shows inside Settings</h3>
+    <p class="sub">Since the save channel was unified, a failed save of Appearance, Diff or Shortcuts reaches only the status bar, which Settings hide. Proposal: one notice at the top of the Settings content, whichever section is open, fed by that channel. It shows the latest failure, keeps the change in use, and stays until ✕, esc or the next successful save of the same settings. The Liquid key's problem keeps its own notice inside Shortcuts.</p>
+    <div class="gal">
+      <div class="gcell"><h4>Today <span>the save failed, nothing shows</span></h4>
+        <div class="set"><div class="nv"><div class="h">Settings</div><div class="it on">Appearance</div><div class="it">Shortcuts</div><div class="it">Worktrees</div></div>
+          <div class="ct"><h2>Appearance</h2><div class="rw"><span class="k">Theme</span><span class="sgm"><span>Light</span><span class="on">Dark</span><span>System</span></span></div><div class="rw"><span class="k">Text size</span><span class="sgm"><span>Compact</span><span class="on">Default</span><span>Large</span></span></div></div></div>
+      </div>
+      <div class="gcell"><h4>Proposal <span>notice on top of the content</span></h4>
+        <div class="set"><div class="nv"><div class="h">Settings</div><div class="it on">Appearance</div><div class="it">Shortcuts</div><div class="it">Worktrees</div></div>
+          <div class="ct"><div class="notice err"><span class="tx">Could not save the appearance: Permission denied. The change applies until Liquid quits.</span><span class="x">✕</span></div><h2>Appearance</h2><div class="rw"><span class="k">Theme</span><span class="sgm"><span>Light</span><span class="on">Dark</span><span>System</span></span></div><div class="rw"><span class="k">Text size</span><span class="sgm"><span>Compact</span><span class="on">Default</span><span>Large</span></span></div></div></div>
+        <span class="cap">An error, so the danger colors (guidelines: errors stay until esc or a click). The text is today's status-bar text.</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="range-keys">
+    <h3 class="sec">3 · The timeline's range handles work as a slider</h3>
+    <p class="sub">Today the two handles that limit the list to a range take only the mouse. Proposal: a standard two-thumb range slider. Tab focuses the start handle, then the end handle, with the visible focus ring. The tooltip shows the step the handle sits on while it has focus.</p>
+    <div class="gal">
+      <div class="gcell" style="grid-column:1/-1"><h4>Proposal <span>end handle focused</span></h4>
+        <div class="tl"><div class="axis"><span>10:40</span><span>10:45</span><span>10:50</span><span>10:55</span><span>11:00</span></div>
+          <div class="tracks">
+            <div class="brush" style="left:calc(64px + 22%);width:36%"></div>
+            <div class="trk"><span class="n">Prompt</span><span class="lane"><i class="k-u" style="left:1%;width:1%"></i><i class="k-u" style="left:48%;width:1%"></i></span></div>
+            <div class="trk"><span class="n">Model</span><span class="lane"><i class="k-m" style="left:3%;width:9%"></i><i class="k-m" style="left:20%;width:6%"></i><i class="k-m" style="left:40%;width:7%"></i><i class="k-m" style="left:52%;width:11%"></i><i class="k-m" style="left:80%;width:6%"></i></span></div>
+            <div class="trk"><span class="n">Tools</span><span class="lane"><i class="k-t" style="left:13%;width:6%"></i><i class="k-t" style="left:27%;width:12%"></i><i class="k-t" style="left:64%;width:14%"></i><i class="k-t" style="left:87%;width:9%"></i></span></div>
+            <div style="position:absolute;left:64px;right:0;top:0;bottom:0"><span class="hd" style="left:22%"></span><span class="hd f" style="left:58%"></span><span class="tip" style="left:58%">Step 31 of 48 · 10:51:12</span></div>
+          </div></div>
+      </div>
+      <div class="gcell"><h4>Keys <span>while a handle has focus</span></h4>
+        <div class="keys"><kbd>←</kbd><span>one step earlier</span><kbd>→</kbd><span>one step later</span><kbd>⇧←</kbd><span>ten steps earlier</span><kbd>⇧→</kbd><span>ten steps later</span><kbd>Home</kbd><span>as far left as the handle can go</span><kbd>End</kbd><span>as far right as the handle can go</span><kbd>⌫</kbd><span>clear the range, as a double-click does</span><kbd>esc</kbd><span>leave the handle; the range stays</span></div>
+        <span class="cap">A step is one record on the timeline, so the keys move by step even when the axis shows time. The handles never cross, as with the mouse.</span>
+      </div>
+      <div class="gcell"><h4>Screen reader <span>macOS VoiceOver</span></h4>
+        <div class="sr">“Range start, step 12 of 48, 10:44:05, slider”<br>“Range end, step 31 of 48, 10:51:12, slider”</div>
+        <span class="cap">Each handle is announced as a slider with its value; after a move, the brush's label (“Steps 12–31 of 48”) is announced, as it is today on change.</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="compact-metrics">
+    <h3 class="sec">4 · Two branches compared in a short window</h3>
+    <p class="sub">At the smallest window, 1050 × 640, the floating input area covers everything below about y = 400, and the first step row starts at about y = 409, so the comparison shows no steps until scrolled. Proposal: when the window is shorter than 760 px, the four metric cards become one line, which saves about 80 px; the table moves up and its first rows show. Taller windows keep the cards. Drawn at 60 %.</p>
+    <div class="gal" style="grid-template-columns:repeat(auto-fill,minmax(630px,1fr))">
+      <div class="gcell"><h4>Today <span>1050 × 640</span></h4><div class="fbox"><div class="fscale" id="f-now"></div></div></div>
+      <div class="gcell"><h4>Proposal <span>1050 × 640, compact line</span></h4><div class="fbox"><div class="fscale" id="f-new"></div></div></div>
+    </div>
+  </section>
+
+  <section id="base-search">
+    <h3 class="sec">5 · Choosing a pull request's base searches GitHub</h3>
+    <p class="sub">Today the base dialog lists the target repository's first 500 branches and filters them; a branch beyond them is taken only as typed and checked later. Proposal: the list still opens with those branches, and typing also asks GitHub for matching branch names after a short pause, so every branch can be found; the field says while it searches. A typed name that GitHub does not know is refused, not taken.</p>
+    <div class="gal">
+      <div class="gcell"><h4>Today <span>branch beyond the first 500</span></h4>
+        <div class="dlg2"><h4>Base branch</h4><div class="inp">release/2019-q4</div><div class="small">No match among the first 500 branches. Press Enter to use the name as typed.</div><div class="small">The base is the branch you want these commits to join. Only branches in acme/acme-api are listed.</div></div>
+      </div>
+      <div class="gcell"><h4>Proposal <span>searching</span></h4>
+        <div class="dlg2"><h4>Base branch</h4><div class="inp">release/2019<span class="sp2">Searching acme/acme-api…</span></div><div class="brow on"><span><mark>release/2019</mark>-q3</span></div><div class="small">The base is the branch you want these commits to join. Only branches in acme/acme-api are listed.</div></div>
+      </div>
+      <div class="gcell"><h4>Proposal <span>GitHub answered</span></h4>
+        <div class="dlg2"><h4>Base branch</h4><div class="inp">release/2019</div><div class="brow on"><span><mark>release/2019</mark>-q3</span></div><div class="brow"><span><mark>release/2019</mark>-q4</span></div><div class="brow"><span><mark>release/2019</mark>-q4-hotfix</span></div><div class="small">The base is the branch you want these commits to join. Only branches in acme/acme-api are listed.</div></div>
+      </div>
+      <div class="gcell"><h4>Proposal <span>no such branch, or GitHub unreachable</span></h4>
+        <div class="dlg2"><h4>Base branch</h4><div class="inp">release/2091</div><div class="small">No branch named “release/2091” in acme/acme-api.</div><div class="small" style="color:var(--ws-warning)">Could not search GitHub: gh: HTTP 502. The list shows the first 500 branches.</div></div>
+        <span class="cap">Two alternative states, drawn together. When the search fails, the list keeps the first 500 and Enter takes a typed name as today, checked when the plan is read again.</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h3 class="sec">Open questions</h3>
+    <ol class="qs">
+      <li>Section 1: does the ··· inside the row apply to Page rows and the session card alike, and may it hide the status word while shown?</li>
+      <li>Section 2: one Settings-wide notice for failed saves, in the danger colors?</li>
+      <li>Section 3: the keys and the announced text of the range handles.</li>
+      <li>Section 4: the 760 px threshold and the one-line metrics.</li>
+      <li>Section 5: search GitHub as the person types, refuse unknown names, and fall back to today's behavior when the search fails.</li>
+    </ol>
+  </section>
+</div>
+<script>
+const trk=(n,bars)=>`<div class="trk"><span class="n">${n}</span><span class="lane">${bars.map(([k,l,w])=>`<i class="k-${k}" style="left:${l}%;width:${w}%"></i>`).join('')}</span></div>`;
+const ov=`<div class="tl fr-ov"><div class="axis"><span>10:40</span><span>10:50</span><span>11:00</span></div><div class="tracks">${trk('A',[['u',1,1],['m',3,10],['t',14,8],['m',24,9],['t',35,12],['m',50,8]])}${trk('B',[['u',1,1],['m',3,10],['t',14,8],['u',30,1],['m',32,7],['t',41,9],['m',52,6],['t',60,10]])}</div></div>`;
+const cards=`<div class="mets"><div class="met"><div class="a">Duration</div><div class="v">4m 12s → 3m 05s</div><div class="c g">−27 %</div></div><div class="met"><div class="a">Tokens in / out</div><div class="v">182k → 141k</div><div class="c">9.1k → 7.4k out</div></div><div class="met"><div class="a">Files changed</div><div class="v">6 → 4</div><div class="c w">no test changes in B</div></div><div class="met"><div class="a">Tests</div><div class="v">42 → 42</div><div class="c">all passed in both</div></div></div>`;
+const line=`<div class="mline"><span><span class="a">Duration </span><b>4m 12s → 3m 05s</b> <span class="g">−27 %</span></span><span><span class="a">Tokens </span><b>182k → 141k</b> <span class="a">in · 9.1k → 7.4k out</span></span><span><span class="a">Files </span><b>6 → 4</b> <span class="w">no test changes in B</span></span><span><span class="a">Tests </span><b>42 → 42</b> <span class="a">all passed</span></span></div>`;
+const row=(a,b)=>`<div class="r"><span><span class="kd ${a[0]}"></span>${a[1]}</span><span><span class="kd ${b[0]}"></span>${b[1]}</span></div>`;
+const table=`<div class="ctab"><div class="r h"><span><span class="bdg">A</span>main session</span><span><span class="bdg">B</span><span style="font-weight:400;color:var(--ws-text-muted)">“Use a token bucket instead”</span></span></div><div class="lg">Steps 1–3 shared · prompt, message, read</div>${row(['k-m','4 · Plan the limiter'],['k-u','4 · Use a token bucket instead'])}${row(['k-t','5 · edit src/limit.ts'],['k-m','5 · Plan the bucket'])}${row(['k-t','6 · npm test'],['k-t','6 · edit src/bucket.ts'])}${row(['k-m','7 · Summary'],['k-t','7 · npm test'])}</div>`;
+const frame=(metrics)=>`<div class="frame"><div class="fr-side"></div><div class="fr-main"><div class="fr-tabs"><span>Roadmap</span><span class="on">Rate limit for /login</span></div><div class="fr-tool">Chat · Diff · <b style="color:var(--ws-text)">Trajectory</b><span style="margin-left:auto">Compare A ↔ B ✕</span></div><div class="fr-filter">Filter steps · Kind · Range</div>${ov}<div class="fr-body">${metrics}${table}</div></div><div class="fr-input">Steer or queue a message…</div><div class="fr-status"></div><div class="cut" style="top:400px">input area covers below here</div></div>`;
+document.getElementById('f-now').innerHTML=frame(cards);
+document.getElementById('f-new').innerHTML=frame(line);
+let mode='system';const mq=matchMedia('(prefers-color-scheme: dark)');
+function hostDark(){const v=getComputedStyle(document.documentElement).getPropertyValue('--background').trim();if(!v)return mq.matches;const c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.fillStyle='#808080';x.fillStyle=v;x.fillRect(0,0,1,1);const d=x.getImageData(0,0,1,1).data;return .2126*d[0]+.7152*d[1]+.0722*d[2]<128}
+function applyTheme(){const dark=mode=='dark'||(mode=='system'&&hostDark());document.body.classList.toggle('theme-dark',dark);document.body.classList.toggle('theme-light',!dark);document.querySelectorAll('#theme button').forEach(b=>b.classList.toggle('on',b.dataset.v==mode))}
+document.querySelectorAll('#theme button').forEach(b=>b.onclick=()=>{mode=b.dataset.v;applyTheme()});
+mq.addEventListener('change',applyTheme);applyTheme();
+</script>
+</body></html>
