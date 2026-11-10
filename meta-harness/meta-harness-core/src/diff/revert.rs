@@ -358,13 +358,12 @@ fn ignored_state(root: &Path, paths: &[String]) -> String {
 /// Whether the folder `folder` is a repository as Git finds one: it holds `.git`, a folder or
 /// a file pointing elsewhere, which a file system without capitals also finds as `.GIT`; or
 /// it is itself a repository's Git folder, as a bare clone is, with `HEAD`, `objects` and
-/// `refs`. Links are not followed.
+/// `refs`, where Git also accepts links to the storage. Links are not followed.
 fn is_repository(folder: &Path) -> bool {
     let entry = |name: &str| std::fs::symlink_metadata(folder.join(name));
-    entry(".git").is_ok()
-        || (entry("HEAD").is_ok()
-            && entry("objects").is_ok_and(|meta| meta.is_dir())
-            && entry("refs").is_ok_and(|meta| meta.is_dir()))
+    let storage =
+        |name: &str| entry(name).is_ok_and(|meta| meta.is_dir() || meta.file_type().is_symlink());
+    entry(".git").is_ok() || (entry("HEAD").is_ok() && storage("objects") && storage("refs"))
 }
 
 /// Whether a repository is at or below the folder at `dir`, found as Git finds one (see

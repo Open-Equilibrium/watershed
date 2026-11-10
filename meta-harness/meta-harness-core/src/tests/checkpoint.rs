@@ -1857,6 +1857,58 @@ fn a_revert_leaves_bare_repositories_alone_as_git_finds_them() {
 }
 
 #[test]
+fn a_revert_leaves_bare_repositories_with_linked_storage_alone() {
+    use std::os::unix::fs::symlink;
+    run(async {
+        let repo = Repo::new("revert-bare-linked");
+        repo.write(".gitignore", "clone\n");
+        repo.write("clone", "a file\n");
+        repo.git(&["add", ".gitignore"]);
+        repo.git(&["add", "-f", "clone"]);
+        repo.git(&["commit", "-q", "-m", "files"]);
+        let source = Repo::new("revert-bare-linked-source");
+        let storage = Repo::new("revert-bare-linked-storage");
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || {
+            std::fs::remove_file(repo.path().join("clone")).expect("removed");
+            git_at(
+                repo.path(),
+                &[
+                    "clone",
+                    "-q",
+                    "--bare",
+                    &source.path().display().to_string(),
+                    "clone",
+                ],
+            );
+            // Git follows links to a bare repository's storage, so its folders may live elsewhere.
+            std::fs::create_dir_all(storage.path().join("outside")).expect("folder");
+            for member in ["objects", "refs"] {
+                let moved = storage.path().join("outside").join(member);
+                std::fs::rename(repo.path().join("clone").join(member), &moved).expect("moved");
+                symlink(&moved, repo.path().join("clone").join(member)).expect("linked");
+            }
+            repo.write("a.txt", "new\n");
+        })
+        .await;
+        let plan = checkpoints
+            .revert_plan(&at("t1", Phase::Start), None)
+            .await
+            .expect("plan");
+        let (reverted, kept) = split(&plan);
+        assert_eq!(reverted, ["a.txt"], "{plan:?}");
+        assert_eq!(kept, ["clone"], "{plan:?}");
+        checkpoints
+            .revert(&at("t1", Phase::Start), &plan.confirmation)
+            .await
+            .expect("reverted");
+        assert!(repo.path().join("clone/HEAD").exists(), "its history stays");
+        drop(source);
+        drop(storage);
+    });
+}
+
+#[test]
 fn a_turns_end_releases_only_its_own_turn() {
     run(async {
         let repo = Repo::new("revert-overlap");
