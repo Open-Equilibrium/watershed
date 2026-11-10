@@ -470,6 +470,28 @@ void main() {
     );
   });
 
+  testWidgets(
+    'keeps the formatting of the same text typed again while it was sent',
+    (tester) async {
+      await show(tester);
+      backend
+        ..sendGate = Completer()
+        ..sendError = 'busy';
+      final composer = find.byKey(const Key('composer'));
+      await tester.enterText(composer, 'nested_call()');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      await tester.enterText(composer, '    nested_call()\n');
+      backend.sendGate!.complete();
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(composer).controller?.text,
+        '    nested_call()\n',
+        reason: 'the message is not doubled, and its retyped form keeps its whitespace',
+      );
+    },
+  );
+
   testWidgets('takes the same handed-back text again after it was sent', (
     tester,
   ) async {
