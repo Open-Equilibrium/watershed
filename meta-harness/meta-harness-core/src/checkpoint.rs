@@ -4,11 +4,11 @@
 //! background fetch under the checkpoint time limit, and the Git writes a user asks for to their
 //! end under the lock against running agents.
 
-use std::collections::{BTreeMap, BTreeSet};
 use std::future::{Future, poll_fn};
 use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
@@ -30,7 +30,8 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long the Chat's model may take to write a pull request's text (decided 2026-11-06).
 const TEXT_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// Longest deleting a session or removing all checkpoints waits for a turn that is ending.
+/// Longest deleting a session or removing all checkpoints waits for a turn that is ending; a turn
+/// of the same checkpoints whose end checkpoint is being taken gets up to the Git time limit.
 const ENDING_WAIT: Duration = Duration::from_secs(2);
 
 /// Longest closing waits for commands in progress to stop their Git.
@@ -152,7 +153,9 @@ pub struct Checkpoints {
     /// Marks this session's agent as running in the checkout while a turn runs, with the turn's
     /// start checkpoint, as the agent may switch sessions between turns.
     running: std::sync::Mutex<Option<(Checkpoint, Running)>>,
-    /// Whether a turn's start waits for a revert in the checkout.
+    /// Whether that turn's end checkpoint is being taken.
+    ending: std::sync::atomic::AtomicBool,
+    /// Whether a turn's start waits for a revert or another action that holds the checkout alone.
     waiting: watch::Sender<bool>,
     /// The host's GitHub CLI.
     gh: std::ffi::OsString,
@@ -162,8 +165,8 @@ pub struct Checkpoints {
 enum Unopened {
     /// The project is not in a Git working tree.
     OutsideGit,
-    /// Git failed, or the checkpoints were closed.
-    Failed(String),
+    /// The checkpoints were closed; no later use opens the project.
+    Closed,
 }
 
 impl Checkpoints {
@@ -183,12 +186,14 @@ impl Checkpoints {
             closed: watch::Sender::new(false),
             captures: tokio::sync::Mutex::new(()),
             running: std::sync::Mutex::new(None),
+            ending: std::sync::atomic::AtomicBool::new(false),
             waiting: watch::Sender::new(false),
             gh: "gh".into(),
         }
     }
 
-    /// Whether a turn's start waits for a revert in the checkout, which can take a while.
+    /// Whether a turn's start waits for a revert or another action that holds the checkout alone,
+    /// which can take a while.
     pub fn waiting(&self) -> watch::Receiver<bool> {
         self.waiting.subscribe()
     }
@@ -250,6 +255,8 @@ impl Checkpoints {
             }
             *slot = Some((checkpoint.clone(), running));
         } else {
+            self.ending
+                .store(self.guards(checkpoint), Ordering::Relaxed);
             tree = self.tree().await;
         }
         let captured = async {
@@ -268,6 +275,7 @@ impl Checkpoints {
             }) {
                 slot.take();
             }
+            self.ending.store(false, Ordering::Relaxed);
         }
         captured
     }
@@ -496,25 +504,33 @@ impl Checkpoints {
     /// of turns, sorted by id.
     pub async fn sessions(&self) -> Result<Vec<(String, usize)>, DiffError> {
         let tree = self.tree().await?;
-        let mut turns: BTreeMap<String, BTreeSet<String>> = Default::default();
-        for reference in self.bounded(tree.references(REFS)).await? {
+        let mut sessions: Vec<(String, usize)> = Vec::new();
+        // Git lists the refs sorted, so each session's and each turn's refs come together.
+        let mut last = String::new();
+        self.bounded(tree.each_reference(REFS, |reference| {
             let mut ids = reference.trim_start_matches(REFS).split('/');
-            if let (Some(session), Some(turn)) = (ids.next(), ids.next()) {
-                turns
-                    .entry(session.to_owned())
-                    .or_default()
-                    .insert(turn.to_owned());
+            let (Some(session), Some(turn)) = (ids.next(), ids.next()) else {
+                return;
+            };
+            let named = format!("{session}/{turn}");
+            if named == last {
+                return;
             }
-        }
-        Ok(turns
-            .into_iter()
-            .map(|(session, turns)| (session, turns.len()))
-            .collect())
+            last = named;
+            match sessions.last_mut() {
+                Some((listed, turns)) if listed == session => *turns += 1,
+                _ => sessions.push((session.to_owned(), 1)),
+            }
+        }))
+        .await?;
+        sessions.sort();
+        Ok(sessions)
     }
 
     /// Deletes the session `session` stored in `file` with its checkpoints first. While an
     /// agent runs in any worktree of the repository, or outside Git in the folder, it is refused,
-    /// so no turn of it starts meanwhile; a turn that is ending gets a moment to end. Git frees
+    /// so no turn of it starts meanwhile; a turn that is ending gets a moment to end, and a turn of
+    /// these checkpoints until its end checkpoint is taken. Git frees
     /// the checkpoints' space at its next cleanup; outside Git only the file goes.
     pub async fn delete_session(&self, session: &str, file: &Path) -> Result<(), DiffError> {
         valid_id(session)?;
@@ -530,10 +546,8 @@ impl Checkpoints {
         let _alone = match &tree {
             Some(tree) => {
                 let alone = self.alone_everywhere(tree).await?;
-                let references = self
-                    .bounded(tree.references(&format!("{REFS}{session}/")))
+                self.bounded(tree.delete_references(&format!("{REFS}{session}/")))
                     .await?;
-                self.bounded(tree.delete_references(&references)).await?;
                 Some(alone)
             }
             None => None,
@@ -546,8 +560,7 @@ impl Checkpoints {
     pub async fn remove_all(&self) -> Result<(), DiffError> {
         let tree = self.tree().await?;
         let _alone = self.alone_everywhere(&tree).await?;
-        let references = self.bounded(tree.references(REFS)).await?;
-        self.bounded(tree.delete_references(&references)).await
+        self.bounded(tree.delete_references(REFS)).await
     }
 
     /// Git's registered worktrees of the project's repository, the main checkout first.
@@ -601,7 +614,9 @@ impl Checkpoints {
     }
 
     /// Holds the repository alone, so no turn runs or starts in any of its worktrees, waiting a
-    /// moment for a turn that is ending; a refusal names the sessions running in its worktrees.
+    /// moment for a turn that is ending, and while only this session's turn whose end checkpoint
+    /// is being taken runs, up to the time limit; a refusal names the sessions running in its
+    /// worktrees.
     async fn alone_everywhere(&self, tree: &WorkingTree) -> Result<Alone, DiffError> {
         let checkouts = tree.checkouts()?;
         let running = || -> Vec<String> {
@@ -610,10 +625,20 @@ impl Checkpoints {
                 .flat_map(|checkout| checkout.running())
                 .collect()
         };
+        let ending_alone = |named: &[String]| {
+            let slot = self.running.lock().expect("running lock");
+            self.ending.load(Ordering::Relaxed)
+                && slot
+                    .as_ref()
+                    .is_some_and(|(start, _)| named.iter().all(|name| *name == start.session))
+        };
         let waited = Instant::now();
         loop {
             match tree.checkout().repository_alone(running).await {
-                Err(DiffError::AgentRunning(_)) if waited.elapsed() < ENDING_WAIT => {
+                Err(DiffError::AgentRunning(named))
+                    if waited.elapsed() < ENDING_WAIT
+                        || (waited.elapsed() < self.timeout && ending_alone(&named)) =>
+                {
                     tokio::time::sleep(RETRY).await;
                 }
                 held => return held,
@@ -626,11 +651,7 @@ impl Checkpoints {
         // Told first, so an open in progress stops instead of holding the project.
         self.closed.send_replace(true);
         self.running.lock().expect("running lock").take();
-        let tree = self
-            .tree
-            .lock()
-            .await
-            .replace(Err(Unopened::Failed("the session ended".to_owned())));
+        let tree = self.tree.lock().await.replace(Err(Unopened::Closed));
         let Some(Ok(tree)) = tree else {
             return;
         };
@@ -690,21 +711,22 @@ impl Checkpoints {
             .ok_or(DiffError::NoCheckpoint)
     }
 
-    /// The project, opened on first use.
+    /// The project, opened on first use. Only success, a project outside Git and a close are
+    /// kept; any other failure is reported to this call, and the next use opens the project again.
+    /// The lock is held while opening, so two opens never run at once.
     async fn tree(&self) -> Result<Arc<WorkingTree>, DiffError> {
         let mut tree = self.tree.lock().await;
         if tree.is_none() || matches!(tree.as_ref(), Some(Err(Unopened::OutsideGit))) {
-            let opened = self.bounded(WorkingTree::open(&self.dir)).await;
-            *tree = Some(match opened {
+            *tree = Some(match self.bounded(WorkingTree::open(&self.dir)).await {
                 Ok(opened) => Ok(Arc::new(opened)),
                 Err(DiffError::NotARepository) => Err(Unopened::OutsideGit),
-                Err(error) => Err(Unopened::Failed(error.to_string())),
+                Err(error) => return Err(DiffError::NotCaptured(error.to_string())),
             });
         }
         match tree.as_ref().expect("opened above") {
             Ok(tree) => Ok(tree.clone()),
             Err(Unopened::OutsideGit) => Err(DiffError::NotARepository),
-            Err(Unopened::Failed(reason)) => Err(DiffError::NotCaptured(reason.clone())),
+            Err(Unopened::Closed) => Err(DiffError::NotCaptured("the session ended".to_owned())),
         }
     }
 

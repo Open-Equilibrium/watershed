@@ -208,6 +208,26 @@ pub(super) async fn pi_once(
     output(piped(command, &[] as &[(&str, &str)]), false, Some(input)).await
 }
 
+/// The variables that point Git at another repository or index, as `git rev-parse
+/// --local-env-vars` lists them, such as those a Git hook sets; Liquid's Git acts on its project.
+pub(crate) const REPOSITORY_ENV: [&str; 15] = [
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_GRAFT_FILE",
+    "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_PREFIX",
+    "GIT_SHALLOW_FILE",
+    "GIT_COMMON_DIR",
+];
+
 /// Keeps Git and its credential helpers from asking on a terminal or in a window, as T3 Code
 /// does.
 pub(super) const NO_PROMPTS: [(&str, &str); 5] = [
@@ -345,6 +365,9 @@ pub(super) fn git_command(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -
 
 /// `command` with its output piped, in a process group of its own.
 fn piped(mut command: Command, env: &[(&str, impl AsRef<std::ffi::OsStr>)]) -> Command {
+    for name in REPOSITORY_ENV {
+        command.env_remove(name);
+    }
     command
         // A group of its own, so Git ends with the programs it starts (see [`Git`]).
         .process_group(0)

@@ -272,6 +272,7 @@ impl WorkingTree {
             // content unstaged, also if the user's hook refuses the commit. Staged deletions
             // are absent from the index too; --only records them without adding a missing path.
             let mut marked = Vec::new();
+            let mut present = Vec::new();
             for entry in &entries {
                 if let [tag, b' ', path @ ..] = entry.as_bytes()
                     && (tag.is_ascii_lowercase() || *tag == b'S')
@@ -279,18 +280,28 @@ impl WorkingTree {
                 {
                     marked.extend_from_slice(path);
                     marked.push(0);
+                    // A skip mark on a file absent from disk stays: outside a sparse checkout
+                    // such a file holds no edit.
+                    if self
+                        .root
+                        .join(OsStr::from_bytes(path))
+                        .symlink_metadata()
+                        .is_ok()
+                    {
+                        present.extend_from_slice(path);
+                        present.push(0);
+                    }
                 }
             }
             // The dialog includes hidden edits; --only would silently skip marked files.
             // Clear only selected marks, leaving excluded index entries and flags intact.
-            if !marked.is_empty() {
-                for mark in ["--no-assume-unchanged", "--no-skip-worktree"] {
-                    user_git_input(
-                        &self.root,
-                        &["update-index", mark, "-z", "--stdin"],
-                        &marked,
-                    )
-                    .await?;
+            for (mark, paths) in [
+                ("--no-assume-unchanged", &marked),
+                ("--no-skip-worktree", &present),
+            ] {
+                if !paths.is_empty() {
+                    user_git_input(&self.root, &["update-index", mark, "-z", "--stdin"], paths)
+                        .await?;
                 }
             }
             let new: Vec<&str> = selected

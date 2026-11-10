@@ -78,6 +78,16 @@ pub enum Changes {
 const MAX_BRANCHES: usize = 1000;
 
 impl WorkingTree {
+    /// Whether Git records a merge in progress, in `MERGE_HEAD` beside the checkout's locks in
+    /// its Git directory; a ref of that name elsewhere is no merge.
+    fn merging(&self) -> Result<bool, DiffError> {
+        match std::fs::symlink_metadata(self.locks.with_file_name("MERGE_HEAD")) {
+            Ok(_) => Ok(true),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(DiffError::Io(error)),
+        }
+    }
+
     /// The checkout's branch, upstream and uncommitted files. A private index with skip marks
     /// cleared exposes hidden edits and leaves the project's index alone beside the user's Git.
     pub async fn status(&self) -> Result<GitStatus, DiffError> {
@@ -108,7 +118,7 @@ impl WorkingTree {
             behind: 0,
             changed: 0,
             default_branch: None,
-            merging: self.resolve("MERGE_HEAD").await?.is_some(),
+            merging: self.merging()?,
             conflicts: Vec::new(),
             repository: std::fs::canonicalize(&self.common)
                 .unwrap_or_else(|_| self.common.clone())

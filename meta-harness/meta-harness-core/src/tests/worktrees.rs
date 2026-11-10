@@ -158,6 +158,20 @@ fn keeps_a_worktree_with_local_or_ignored_files() {
         assert!(!review.removable());
         assert!(checkpoints.remove_worktree(&review).await.is_err());
         assert!(linked.linked.path().join("run.log").exists());
+
+        // Git names an ignored folder without walking it, so its files count only as more; an
+        // empty one holds nothing.
+        std::fs::remove_file(linked.linked.path().join("run.log")).unwrap();
+        linked.linked.write(".gitignore", "*.log\nbuild/\ncache/\n");
+        linked.linked.git(&["commit", "-q", "-am", "Ignore builds"]);
+        for dir in ["build/deep", "cache"] {
+            std::fs::create_dir_all(linked.linked.path().join(dir)).unwrap();
+        }
+        linked.linked.write("build/deep/out.o", "");
+        linked.linked.write("build/out.o", "");
+        let review = checkpoints.worktree_removal(&linked.path()).await.unwrap();
+        assert_eq!((review.ignored, review.more_ignored), (0, true));
+        assert!(!review.removable());
     });
 }
 

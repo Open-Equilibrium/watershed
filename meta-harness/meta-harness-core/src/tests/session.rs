@@ -690,7 +690,7 @@ fn git_project(name: &str) -> std::path::PathBuf {
             "base",
         ],
     ] {
-        let status = std::process::Command::new("git")
+        let status = super::fixture_git()
             .args(args)
             .current_dir(&dir)
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -744,11 +744,12 @@ fn checkpoint_start_distinguishes_missing_guards_from_failed_snapshots() {
             let script = format!(
                 r#"printf '%s\n' '{{"type":"extension_ui_request","id":"c1","method":"input","title":"watershed.checkpoint {{\"session\":\"s1\",\"turn\":\"t1\",\"phase\":\"start\"}}"}}'
 IFS= read -r line
-printf '%s' "$line" > '{response}.tmp'
-mv '{response}.tmp' '{response}'
+printf '%s' "$line" > {written}
+mv {written} {response}
 IFS= read -r line
 "#,
-                response = response.display()
+                written = super::shell_word(format!("{}.tmp", response.display())),
+                response = super::shell_word(response.display())
             );
             let command = AgentCommand {
                 program: "/bin/sh".into(),
@@ -846,7 +847,7 @@ fn takes_the_checkpoints_the_extension_asks_for_without_asking_the_user() {
             exited(true),
             "no question reached the user"
         );
-        let refs = std::process::Command::new("git")
+        let refs = super::fixture_git()
             .args(["for-each-ref", "--format=%(refname)", "refs/watershed"])
             .current_dir(&project)
             .output()
@@ -863,7 +864,8 @@ fn takes_the_checkpoints_the_extension_asks_for_without_asking_the_user() {
 fn a_turn_that_waits_for_a_revert_says_so_in_the_status() {
     run(async {
         let project = git_project("checkpoint-waits");
-        // Another window reverts the checkout.
+        // Another window reverts the checkout, or deletes a session or commits; the turn cannot
+        // tell which.
         let reverting = crate::checkout::Checkout::new(
             project.join(".git/watershed"),
             project.join(".git/watershed"),
@@ -894,7 +896,9 @@ fn a_turn_that_waits_for_a_revert_says_so_in_the_status() {
         };
         assert_eq!(
             next(&mut events).await,
-            status(Some("Waiting for a revert in this checkout to finish"))
+            status(Some(
+                "Waiting for another Git action in this checkout to finish"
+            ))
         );
         drop(reverting);
         assert_eq!(next(&mut events).await, status(None));
@@ -1440,7 +1444,10 @@ fn refuses_an_extension_path_relative_to_the_agents_directory() {
         let started = marker("relative-extension");
         let command = AgentCommand {
             program: "/bin/sh".into(),
-            args: vec!["-c".into(), format!("touch '{}'", started.display()).into()],
+            args: vec![
+                "-c".into(),
+                format!("touch {}", super::shell_word(started.display())).into(),
+            ],
             extension: "pi-extension/watershed.ts".into(),
             session: None,
             cwd: std::env::temp_dir(),

@@ -226,8 +226,9 @@ impl Checkpoints {
         self.bounded(tree.uncommitted_patch(path, whitespace)).await
     }
 
-    /// Compares each available turn's start/end, the gaps between them and the checkout.
-    /// Missing checkpoints supply no attribution; they never hide uncommitted files.
+    /// Compares each available turn's start/end, the gaps between them and the checkout. A turn
+    /// without its end counts what changed up to the next checkpoint as its own; missing
+    /// checkpoints never hide uncommitted files.
     pub async fn commit_plan(&self, turns: &[TurnCheckpoints]) -> Result<CommitPlan, DiffError> {
         let tree = self.tree().await?;
         let (current, mut files) = self
@@ -268,7 +269,8 @@ impl Checkpoints {
             .await
         {
             Ok(()) => {}
-            Err(DiffError::TimedOut(_) | DiffError::TooLarge) => {
+            // A checkpoint id that names no ref leaves attribution unavailable; files stay listed.
+            Err(DiffError::TimedOut(_) | DiffError::TooLarge | DiffError::InvalidCheckpoint(_)) => {
                 for file in files.values_mut() {
                     file.attribution_available = false;
                     file.turns.clear();
@@ -314,7 +316,8 @@ impl Checkpoints {
             REFS.to_owned()
         };
         let resolved = tree.checkpoint_trees(&prefix).await?;
-        let mut previous = None;
+        // The last checkpoint, and the turn the changes after it belong to, none outside turns.
+        let mut previous: Option<(Snapshot, Option<u64>)> = None;
         let mut first = true;
         let mut pairs = Vec::new();
         let mut labels = Vec::new();
@@ -324,24 +327,24 @@ impl Checkpoints {
                 continue;
             };
             if first {
-                previous = Some(tree.committed(&format!("{start_ref}^")).await?);
+                previous = Some((tree.committed(&format!("{start_ref}^")).await?, None));
                 first = false;
             }
-            if let Some(before) = previous.take() {
+            if let Some((before, turn)) = previous.take() {
                 pairs.push((before, start.clone()));
-                labels.push(None);
+                labels.push(turn);
             }
             let Some(end) = resolved.get(&end_ref) else {
-                previous = Some(start.clone());
+                previous = Some((start.clone(), Some(number)));
                 continue;
             };
             pairs.push((start.clone(), end.clone()));
             labels.push(Some(number));
-            previous = Some(end.clone());
+            previous = Some((end.clone(), None));
         }
-        if let Some(previous) = previous {
+        if let Some((previous, turn)) = previous {
             pairs.push((previous, current.clone()));
-            labels.push(None);
+            labels.push(turn);
         }
         for (paths, turn) in tree
             .changed_paths_batch(&pairs)

@@ -91,6 +91,19 @@ fn times_parallel_tools_from_their_own_end_and_follows_compaction() {
 }
 
 #[test]
+fn lists_a_compaction_summary_a_later_one_replaced() {
+    let data: Value = serde_json::from_str(PARALLEL).expect("JSON");
+    let detail = History::from_entries(&data).context("a3").expect("context");
+    let summaries: Vec<_> = detail
+        .messages
+        .iter()
+        .filter(|message| message.label == "compaction summary")
+        .map(|message| (message.entry.as_str(), message.in_context))
+        .collect();
+    assert_eq!(summaries, [("k1", false), ("k2", true)]);
+}
+
+#[test]
 fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
     let data: Value = serde_json::from_str(ENTRIES).expect("JSON");
     let record = |entry: &str, turn, kind, label: &str, start_ms, duration_ms| TrajectoryRecord {

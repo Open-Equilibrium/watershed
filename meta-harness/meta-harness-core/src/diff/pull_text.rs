@@ -15,13 +15,15 @@ const MAX_LIST_BYTES: u64 = 16 * 1024;
 /// Uncommitted files one Git diff names, so a long selection never outgrows a command line.
 const PATHS_PER_DIFF: usize = 100;
 
-/// Git's diff with no program a project names (ADR-0206).
-const DIFF: [&str; 5] = [
+/// Git's diff with no program a project names (ADR-0206), and no setting that hides a
+/// submodule's new commits (ADR-0210).
+const DIFF: [&str; 6] = [
     "diff",
     "--no-color",
     "--no-ext-diff",
     "--no-textconv",
     "--no-renames",
+    "--ignore-submodules=none",
 ];
 
 /// The longest title GitHub takes.

@@ -46,6 +46,10 @@ impl Pushed {
         pushed.answer("head", &pushed.head());
         pushed.answer("prs", "");
         pushed.answer("fork-prs", "");
+        pushed.answer(
+            "compare",
+            &format!(r#"{{"commits":2,"url":"https://github.com/acme/api/compare","merge_base":"{BASE}","files":3,"added":12,"removed":1}}"#),
+        );
         pushed
     }
 
@@ -77,7 +81,7 @@ impl Pushed {
                  'api --hostname github.com repos/acme/api/pulls?head=bw:feature/retry-after&state=all&per_page=100 --jq '*) cat \"$d/prs\" ;;\n\
                  'api --hostname github.com repos/bw/api/pulls?head=bw:feature/retry-after&state=all&per_page=100 --jq '*) cat \"$d/fork-prs\" ;;\n\
                  'pr view '*' --repo github.com/'*) cat \"$d/view-$3\" ;;\n\
-                 'api --hostname github.com repos/acme/api/compare/develop...bw:feature/retry-after --jq '*) echo '{{\"commits\":2,\"url\":\"https://github.com/acme/api/compare\",\"merge_base\":\"{BASE}\",\"files\":3,\"added\":12,\"removed\":1}}' ;;\n\
+                 'api --hostname github.com repos/acme/api/compare/develop...'\"$(cat \"$d/head\")\"' --jq '*) cat \"$d/compare\" ;;\n\
                  'api --hostname github.com repos/acme/api/compare/'*) echo 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;\n\
                  *) echo \"unexpected: $*\" >&2; exit 9 ;;\nesac\n"
             ),
@@ -179,6 +183,42 @@ fn a_fork_targets_its_parent_and_creates_only_the_reviewed_pull_request() {
                 .lines()
                 .skip(calls)
                 .any(|call| call.contains("POST"))
+        );
+    });
+}
+
+#[test]
+fn past_githubs_listed_files_git_counts_the_comparison() {
+    run(async {
+        let pushed = Pushed::new("many", "https://github.com/bw/api.git");
+        let base = pushed.repo.git(&["rev-parse", "main"]).trim().to_owned();
+        for n in 0..301 {
+            pushed.repo.write(&format!("f{n}.txt"), "line\n");
+        }
+        pushed.repo.git(&["add", "."]);
+        pushed.repo.git(&["commit", "-m", "Many files"]);
+        pushed.repo.git(&[
+            "update-ref",
+            "refs/remotes/origin/feature/retry-after",
+            "HEAD",
+        ]);
+        pushed.answer("head", &pushed.head());
+        // GitHub lists at most 300 of the files and counts only their lines.
+        pushed.answer(
+            "compare",
+            &format!(r#"{{"commits":2,"url":"","merge_base":"{base}","files":300,"added":300,"removed":0}}"#),
+        );
+
+        let plan = pushed
+            .checkpoints("")
+            .pull_request_plan(None, Some("develop"))
+            .await
+            .unwrap();
+
+        let comparison = plan.comparison.unwrap();
+        assert_eq!(
+            (comparison.commits, comparison.files, comparison.added),
+            (2, 302, 302)
         );
     });
 }
@@ -309,7 +349,7 @@ fn refuses_what_cannot_become_a_pull_request_and_says_why() {
                 "'api --hostname github.acme.example repos/bw/api') echo '{\"full_name\":\"bw/api\",\"fork\":false,\"default_branch\":\"trunk\"}' ;;\n\
                  'api --hostname github.acme.example repos/bw/api/branches/'*) cat \"$d/head\" ;;\n\
                  'api --hostname github.acme.example repos/bw/api/pulls?'*) ;;\n\
-                 'api --hostname github.acme.example repos/bw/api/compare/trunk...bw:feature/retry-after --jq '*) echo '{\"commits\":1,\"files\":1,\"added\":1,\"removed\":0,\"url\":\"\"}' ;;",
+                 'api --hostname github.acme.example repos/bw/api/compare/trunk...'\"$(cat \"$d/head\")\"' --jq '*) echo '{\"commits\":1,\"files\":1,\"added\":1,\"removed\":0,\"url\":\"\"}' ;;",
             )
             .pull_request_plan(None, None)
             .await

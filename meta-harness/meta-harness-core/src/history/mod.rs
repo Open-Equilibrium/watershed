@@ -41,11 +41,12 @@ impl History {
         history
     }
 
-    /// Reads the entries pi stored in a session file, line by line. An entry longer than `limit`
-    /// is skipped and an unfinished last line is left to the agent's answer, so memory stays
-    /// bounded by one entry rather than by the session.
+    /// Reads the entries pi stored in a session file, line by line; a pipe or device is refused
+    /// without waiting. An entry longer than `limit` is skipped and an unfinished last line is
+    /// left to the agent's answer, so memory stays bounded by one entry rather than by the
+    /// session.
     pub(crate) fn from_file(path: &Path, limit: usize) -> std::io::Result<Self> {
-        let mut file = std::fs::File::open(path)?;
+        let mut file = crate::stored::open(path)?;
         let mut framer = LineFramer::new(limit);
         let mut chunk = vec![0; 64 * 1024];
         let mut entries = Vec::new();

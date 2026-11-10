@@ -208,7 +208,8 @@ impl WorkingTree {
             return Ok(removal);
         }
         let dir = Path::new(&worktree.path).to_owned();
-        // Reading the status writes nothing, not even the index's file stats.
+        // Reading the status writes nothing, not even the index's file stats. Git names an
+        // ignored folder without walking it, so a huge one stays quick.
         let (status, more) = git_start(
             &dir,
             &[
@@ -217,7 +218,7 @@ impl WorkingTree {
                 "--porcelain=v1",
                 "-z",
                 "--untracked-files=all",
-                "--ignored=traditional",
+                "--ignored=matching",
                 "--no-renames",
             ],
             MAX_STATUS_BYTES,
@@ -231,12 +232,26 @@ impl WorkingTree {
             // The last entry may be cut short.
             entries.pop();
         }
+        let mut ignored = false;
         for entry in entries {
             let (code, path) = entry.split_at(3);
-            let path = String::from_utf8_lossy(path).into_owned();
             let state = match (code[0], code[1]) {
+                // A folder's files are not counted, only that there are more; an empty one holds
+                // nothing, and one that cannot be read may hold anything.
+                (b'!', b'!') if path.ends_with(b"/") => {
+                    let folder = dir.join(std::ffi::OsStr::from_bytes(path));
+                    if folder
+                        .read_dir()
+                        .map_or(true, |mut inside| inside.next().is_some())
+                    {
+                        removal.more_ignored = true;
+                        ignored = true;
+                    }
+                    continue;
+                }
                 (b'!', b'!') => {
                     removal.ignored += 1;
+                    ignored = true;
                     continue;
                 }
                 (b'?', b'?') => WorktreeFileState::Untracked,
@@ -244,6 +259,7 @@ impl WorkingTree {
                 _ => WorktreeFileState::Staged,
             };
             if removal.files.len() < MAX_FILES {
+                let path = String::from_utf8_lossy(path).into_owned();
                 removal.files.push(WorktreeFile { path, state });
             } else {
                 removal.more_files = true;
@@ -251,7 +267,7 @@ impl WorkingTree {
         }
         // Git lists ignored entries last, so a cut status ends in them once any was read, and
         // otherwise in local files.
-        if more && removal.ignored > 0 {
+        if more && ignored {
             removal.more_ignored = true;
         } else if more {
             removal.more_files = true;

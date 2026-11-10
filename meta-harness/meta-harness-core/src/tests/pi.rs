@@ -722,6 +722,7 @@ fn ends_the_items_an_abort_leaves_open() {
         r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Run"}}"#,
         r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"ning"}}"#,
         r#"{"type":"tool_execution_start","toolCallId":"c1","toolName":"bash","args":{"command":"sleep 9"}}"#,
+        r#"{"type":"tool_execution_update","toolCallId":"c1","toolName":"bash","args":{"command":"sleep 9"},"partialResult":{"content":[{"type":"text","text":"waiting"}],"details":{}}}"#,
         r#"{"type":"agent_settled","aborted":true}"#,
     ]);
     let ended: Vec<_> = events
@@ -736,6 +737,7 @@ fn ends_the_items_an_abort_leaves_open() {
             )
         })
         .skip(1)
+        .filter(|event| !matches!(event, AgentEvent::ItemUpdated { .. }))
         .cloned()
         .collect();
     let interrupted = |item, kind, text: &str| AgentEvent::ItemCompleted {
@@ -751,9 +753,9 @@ fn ends_the_items_an_abort_leaves_open() {
         ended,
         [
             interrupted(1, ItemKind::AssistantMessage, "Running"),
-            interrupted(2, ItemKind::CommandExecution, ""),
+            interrupted(2, ItemKind::CommandExecution, "waiting"),
             AgentEvent::TurnAborted { turn: TURN },
         ],
-        "nothing stays running after the abort"
+        "nothing stays running after the abort, and each keeps its partial output"
     );
 }

@@ -91,8 +91,8 @@ struct Projection<'a> {
     since: usize,
     request_timing: Option<(Option<u64>, Option<u64>)>,
     /// The latest response's open calls, with when each tool's timing entry was stored and how
-    /// long the tool ran. pi runs a response's tools in parallel and stores their results
-    /// together, so a result's own time is the end of the slowest tool.
+    /// long the tool ran. A result's own time can be the end of a slower tool that ran
+    /// alongside it ([`OpenCalls::timing`]).
     calls: OpenCalls<'a, (u64, Option<u64>)>,
 }
 
@@ -107,7 +107,8 @@ struct Logged {
     /// What it is, as the context detail lists it.
     label: String,
     chars: usize,
-    /// Whether it ever was a message, so the detail lists it even once taken out.
+    /// Whether it ever was a message or the summary leading the context, so the detail lists it
+    /// even once taken out or replaced.
     was_message: bool,
     /// Whether it changed the context without being a message, such as a compaction.
     event: bool,
@@ -177,7 +178,7 @@ impl<'a> Projection<'a> {
                 .log
                 .iter()
                 .enumerate()
-                .filter(|(index, logged)| logged.was_message || Some(*index) == self.summary)
+                .filter(|(_, logged)| logged.was_message)
                 .map(|(index, logged)| ContextMessage {
                     entry: logged.id.clone(),
                     label: logged.label.clone(),
@@ -237,6 +238,7 @@ impl<'a> Projection<'a> {
                 if let Some(logged) = self.log.last_mut() {
                     logged.label = "compaction summary".to_owned();
                     logged.chars = *chars;
+                    logged.was_message = true;
                 }
                 if let Some(system) = system {
                     self.sections.clear();

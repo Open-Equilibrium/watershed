@@ -270,8 +270,8 @@ impl Responder {
     /// Aborts the running turn. pi answers once the agent is idle, which needs its open
     /// questions answered, so they are dismissed.
     pub async fn abort(&self) -> Result<Pending, CommandError> {
-        self.state.lock().stopping = true;
-        let pending = self.submit_as(json!({ "type": "abort" }), false).await?;
+        let stopping = |shared: &mut Shared, _| shared.stopping = true;
+        let pending = self.submit_as(json!({ "type": "abort" }), stopping).await?;
         let questions: Vec<_> = self.state.lock().questions.iter().cloned().collect();
         // One the user answered meanwhile is already resolved.
         for request in questions {
@@ -282,6 +282,16 @@ impl Responder {
 
     /// Answers an open question from an agent extension.
     pub async fn answer(&self, request: &RequestId, answer: Answer) -> Result<(), CommandError> {
+        if !self.state.lock().questions.contains(request) {
+            return Err(CommandError::UnknownRequest);
+        }
+        // Room first, so an answer given up while it waits leaves the question open.
+        let room = self
+            .writer
+            .reserve()
+            .await
+            .map_err(|_| CommandError::Closed)?;
+        // It may have been answered or run out of time meanwhile.
         if !self.state.lock().end_question(request) {
             return Err(CommandError::UnknownRequest);
         }
@@ -290,10 +300,7 @@ impl Responder {
             Answer::Confirmed(confirmed) => json!({ "confirmed": confirmed }),
             Answer::Cancelled => json!({ "cancelled": true }),
         };
-        self.writer
-            .send(ui_response(request, reply))
-            .await
-            .map_err(|_| CommandError::Closed)?;
+        room.send(ui_response(request, reply));
         self.resolved(AgentEvent::UserInputResolved {
             request: request.clone(),
         })
@@ -309,9 +316,19 @@ impl Responder {
         }
     }
 
-    /// Sends `command`; a `switch` of the session starts the next history read over once the
-    /// agent did it.
-    async fn submit_as(&self, mut command: Value, switch: bool) -> Result<Pending, CommandError> {
+    /// Sends `command` once the agent's input has room, so a caller that gives up while it
+    /// waits leaves nothing waiting for an answer; `mark` notes what the command starts under
+    /// its id, such as a session switch.
+    async fn submit_as(
+        &self,
+        mut command: Value,
+        mark: impl FnOnce(&mut Shared, u64),
+    ) -> Result<Pending, CommandError> {
+        let room = self
+            .writer
+            .reserve()
+            .await
+            .map_err(|_| CommandError::Closed)?;
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
         command["id"] = Value::String(id.to_string());
         let (reply, response) = oneshot::channel();
@@ -321,14 +338,9 @@ impl Responder {
                 return Err(CommandError::Closed);
             };
             replies.insert(id, reply);
-            if switch {
-                shared.switches.insert(id);
-            }
+            mark(&mut shared, id);
         }
-        self.writer
-            .send(Write::Record(encode(&command)))
-            .await
-            .map_err(|_| CommandError::Closed)?;
+        room.send(Write::Record(encode(&command)));
         Ok(Pending(response))
     }
 }
@@ -484,7 +496,7 @@ impl Session {
     /// Starts a new session in the same agent; the stored one stays available. Extensions may
     /// ask the user first or cancel it.
     pub async fn new_session(&mut self) -> Result<Pending, CommandError> {
-        self.submit_as(json!({ "type": "new_session" }), true).await
+        self.switch(json!({ "type": "new_session" })).await
     }
 
     /// Continues the session stored in `file`; extensions may ask the user first or cancel it.
@@ -493,7 +505,7 @@ impl Session {
             "type": "switch_session",
             "sessionPath": file.to_string_lossy(),
         });
-        self.submit_as(command, true).await
+        self.switch(command).await
     }
 
     /// Fails unless Watershed's pi extension is loaded from the file the session named, which
@@ -677,10 +689,15 @@ impl Session {
     }
 
     async fn submit(&mut self, command: Value) -> Result<Pending, CommandError> {
-        self.submit_as(command, false).await
+        self.responder.submit_as(command, |_, _| {}).await
     }
 
-    async fn submit_as(&mut self, command: Value, switch: bool) -> Result<Pending, CommandError> {
+    /// Sends a command that switches the session; once the agent did it, the next history read
+    /// starts over.
+    async fn switch(&mut self, command: Value) -> Result<Pending, CommandError> {
+        let switch = |shared: &mut Shared, id| {
+            shared.switches.insert(id);
+        };
         self.responder.submit_as(command, switch).await
     }
 }
@@ -711,9 +728,9 @@ async fn capture(
     }
 }
 
-/// Shows in the status while a turn's start waits for a revert in the checkout, until the
-/// agent's exit was reported, which stays last. It holds the events weakly, so checkpoints
-/// kept after the session keep no event stream open.
+/// Shows in the status while a turn's start waits for a revert or another Git action that holds
+/// the checkout alone, until the agent's exit was reported, which stays last. It holds the
+/// events weakly, so checkpoints kept after the session keep no event stream open.
 async fn report_waiting(
     mut waiting: tokio::sync::watch::Receiver<bool>,
     events: mpsc::WeakSender<SessionEvent>,
@@ -724,7 +741,7 @@ async fn report_waiting(
             break;
         };
         let text = (*waiting.borrow_and_update())
-            .then(|| "Waiting for a revert in this checkout to finish".to_owned());
+            .then(|| "Waiting for another Git action in this checkout to finish".to_owned());
         let status = AgentEvent::StatusChanged {
             key: "watershed.revert".to_owned(),
             text,
@@ -780,5 +797,62 @@ async fn write(mut stdin: ChildStdin, mut writes: mpsc::Receiver<Write>) {
         if stdin.write_all(&line).await.is_err() || stdin.flush().await.is_err() {
             break;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::Future;
+    use std::task::{Context, Waker};
+
+    use super::*;
+
+    /// A responder whose agent input has no room left, with the question `q1` open.
+    fn crowded() -> (Responder, mpsc::Receiver<Write>) {
+        let (writer, writes) = mpsc::channel(1);
+        assert!(writer.try_send(Write::Close).is_ok());
+        let state = State(Arc::new(Mutex::new(Shared {
+            replies: Some(HashMap::new()),
+            questions: HashSet::from([RequestId("q1".to_owned())]),
+            ..Shared::default()
+        })));
+        let responder = Responder {
+            writer,
+            events: mpsc::channel(1).0.downgrade(),
+            ended: Arc::default(),
+            state,
+            next_id: Arc::default(),
+        };
+        (responder, writes)
+    }
+
+    /// Starts `work` and drops it while it waits for room, as a caller that gives up does.
+    fn cancel(work: impl Future) {
+        let mut work = std::pin::pin!(work);
+        let polled = work.as_mut().poll(&mut Context::from_waker(Waker::noop()));
+        assert!(polled.is_pending(), "it waits for room");
+    }
+
+    #[test]
+    fn a_cancelled_answer_leaves_the_question_open() {
+        let (responder, mut writes) = crowded();
+        let request = RequestId("q1".to_owned());
+        cancel(responder.answer(&request, Answer::Confirmed(true)));
+        assert!(matches!(writes.try_recv(), Ok(Write::Close)));
+        let answered = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("test runtime starts")
+            .block_on(responder.answer(&request, Answer::Confirmed(true)));
+        assert_eq!(answered, Ok(()), "the question is still open");
+        assert!(matches!(writes.try_recv(), Ok(Write::Record(_))));
+    }
+
+    #[test]
+    fn a_cancelled_abort_leaves_nothing_waiting_and_questions_to_the_user() {
+        let (responder, _writes) = crowded();
+        cancel(responder.abort());
+        let shared = responder.state.lock();
+        assert!(shared.replies.as_ref().is_some_and(HashMap::is_empty));
+        assert!(!shared.stopping);
     }
 }

@@ -21,6 +21,9 @@ const BRANCHES_PER_PAGE: usize = 100;
 /// Pages of branches read to choose a base from.
 const MAX_BRANCH_PAGES: usize = 5;
 
+/// Files GitHub's comparison lists at most; past them Git counts the files itself.
+const MAX_COMPARED_FILES: u64 = 300;
+
 /// The pull request fields Liquid reads.
 const FIELDS: &str = "number,title,state,isDraft,url,baseRefName,headRefName,headRepository,headRepositoryOwner,statusCheckRollup,reviewDecision";
 
@@ -452,14 +455,7 @@ impl WorkingTree {
             Some(target) if pushed => {
                 both(
                     self.open_pull_request(program, &host, target, &repository, &head.branch),
-                    self.compared(
-                        program,
-                        &host,
-                        target,
-                        base.as_deref(),
-                        &repository.owner,
-                        &head.branch,
-                    ),
+                    self.compared(program, &host, target, base.as_deref(), &head.commit),
                 )
                 .await?
             }
@@ -1017,16 +1013,15 @@ impl WorkingTree {
         })
     }
 
-    /// The comparison of the head with `base`, whether GitHub lacks `base`, and whether GitHub
-    /// could not compare them; only gh and login failures end the plan.
+    /// The comparison of the head `commit` with `base`, whether GitHub lacks `base`, and whether
+    /// GitHub could not compare them; only gh and login failures end the plan.
     async fn compared(
         &self,
         program: &OsStr,
         host: &str,
         target: &str,
         base: Option<&str>,
-        owner: &str,
-        branch: &str,
+        commit: &str,
     ) -> Result<(Option<Comparison>, bool, bool), PullRequestError> {
         let Some(base) = base else {
             return Ok((None, false, false));
@@ -1034,11 +1029,13 @@ impl WorkingTree {
         if !valid_base(base) {
             return Ok((None, true, false));
         }
-        match self
-            .compare(program, host, target, base, owner, branch)
-            .await
-        {
-            Ok(compared) => Ok((Some(compared), false, false)),
+        match self.compare(program, host, target, base, commit).await {
+            Ok(mut compared) => {
+                if compared.files >= MAX_COMPARED_FILES {
+                    self.count_files(&mut compared, commit).await?;
+                }
+                Ok((Some(compared), false, false))
+            }
             Err(PullRequestError::NoAccess { .. }) => Ok((None, true, false)),
             Err(PullRequestError::Failed(_) | PullRequestError::Unreachable { .. }) => {
                 Ok((None, false, true))
@@ -1047,14 +1044,16 @@ impl WorkingTree {
         }
     }
 
+    /// GitHub's comparison of `base` with the head by its pushed commit, which names it in
+    /// the fork network even where `owner:branch` would name the target's own branch, as when
+    /// one organization owns both.
     async fn compare(
         &self,
         program: &OsStr,
         host: &str,
         target: &str,
         base: &str,
-        owner: &str,
-        branch: &str,
+        commit: &str,
     ) -> Result<Comparison, PullRequestError> {
         let output = self
             .gh_api(
@@ -1062,11 +1061,7 @@ impl WorkingTree {
                 host,
                 target,
                 &[
-                    &format!(
-                        "repos/{target}/compare/{}...{}",
-                        path_segment(base),
-                        qualified(owner, &path_segment(branch))
-                    ),
+                    &format!("repos/{target}/compare/{}...{commit}", path_segment(base)),
                     "--jq",
                     "{commits: .ahead_by, url: .html_url, merge_base: .merge_base_commit.sha, files: (.files | length), added: ([.files[].additions] | add // 0), removed: ([.files[].deletions] | add // 0)}",
                 ],
@@ -1084,6 +1079,28 @@ impl WorkingTree {
             url: text(&json["url"]),
             merge_base: text(&json["merge_base"]),
         })
+    }
+
+    /// The files and lines from the shared commit GitHub named to the head `commit`, as Git
+    /// counts them; GitHub's counts stay when Git lacks that commit or the list is too long.
+    async fn count_files(
+        &self,
+        comparison: &mut Comparison,
+        commit: &str,
+    ) -> Result<(), PullRequestError> {
+        let base = comparison.merge_base.as_str();
+        if !commit_id(base) || self.resolve(&format!("{base}^{{commit}}")).await?.is_none() {
+            return Ok(());
+        }
+        let counts = match self.diff(&["--numstat", "-z", base, commit]).await {
+            Ok(numstat) => line_counts(&numstat),
+            Err(DiffError::TooLarge) => return Ok(()),
+            Err(error) => return Err(error.into()),
+        };
+        comparison.files = counts.len() as u64;
+        comparison.added = counts.values().map(|(added, _)| added).sum();
+        comparison.removed = counts.values().map(|(_, removed)| removed).sum();
+        Ok(())
     }
 
     async fn gh_api(
@@ -1190,11 +1207,15 @@ fn github_repository(url: &str) -> Option<Repository> {
             let host = authority
                 .rsplit_once('@')
                 .map_or(authority, |(_, host)| host);
-            // SSH's port is not part of the host gh knows.
-            let host = if scheme.eq_ignore_ascii_case("ssh") {
-                host.split(':').next()?
-            } else {
-                host
+            // A port is not part of the host gh knows.
+            let host = match host.split_once(':') {
+                Some((host, port))
+                    if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) =>
+                {
+                    host
+                }
+                Some(_) => return None,
+                None => host,
             };
             (host, path)
         }
@@ -1397,6 +1418,15 @@ fn reads_github_repositories_from_resolved_remote_urls() {
             "ssh://git@ssh.github.com:443/acme/api.git",
             Some("github.com/acme/api"),
         ),
+        (
+            "https://github.com:443/acme/api.git",
+            Some("github.com/acme/api"),
+        ),
+        (
+            "https://github.acme.example:8443/team/tool",
+            Some("github.acme.example/team/tool"),
+        ),
+        ("https://github.com:x/acme/api", None),
         (
             "https://GitHub.Acme.example/team/tool",
             Some("github.acme.example/team/tool"),

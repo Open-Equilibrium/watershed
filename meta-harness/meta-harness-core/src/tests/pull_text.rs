@@ -151,6 +151,37 @@ fn a_long_patch_reaches_the_model_cut_at_64_kib_with_a_note() {
 }
 
 #[test]
+fn a_submodule_update_reaches_the_model_though_the_project_hides_it() {
+    run(async {
+        let mut branch = Branch::new("submodule", "b.txt", "retry\n");
+        let checkpoints = Checkpoints::new(branch.repo.path());
+        let repo = &branch.repo;
+        let (old, new) = (branch.base.clone(), branch.head.clone());
+        for (commit, message) in [(&old, "Add lib"), (&new, "Update lib")] {
+            repo.git(&[
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &format!("160000,{commit},lib"),
+            ]);
+            repo.git(&["commit", "-q", "-m", message]);
+        }
+        branch.base = repo.git(&["rev-parse", "HEAD~1"]).trim().to_owned();
+        branch.head = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
+        repo.git(&["config", "diff.ignoreSubmodules", "all"]);
+
+        branch.write(&checkpoints).await.unwrap();
+
+        let input = branch.read("input");
+        assert!(input.contains("Update lib"), "{input}");
+        assert!(
+            input.contains(&format!("+Subproject commit {new}")),
+            "{input}"
+        );
+    });
+}
+
+#[test]
 fn a_failing_or_empty_answer_writes_no_text() {
     run(async {
         let branch = Branch::new("fails", "b.txt", "retry\n");
