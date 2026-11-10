@@ -1632,6 +1632,32 @@ void main() {
     );
   });
 
+  testWidgets('turn folds leave the hidden list alone while comparing', (
+    tester,
+  ) async {
+    await showBranches(tester);
+    await press(tester, LogicalKeyboardKey.arrowDown);
+    await press(tester, LogicalKeyboardKey.keyC);
+    await press(tester, LogicalKeyboardKey.arrowLeft);
+    await press(tester, LogicalKeyboardKey.keyC);
+    expect(
+      find.byKey(const ValueKey('step-e2')),
+      findsOneWidget,
+      reason: '← does not fold the list while comparing',
+    );
+
+    await press(tester, LogicalKeyboardKey.arrowLeft);
+    expect(find.byKey(const ValueKey('step-e2')), findsNothing);
+    await press(tester, LogicalKeyboardKey.keyC);
+    await press(tester, LogicalKeyboardKey.arrowRight);
+    await press(tester, LogicalKeyboardKey.keyC);
+    expect(
+      find.byKey(const ValueKey('step-e2')),
+      findsNothing,
+      reason: '→ does not unfold the list while comparing',
+    );
+  });
+
   testWidgets('shows tool outcomes, the token split and the context tab', (
     tester,
   ) async {

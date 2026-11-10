@@ -474,9 +474,10 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     });
   }
 
+  /// Folds the selected step's turn; not while comparing, which hides the list.
   void _fold(bool fold) {
     final index = _selectedIndex;
-    if (index < 0) return;
+    if (_comparing || index < 0) return;
     final turn = _records[index].turn;
     setState(() => fold ? _folded.add(turn) : _folded.remove(turn));
   }
