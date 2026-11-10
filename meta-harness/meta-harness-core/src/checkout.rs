@@ -98,18 +98,22 @@ impl Checkout {
         let checkout = lock_file(&self.dir, "checkout.lock")?;
         let repository = lock_file(&self.repository, "repository.lock")?;
         let mut waits = Some(waits);
-        for lock in [&checkout, &repository] {
-            loop {
-                match lock.try_lock_shared() {
-                    Ok(()) => break,
-                    Err(TryLockError::WouldBlock) => {
-                        if let Some(waits) = waits.take() {
-                            waits();
-                        }
-                        tokio::time::sleep(RETRY).await;
+        loop {
+            match checkout
+                .try_lock_shared()
+                .and_then(|()| repository.try_lock_shared())
+            {
+                Ok(()) => break,
+                Err(TryLockError::WouldBlock) => {
+                    // A removal holds the repository while it asks for this checkout, so the
+                    // checkout is released while waiting; unlocking one not held is a no-op.
+                    checkout.unlock().map_err(DiffError::Io)?;
+                    if let Some(waits) = waits.take() {
+                        waits();
                     }
-                    Err(TryLockError::Error(error)) => return Err(DiffError::Io(error)),
+                    tokio::time::sleep(RETRY).await;
                 }
+                Err(TryLockError::Error(error)) => return Err(DiffError::Io(error)),
             }
         }
         // The turn counts as running from here, even if its name cannot be kept.
