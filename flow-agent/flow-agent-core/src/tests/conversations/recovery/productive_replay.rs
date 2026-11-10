@@ -813,6 +813,63 @@ fn live_recovery_requires_exactly_once_completed_attempts_before_terminal() {
 }
 
 #[test]
+fn structural_boundary_rejects_before_an_unrecorded_completed_attempt() {
+    let phase_result = core_script::FlowValue::Boolean(true);
+    for boundary in ["phase", "transition", "flow"] {
+        let (workspace, _history, completed) = header_only_recovery_with_completed_attempt(
+            &format!("conversation-recovery-structural-{boundary}"),
+        );
+        let path = crate::tests::helpers::workspace_session_dir(&workspace)
+            .join("review/runs/review-1/recovery.jsonl");
+        let before = fs::read(&path).expect("recovery snapshot reads");
+        let mut recovery =
+            ProductiveRecoveryWriter::open_for_resume(&workspace, "review", "review-1")
+                .expect("header-only recovery opens");
+
+        let error = match boundary {
+            "phase" => recovery.phase_boundary(
+                "flow-000001",
+                "phase-000001",
+                "review-phase",
+                1,
+                &phase_result,
+                true,
+            ),
+            "transition" => {
+                recovery.transition_boundary("flow-000001", "review-phase", Some("summary-phase"))
+            }
+            _ => recovery.flow_boundary("flow-000001", Some(&phase_result)),
+        }
+        .expect_err("a structural boundary must wait for the completed attempt");
+
+        assert!(
+            error.to_string().contains("unreplayed"),
+            "{boundary}: {error}"
+        );
+        assert_eq!(
+            fs::read(&path).expect("recovery snapshot reads"),
+            before,
+            "{boundary}"
+        );
+        let mut reopened =
+            ProductiveRecoveryWriter::open_for_resume(&workspace, "review", "review-1")
+                .expect("recovery reopens");
+        assert_eq!(
+            reopened
+                .recover_attempt(
+                    RunAttemptKind::Provider,
+                    "provider-000001",
+                    REQUEST_HASH,
+                    None,
+                )
+                .expect("completed attempt recovers"),
+            Some(completed),
+            "{boundary}"
+        );
+    }
+}
+
+#[test]
 fn productive_recovery_truncates_only_an_uncommitted_tail_and_rejects_divergence() {
     let workspace = empty_workspace("conversation-recovery-truncated-tail");
     let mut recovery =

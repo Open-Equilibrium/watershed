@@ -280,6 +280,7 @@ impl ProductiveRecovery for ProductiveRecoveryWriter {
             return Ok(());
         }
         self.ensure_live_append()?;
+        self.ensure_completed_attempts_consumed()?;
         let result_object = self.persist_value(&result_value)?;
         self.append_record(&ProductiveRecoveryRecord::Phase {
             schema: PRODUCTIVE_RECOVERY_SCHEMA_V0.to_owned(),
@@ -323,6 +324,7 @@ impl ProductiveRecovery for ProductiveRecoveryWriter {
             return Ok(());
         }
         self.ensure_live_append()?;
+        self.ensure_completed_attempts_consumed()?;
         self.append_record(&ProductiveRecoveryRecord::Transition {
             schema: PRODUCTIVE_RECOVERY_SCHEMA_V0.to_owned(),
             flow_execution_id: flow_execution_id.to_owned(),
@@ -359,6 +361,7 @@ impl ProductiveRecovery for ProductiveRecoveryWriter {
             return Ok(());
         }
         self.ensure_live_append()?;
+        self.ensure_completed_attempts_consumed()?;
         let result_object = self.persist_value(&result_value)?;
         self.append_record(&ProductiveRecoveryRecord::Flow {
             schema: PRODUCTIVE_RECOVERY_SCHEMA_V0.to_owned(),
