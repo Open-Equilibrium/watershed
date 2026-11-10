@@ -91,6 +91,26 @@ fn times_parallel_tools_from_their_own_end_and_follows_compaction() {
 }
 
 #[test]
+fn an_untimestamped_first_prompt_takes_the_time_before_it() {
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+          {"type":"model_change","id":"e1","parentId":null,"timestamp":"2026-10-24T10:00:01.000Z"},
+          {"type":"model_change","id":"e2","parentId":"e1","timestamp":"2026-10-24T10:00:02.000Z"},
+          {"type":"message","id":"u1","parentId":"e2","message":{"role":"user","content":"Read it"}},
+          {"type":"message","id":"a1","parentId":"u1","timestamp":"2026-10-24T10:00:03.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}
+        ],"leafId":"a1"}"#,
+    )
+    .expect("JSON");
+    let trajectory = History::from_entries(&data).trajectory(None);
+    assert_eq!(
+        (trajectory.records[0].start_ms, trajectory.duration_ms),
+        (0, 1000),
+        "a prompt without a timestamp takes the time of the entry before it, so the clock starts \
+         there"
+    );
+}
+
+#[test]
 fn lists_a_compaction_summary_a_later_one_replaced() {
     let data: Value = serde_json::from_str(PARALLEL).expect("JSON");
     let detail = History::from_entries(&data).context("a3").expect("context");

@@ -79,3 +79,28 @@ fn a_branch_lists_its_turns_with_their_checkpoints() {
         }
     );
 }
+
+#[test]
+fn a_turn_ended_without_a_timestamp_takes_no_later_prompt() {
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+          {"type":"custom","id":"c1","parentId":null,"timestamp":"2026-11-01T10:00:01.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T1","phase":"start"}},
+          {"type":"custom","id":"c2","parentId":"c1","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T1","phase":"end","files":0,"added":0,"removed":0}},
+          {"type":"message","id":"u1","parentId":"c2","timestamp":"2026-11-01T10:00:03.000Z","message":{"role":"user","content":"Later prompt"}}
+        ],"leafId":"u1"}"#,
+    )
+    .expect("JSON");
+    let turns = History::from_entries(&data).turns(None);
+    assert_eq!(
+        turns
+            .iter()
+            .map(|turn| (
+                turn.number,
+                turn.prompt_entry.as_deref(),
+                turn.end_entry.as_deref()
+            ))
+            .collect::<Vec<_>>(),
+        [(0, None, Some("c2"))],
+        "a turn whose end checkpoint was recorded keeps no prompt, even without its timestamp"
+    );
+}

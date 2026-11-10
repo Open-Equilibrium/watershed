@@ -59,7 +59,7 @@ pub(super) fn turns(entries: &[Entry], leaf: Option<&str>) -> Vec<TurnCheckpoint
                 prompts += 1;
                 if let Some(turn) = turns.last_mut()
                     && turn.number == 0
-                    && turn.ended_ms.is_none()
+                    && turn.end_entry.is_none()
                 {
                     turn.number = prompts;
                     turn.prompt_entry = Some(entry.id.clone());

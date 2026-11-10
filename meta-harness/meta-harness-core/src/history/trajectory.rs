@@ -55,8 +55,8 @@ pub(super) fn trajectory(entries: &[Entry], leaf: Option<&str>) -> Trajectory {
     // timestamp takes the time of the entry before it.
     let base = path
         .iter()
-        .find(|entry| matches!(entry.body, Body::User { .. }))
-        .and_then(|entry| entry.at_ms)
+        .position(|entry| matches!(entry.body, Body::User { .. }))
+        .and_then(|prompt| path[..=prompt].iter().rev().find_map(|entry| entry.at_ms))
         .or_else(|| path.iter().find_map(|entry| entry.at_ms))
         .unwrap_or(0);
     let mut projection = Projection::default();
