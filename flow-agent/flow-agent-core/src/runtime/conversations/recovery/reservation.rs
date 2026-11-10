@@ -33,7 +33,8 @@ use crate::runtime::{
 use std::path::Path;
 
 use super::selection::{
-    conversation_run_definition, read_productive_recovery_header, selected_entry_recovery_history,
+    conversation_run_definition, ensure_header_matches_definition, read_productive_recovery_header,
+    selected_entry_recovery_history,
 };
 
 pub(crate) struct ProductiveConversationReservation {
@@ -237,10 +238,14 @@ pub(crate) fn reserve_conversation_continuation(
                     ))
                 })?,
             };
-            let (prior_history, prior_event_count) =
-                selected_entry_recovery_history(workspace, conversation_id, &selected)?;
             let recorded_definition =
                 conversation_run_definition(workspace, conversation_id, &selected.run_session_id)?;
+            let (prior_history, prior_event_count) = selected_entry_recovery_history(
+                workspace,
+                conversation_id,
+                &selected,
+                &recorded_definition,
+            )?;
             let runs = required_child(
                 &conversation,
                 CONVERSATION_RUNS_DIR,
@@ -451,14 +456,12 @@ pub(crate) fn reserve_conversation_run_recovery(
         };
         let recorded_definition =
             conversation_run_definition(workspace, conversation_id, run_session_id)?;
-        if recorded_definition.flow_definition_id.as_deref() != Some(&flow_definition_id)
-            || recorded_definition.registry_hash.as_deref() != Some(&registry_hash)
-            || recorded_definition.flow_definition_hash.as_deref() != Some(&flow_definition_hash)
-        {
-            return Err(protocol(
-                "productive recovery header conflicts with the run definition",
-            ));
-        }
+        ensure_header_matches_definition(
+            &flow_definition_id,
+            &registry_hash,
+            &flow_definition_hash,
+            &recorded_definition,
+        )?;
         let objects = required_child(&run, RUN_OBJECTS_DIR, "run object directory")?;
         let prior_history = ContextHistory::from_recovery_bytes(
             &read_run_object_uri(&objects, &prior_history_object)?,

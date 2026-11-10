@@ -50,10 +50,29 @@ pub(super) fn read_productive_recovery_header(
     Ok(record)
 }
 
+/// Rejects a recovery header whose Flow definition identity contradicts its run log.
+pub(super) fn ensure_header_matches_definition(
+    flow_definition_id: &str,
+    registry_hash: &str,
+    flow_definition_hash: &str,
+    recorded: &SessionLogMetadata,
+) -> Result<(), RuntimeError> {
+    if recorded.flow_definition_id.as_deref() != Some(flow_definition_id)
+        || recorded.registry_hash.as_deref() != Some(registry_hash)
+        || recorded.flow_definition_hash.as_deref() != Some(flow_definition_hash)
+    {
+        return Err(protocol(
+            "productive recovery header conflicts with the run definition",
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn selected_entry_recovery_history(
     workspace: &Path,
     conversation_id: &str,
     selected: &ConversationEntry,
+    recorded_definition: &SessionLogMetadata,
 ) -> Result<(ContextHistory, usize), RuntimeError> {
     let uncertain = inspect_run_attempts(workspace, conversation_id, &selected.run_session_id)?
         .iter()
@@ -79,6 +98,9 @@ pub(super) fn selected_entry_recovery_history(
         conversation_id: recorded_conversation_id,
         run_session_id,
         parent_entry_id: recorded_parent_entry_id,
+        flow_definition_id,
+        registry_hash,
+        flow_definition_hash,
         ..
     }) = records.first()
     else {
@@ -96,6 +118,12 @@ pub(super) fn selected_entry_recovery_history(
             "productive recovery header parent does not match its conversation entry",
         ));
     }
+    ensure_header_matches_definition(
+        flow_definition_id,
+        registry_hash,
+        flow_definition_hash,
+        recorded_definition,
+    )?;
     let Some(ProductiveRecoveryRecord::Terminal {
         history_object,
         cumulative_event_count,

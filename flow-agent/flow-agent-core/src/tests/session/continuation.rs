@@ -59,12 +59,27 @@ fn executor_readiness_failure_precedes_continuation_reservation() {
     )
     .expect("recorded Tool-bearing run is created");
     crate::tests::conversations::write_terminal_run(&workspace, "conversation", "run");
+    // The snapshot header must name the Flow definition of the run it checkpoints.
+    write_terminal_recovery_snapshot(&workspace, "conversation", "run");
+    let recovery_path = crate::tests::helpers::workspace_session_dir(&workspace)
+        .join("conversation/runs/run/recovery.jsonl");
+    let snapshot = fs::read_to_string(&recovery_path).expect("recovery reads");
+    let (header, terminal) = snapshot.split_once('\n').expect("header and terminal");
+    let mut header: serde_json::Value = serde_json::from_str(header).expect("header parses");
+    header["flow_definition_id"] = serde_json::json!(definition.flow_definition_id);
+    header["registry_hash"] = serde_json::json!(definition.registry_hash);
+    header["flow_definition_hash"] = serde_json::json!(definition.flow_definition_hash);
+    let snapshot = format!(
+        "{}\n{terminal}",
+        proto::canonical_json(&header).expect("header canonicalizes")
+    );
+    fs::write(&recovery_path, &snapshot).expect("recovery header writes");
     append_productive_run_checkpoint(
         &workspace,
         "conversation",
         "run",
         None,
-        &write_terminal_recovery_snapshot(&workspace, "conversation", "run"),
+        &crate::runtime::digest::sha256_hex(snapshot.as_bytes()),
         2,
         "2026-07-30T12:00:01Z",
     )
