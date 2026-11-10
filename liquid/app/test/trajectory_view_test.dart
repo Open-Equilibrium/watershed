@@ -664,6 +664,85 @@ void main() {
     expect(width(), 200);
   });
 
+  testWidgets('the collapsed tree marks only the selected step\'s own prompt', (
+    tester,
+  ) async {
+    final shared = [
+      record('e1', 1, BridgeRecordKind.user, 'Go', 0),
+      record('e2', 1, BridgeRecordKind.message, 'Look', 100, duration: 900),
+    ];
+    final b = [
+      ...shared,
+      record('b1', 2, BridgeRecordKind.user, 'Use a token bucket', 2000),
+      record('b2', 2, BridgeRecordKind.message, 'Ok', 2100, duration: 900),
+    ];
+    final c = [
+      ...shared,
+      record('c1', 2, BridgeRecordKind.user, 'Fixed', 2000),
+    ];
+    final tree = [
+      const BridgeTreeNode(
+        failed: false,
+        id: 'e1',
+        kind: BridgeEntryKind.user,
+        preview: 'Go',
+      ),
+      const BridgeTreeNode(
+        failed: false,
+        id: 'e2',
+        parent: 'e1',
+        kind: BridgeEntryKind.assistant,
+        preview: 'Look',
+      ),
+      const BridgeTreeNode(
+        failed: false,
+        id: 'b1',
+        parent: 'e2',
+        kind: BridgeEntryKind.user,
+        preview: 'Use a token bucket',
+      ),
+      const BridgeTreeNode(
+        failed: false,
+        id: 'b2',
+        parent: 'b1',
+        kind: BridgeEntryKind.assistant,
+        preview: 'Ok',
+      ),
+      const BridgeTreeNode(
+        failed: false,
+        id: 'c1',
+        parent: 'e2',
+        kind: BridgeEntryKind.user,
+        preview: 'Fixed',
+      ),
+    ];
+    await show(tester, historyOf(b, tree: tree, leaf: 'b2', others: [c]));
+    await tester.tap(find.byKey(const ValueKey('tree-b2')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Collapse the session tree'));
+    await tester.pumpAndSettle();
+
+    bool filled(String prompt) {
+      final dot = tester.widget<Container>(
+        find
+            .descendant(
+              of: find.byTooltip(prompt),
+              matching: find.byType(Container),
+            )
+            .first,
+      );
+      return (dot.decoration as BoxDecoration?)?.color != null;
+    }
+
+    expect(filled('Turn 2 · Use a token bucket'), isTrue);
+    expect(
+      filled('Turn 2 · Fixed'),
+      isFalse,
+      reason:
+          'a sibling branch\'s prompt with the same turn number stays unmarked',
+    );
+  });
+
   testWidgets('tree nodes show each step\'s kind, not by color alone', (
     tester,
   ) async {

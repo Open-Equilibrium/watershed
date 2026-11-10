@@ -238,9 +238,15 @@ class _Rail extends StatelessWidget {
       for (final row in tree.graph.rows)
         if (row.node.kind == BridgeEntryKind.user) row,
     ];
-    final selected = tree.graph.rows
+    // The selected step's own prompt: turn numbers repeat on sibling branches, so it is found on
+    // the path to the step.
+    var owner = tree.graph.rows
         .where((row) => row.node.id == tree.selected)
         .firstOrNull;
+    while (owner != null && owner.node.kind != BridgeEntryKind.user) {
+      final parent = owner.parentRow;
+      owner = parent == null ? null : tree.graph.rows[parent];
+    }
     return Container(
       width: treeRailWidth,
       padding: const EdgeInsets.only(top: WsMetrics.space2),
@@ -258,7 +264,7 @@ class _Rail extends StatelessWidget {
               itemCount: turns.length,
               itemBuilder: (context, index) {
                 final turn = turns[index];
-                final on = selected?.turn == turn.turn;
+                final on = turn.node.id == owner?.node.id;
                 return Tooltip(
                   message: 'Turn ${turn.turn} · ${turn.node.preview}',
                   child: InkWell(
