@@ -409,8 +409,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     if (last == null) return _toggleTurn(turn.turn);
     _focus.requestFocus();
     setState(() {
-      _folded.remove(turn.turn);
-      _selected = records[last].entry;
+      _selectStep(last);
       _inspecting = true;
       _tab = InspectorTab.context;
     });
@@ -637,7 +636,18 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     }
     setState(() => _selected = row.node.id);
     final tip = row.branch?.tip ?? _graph.branchOf(row.node.id)?.tip;
-    if (tip != null) _show(tip).then((_) => _reveal());
+    if (tip == null) return;
+    // Once its branch is loaded, the step expands its turn and moves the range like any other.
+    _show(tip).then((_) {
+      if (!mounted) return;
+      final loaded = _records.indexWhere(
+        (record) => record.entry == row.node.id,
+      );
+      if (loaded >= 0 && _selected == row.node.id) {
+        setState(() => _selectStep(loaded));
+      }
+      _reveal();
+    });
   }
 
   /// Compares the branch of the tree's cursor with the other picked branch.

@@ -1180,6 +1180,112 @@ void main() {
     );
   });
 
+  testWidgets('opening a turn shows its last request outside the range', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      historyOf([
+        record('u1', 1, BridgeRecordKind.user, 'Go', 0),
+        record('m1', 1, BridgeRecordKind.message, 'Look', 100, duration: 1000),
+        record('t1', 1, BridgeRecordKind.tool, 'read', 1200, duration: 100),
+        record('m2', 1, BridgeRecordKind.message, 'Done', 1400, duration: 1000),
+      ]),
+    );
+    final tracks = tester.getRect(find.byKey(const Key('overview-tracks')));
+    final end = tester.getCenter(find.byKey(const Key('range-end')));
+    await tester.dragFrom(
+      end,
+      Offset(tracks.left + tracks.width * 0.4 - end.dx, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('step-m2')), findsNothing);
+
+    await tester.tap(find.text('Turn 1'));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('step-m2')),
+      findsOneWidget,
+      reason: 'the turn\'s last request is opened, so the range moves to it',
+    );
+    expect(find.byKey(const Key('inspector')), findsOneWidget);
+  });
+
+  testWidgets('a tree jump to another branch unfolds the target turn', (
+    tester,
+  ) async {
+    final shared = [
+      record('e1', 1, BridgeRecordKind.user, 'Go', 0),
+      record('e2', 1, BridgeRecordKind.message, 'Look', 100, duration: 900),
+    ];
+    final a = [
+      ...shared,
+      record('a3', 2, BridgeRecordKind.user, 'Again', 2000),
+      record('a4', 2, BridgeRecordKind.message, 'Done', 2100, duration: 900),
+    ];
+    final b = [
+      ...shared,
+      record('b3', 2, BridgeRecordKind.user, 'Instead', 2000),
+      record('b4', 2, BridgeRecordKind.tool, 'bash', 2100, duration: 900),
+    ];
+    final tree = [
+      const BridgeTreeNode(
+        failed: false,
+        id: 'e1',
+        kind: BridgeEntryKind.user,
+        preview: 'Go',
+      ),
+      const BridgeTreeNode(
+        failed: false,
+        id: 'e2',
+        parent: 'e1',
+        kind: BridgeEntryKind.assistant,
+        preview: 'Look',
+      ),
+      const BridgeTreeNode(
+        failed: false,
+        id: 'a3',
+        parent: 'e2',
+        kind: BridgeEntryKind.user,
+        preview: 'Again',
+      ),
+      const BridgeTreeNode(
+        failed: false,
+        id: 'a4',
+        parent: 'a3',
+        kind: BridgeEntryKind.assistant,
+        preview: 'Done',
+      ),
+      const BridgeTreeNode(
+        failed: false,
+        id: 'b3',
+        parent: 'e2',
+        kind: BridgeEntryKind.user,
+        preview: 'Instead',
+      ),
+      const BridgeTreeNode(
+        failed: false,
+        id: 'b4',
+        parent: 'b3',
+        kind: BridgeEntryKind.toolResult,
+        preview: 'bash',
+      ),
+    ];
+    await show(tester, historyOf(a, tree: tree, leaf: 'a4', others: [b]));
+    backend.histories['b4'] = historyOf(b, tree: tree, leaf: 'b4');
+    await tester.tap(find.byTooltip('Collapse all turns'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('step-a3')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('tree-b4')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('step-b4')),
+      findsOneWidget,
+      reason: 'the target turn opens on the branch it is jumped to',
+    );
+  });
+
   testWidgets('a session switch shows the new session\'s current branch', (
     tester,
   ) async {
