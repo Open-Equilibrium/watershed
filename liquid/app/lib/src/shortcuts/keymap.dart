@@ -52,7 +52,31 @@ class Keys {
   /// ⌃ character, which moves the cursor, or a cursor or delete key with any modifier.
   bool get types =>
       !liquid &&
-      (_editing.contains(key) || (!meta && key.keyLabel.runes.length == 1));
+      (_editing.contains(key) ||
+          (!meta && (key.keyLabel.runes.length == 1 || _numpad.contains(key))));
+
+  /// Numpad keys that type a character; their labels name them, as in "Numpad 1".
+  static final _numpad = {
+    LogicalKeyboardKey.numpad0,
+    LogicalKeyboardKey.numpad1,
+    LogicalKeyboardKey.numpad2,
+    LogicalKeyboardKey.numpad3,
+    LogicalKeyboardKey.numpad4,
+    LogicalKeyboardKey.numpad5,
+    LogicalKeyboardKey.numpad6,
+    LogicalKeyboardKey.numpad7,
+    LogicalKeyboardKey.numpad8,
+    LogicalKeyboardKey.numpad9,
+    LogicalKeyboardKey.numpadDecimal,
+    LogicalKeyboardKey.numpadAdd,
+    LogicalKeyboardKey.numpadSubtract,
+    LogicalKeyboardKey.numpadMultiply,
+    LogicalKeyboardKey.numpadDivide,
+    LogicalKeyboardKey.numpadEqual,
+    LogicalKeyboardKey.numpadComma,
+    LogicalKeyboardKey.numpadParenLeft,
+    LogicalKeyboardKey.numpadParenRight,
+  };
 
   static final _editing = {
     LogicalKeyboardKey.arrowLeft,

@@ -180,6 +180,24 @@ void main() {
       'typing',
       reason: '⌃A moves the cursor',
     );
+    for (final key in [
+      LogicalKeyboardKey.numpad1,
+      LogicalKeyboardKey.numpadAdd,
+      LogicalKeyboardKey.numpadDecimal,
+    ]) {
+      expect(
+        reserved(Command.newSession, Keys(key)),
+        'typing',
+        reason: 'numpad ${key.keyLabel} types a character',
+      );
+    }
+    expect(
+      reserved(
+        Command.newSession,
+        const Keys(LogicalKeyboardKey.numpad1, meta: true),
+      ),
+      isNull,
+    );
   });
 
   test(
