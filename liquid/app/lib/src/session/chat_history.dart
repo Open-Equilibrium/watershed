@@ -305,11 +305,13 @@ class ChatHistory {
         ),
   ];
 
-  /// Each entry's position on the path from the root to `leaf`.
+  /// Each entry's position on the path from the root to `leaf`. Stored parents may loop, so the
+  /// walk ends at the first entry it meets again.
   static Map<String, int> _pathIndex(List<BridgeTreeNode> tree, String? leaf) {
     final parents = {for (final node in tree) node.id: node.parent};
     final path = <String>[];
-    for (String? id = leaf; id != null; id = parents[id]) {
+    final seen = <String>{};
+    for (String? id = leaf; id != null && seen.add(id); id = parents[id]) {
       path.add(id);
     }
     return {for (final (index, id) in path.reversed.indexed) id: index};

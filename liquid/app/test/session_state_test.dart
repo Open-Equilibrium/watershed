@@ -899,6 +899,42 @@ void main() {
     );
   });
 
+  test('a stored parent cycle restores without hanging', () async {
+    // a's parent is b and b's is a, so the path to the leaf must stop at the repeated entry.
+    backend.stored = historyOf(
+      [],
+      tree: const [
+        BridgeTreeNode(
+          failed: false,
+          id: 'a',
+          parent: 'b',
+          kind: BridgeEntryKind.assistant,
+          preview: 'A',
+        ),
+        BridgeTreeNode(
+          failed: false,
+          id: 'b',
+          parent: 'a',
+          kind: BridgeEntryKind.user,
+          preview: 'B',
+        ),
+      ],
+      leaf: 'a',
+    );
+    backend.transcripts[''] = BridgeTranscript(
+      items: [
+        chatItem('b', BridgeItemKind.userMessage, text: 'Before'),
+        chatItem('a', BridgeItemKind.assistantMessage, text: 'After'),
+      ],
+      more: false,
+    );
+    await state.loadChat();
+    expect(state.items.value.map((view) => view.entry).whereType<String>(), [
+      'b',
+      'a',
+    ], reason: 'each stored entry appears once');
+  });
+
   test('keeps an error in the status bar until it is dismissed', () async {
     state.notify(BridgeLevel.error, 'The model request failed');
     state.notify(BridgeLevel.info, 'Session saved');

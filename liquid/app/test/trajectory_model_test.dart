@@ -122,6 +122,21 @@ void main() {
     expect(branchMarker(tree.take(4).toList(), 'e4'), isNull);
   });
 
+  test('a stored parent cycle returns from the branch marker', () {
+    // The stored parents loop, so walks up the tree must stop at a repeated entry.
+    expect(
+      () => branchMarker([
+        node('a', 'b', BridgeEntryKind.assistant),
+        node('b', 'a', BridgeEntryKind.user, preview: 'Go'),
+      ], 'a'),
+      returnsNormally,
+    );
+    expect(
+      () => branchMarker([node('s', 's', BridgeEntryKind.assistant)], 's'),
+      returnsNormally,
+    );
+  });
+
   test('groups records into turns with their tool counts', () {
     final records = [
       record('e1', 1, BridgeRecordKind.user, 'Add rate limiting', 0),

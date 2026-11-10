@@ -655,7 +655,9 @@ BranchMarker? branchMarker(List<BridgeTreeNode> tree, String? leaf) {
   final graph = sessionGraph(tree, leaf);
   final rows = {for (final row in graph.rows) row.node.id: row};
   int stepAt(String? id) {
-    while (id != null) {
+    // A stored parent cycle ends the walk at the first entry it meets again.
+    final seen = <String>{};
+    while (id != null && seen.add(id)) {
       final row = rows[id];
       if (row != null && row.isStep) return row.step;
       id = byId[id]?.parent;
