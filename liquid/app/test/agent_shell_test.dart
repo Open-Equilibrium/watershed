@@ -1249,6 +1249,43 @@ void main() {
     expect(backend.calls.last, 'answer q1 production-us');
   });
 
+  testWidgets('filtering after scrolling shows the option Enter picks', (
+    tester,
+  ) async {
+    await show(tester);
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.userInputRequested,
+        request: BridgeRequest(
+          id: 'q1',
+          question: BridgeQuestion(
+            kind: BridgeQuestionKind.select,
+            title: 'Pick an option',
+            detail: '',
+            options: [
+              for (var number = 0; number < 100; number++)
+                'Option ${number.toString().padLeft(2, '0')}',
+            ],
+          ),
+        ),
+      ),
+    );
+    for (var step = 0; step < 50; step++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    }
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('filter')), 'Option');
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Option 00').hitTestable(),
+      findsOneWidget,
+      reason: 'the highlighted first match is in view',
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(backend.calls.last, 'answer q1 Option 00');
+  });
+
   testWidgets('edits a multi-line answer and sends it with ⌘Enter', (
     tester,
   ) async {

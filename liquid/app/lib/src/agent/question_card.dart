@@ -101,7 +101,11 @@ class _OptionListState extends State<_OptionList> {
                     decoration: const InputDecoration.collapsed(
                       hintText: 'Type to filter',
                     ),
-                    onChanged: (_) => setState(() => _highlight = 0),
+                    onChanged: (_) {
+                      setState(() => _highlight = 0);
+                      // The highlight returns to the first match, so the list returns to the top.
+                      if (_scroll.hasClients) _scroll.jumpTo(0);
+                    },
                   ),
                 ),
               ),
