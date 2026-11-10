@@ -228,6 +228,23 @@ void main() {
     ]);
   });
 
+  testWidgets('a Trajectory key that the menu bar runs asks first', (
+    tester,
+  ) async {
+    await show(tester, ShortcutSettings.standard());
+    await openSettings(tester);
+    await tester.tap(find.text('⌘F'));
+    await tester.pumpAndSettle();
+    await press(
+      tester,
+      LogicalKeyboardKey.digit1,
+      holding: LogicalKeyboardKey.metaLeft,
+    );
+    expect(find.textContaining('⌘1 already runs'), findsOneWidget);
+    expect(find.text('Use anyway, clear Chat'), findsOneWidget);
+    expect(shortcuts.value.changed(Command.filterSteps), isFalse);
+  });
+
   testWidgets('recording the keys a command already has changes nothing', (
     tester,
   ) async {

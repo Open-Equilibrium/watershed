@@ -90,6 +90,57 @@ void main() {
     expect(taken.conflict(Command.focusInput, commandN), Command.diff);
   });
 
+  test('a ⌘ chord of the app area conflicts in every area, both ways', () {
+    const commandF = Keys(LogicalKeyboardKey.keyF, meta: true);
+    const commandOne = Keys(LogicalKeyboardKey.digit1, meta: true);
+    final keys = ShortcutSettings.standard();
+
+    expect(keys.conflict(Command.filterSteps, commandOne), Command.chat);
+    expect(keys.conflict(Command.chat, commandF), Command.filterSteps);
+    expect(
+      keys.conflict(
+        Command.filterSteps,
+        const Keys(LogicalKeyboardKey.digit1, liquid: true, meta: true),
+      ),
+      Command.chat,
+      reason: 'the menu bar ignores the Liquid key',
+    );
+    final taken = keys.change(
+      Command.filterSteps,
+      commandOne,
+      clear: Command.chat,
+    );
+    expect(taken.bindings(Command.chat), isEmpty);
+    expect(taken.bindings(Command.filterSteps), [commandOne]);
+  });
+
+  test('esc may be shared with the app area', () {
+    expect(
+      ShortcutSettings.standard().conflict(
+        Command.closeStep,
+        const Keys(LogicalKeyboardKey.escape),
+      ),
+      isNull,
+    );
+  });
+
+  test('the default keys of every profile conflict with nothing', () {
+    for (final keys in [
+      ShortcutSettings.standard(),
+      ShortcutSettings.liquidKey(),
+    ]) {
+      for (final command in Command.values) {
+        for (final bound in keys.bindings(command)) {
+          expect(
+            keys.conflict(command, bound),
+            isNull,
+            reason: '${keys.base.label} ${command.name} ${bound.label}',
+          );
+        }
+      }
+    }
+  });
+
   test('taking keys anyway clears them from the other command', () {
     final keys = ShortcutSettings.liquidKey().change(
       Command.focusInput,

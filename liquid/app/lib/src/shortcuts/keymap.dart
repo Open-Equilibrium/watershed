@@ -41,9 +41,6 @@ class Keys {
   Keys get withoutLiquid =>
       Keys(key, meta: meta, alt: alt, shift: shift, control: control);
 
-  /// A ⌘ chord without the Liquid key, which a menu item can show.
-  bool get menuChord => meta && !liquid;
-
   /// These keys as the macOS menu bar shows them; none with the Liquid key.
   SingleActivator? get menuShortcut => liquid
       ? null
@@ -206,7 +203,8 @@ class _KeysActivator extends ShortcutActivator {
   String debugDescribeKeys() => keys.label;
 }
 
-/// Where a command's keys work; keys conflict only within one area.
+/// Where a command's keys work. Keys conflict within one area, and the ⌘ keys of the app area,
+/// which the menu bar runs, in every area.
 enum Area { app, input, question, trajectory, diff }
 
 /// Keys that never change, as Settings → Shortcuts lists them per area; no command may take
@@ -535,23 +533,28 @@ class ShortcutSettings {
   /// What `command` shows when unchanged.
   String defaultLabel(Command command) => _defaults(command).first.label;
 
-  /// Whether `bound`, a combination of a command in `area`, runs `keys` too: the same keys, or
-  /// in the app area the same ⌘ keys, which the menu bar also runs under the Liquid key.
-  static bool _runsSame(Keys bound, Keys keys, Area area) =>
-      bound == keys ||
-      (area == Area.app &&
-          (bound.menuChord || keys.menuChord) &&
+  /// Whether `bound`, a combination of `other`, runs `keys` of `command` too: the same keys in
+  /// one area. When either is in the app area, also the same ⌘ keys, which the menu bar runs
+  /// with or without the Liquid key.
+  static bool _runsSame(
+    Command command,
+    Keys keys,
+    Command other,
+    Keys bound,
+  ) =>
+      (command.area == other.area && bound == keys) ||
+      ((command.area == Area.app || other.area == Area.app) &&
+          bound.meta &&
           bound.withoutLiquid == keys.withoutLiquid);
 
-  /// The other command in `command`'s area that `keys` already runs, or that the menu bar runs
-  /// for them.
+  /// The other command that `keys` already runs for `command`: in its area, or across areas
+  /// for the app area's ⌘ keys.
   Command? conflict(Command command, Keys keys) => Command.values
       .where(
         (other) =>
             other != command &&
-            other.area == command.area &&
             bindings(other)
-                .any((bound) => _runsSame(bound, keys, command.area)),
+                .any((bound) => _runsSame(command, keys, other, bound)),
       )
       .firstOrNull;
 
@@ -591,7 +594,7 @@ class ShortcutSettings {
       put(clear, [
         ...from
             .bindings(clear)
-            .where((bound) => !_runsSame(bound, keys, clear.area)),
+            .where((bound) => !_runsSame(command, keys, clear, bound)),
       ]);
     }
     return ShortcutSettings._(
@@ -612,20 +615,19 @@ class ShortcutSettings {
     null => this,
   };
 
-  /// Restores `command`'s default keys and takes them from the other commands in its area that
-  /// run them now.
+  /// Restores `command`'s default keys and takes them from the other commands that run them now.
   ShortcutSettings resetTaking(Command command) {
     final custom = _active;
     if (custom == null) return this;
     final defaults = _defaults(command);
     final changes = {...custom.changes}..remove(command);
     for (final other in Command.values) {
-      if (other == command || other.area != command.area) continue;
+      if (other == command) continue;
       final bound = bindings(other);
       final kept = [
         for (final keys in bound)
           if (!defaults.any(
-            (restored) => _runsSame(keys, restored, command.area),
+            (restored) => _runsSame(command, restored, other, keys),
           ))
             keys,
       ];
