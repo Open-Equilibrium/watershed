@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/format.dart';
 import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/rust/api/session.dart';
+import 'package:liquid/src/trajectory/context_details.dart';
 import 'package:liquid/src/trajectory/context_track.dart';
 import 'package:liquid/src/trajectory/trajectory_model.dart';
 
@@ -434,6 +437,40 @@ void main() {
       ];
       expect(stepAt(back, 1000, equalWidth: false), 1);
     });
+  });
+
+  test('a read dropped by eviction does not settle into a newer one', () async {
+    final reads = <Completer<BridgeContextDetail?>>[];
+    final details = ContextDetails((entry) {
+      final read = Completer<BridgeContextDetail?>();
+      reads.add(read);
+      return read.future;
+    });
+    var notified = 0;
+    details.addListener(() => notified++);
+    BridgeRecord request(String entry) =>
+        record(entry, 1, BridgeRecordKind.message, 'Look', 0);
+
+    // Five entries in turn evict the first read of 'a', which is then read again.
+    details.detailFor(request('a'));
+    for (final entry in ['b', 'c', 'd', 'e']) {
+      details.detailFor(request(entry));
+    }
+    details.detailFor(request('a'));
+
+    const detail = BridgeContextDetail(sections: [], tools: [], messages: []);
+    reads.last.complete(detail);
+    await Future<void>.delayed(Duration.zero);
+    reads.first.completeError(StateError('dropped'));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(
+      details.detailFor(request('a')),
+      detail,
+      reason: 'the newer read stays',
+    );
+    expect(details.unread('a'), isNull);
+    expect(notified, 1, reason: 'the dropped read notifies nothing');
   });
 
   test('aligns steps of the same kind after the shared steps', () {

@@ -10,6 +10,9 @@ class ContextDetails extends ChangeNotifier {
   final Future<BridgeContextDetail?> Function(String entry) _read;
   final _details = <String, BridgeContextDetail?>{};
 
+  /// The read each entry's context waits for; a read dropped by eviction settles nowhere.
+  final _reads = <String, Object>{};
+
   /// Why what the model saw for a response could not be read, by entry.
   final _unread = <String, String>{};
   static const _kept = 4;
@@ -24,11 +27,13 @@ class ContextDetails extends ChangeNotifier {
       if (_details.length == _kept) {
         final oldest = _details.keys.first;
         _details.remove(oldest);
+        _reads.remove(oldest);
         _unread.remove(oldest);
       }
       _details[entry] = null;
+      final read = _reads[entry] = Object();
       _read(entry).then(
-        (detail) => _settle(entry, () {
+        (detail) => _settle(entry, read, () {
           if (detail == null) {
             _unread[entry] = 'the session has no such response';
           } else {
@@ -36,7 +41,7 @@ class ContextDetails extends ChangeNotifier {
           }
         }),
         onError: (Object error) =>
-            _settle(entry, () => _unread[entry] = '$error'),
+            _settle(entry, read, () => _unread[entry] = '$error'),
       );
     }
     return _details[entry];
@@ -45,9 +50,9 @@ class ContextDetails extends ChangeNotifier {
   /// Why the context of `entry` could not be read.
   String? unread(String entry) => _unread[entry];
 
-  /// Applies a finished read, unless its entry was dropped meanwhile.
-  void _settle(String entry, VoidCallback apply) {
-    if (_disposed || !_details.containsKey(entry)) return;
+  /// Applies a finished read, unless its entry was dropped or read again meanwhile.
+  void _settle(String entry, Object read, VoidCallback apply) {
+    if (_disposed || !identical(_reads[entry], read)) return;
     apply();
     notifyListeners();
   }
