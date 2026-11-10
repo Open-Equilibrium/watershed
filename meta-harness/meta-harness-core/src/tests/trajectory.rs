@@ -124,6 +124,64 @@ fn lists_a_compaction_summary_a_later_one_replaced() {
 }
 
 #[test]
+fn repeated_compactions_and_edits_keep_the_context_the_model_saw() {
+    // Each compaction takes out what precedes its first kept entry for good, so a later edit
+    // brings back only the messages no compaction took out.
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+          {"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Read it"}},
+          {"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"text","text":"On it."}]}},
+          {"type":"compaction","id":"k1","parentId":"a1","summary":"Read it.","firstKeptEntryId":"a1","tokensBefore":900},
+          {"type":"message","id":"u2","parentId":"k1","message":{"role":"user","content":"Now test"}},
+          {"type":"message","id":"a2","parentId":"u2","message":{"role":"assistant","content":[{"type":"text","text":"Tests pass."}]}},
+          {"type":"context_edit","id":"x1","parentId":"a2","targetId":"a2","replacement":null},
+          {"type":"compaction","id":"k2","parentId":"x1","summary":"Read and tested.","firstKeptEntryId":"u2","tokensBefore":800},
+          {"type":"context_edit","id":"x2","parentId":"k2","targetId":"a2","replacement":{"content":[{"type":"text","text":"Done."}]}},
+          {"type":"context_edit","id":"x3","parentId":"x2","targetId":"u1","replacement":{"content":[{"type":"text","text":"Changed"}]}},
+          {"type":"message","id":"u3","parentId":"x3","message":{"role":"user","content":"Again"}},
+          {"type":"message","id":"a3","parentId":"u3","message":{"role":"assistant","content":[{"type":"text","text":"Done again."}]}}
+        ],"leafId":"a3"}"#,
+    )
+    .expect("JSON");
+    let history = History::from_entries(&data);
+    let trajectory = history.trajectory(None);
+    let rows: Vec<_> = trajectory
+        .records
+        .iter()
+        .map(|record| record.entry.as_str())
+        .collect();
+    assert_eq!(rows, ["u1", "a1", "u2", "a2", "u3", "a3"]);
+    let messages: Vec<_> = trajectory
+        .records
+        .iter()
+        .filter(|record| record.kind == RecordKind::Message)
+        .map(|record| {
+            (
+                record.entry.as_str(),
+                record.context.as_ref().expect("context").messages,
+            )
+        })
+        .collect();
+    assert_eq!(
+        messages,
+        [("a1", 1), ("a2", 3), ("a3", 4)],
+        "each request counts the messages in its context, the summary included"
+    );
+    let detail = history.context("a3").expect("context");
+    let in_context: Vec<_> = detail
+        .messages
+        .iter()
+        .filter(|message| message.in_context)
+        .map(|message| (message.entry.as_str(), message.chars))
+        .collect();
+    assert_eq!(
+        in_context,
+        [("u2", 8), ("a2", 5), ("k2", 16), ("u3", 5)],
+        "the removed-then-replaced response is back, the edit of u1 is not"
+    );
+}
+
+#[test]
 fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
     let data: Value = serde_json::from_str(ENTRIES).expect("JSON");
     let record = |entry: &str, turn, kind, label: &str, start_ms, duration_ms| TrajectoryRecord {

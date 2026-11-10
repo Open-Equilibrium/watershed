@@ -87,6 +87,10 @@ struct Projection<'a> {
     summary: Option<usize>,
     /// Every entry of the branch so far, in order.
     log: Vec<Logged>,
+    /// The `log` index of each entry id, so a compaction or edit finds its entry at once.
+    ids: HashMap<&'a str, usize>,
+    /// The `log` entries before this index a compaction took out of the context for good.
+    forgotten: usize,
     /// The `log` length at the previous model request.
     since: usize,
     request_timing: Option<(Option<u64>, Option<u64>)>,
@@ -202,13 +206,12 @@ impl<'a> Projection<'a> {
     }
 
     fn position(&self, id: Option<&str>) -> Option<usize> {
-        self.log
-            .iter()
-            .position(|logged| Some(logged.id.as_str()) == id)
+        self.ids.get(id?).copied()
     }
 
     fn add(&mut self, entry: &'a Entry, at: u64) {
         let id = entry.id.as_str();
+        self.ids.entry(id).or_insert(self.log.len());
         self.log.push(Logged {
             id: id.to_owned(),
             ..Logged::default()
@@ -231,9 +234,11 @@ impl<'a> Projection<'a> {
                 // older compaction adds nothing.
                 let current = self.log.len() - 1;
                 let kept = self.position(first_kept.as_deref()).unwrap_or(current);
-                for index in 0..kept {
+                // Earlier compactions took the entries before `forgotten` out already.
+                for index in self.forgotten..kept {
                     self.forget(index);
                 }
+                self.forgotten = self.forgotten.max(kept);
                 self.summary = Some(current);
                 if let Some(logged) = self.log.last_mut() {
                     logged.label = "compaction summary".to_owned();
