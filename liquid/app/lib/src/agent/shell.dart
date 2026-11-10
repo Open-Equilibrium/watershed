@@ -149,6 +149,8 @@ class _AgentShellState extends State<AgentShell> {
   /// Settings replace the main area; closing them gives the keys back to the shell.
   void _toggleSettings() {
     _settings.value = !_settings.value;
+    // Settings remove the agent surface, so the Trajectory built after them starts outside a comparison.
+    if (_settings.value) _comparing.value = false;
     if (!_settings.value) _focus.requestFocus();
   }
 

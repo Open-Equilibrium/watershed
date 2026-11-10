@@ -1160,6 +1160,40 @@ void main() {
     );
   }
 
+  testWidgets(
+    'leaving Settings shows the Trajectory keys outside a comparison',
+    (tester) async {
+      await showBranches(tester);
+      await tester.tap(find.text('Compare'));
+      await tester.pumpAndSettle();
+      Future<void> holdCommand(LogicalKeyboardKey key) async {
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+        await tester.sendKeyEvent(key);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+        await tester.pumpAndSettle();
+      }
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pump(const Duration(milliseconds: 700));
+      expect(find.textContaining('leave compare'), findsOneWidget);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+
+      await holdCommand(LogicalKeyboardKey.comma);
+      await holdCommand(LogicalKeyboardKey.comma);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pump(const Duration(milliseconds: 700));
+      expect(
+        find.textContaining('leave compare'),
+        findsNothing,
+        reason: 'the rebuilt Trajectory is not comparing',
+      );
+      expect(find.textContaining('collapse'), findsOneWidget);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pump();
+    },
+  );
+
   testWidgets('compares two branches side by side', (tester) async {
     await showBranches(tester);
     expect(find.text('session branch B · 5 steps · 1m 01s'), findsOneWidget);
