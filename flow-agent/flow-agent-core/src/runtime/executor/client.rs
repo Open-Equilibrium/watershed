@@ -697,7 +697,7 @@ mod tests {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[test]
     fn executor_descriptor_is_moved_above_protected_slots_under_fd_pressure() {
-        use super::transport::duplicate_executor_descriptor;
+        use super::super::process::duplicate_executor_descriptor;
         let pressure = (0..proto::EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0 + 8)
             .map(|_| File::open("/dev/null").expect("fd pressure source"))
             .collect::<Vec<_>>();

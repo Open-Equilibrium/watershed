@@ -14,6 +14,25 @@ pub(super) fn configure_executor_child(
         .map_err(|error| std::io::Error::from_raw_os_error(error.raw_os_error()))
 }
 
+/// Moves a validated Executor image above the protected descriptor range, so that launching it
+/// by descriptor path cannot resolve to a standard stream that the child remaps.
+pub(super) fn duplicate_executor_descriptor(
+    executable: &std::fs::File,
+) -> Result<std::os::fd::OwnedFd, crate::runtime::types::RuntimeError> {
+    let minimum = i32::try_from(
+        proto::EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0 as usize
+            + proto::MAX_EXECUTOR_PROTECTED_OBJECTS_V0
+            + 64,
+    )
+    .expect("protocol descriptor bounds fit i32");
+    rustix::io::fcntl_dupfd_cloexec(executable, minimum).map_err(|_| {
+        crate::runtime::types::RuntimeError::executor(
+            proto::ExecutorErrorCodeV0::Unavailable,
+            "validated Executor descriptor could not be moved outside the protected descriptor range",
+        )
+    })
+}
+
 #[cfg(test)]
 thread_local! {
     static PROCESS_GROUP_CLEANUP_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };

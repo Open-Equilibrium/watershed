@@ -1,5 +1,6 @@
 use super::super::process::{
-    child_exited_without_reaping, configure_executor_child, terminate_child_or_fail_stop,
+    child_exited_without_reaping, configure_executor_child, duplicate_executor_descriptor,
+    terminate_child_or_fail_stop,
 };
 use super::{invalid_response, runtime_open_error};
 use crate::runtime::types::RuntimeError;
@@ -19,21 +20,6 @@ use std::{
 pub(super) enum ExecutorPreflightProcess {
     Ready(WaitingExecutor),
     Rejected(proto::ExecutorErrorCodeV0),
-}
-
-pub(super) fn duplicate_executor_descriptor(executable: &File) -> Result<OwnedFd, RuntimeError> {
-    let minimum = i32::try_from(
-        proto::EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0 as usize
-            + proto::MAX_EXECUTOR_PROTECTED_OBJECTS_V0
-            + 64,
-    )
-    .expect("protocol descriptor bounds fit i32");
-    rustix::io::fcntl_dupfd_cloexec(executable, minimum).map_err(|_| {
-        RuntimeError::executor(
-            proto::ExecutorErrorCodeV0::Unavailable,
-            "validated Executor descriptor could not be moved outside the protected descriptor range",
-        )
-    })
 }
 
 fn set_nonblocking(descriptor: &impl std::os::fd::AsFd) -> Result<(), RuntimeError> {
