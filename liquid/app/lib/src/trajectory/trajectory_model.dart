@@ -571,12 +571,24 @@ String? outcomeText(BridgeToolOutcome outcome) {
 }
 
 /// `total` split in proportion to `parts`, such as a request's tokens by the characters of
-/// its system prompt, tools and messages.
+/// its system prompt, tools and messages. The units left over go to the largest remainders, so
+/// the shares add up to `total`.
 List<int> shares(int total, List<int> parts) {
-  final sum = parts.fold(0, (sum, part) => sum + part);
-  return [
-    for (final part in parts) sum == 0 ? 0 : (total * part / sum).round(),
-  ];
+  final sum = parts.fold<int>(0, (sum, part) => sum + part);
+  if (sum == 0) return [for (final _ in parts) 0];
+  final whole = [for (final part in parts) total * part ~/ sum];
+  final remainders = [for (final part in parts) total * part % sum];
+  final largest = [for (var index = 0; index < parts.length; index++) index]
+    ..sort(
+      (x, y) => remainders[x] != remainders[y]
+          ? remainders[y].compareTo(remainders[x])
+          : x.compareTo(y),
+    );
+  final left = total - whole.fold<int>(0, (placed, share) => placed + share);
+  for (final index in largest.take(left)) {
+    whole[index]++;
+  }
+  return whole;
 }
 
 /// Paths that successful file changes changed on a branch.

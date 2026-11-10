@@ -531,6 +531,21 @@ void main() {
     expect(lastTests(edits)?.testsPassed, 14);
   });
 
+  test('shares add up to the total', () {
+    for (final (total, parts) in [
+      (1, [1, 1]),
+      (1, [1, 1, 1]),
+      (10, [1, 1, 1]),
+    ]) {
+      expect(
+        shares(total, parts).fold(0, (sum, share) => sum + share),
+        total,
+        reason: '$total split over $parts',
+      );
+    }
+    expect(shares(5, [0, 0]), [0, 0]);
+  });
+
   test('formats durations, counts and tool arguments', () {
     expect(
       [formatDuration(18), formatDuration(3400), formatDuration(125000)],
