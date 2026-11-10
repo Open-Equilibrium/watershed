@@ -176,6 +176,13 @@ Future<void> _switch(
   BridgeBranches branches,
 ) async {
   final git = state.git;
+  // Read again, since a change saved while the menu was open must be asked about.
+  await git.refresh();
+  if (!context.mounted) return;
+  if (git.problem.value case final problem?) {
+    state.notify(BridgeLevel.error, 'Could not read the checkout: $problem');
+    return;
+  }
   final left = git.status.value?.branch;
   final changed = git.status.value?.changed ?? 0;
   final stashed = git.stash.value;

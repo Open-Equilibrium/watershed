@@ -267,6 +267,42 @@ void main() {
     await tester.pump(const Duration(seconds: 7));
   });
 
+  testWidgets('a change saved while the menu is open is asked about', (
+    tester,
+  ) async {
+    await show(tester, git: gitStatusOf());
+    await openMenu(tester);
+    backend.git = gitStatusOf(changed: 4);
+    await tester.tap(find.text('origin/release-1.2'));
+    await tester.pumpAndSettle();
+    expect(find.text('Leave my changes on main'), findsOneWidget);
+    expect(
+      backend.calls.where((call) => call.startsWith('switch')),
+      isEmpty,
+      reason: 'nothing switches before the person chooses',
+    );
+    await tester.pump(const Duration(seconds: 7));
+  });
+
+  testWidgets('a checkout that cannot be read again stops the switch', (
+    tester,
+  ) async {
+    await show(tester, git: gitStatusOf());
+    await openMenu(tester);
+    backend.gitError = 'git could not start: No such file or directory';
+    await tester.tap(find.text('origin/release-1.2'));
+    await tester.pumpAndSettle();
+    expect(
+      backend.calls.where((call) => call.startsWith('switch')),
+      isEmpty,
+      reason: 'the cached status cannot tell whether changes would be lost',
+    );
+    expect(
+      state.notice.value?.text,
+      'Could not read the checkout: git could not start: No such file or directory',
+    );
+  });
+
   testWidgets('a changed stash invalidates the open replacement confirmation', (
     tester,
   ) async {
