@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -71,6 +72,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   /// takes.
   final _menu = OverlayPortalController();
   final _menuAnchor = LayerLink();
+  final _line = GlobalKey();
   var _choices = const <SlashCommand>[];
   var _chosen = 0;
 
@@ -167,10 +169,12 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (_menu.isShowing) _menu.hide();
   }
 
-  /// Opens the slash command menu once `/` is typed in an empty Text Block, filters it by what
-  /// follows, and closes it when nothing matches or the `/` is gone.
-  void _offer(String text, String stored) {
-    final opening = text == '/' && stored.isEmpty;
+  /// Opens the slash command menu once `/` is typed in an empty Text Block, or `handed` text
+  /// starting with it, filters it by what follows, and closes it when nothing matches or the
+  /// `/` is gone.
+  void _offer(String text, String stored, {bool handed = false}) {
+    final opening =
+        stored.isEmpty && (text == '/' || handed && text.startsWith('/'));
     if (!opening && !_menu.isShowing) return;
     final choices = text.startsWith('/')
         ? slashCommandsFor(text.substring(1))
@@ -319,6 +323,44 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (mounted) _set('', 0);
   }
 
+  /// The slash command menu, under the line `/` was typed in, or above it when all its
+  /// commands do not fit under it and there is more room above; they scroll in the room
+  /// it has. Clicking it keeps the field's focus.
+  Widget _menuView(BuildContext context) {
+    final line = _line.currentContext?.findRenderObject() as RenderBox?;
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (line == null || !line.hasSize || overlay == null) {
+      return const SizedBox.shrink();
+    }
+    final top = line.localToGlobal(Offset.zero, ancestor: overlay).dy;
+    final below =
+        overlay.size.height - top - line.size.height - WsMetrics.space1;
+    final above = top - WsMetrics.space1;
+    final up = SlashCommands.heightFor(_choices) > below && above > below;
+    return Align(
+      alignment: Alignment.topLeft,
+      child: CompositedTransformFollower(
+        link: _menuAnchor,
+        targetAnchor: up ? Alignment.topLeft : Alignment.bottomLeft,
+        followerAnchor: up ? Alignment.bottomLeft : Alignment.topLeft,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: math.max(0, up ? above : below),
+          ),
+          child: TextFieldTapRegion(
+            child: SlashCommands(
+              choices: _choices,
+              chosen: _chosen,
+              onChoose: _take,
+              onHover: (index) => setState(() => _chosen = index),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   /// ↑↓ choose in the open slash command menu, ⏎ takes the choice and esc closes it.
   KeyEventResult _menuKey(LogicalKeyboardKey key) {
     switch (key) {
@@ -438,8 +480,11 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
     widget.views.caret.value = null;
     _focus.requestFocus();
-    // `/` typed on a blank Page opens the slash command menu in the Text Block it made.
-    if (caret.text == '/' && widget.views.count == 1) _offer('/', '');
+    // `/` typed on a blank Page opens the slash command menu in the Text Block it made, also
+    // with the keys typed after it while the Block was made.
+    if (caret.text case final text? when caret.slash) {
+      _offer(text, '', handed: true);
+    }
     final length = _text.text.length;
     if (caret.offset > length && caret.offset < _end) _wanted = caret.offset;
     _text.selection = TextSelection.collapsed(
@@ -752,28 +797,14 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       ),
       _ => text,
     };
-    // The slash command menu opens under the line `/` was typed in, and clicking it keeps the
-    // field's focus. It sits above the style's frame, which a restyle rebuilds.
+    // The slash command menu sits above the style's frame, which a restyle rebuilds.
     return CompositedTransformTarget(
       link: _menuAnchor,
       child: OverlayPortal(
         controller: _menu,
-        overlayChildBuilder: (context) => Align(
-          alignment: Alignment.topLeft,
-          child: CompositedTransformFollower(
-            link: _menuAnchor,
-            targetAnchor: Alignment.bottomLeft,
-            child: TextFieldTapRegion(
-              child: SlashCommands(
-                choices: _choices,
-                chosen: _chosen,
-                onChoose: _take,
-                onHover: (index) => setState(() => _chosen = index),
-              ),
-            ),
-          ),
-        ),
+        overlayChildBuilder: _menuView,
         child: Padding(
+          key: _line,
           padding: EdgeInsets.only(top: top, bottom: WsMetrics.space1),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
