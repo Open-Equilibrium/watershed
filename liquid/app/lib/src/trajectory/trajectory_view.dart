@@ -878,11 +878,9 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     final b = history.trajectories[1].records;
     final comparison = _comparison(history);
     final shared = comparison.shared;
-    final branchPoint = shared == 0
-        ? null
-        : _equalWidth
-        ? shared.toDouble()
-        : (a[shared - 1].startMs + (a[shared - 1].durationMs ?? 0)).toDouble();
+    final branchPoint = _equalWidth
+        ? (shared == 0 ? null : shared.toDouble())
+        : comparison.branchPoint?.toDouble();
     List<Segment> own(List<BridgeRecord> records, int idle) => comparedSegments(
       records,
       shared: shared,

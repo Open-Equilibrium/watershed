@@ -469,6 +469,24 @@ void main() {
     );
   });
 
+  test('idle counts from the latest end of the shared steps', () {
+    // Parallel tools end out of order: the shared steps end at 1000 and at 200.
+    final shared = [
+      record('s1', 1, BridgeRecordKind.tool, 'bash', 0, duration: 1000),
+      record('s2', 1, BridgeRecordKind.tool, 'read', 0, duration: 200),
+    ];
+    final comparison = compareBranches(
+      [...shared, record('a1', 2, BridgeRecordKind.user, 'Try A', 2000)],
+      [...shared, record('b1', 2, BridgeRecordKind.user, 'Try B', 5000)],
+    );
+    expect(
+      (comparison.idleA, comparison.idleB),
+      (1000, 4000),
+      reason: 'the wait starts when the last shared step ends',
+    );
+    expect(comparison.branchPoint, 1000);
+  });
+
   test('describes tool outcomes, shares and changed files', () {
     expect(
       [

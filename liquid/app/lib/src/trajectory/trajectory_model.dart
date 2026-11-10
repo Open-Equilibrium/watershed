@@ -418,7 +418,13 @@ List<bool> inRange(
 /// Two branches side by side: their shared steps and the aligned rest.
 @immutable
 class Comparison {
-  const Comparison(this.shared, this.rows, this.idleA, this.idleB);
+  const Comparison(
+    this.shared,
+    this.rows,
+    this.idleA,
+    this.idleB,
+    this.branchPoint,
+  );
 
   /// Leading records both branches share.
   final int shared;
@@ -430,6 +436,10 @@ class Comparison {
   /// leave this human time out.
   final int idleA;
   final int idleB;
+
+  /// When the branches part: the latest end of the shared steps, which parallel tools can
+  /// put before the last shared step's end; `null` without shared steps.
+  final int? branchPoint;
 }
 
 /// Pairs larger than this align by position instead of by content.
@@ -442,7 +452,9 @@ Comparison compareBranches(List<BridgeRecord> a, List<BridgeRecord> b) {
       a[shared].entry == b[shared].entry) {
     shared++;
   }
-  final branchPoint = shared == 0 ? null : _end(a[shared - 1]);
+  final branchPoint = shared == 0
+      ? null
+      : a.take(shared).map(_end).reduce(math.max);
   int idle(List<BridgeRecord> records) =>
       branchPoint == null ||
           records.length <= shared ||
@@ -452,7 +464,8 @@ Comparison compareBranches(List<BridgeRecord> a, List<BridgeRecord> b) {
   final left = a.sublist(shared);
   final right = b.sublist(shared);
   final rows = <(BridgeRecord?, BridgeRecord?)>[];
-  Comparison result() => Comparison(shared, rows, idle(a), idle(b));
+  Comparison result() =>
+      Comparison(shared, rows, idle(a), idle(b), branchPoint);
   if (left.length * right.length > _alignLimit) {
     for (var index = 0; index < math.max(left.length, right.length); index++) {
       rows.add((
