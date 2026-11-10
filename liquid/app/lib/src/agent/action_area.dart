@@ -264,8 +264,11 @@ class _QueueChips extends StatelessWidget {
                           child: InkWell(
                             key: Key('unqueue $index'),
                             canRequestFocus: false,
-                            onTap: () =>
-                                state.unqueue(text, followUp: followUp),
+                            onTap: () => state.unqueue(
+                              text,
+                              followUp: followUp,
+                              occurrence: _earlierEqual(waiting, index),
+                            ),
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: WsMetrics.space2,
@@ -288,4 +291,13 @@ class _QueueChips extends StatelessWidget {
       },
     );
   }
+}
+
+/// How many equal messages wait before the one at `index` in the same queue.
+int _earlierEqual(List<(String, String, bool)> waiting, int index) {
+  final (_, text, followUp) = waiting[index];
+  return waiting
+      .take(index)
+      .where((entry) => entry.$2 == text && entry.$3 == followUp)
+      .length;
 }

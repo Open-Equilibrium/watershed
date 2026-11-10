@@ -295,11 +295,20 @@ class SessionState {
   }
 
   /// Takes one waiting message out of the queue; pi clears the whole queue, so the others are
-  /// sent again in their order.
-  Future<void> unqueue(String message, {required bool followUp}) =>
-      _changeQueue(() => _unqueue(message, followUp: followUp));
+  /// sent again in their order. `occurrence` counts the equal messages before it in its queue.
+  Future<void> unqueue(
+    String message, {
+    required bool followUp,
+    int occurrence = 0,
+  }) => _changeQueue(
+    () => _unqueue(message, followUp: followUp, occurrence: occurrence),
+  );
 
-  Future<void> _unqueue(String message, {required bool followUp}) async {
+  Future<void> _unqueue(
+    String message, {
+    required bool followUp,
+    required int occurrence,
+  }) async {
     final BridgeQueue waiting;
     try {
       waiting = await _backend.clearQueue();
@@ -314,7 +323,17 @@ class SessionState {
     // Only the queue the chip belongs to loses the message; the same text may wait in both.
     List<String> kept(List<String> texts, {required bool inFollowUp}) {
       final rest = [...texts];
-      if (!removed && inFollowUp == followUp) removed = rest.remove(message);
+      if (!removed && inFollowUp == followUp) {
+        final matches = [
+          for (final (index, text) in texts.indexed)
+            if (text == message) index,
+        ];
+        // The cleared queue may hold fewer equal messages than the chip counted; the last goes.
+        if (matches.isNotEmpty) {
+          rest.removeAt(matches[occurrence.clamp(0, matches.length - 1)]);
+          removed = true;
+        }
+      }
       return rest;
     }
 

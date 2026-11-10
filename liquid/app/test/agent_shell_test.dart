@@ -836,6 +836,25 @@ void main() {
     expect(backend.calls.last, 'abort');
   });
 
+  testWidgets('removing a repeated queued message keeps the others in order', (
+    tester,
+  ) async {
+    await show(tester);
+    const queue = BridgeQueue(
+      steering: [],
+      followUp: ['build', 'test', 'build'],
+    );
+    backend.queued = queue;
+    await emit(tester, event(BridgeEventKind.queueChanged, queue: queue));
+    await tester.tap(find.byKey(const Key('unqueue 2')));
+    await tester.pumpAndSettle();
+    expect(backend.calls, [
+      'clear queue',
+      'follow-up build',
+      'follow-up test',
+    ], reason: 'the last build leaves; the first one keeps its place');
+  });
+
   testWidgets(
     'shows streamed text, tool rows, widgets and the waiting status',
     (tester) async {
