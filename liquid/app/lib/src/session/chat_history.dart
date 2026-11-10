@@ -32,7 +32,9 @@ class ChatHistory {
 
   /// The earliest stored entry the chat covers; the next page ends before it.
   String? _start;
-  bool _readingEarlier = false;
+
+  /// The version whose earlier page is being read; a reset or restore reads for its own.
+  int? _readingVersion;
 
   /// Rebuilt items count down from -1, so they never meet live item ids.
   int _nextId = -1;
@@ -75,6 +77,8 @@ class ChatHistory {
       return;
     }
     if (version != _version) return;
+    // Earlier pages started during this restore read the cursor it replaces, so they are dropped.
+    _version++;
     // What the stored responses used; live requests add to it.
     totals.value = const SessionTotals().add(history.usage);
     final rebuilt = _stored(page.items);
@@ -246,9 +250,9 @@ class ChatHistory {
   /// Reads the stored entries before the earliest one the chat covers, passing over pages the
   /// chat shows nothing of, such as tool results only.
   Future<void> loadEarlier() async {
-    if (_readingEarlier) return;
-    _readingEarlier = true;
+    if (_readingVersion == _version) return;
     final version = _version;
+    _readingVersion = version;
     try {
       while (more.value && _start != null) {
         final before = _start;
@@ -284,7 +288,8 @@ class ChatHistory {
     } on Object catch (error) {
       reportRead('earlier messages', 'Could not read earlier messages: $error');
     } finally {
-      _readingEarlier = false;
+      // A newer chat may have started its own reading meanwhile; that one stays.
+      if (_readingVersion == version) _readingVersion = null;
     }
   }
 

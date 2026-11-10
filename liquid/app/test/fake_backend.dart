@@ -259,9 +259,13 @@ class FakeBackend implements SessionBackend {
   /// Holds reads of earlier chat pages until it completes.
   Completer<void>? earlierGate;
 
+  /// Holds the newest chat page until it completes.
+  Completer<void>? newestGate;
+
   @override
   Future<BridgeTranscript> transcript(String? before) async {
     calls.add('transcript ${before ?? ''}'.trim());
+    if (before == null) await newestGate?.future;
     if (before != null) await earlierGate?.future;
     if (transcriptError case final error?) throw error;
     return transcripts[before ?? ''] ??

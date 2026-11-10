@@ -899,6 +899,83 @@ void main() {
     );
   });
 
+  test(
+    'a stale earlier-page read does not stop the next chat reading its own',
+    () async {
+      backend.transcripts[''] = BridgeTranscript(
+        items: [chatItem('u2', BridgeItemKind.userMessage, text: 'Later')],
+        more: true,
+        start: 'u2',
+      );
+      backend.transcripts['u2'] = BridgeTranscript(
+        items: [chatItem('u1', BridgeItemKind.userMessage, text: 'First')],
+        more: false,
+        start: 'u1',
+      );
+      await state.loadChat();
+      final stalled = Completer<void>();
+      backend.earlierGate = stalled;
+      final stale = state.loadEarlier();
+      await pumpEventQueue();
+      // The new session's own reads are not held back by the old one.
+      backend.earlierGate = null;
+      backend.transcripts[''] = const BridgeTranscript(
+        items: [],
+        more: true,
+        start: 'x',
+      );
+      backend.transcripts['x'] = BridgeTranscript(
+        items: [chatItem('u9', BridgeItemKind.userMessage, text: 'Mine')],
+        more: false,
+        start: 'u9',
+      );
+      await state.newSession();
+      expect(state.items.value.map((view) => view.text.value), [
+        'Mine',
+      ], reason: 'the new chat reads its own earlier page');
+      stalled.complete();
+      await stale;
+      expect(state.items.value.map((view) => view.text.value), [
+        'Mine',
+      ], reason: 'the old page never joins the new chat');
+    },
+  );
+
+  test(
+    'an earlier-page read started during a restore leaves the restored chat',
+    () async {
+      backend.transcripts[''] = BridgeTranscript(
+        items: [chatItem('u2', BridgeItemKind.userMessage, text: 'Later')],
+        more: true,
+        start: 'u2',
+      );
+      backend.transcripts['u2'] = BridgeTranscript(
+        items: [chatItem('u1', BridgeItemKind.userMessage, text: 'First')],
+        more: false,
+        start: 'u1',
+      );
+      await state.loadChat();
+      backend.transcripts[''] = BridgeTranscript(
+        items: [chatItem('u3', BridgeItemKind.userMessage, text: 'Newer')],
+        more: false,
+        start: 'u3',
+      );
+      backend.newestGate = Completer();
+      backend.earlierGate = Completer();
+      final restoring = state.loadChat();
+      await pumpEventQueue();
+      // Started with the cursor the restore is about to replace.
+      final earlier = state.loadEarlier();
+      await pumpEventQueue();
+      backend.newestGate!.complete();
+      await restoring;
+      backend.earlierGate!.complete();
+      await earlier;
+      expect(state.items.value.map((view) => view.text.value), ['Newer']);
+      expect(state.chatMore.value, isFalse);
+    },
+  );
+
   test('a stored parent cycle restores without hanging', () async {
     // a's parent is b and b's is a, so the path to the leaf must stop at the repeated entry.
     backend.stored = historyOf(
