@@ -262,7 +262,8 @@ pub struct ContextMessage {
     pub chars: usize,
     /// Whether the model saw it; a compaction or edit can take it out.
     pub in_context: bool,
-    /// Whether it arrived since the previous request.
+    /// Whether it arrived since the previous request; the model's own reply to that request does
+    /// not count.
     pub fresh: bool,
 }
 
