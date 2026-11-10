@@ -253,7 +253,7 @@ impl Entry {
                 replacement: entry
                     .get("replacement")
                     .filter(|replacement| !replacement.is_null())
-                    .map(|replacement| content_text(replacement.get("content")).chars().count()),
+                    .map(|replacement| content_chars(replacement.get("content"))),
             },
             "label" => Body::Label {
                 target: text("targetId"),
@@ -283,6 +283,25 @@ impl Entry {
     }
 }
 
+/// Characters a message's content adds to the context: its text and its tool calls' arguments.
+fn content_chars(content: Option<&Value>) -> usize {
+    let arguments: usize = content
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|block| block.get("type").and_then(Value::as_str) == Some("toolCall"))
+        .map(|call| {
+            call.get("arguments")
+                .cloned()
+                .unwrap_or(Value::Null)
+                .to_string()
+                .chars()
+                .count()
+        })
+        .sum();
+    content_text(content).chars().count() + arguments
+}
+
 fn message(message: Option<&Value>) -> Body {
     let Some(message) = message else {
         return Body::Other;
@@ -308,11 +327,9 @@ fn message(message: Option<&Value>) -> Body {
                 .into_iter()
                 .flatten()
                 .filter(|block| block.get("type").and_then(Value::as_str) == Some("toolCall"));
-            let mut call_chars = 0;
             let calls = blocks
                 .map(|call| {
                     let full = call.get("arguments").cloned().unwrap_or(Value::Null);
-                    call_chars += full.to_string().chars().count();
                     Call {
                         id: call
                             .get("id")
@@ -343,7 +360,7 @@ fn message(message: Option<&Value>) -> Body {
                 model: field("model"),
                 stop_reason: field("stopReason"),
                 usage: usage(message.get("usage")),
-                chars: chars + call_chars,
+                chars: content_chars(message.get("content")),
             }
         }
         Some("toolResult") => {

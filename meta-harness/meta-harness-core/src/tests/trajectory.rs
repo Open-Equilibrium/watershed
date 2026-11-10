@@ -441,6 +441,52 @@ fn a_replacement_counts_its_own_size() {
     );
 }
 
+#[test]
+fn an_identical_edit_of_a_tool_call_message_keeps_its_size() {
+    let call = r#"{"type":"toolCall","id":"c1","name":"bash","arguments":{"command":"pwd"}}"#;
+    let session = |edit: &str, parent: &str| -> Value {
+        serde_json::from_str(&format!(
+            r#"{{"entries":[
+              {{"type":"message","id":"u1","parentId":null,"message":{{"role":"user","content":"Where am I?"}}}},
+              {{"type":"message","id":"a1","parentId":"u1","message":{{"role":"assistant","content":[{{"type":"text","text":"Checking."}},{call}]}}}},
+              {edit}
+              {{"type":"message","id":"a2","parentId":"{parent}","message":{{"role":"assistant","content":[{{"type":"text","text":"Done."}}]}}}}
+            ],"leafId":"a2"}}"#
+        ))
+        .expect("JSON")
+    };
+    let edit = format!(
+        r#"{{"type":"context_edit","id":"x1","parentId":"a1","targetId":"a1","replacement":{{"content":[{{"type":"text","text":"Checking."}},{call}]}}}},"#
+    );
+    let plain = session("", "a1");
+    let edited = session(&edit, "x1");
+    let message_chars = |data: &Value| {
+        History::from_entries(data)
+            .context("a2")
+            .expect("context")
+            .messages
+            .into_iter()
+            .find(|message| message.entry == "a1")
+            .expect("the edited message")
+            .chars
+    };
+    let request_chars = |data: &Value| {
+        History::from_entries(data)
+            .trajectory(Some("a2"))
+            .records
+            .into_iter()
+            .find(|record| record.entry == "a2")
+            .and_then(|record| record.context)
+            .expect("a2 context")
+            .message_chars
+    };
+    assert_eq!(
+        (message_chars(&edited), request_chars(&edited)),
+        (message_chars(&plain), request_chars(&plain)),
+        "replacing a message with identical content keeps its size, tool-call arguments included"
+    );
+}
+
 /// A response that writes, edits and tests, with the prompt and tools the model saw.
 const OUTCOMES: &str = r#"{"entries":[
   {"type":"message","id":"s1","parentId":null,"message":{"role":"system","content":"","sections":{"preamble":"You are pi."},"toolsAdded":[{"name":"write","description":"Write a file","parameters":{}},{"name":"bash","description":"Run","parameters":{}}]}},
