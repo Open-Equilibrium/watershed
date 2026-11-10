@@ -262,35 +262,49 @@ class SessionState {
   Future<void> send(String message, {bool followUp = false}) async {
     // A message typed while the session changes goes to the new one, and one typed while the
     // chat is restored or branched follows it, so the restored chat does not hold its items twice
-    // and keeps the items of the turn the message starts.
-    await _switching?.future;
-    try {
-      await _branching;
-    } on Object {
-      // The branch or revert reports its own failure; the message still goes out.
-    }
-    try {
-      await _chat.loading;
-    } on Object {
-      // The chat reports its own failure; the message still goes out.
-    }
+    // and keeps the items of the turn the message starts. One typed during a queue change follows
+    // the messages the change keeps.
+    await _untilSettled();
+    final generation = _generation;
     try {
       await _backend.send(message, followUp: followUp);
-      // Named like a stored session until pi stores this one.
-      sessionTitle.value ??= _firstLine(message);
+      // Named like a stored session until pi stores this one, unless another session replaced it.
+      if (generation == _generation) sessionTitle.value ??= _firstLine(message);
     } on Object catch (error) {
       draft.value = message;
       notify(BridgeLevel.error, 'The message was not sent: $error');
     }
   }
 
+  /// Waits until no session switch, branch, chat restore or queue change is running. Each may
+  /// start another while it is awaited, so the check repeats.
+  Future<void> _untilSettled() async {
+    for (var pending = _pending; pending != null; pending = _pending) {
+      try {
+        await pending;
+      } on Object {
+        // Each reports its own failure; the message still goes out.
+      }
+    }
+  }
+
+  Future<Object?>? get _pending =>
+      _switching?.future ?? _branching ?? _chat.loading ?? _queueChange;
+
   /// Queue changes run one after another: each clears pi's whole queue, and a removal sends the
-  /// others again, which a second removal or Stop must not overtake.
-  Future<void> _queueChange = Future.value();
+  /// others again, which a second removal, Stop or a new message must not overtake. Null while
+  /// none runs.
+  Future<void>? _queueChange;
 
   Future<void> _changeQueue(Future<void> Function() change) {
-    final next = _queueChange.then((_) => change());
-    _queueChange = next.then((_) {}, onError: (Object _) {});
+    final next = (_queueChange ?? Future.value()).then((_) => change());
+    final settled = next.then((_) {}, onError: (Object _) {});
+    _queueChange = settled;
+    unawaited(
+      settled.whenComplete(() {
+        if (identical(_queueChange, settled)) _queueChange = null;
+      }),
+    );
     return next;
   }
 

@@ -976,6 +976,65 @@ void main() {
     },
   );
 
+  test(
+    'a message sent while the queue is rebuilt follows the kept messages',
+    () async {
+      backend.queued = const BridgeQueue(
+        steering: [],
+        followUp: ['a', 'b', 'c'],
+      );
+      backend.sendGate = Completer();
+      final removing = state.unqueue('b', followUp: true);
+      await pumpEventQueue();
+      final sending = state.send('d');
+      await pumpEventQueue();
+      backend.sendGate!.complete();
+      await Future.wait([removing, sending]);
+      expect(backend.calls, [
+        'clear queue',
+        'follow-up a',
+        'follow-up c',
+        'send d',
+      ], reason: 'the message waits until the kept messages are sent again');
+    },
+  );
+
+  test(
+    'a message waiting for a restore also waits for a switch started meanwhile',
+    () async {
+      backend.gate = Completer();
+      final restoring = state.loadChat();
+      final sending = state.send('Hi');
+      await pumpEventQueue();
+      backend.switchGate = Completer();
+      final switching = state.newSession();
+      await pumpEventQueue();
+      backend.gate!.complete();
+      await pumpEventQueue();
+      expect(
+        backend.calls,
+        isNot(contains('send Hi')),
+        reason: 'the switch is still running',
+      );
+      backend.switchGate!.complete();
+      await Future.wait([restoring, switching, sending]);
+      expect(backend.calls.last, 'send Hi');
+    },
+  );
+
+  test(
+    'a send that completes after a new session leaves its title unset',
+    () async {
+      backend.sendGate = Completer();
+      final sending = state.send('Old');
+      await pumpEventQueue();
+      await state.newSession();
+      backend.sendGate!.complete();
+      await sending;
+      expect(state.sessionTitle.value, isNull);
+    },
+  );
+
   test('a stored parent cycle restores without hanging', () async {
     // a's parent is b and b's is a, so the path to the leaf must stop at the repeated entry.
     backend.stored = historyOf(
