@@ -599,7 +599,11 @@ impl AgentSession {
         let limit = usize::try_from(limit).unwrap_or(usize::MAX);
         let stored = recent_sessions(dir, &self.cwd, Some(&file), limit)
             .map_err(|error| error.to_string())?;
-        Ok(stored.into_iter().map(Into::into).collect())
+        // A session whose path is not UTF-8 has no name to reopen it by, so it is not listed.
+        Ok(stored
+            .into_iter()
+            .filter_map(|session| BridgeStoredSession::try_from(session).ok())
+            .collect())
     }
 
     /// The open session's title, as the start page names stored sessions; none before pi

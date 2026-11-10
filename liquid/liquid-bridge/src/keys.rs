@@ -22,11 +22,14 @@ pub(crate) struct Keychain {
 const SERVICE: &str = "Liquid replica key";
 
 impl Keychain {
-    pub(crate) fn for_replica(folder: &Path) -> Self {
+    pub(crate) fn for_replica(folder: &Path) -> Result<Self, String> {
         let folder = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
-        Self {
-            folder: folder.to_string_lossy().into_owned(),
-        }
+        // The account must spell the folder exactly, or two folders could share one key.
+        let folder = folder
+            .to_str()
+            .ok_or("the replica's folder path is not UTF-8")?
+            .to_owned();
+        Ok(Self { folder })
     }
 
     fn entry(&self) -> Result<keyring::Entry, String> {

@@ -1,5 +1,7 @@
 //! Conversions between the core's model and the types Dart receives.
 
+use std::ffi::OsString;
+
 use meta_harness_core::{
     AgentEvent, ChangeStatus, CommandError, ContextDetail, ContextMessage, ContextPart, EntryKind,
     FileChange, ItemDetail, ItemKind, ItemStatus, MAX_RECORD_BYTES, Model, NotificationLevel,
@@ -499,13 +501,16 @@ impl From<AgentEvent> for BridgeEvent {
     }
 }
 
-impl From<StoredSession> for BridgeStoredSession {
-    fn from(stored: StoredSession) -> Self {
-        Self {
-            path: stored.path.display().to_string(),
+impl TryFrom<StoredSession> for BridgeStoredSession {
+    /// The path, when it is not UTF-8 and so cannot name the session to reopen.
+    type Error = OsString;
+
+    fn try_from(stored: StoredSession) -> Result<Self, Self::Error> {
+        Ok(Self {
+            path: stored.path.into_os_string().into_string()?,
             title: stored.title,
             modified_ms: int(stored.modified_ms),
-        }
+        })
     }
 }
 

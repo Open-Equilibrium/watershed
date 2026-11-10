@@ -663,7 +663,7 @@ impl LiquidWorkspace {
         let dir = Path::new(&dir);
         // Created first, so the keychain names the folder by its canonical path every time.
         std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
-        Self::open_with(dir, &Keychain::for_replica(dir))
+        Self::open_with(dir, &Keychain::for_replica(dir)?)
     }
 
     /// Opens with `keys` in place of the keychain, for tests.

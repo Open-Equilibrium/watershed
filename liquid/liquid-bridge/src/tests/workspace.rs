@@ -349,7 +349,7 @@ fn a_window_never_exceeds_its_cap() {
 fn the_keychain_keeps_a_replica_key() {
     let folder = Folder::new("keychain");
     std::fs::create_dir_all(&folder.0).unwrap();
-    let keychain = crate::keys::Keychain::for_replica(&folder.0);
+    let keychain = crate::keys::Keychain::for_replica(&folder.0).unwrap();
     assert_eq!(keychain.read().unwrap(), None);
     keychain.write(&[5; 32]).unwrap();
     assert_eq!(keychain.read().unwrap(), Some([5; 32]));
@@ -360,6 +360,14 @@ fn the_keychain_keeps_a_replica_key() {
         1
     );
     keychain.delete().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_folder_whose_path_is_not_utf8_gets_no_keychain_entry() {
+    use std::os::unix::ffi::OsStrExt;
+    let folder = std::ffi::OsStr::from_bytes(b"/nonexistent/replica-\x80");
+    assert!(crate::keys::Keychain::for_replica(std::path::Path::new(folder)).is_err());
 }
 
 #[test]

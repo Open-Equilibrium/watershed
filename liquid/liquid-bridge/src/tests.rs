@@ -3,7 +3,7 @@ mod workspace;
 
 use meta_harness_core::{
     AgentCommand, AgentEvent, ChangedLines, CommandError, ItemDetail, ItemId, ItemKind, ItemStatus,
-    RequestId, SessionEvent, TurnId, Usage, UserInput,
+    RequestId, SessionEvent, StoredSession, TurnId, Usage, UserInput,
 };
 
 use crate::api::events::{
@@ -453,6 +453,18 @@ fn starts_and_resumes_sessions_and_picks_models() {
         Ok(())
     );
     assert!(call(session.shutdown()));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_session_path_that_is_not_utf8_is_not_listed() {
+    use std::os::unix::ffi::OsStrExt;
+    let stored = StoredSession {
+        path: std::ffi::OsStr::from_bytes(b"/s/session-\xff.jsonl").into(),
+        title: "Fix login".to_owned(),
+        modified_ms: 1_000_000,
+    };
+    assert_eq!(BridgeStoredSession::try_from(stored).ok(), None);
 }
 
 #[test]
