@@ -231,3 +231,20 @@ test("refuses startup when the checkpoint dialog rejects", async () => {
   assert.deepEqual(aborted, [true]);
   assert.deepEqual(notes, ["Could not start: core disconnected"]);
 });
+
+test("a failing end dialog records its error and ends the run", async () => {
+  const { handlers, entries } = load();
+  const { ctx } = context("rpc", {}, ['{"ok":true,"canRun":true}']);
+  await handlers.get("before_agent_start")!({}, ctx);
+  let asks = 0;
+  ctx.ui.input = async () => {
+    asks += 1;
+    throw new Error("core disconnected");
+  };
+  await handlers.get("agent_settled")!({}, ctx);
+  await handlers.get("agent_settled")!({}, ctx);
+  const [start, end] = entries.map(({ data }) => data as Record<string, unknown>);
+  assert.equal(entries.length, 2, "the failed end is the run's last checkpoint");
+  assert.deepEqual(end, { ...start, phase: "end", error: "core disconnected" });
+  assert.equal(asks, 1, "a settled run asks nothing once its end failed");
+});

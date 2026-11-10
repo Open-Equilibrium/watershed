@@ -30,7 +30,12 @@ function watershed(pi: ExtensionAPI, clock: Clock): void {
       return;
     }
     const data = { ...running, phase };
-    const answer = await ui.input(CHECKPOINT_PREFIX + JSON.stringify(data));
+    // A dialog that failed, such as one the core disconnected from, is recorded with its reason.
+    const answer = await ui
+      .input(CHECKPOINT_PREFIX + JSON.stringify(data))
+      .catch((error: unknown) =>
+        JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
+      );
     let recorded: Record<string, unknown> = { ...data, error: "No answer from Watershed" };
     let canRun = false;
     try {
@@ -71,10 +76,13 @@ function watershed(pi: ExtensionAPI, clock: Clock): void {
     return undefined;
   });
   pi.on("agent_settled", async (_event, ctx) => {
-    if (ctx.mode === "rpc") {
-      await checkpoint(ctx.ui, "end");
+    try {
+      if (ctx.mode === "rpc") {
+        await checkpoint(ctx.ui, "end");
+      }
+    } finally {
+      running = undefined;
     }
-    running = undefined;
   });
 
   // pi runs these handlers before it stores the message or tool result, so a request's timing
