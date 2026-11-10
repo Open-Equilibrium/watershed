@@ -62,7 +62,13 @@ class CompareView extends StatelessWidget {
       child: CustomScrollView(
         slivers: [
           SliverToBoxAdapter(
-            child: _Metrics(a: a, b: b, comparison: comparison),
+            child: _Metrics(
+              a: a,
+              b: b,
+              comparison: comparison,
+              branchA: branchA,
+              branchB: branchB,
+            ),
           ),
           const SliverToBoxAdapter(child: SizedBox(height: WsMetrics.space4)),
           DecoratedSliver(
@@ -117,9 +123,9 @@ class CompareView extends StatelessWidget {
                     return Row(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        _Cell(step: left, other: right, side: 'A'),
+                        _Cell(step: left, other: right, side: branchA.ref),
                         Container(width: 1, color: ws.border),
-                        _Cell(step: right, other: left, side: 'B'),
+                        _Cell(step: right, other: left, side: branchB.ref),
                       ],
                     );
                   }, childCount: rows.length),
@@ -269,11 +275,19 @@ class _Cell extends StatelessWidget {
 
 /// Headline numbers of both branches.
 class _Metrics extends StatelessWidget {
-  const _Metrics({required this.a, required this.b, required this.comparison});
+  const _Metrics({
+    required this.a,
+    required this.b,
+    required this.comparison,
+    required this.branchA,
+    required this.branchB,
+  });
 
   final BridgeTrajectory a;
   final BridgeTrajectory b;
   final Comparison comparison;
+  final Branch branchA;
+  final Branch branchB;
 
   @override
   Widget build(BuildContext context) {
@@ -306,8 +320,20 @@ class _Metrics extends StatelessWidget {
             '${formatCompact(totalsA.output)} → ${formatCompact(totalsB.output)} out',
             ws.textMuted,
           ),
-          _files(ws, changedFiles(a.records), changedFiles(b.records)),
-          _tests(ws, lastTests(a.records), lastTests(b.records)),
+          _files(
+            ws,
+            branchA.ref,
+            branchB.ref,
+            changedFiles(a.records),
+            changedFiles(b.records),
+          ),
+          _tests(
+            ws,
+            branchA.ref,
+            branchB.ref,
+            lastTests(a.records),
+            lastTests(b.records),
+          ),
         ].indexed) ...[
           if (index > 0) const SizedBox(width: 10),
           Expanded(
@@ -358,6 +384,8 @@ class _Metrics extends StatelessWidget {
 /// Files the branches changed, and whether only one changed tests.
 (String, String, String, Color) _files(
   WsPalette ws,
+  String refA,
+  String refB,
   Set<String> a,
   Set<String> b,
 ) {
@@ -368,7 +396,7 @@ class _Metrics extends StatelessWidget {
     '${a.length} → ${b.length}',
     testsA == testsB
         ? (testsA ? 'tests changed in both' : 'no test changes')
-        : 'no test changes in ${testsA ? 'B' : 'A'}',
+        : 'no test changes in ${testsA ? refB : refA}',
     testsA == testsB ? ws.textMuted : ws.warning,
   );
 }
@@ -376,6 +404,8 @@ class _Metrics extends StatelessWidget {
 /// The branches' last test runs.
 (String, String, String, Color) _tests(
   WsPalette ws,
+  String refA,
+  String refB,
   BridgeToolOutcome? a,
   BridgeToolOutcome? b,
 ) {
@@ -385,7 +415,7 @@ class _Metrics extends StatelessWidget {
   final note = a == null && b == null
       ? 'no test runs'
       : a == null || b == null
-      ? 'no test run in ${a == null ? 'A' : 'B'}'
+      ? 'no test run in ${a == null ? refA : refB}'
       : failedA + failedB == 0
       ? 'all passed in both'
       : '$failedA → $failedB failed';

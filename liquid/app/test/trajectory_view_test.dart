@@ -16,6 +16,7 @@ import 'package:liquid/src/theme/tokens.g.dart';
 import 'package:liquid/src/trajectory/compare_view.dart';
 import 'package:liquid/src/trajectory/filter_bar.dart';
 import 'package:liquid/src/trajectory/overview.dart';
+import 'package:liquid/src/trajectory/trajectory_model.dart';
 import 'package:liquid/src/trajectory/tree_view.dart';
 
 import 'fake_backend.dart';
@@ -1253,6 +1254,51 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('tree-e6')));
     await tester.pumpAndSettle();
     expect(backend.calls.last, 'history e6');
+  });
+
+  testWidgets('a comparison names its branches by their refs', (tester) async {
+    await tester.binding.setSurfaceSize(shortest);
+    final shared = [
+      record('e1', 1, BridgeRecordKind.user, 'Go', 0),
+      record('e2', 1, BridgeRecordKind.message, 'Look', 100, duration: 900),
+    ];
+    final b = [
+      ...shared,
+      record(
+        'b1',
+        1,
+        BridgeRecordKind.tool,
+        'bash',
+        1100,
+        duration: 50,
+        outcome: const BridgeToolOutcome(testsPassed: 3, testsFailed: 0),
+      ),
+    ];
+    final c = [
+      ...shared,
+      record('c1', 2, BridgeRecordKind.user, 'Other', 1100),
+    ];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: Scaffold(
+          body: SizedBox(
+            height: 600,
+            child: CompareView(
+              a: BridgeTrajectory(records: b, durationMs: 1150),
+              b: BridgeTrajectory(records: c, durationMs: 1100),
+              comparison: compareBranches(b, c),
+              branchA: const Branch(tip: 'b1', ref: 'B', name: 'Run tests'),
+              branchB: const Branch(tip: 'c1', ref: 'C', name: 'Other'),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('only in B'), findsOneWidget);
+    expect(find.text('only in C'), findsOneWidget);
+    expect(find.text('only in A'), findsNothing);
+    expect(find.text('no test run in C'), findsOneWidget);
   });
 
   testWidgets('keys for the list leave what the comparison hides alone', (
