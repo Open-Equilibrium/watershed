@@ -191,6 +191,17 @@ fn names_the_open_session_as_the_start_page_does() {
         1,
     );
     session(&dir, "empty", "/work/acme-api", &[], 1);
+    // A cleared name gives way to the first prompt, as an unnamed session does.
+    session(
+        &dir,
+        "cleared",
+        "/work/acme-api",
+        &[
+            user,
+            r#"{"type":"session_info","id":"i1","parentId":"u1","name":""}"#,
+        ],
+        1,
+    );
     // A prompt that starts with a blank line is named by its first words, as Liquid names it.
     let spaced = r#"{"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"\n  Fix login\nand more"}}"#;
     session(&dir, "spaced", "/work/acme-api", &[spaced], 1);
@@ -200,6 +211,7 @@ fn names_the_open_session_as_the_start_page_does() {
 
     assert_eq!(title("prompt").as_deref(), Some("Add a limiter"));
     assert_eq!(title("named").as_deref(), Some("Rate limit for /login"));
+    assert_eq!(title("cleared").as_deref(), Some("Add a limiter"));
     assert_eq!(title("empty"), None, "nothing to name it by yet");
     assert_eq!(
         session_title(&dir.join("prompt.jsonl"), Path::new("/work/web-shop")),

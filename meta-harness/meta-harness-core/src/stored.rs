@@ -169,7 +169,10 @@ fn head(path: &Path, project: &Path) -> Option<Head> {
     }
     Some(Head {
         id,
-        title: name.or(prompt).filter(|title: &String| !title.is_empty()),
+        title: name
+            .filter(|name: &String| !name.is_empty())
+            .or(prompt)
+            .filter(|title: &String| !title.is_empty()),
     })
 }
 
