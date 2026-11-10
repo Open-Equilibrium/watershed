@@ -614,12 +614,13 @@ fn a_turn_can_start_during_pull_fetch_and_pull_rechecks_its_lock() {
 #[test]
 fn pull_fetch_is_bounded_and_stops_when_the_session_closes() {
     run(async {
-        for closing in [false, true] {
+        // Closing must end the fetch alone, so its own deadline outlasts the wait below.
+        for (closing, deadline) in [(false, 2), (true, 60)] {
             let remote = Remote::new(&format!("pull-fetch-bounded-{closing}"));
             let (entered, release) = gated_fetch(&remote);
             let checkpoints = std::sync::Arc::new(Checkpoints::with_timeout(
                 remote.repo.path(),
-                std::time::Duration::from_secs(2),
+                std::time::Duration::from_secs(deadline),
             ));
             let mut pulling = tokio::spawn({
                 let checkpoints = checkpoints.clone();
@@ -637,10 +638,12 @@ fn pull_fetch_is_bounded_and_stops_when_the_session_closes() {
                 "network fetch must stop on deadline or close"
             );
             let error = result.unwrap().unwrap().unwrap_err();
-            assert!(
-                matches!(error, DiffError::TimedOut(_) | DiffError::Closed),
-                "{error:?}"
-            );
+            let expected = if closing {
+                matches!(error, DiffError::Closed)
+            } else {
+                matches!(error, DiffError::TimedOut(_))
+            };
+            assert!(expected, "{error:?}");
         }
     });
 }
