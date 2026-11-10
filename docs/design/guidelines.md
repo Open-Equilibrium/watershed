@@ -32,7 +32,7 @@ References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 ## Patterns
 
 - The input area floats at the bottom of each tab's main column, centered within the reading width, as T3 Code's composer does; content runs on beneath it. Agent questions appear inside it, and widgets sit directly above it.
-- Filters dim what does not match instead of hiding it; a range set with the timeline's handles limits the list to its steps.
+- Filters dim what does not match instead of hiding it; a range set with the timeline's handles limits the list to its steps. A click on the timeline or the session tree jumps to that step and moves a range that hides it there.
 - A step's kind has one shape and color everywhere: the Kind tags, the timeline and the session tree.
 - A choice of one among a few options uses the shared segments (`Segments` in `liquid/app/lib/src/controls.dart`): one framed control on the subtle background, the chosen segment raised on the surface, the same in every view; mockups that draw it otherwise are superseded.
 - An action that cannot run stays visible, dimmed, and says why on hover.

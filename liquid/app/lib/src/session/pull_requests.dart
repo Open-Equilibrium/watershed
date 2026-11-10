@@ -56,7 +56,9 @@ class PullRequests {
     updated.value = null;
     failure.value = null;
     _notGitHub = false;
-    if (offer.value?.branch != _git.status.value?.branch) offer.value = null;
+    if (offer.value?.confirmation.branch != _git.status.value?.rawBranch) {
+      offer.value = null;
+    }
     unawaited(refresh());
   }
 
@@ -124,7 +126,7 @@ class PullRequests {
     if (!_disposed &&
         !_notGitHub &&
         !isOpen(current.value) &&
-        _git.status.value?.branch == transfer.branch) {
+        _git.status.value?.rawBranch == transfer.confirmation.branch) {
       offer.value = transfer;
     }
   }

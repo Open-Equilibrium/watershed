@@ -10,6 +10,7 @@ import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'step_parts.dart';
 import 'trajectory_model.dart';
 
 /// Widths of the open session tree and of its collapsed rail.
@@ -223,7 +224,8 @@ class _Toggle extends StatelessWidget {
   );
 }
 
-/// The collapsed tree: a rail with one dot per turn, filled for the selected step's turn.
+/// The collapsed tree: a rail with one dot per turn, filled for the selected step's turn, and
+/// its name below them.
 class _Rail extends StatelessWidget {
   const _Rail({required this.tree});
 
@@ -249,8 +251,9 @@ class _Rail extends StatelessWidget {
         children: [
           _Toggle(open: false, onOpen: tree.onOpen),
           const SizedBox(height: WsMetrics.space2),
-          Expanded(
+          Flexible(
             child: ListView.builder(
+              shrinkWrap: true,
               itemExtent: 16,
               itemCount: turns.length,
               itemBuilder: (context, index) {
@@ -278,6 +281,17 @@ class _Rail extends StatelessWidget {
                   ),
                 );
               },
+            ),
+          ),
+          const SizedBox(height: WsMetrics.space2),
+          RotatedBox(
+            quarterTurns: 1,
+            child: Text(
+              'Tree',
+              style: TextStyle(
+                color: ws.textFaint,
+                fontSize: WsMetrics.fsCaption,
+              ),
             ),
           ),
         ],
@@ -421,7 +435,7 @@ class RefBadge extends StatelessWidget {
         style: TextStyle(
           color: shown ? ws.onAccent : ws.textMuted,
           fontSize: WsMetrics.fsSmall,
-          height: 18 / WsMetrics.fsSmall,
+          height: lineHeight(WsMetrics.lhSmall, WsMetrics.fsSmall),
           fontWeight: WsMetrics.fwMedium,
         ),
       ),
@@ -580,15 +594,15 @@ class _RowPainter extends CustomPainter {
       case BridgeEntryKind.user:
         shape = Path()..addOval(Rect.fromCircle(center: center, radius: 5));
         fill.color = palette.canvas;
-        outline.color = palette.textFaint;
+        outline.color = kindColor(palette, BridgeRecordKind.user);
         outlined = true;
       case BridgeEntryKind.assistant:
         shape = Path()..addOval(Rect.fromCircle(center: center, radius: 3.5));
-        fill.color = palette.data1;
+        fill.color = kindColor(palette, BridgeRecordKind.message);
       case BridgeEntryKind.toolResult:
         shape = Path()
           ..addRect(Rect.fromCenter(center: center, width: 6.5, height: 6.5));
-        fill.color = palette.data2;
+        fill.color = kindColor(palette, BridgeRecordKind.tool);
       default:
         shape = Path()..addOval(Rect.fromCircle(center: center, radius: 3));
         fill.color = palette.canvas;

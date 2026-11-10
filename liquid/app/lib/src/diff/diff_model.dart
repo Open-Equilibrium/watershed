@@ -76,6 +76,45 @@ class DiffLine {
   final int? newNumber;
 }
 
+/// The characters of a line the Diff tab shows; a longer one, such as a minified bundle's,
+/// shows them and an ellipsis, so laying out one line stays cheap.
+const shownChars = 1000;
+
+/// The start of `text` the Diff tab shows, without a split character pair, and whether it is
+/// cut.
+({String text, bool cut}) shownText(String text) {
+  if (text.length <= shownChars) return (text: text, cut: false);
+  final end = text.codeUnitAt(shownChars - 1) & 0xFC00 == 0xD800
+      ? shownChars - 1
+      : shownChars;
+  return (text: text.substring(0, end), cut: true);
+}
+
+/// The shown text of the lines likely widest: the longest by a count that takes every
+/// non-ASCII character as two wide, so wide characters such as Chinese ones count as the
+/// width they take. The caller lays out only these few.
+List<String> widestLines(List<DiffLine> lines, {int count = 8}) {
+  int columns(String text) {
+    var sum = 0;
+    for (var index = 0; index < text.length; index++) {
+      sum += text.codeUnitAt(index) < 0x80 ? 1 : 2;
+    }
+    return sum;
+  }
+
+  final widest = <({String text, int columns})>[];
+  for (final line in lines) {
+    final shown = shownText(line.text);
+    final text = shown.cut ? '${shown.text}…' : shown.text;
+    final width = columns(text);
+    if (widest.length == count && width <= widest.last.columns) continue;
+    final at = widest.indexWhere((wide) => wide.columns < width);
+    widest.insert(at < 0 ? widest.length : at, (text: text, columns: width));
+    if (widest.length > count) widest.removeLast();
+  }
+  return [for (final wide in widest) wide.text];
+}
+
 final _hunk = RegExp(r'^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@');
 
 /// Turns a unified diff into numbered lines, skipping the file headers.

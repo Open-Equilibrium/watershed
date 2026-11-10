@@ -336,7 +336,7 @@ class _Metrics extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: WsMetrics.fsH3,
-                      height: 24 / WsMetrics.fsH3,
+                      height: lineHeight(24, WsMetrics.fsH3),
                       fontWeight: WsMetrics.fwSemibold,
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),

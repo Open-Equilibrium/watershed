@@ -74,6 +74,14 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// ⌘Z, as the macOS keyboard sends it.
+  Future<void> undo(WidgetTester tester) async {
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+  }
+
   /// Types `typed` at the caret, as the text input does.
   Future<void> type(WidgetTester tester, int index, String typed) async {
     final text = field(tester, index).controller!;
@@ -85,6 +93,20 @@ void main() {
         selection: TextSelection.collapsed(offset: at + typed.length),
       ),
     );
+    await tester.pumpAndSettle();
+  }
+
+  /// Answers the held queries and from now on holds those of `kinds`.
+  Future<void> release(
+    WidgetTester tester, [
+    Set<BridgeQueryKind> kinds = const {},
+  ]) async {
+    fake.deferredKinds = kinds;
+    final held = [...fake.deferred!];
+    fake.deferred!.clear();
+    for (final query in held) {
+      query.complete();
+    }
     await tester.pumpAndSettle();
   }
 
@@ -135,6 +157,86 @@ void main() {
     expect(focused(tester, 0), isTrue);
     expect(field(tester, 0).controller!.selection.baseOffset, 9);
   });
+
+  testWidgets(
+    '⌘Z after ⌫ joins Text Blocks does not bring back the joined Block',
+    (tester) async {
+      await show(tester, ['Hello', ' world']);
+      await caret(tester, 1, 0);
+      await tester.pump(const Duration(milliseconds: 600));
+      await key(tester, LogicalKeyboardKey.backspace);
+      expect(fake.textsOf(page), ['Hello world']);
+      await tester.pump(const Duration(milliseconds: 600));
+      await undo(tester);
+      expect(fake.textsOf(page), ['Hello world']);
+      expect(field(tester, 0).controller!.text, 'Hello world');
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+  );
+
+  testWidgets(
+    '⌘Z after ⏎ and ↑ does not write the split text into the first Block',
+    (tester) async {
+      await show(tester, ['Hello world']);
+      await caret(tester, 0, 5);
+      await tester.pump(const Duration(milliseconds: 600));
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(fake.textsOf(page), ['Hello', ' world']);
+      await tester.pump(const Duration(milliseconds: 600));
+      await key(tester, LogicalKeyboardKey.arrowUp);
+      expect(focused(tester, 0), isTrue);
+      await undo(tester);
+      expect(fake.textsOf(page), ['Hello', ' world']);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+  );
+
+  testWidgets('⌘Z after a Markdown shortcut keeps the heading and its text', (
+    tester,
+  ) async {
+    await show(tester, ['']);
+    await caret(tester, 0, 0);
+    await tester.pump(const Duration(milliseconds: 600));
+    await type(tester, 0, 'Title');
+    await tester.pump(const Duration(milliseconds: 600));
+    await caret(tester, 0, 0);
+    await type(tester, 0, '# ');
+    expect(styleOf(0), BridgeTextStyle.heading1);
+    await undo(tester);
+    expect(styleOf(0), BridgeTextStyle.heading1);
+    expect(fake.textsOf(page), ['Title']);
+    expect(field(tester, 0).controller!.text, 'Title');
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+  testWidgets('⌘Z after typing that follows a join undoes only that typing', (
+    tester,
+  ) async {
+    await show(tester, ['Hello', ' world']);
+    await caret(tester, 1, 0);
+    await tester.pump(const Duration(milliseconds: 600));
+    await key(tester, LogicalKeyboardKey.backspace);
+    await tester.pump(const Duration(milliseconds: 600));
+    await type(tester, 0, 'x');
+    await tester.pump(const Duration(milliseconds: 600));
+    await undo(tester);
+    expect(fake.textsOf(page), ['Hello world']);
+    await undo(tester);
+    expect(fake.textsOf(page), ['Hello world']);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+  testWidgets('⌘Z still undoes typing with no replacement in between', (
+    tester,
+  ) async {
+    await show(tester, ['']);
+    await caret(tester, 0, 0);
+    for (final typed in ['a', 'b', 'c']) {
+      await type(tester, 0, typed);
+      await tester.pump(const Duration(milliseconds: 600));
+    }
+    await undo(tester);
+    expect(fake.textsOf(page), ['ab']);
+    expect(field(tester, 0).controller!.text, 'ab');
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
   testWidgets('Markdown shortcuts format, and lists go on until left empty', (
     tester,
@@ -804,11 +906,50 @@ void main() {
     workspace.open.value = OpenPage(workspace.open.value?.area ?? '', page);
     await tester.pumpAndSettle();
     expect(field(tester, 0).readOnly, isTrue);
+    fake.deferredKinds = {BridgeQueryKind.views};
+    fake.deferred = [];
     fake.gate!.complete();
     await tester.pumpAndSettle();
     expect(fake.textsOf(page), ['A', 'BC']);
+    expect(
+      field(tester, 0).readOnly,
+      isTrue,
+      reason: 'until the Views it wrote are read',
+    );
+    await release(tester, {BridgeQueryKind.text});
+    expect(find.byType(TextBlock), findsNWidgets(2));
+    expect(field(tester, 0).readOnly, isTrue, reason: 'and then the text');
+    await release(tester);
     expect(field(tester, 0).readOnly, isFalse);
     expect(field(tester, 0).controller!.text, 'A');
+  });
+
+  testWidgets('a refused edit drops the edits typed after it', (tester) async {
+    await show(tester, ['abcd']);
+    await caret(tester, 0, 1);
+    fake.gate = Completer();
+    fake.refuseNext = 1;
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'bcd',
+        selection: TextSelection.collapsed(offset: 0),
+      ),
+    );
+    await tester.pump();
+    field(tester, 0).controller!.selection = const TextSelection.collapsed(
+      offset: 3,
+    );
+    await type(tester, 0, 'X');
+    fake.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(fake.textsOf(page), [
+      'abcd',
+    ], reason: 'the X assumed the refused deletion');
+    expect(field(tester, 0).controller!.text, 'abcd');
+
+    await caret(tester, 0, 4);
+    await type(tester, 0, 'e');
+    expect(fake.textsOf(page), ['abcde'], reason: 'later edits go on');
   });
 
   testWidgets('a person who moved to another Text Block keeps the caret', (

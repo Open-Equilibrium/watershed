@@ -43,7 +43,7 @@ class ChatHistory {
     _start = null;
     _pendingMark = null;
     _ended.clear();
-    _boundaries.clear();
+    _forget();
     more.value = false;
   }
 
@@ -81,14 +81,15 @@ class ChatHistory {
     _pendingMark = null;
     _path = _pathIndex(history.tree, history.leaf);
     _turns = turns;
-    // Turns that ended before the restore get their rows from it, not from a live end.
+    // Turns that ended before the restore get their rows from it, not from a live end; one
+    // a later turn follows never ends.
     _ended
       ..clear()
       ..addAll([
-        for (final turn in turns)
-          if (turn.endEntry != null) turn.id,
+        for (final (index, turn) in turns.indexed)
+          if (turn.endEntry != null || index < turns.length - 1) turn.id,
       ]);
-    _boundaries.clear();
+    _forget();
     if (branchMarker(history.tree, history.leaf) case final marker?) {
       final mark = (
         marker: marker,
@@ -150,25 +151,55 @@ class ChatHistory {
   /// Where the chat stood when each turn ended live, oldest first, until the turn is read.
   final _boundaries = <int>[];
 
+  /// How many turns ended live, and how many of their places were used or given up.
+  int _completed = 0;
+  int _settled = 0;
+
+  /// Gives up the places of the turns that ended live so far.
+  void _forget() {
+    _boundaries.clear();
+    _settled = _completed;
+  }
+
   /// A turn ended live: its row goes here, after its items and before any of the next turn.
-  void turnCompleted() => _boundaries.add(items.value.length);
+  /// Returns how many turns ended live so far, for [endTurns].
+  int turnCompleted() {
+    _boundaries.add(items.value.length);
+    return ++_completed;
+  }
 
   /// Places the rows of turns that ended live, oldest first, each where its turn ended.
-  void endTurns(List<BridgeTurn> turns) {
+  /// `turns` were read after `read` turns had ended live; 0 if that read failed.
+  void endTurns(List<BridgeTurn> turns, int read) {
     final views = [...items.value];
     var inserted = 0;
-    for (final turn in turns) {
-      if (turn.endEntry == null || _ended.contains(turn.id)) continue;
-      if (_boundaries.isEmpty) break;
-      // Rows inserted before it already moved the remaining places.
-      final at = _boundaries.removeAt(0);
+    // Whether a turn may still get its row from a later read.
+    var open = false;
+    for (final (index, turn) in turns.indexed) {
+      if (_ended.contains(turn.id)) continue;
+      // The last turn may still record its end; one a later turn follows never does, so its
+      // place is given up. A turn whose end event has not arrived waits for it.
+      if (turn.endEntry == null
+          ? index == turns.length - 1
+          : _boundaries.isEmpty) {
+        open = true;
+        break;
+      }
       _ended.add(turn.id);
-      if (!_changedFiles(turn)) continue;
+      if (_boundaries.isEmpty) continue;
+      final at = _boundaries.removeAt(0);
+      _settled++;
+      if (turn.endEntry == null || !_changedFiles(turn)) continue;
       views.insert(at.clamp(0, views.length), _turnEnd(turn));
       inserted++;
-      for (var index = 0; index < _boundaries.length; index++) {
-        _boundaries[index]++;
-      }
+      // The row moved the remaining places.
+      _shift(1);
+    }
+    // A turn that ended before the read and is not among its turns took no checkpoint, as
+    // outside Git: its place would otherwise go to a later turn.
+    while (!open && _settled < read && _boundaries.isNotEmpty) {
+      _boundaries.removeAt(0);
+      _settled++;
     }
     if (inserted > 0) items.value = views;
   }

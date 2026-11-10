@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+
 /// One of Liquid's settings files: a JSON object, replaced whole on each save.
 class SettingsFile {
   SettingsFile(this.file);
@@ -60,6 +62,64 @@ class SettingsFile {
     } finally {
       mine.complete();
       if (identical(_updates[key], mine.future)) _updates.remove(key);
+    }
+  }
+}
+
+/// Settings in use that a [SettingsFile] keeps: each change applies at once and is saved after
+/// the saves before it, so the last change is the one kept. A failed save goes to [report].
+class SavedSettings<T> extends ValueNotifier<T> {
+  SavedSettings(super.value, this._save, this._name);
+
+  /// Writes the settings; none for settings kept only in memory.
+  final Future<void> Function(T settings)? _save;
+
+  /// What a failed save calls the settings, such as "the appearance".
+  final String _name;
+
+  Future<void> _saving = Future.value();
+
+  /// Uses `next` at once and saves it.
+  Future<void> change(T next) {
+    value = next;
+    return save();
+  }
+
+  /// Saves the settings in use after the saves before; completes once written or reported.
+  @protected
+  Future<void> save() {
+    final write = _save;
+    if (write == null) return Future.value();
+    final settings = value;
+    return _saving = _saving.then((_) async {
+      try {
+        await write(settings);
+      } on FileSystemException catch (error) {
+        problem('Could not save $_name: ${error.message}');
+      }
+    });
+  }
+
+  /// Receives what goes wrong with these settings; problems wait until it is set.
+  set report(void Function(String problem)? report) {
+    _report = report;
+    if (report == null) return;
+    for (final problem in _unreported) {
+      report(problem);
+    }
+    _unreported.clear();
+  }
+
+  void Function(String problem)? _report;
+  final _unreported = <String>[];
+
+  @protected
+  void problem(String problem) {
+    final report = _report;
+    if (report == null) {
+      _unreported.add(problem);
+    } else {
+      report(problem);
     }
   }
 }

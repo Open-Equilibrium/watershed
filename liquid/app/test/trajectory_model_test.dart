@@ -377,6 +377,14 @@ void main() {
         false,
       ]);
     });
+
+    test('a range that only touches a step leaves it out', () {
+      expect(inRange(records, (1.0, 2.5), equalWidth: true), [
+        false,
+        true,
+        true,
+      ]);
+    });
   });
 
   test('aligns steps of the same kind after the shared steps', () {
@@ -412,6 +420,19 @@ void main() {
       (comparison.idleA, comparison.idleB),
       (0, 59000),
       reason: 'only the wait for a new prompt counts as idle',
+    );
+    expect(
+      [
+        for (final segment in comparedSegments(
+          b,
+          shared: comparison.shared,
+          idle: comparison.idleB,
+          equalWidth: false,
+        ))
+          segment.start,
+      ],
+      [100, 1100, 2000, 2100],
+      reason: 'own steps start at the branch point, shared ones stay',
     );
   });
 

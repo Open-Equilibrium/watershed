@@ -284,20 +284,29 @@ class ToolRow extends StatelessWidget {
             children: [
               Icon(mark, size: 14, color: markColor),
               const SizedBox(width: WsMetrics.space3),
-              Text(
-                item.tool ?? '',
-                style: TextStyle(
-                  color: ws.textMuted,
-                  fontSize: WsMetrics.fsCompact,
-                ),
-              ),
-              const SizedBox(width: WsMetrics.space3),
+              // One line, so a long tool name shortens with its target.
               Expanded(
-                child: Text(
-                  item.target ?? '',
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(
+                        text: item.tool ?? '',
+                        style: TextStyle(
+                          color: ws.textMuted,
+                          fontSize: WsMetrics.fsCompact,
+                        ),
+                      ),
+                      const WidgetSpan(
+                        child: SizedBox(width: WsMetrics.space3),
+                      ),
+                      TextSpan(
+                        text: item.target ?? '',
+                        style: monoStyle(context),
+                      ),
+                    ],
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: monoStyle(context),
                 ),
               ),
               Text.rich(

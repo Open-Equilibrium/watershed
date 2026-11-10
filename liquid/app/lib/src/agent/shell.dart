@@ -11,11 +11,12 @@ import '../diff/diff_view.dart';
 import '../diff/turn_scope.dart';
 import '../rust/api/events.dart';
 import '../session/session_state.dart';
+import '../settings_file.dart';
+import '../settings_page.dart';
 import '../shortcuts/first_start.dart';
 import '../shortcuts/keymap.dart';
 import '../shortcuts/shortcut_reveal.dart';
 import '../shortcuts/shortcut_store.dart';
-import '../shortcuts/shortcuts_page.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import '../trajectory/trajectory_view.dart';
@@ -82,6 +83,13 @@ class _AgentShellState extends State<AgentShell> {
   late final _shortcuts = widget.shortcuts ?? ShortcutController.memory();
   late final _diffSettings = widget.diffSettings ?? DiffSettingsController();
 
+  /// The settings whose failed saves the status bar reports.
+  late final _saved = <SavedSettings<Object?>?>[
+    _shortcuts,
+    _diffSettings,
+    widget.appearance,
+  ];
+
   /// Stops the agent before the app exits, so no pi process outlives Liquid.
   late final _lifecycle = AppLifecycleListener(
     // The pull request summary is read again when the window regains focus.
@@ -111,9 +119,11 @@ class _AgentShellState extends State<AgentShell> {
     widget.workspace?.open.addListener(_pageOpened);
     // A reopened Trajectory tab starts outside the comparison.
     _tab.addListener(() => _comparing.value = false);
-    _shortcuts.report = (problem) => widget.state != null
-        ? widget.state!.notify(BridgeLevel.error, problem)
-        : widget.workspace?.problem.value = problem;
+    for (final settings in _saved) {
+      settings?.report = (problem) => widget.state != null
+          ? widget.state!.notify(BridgeLevel.error, problem)
+          : widget.workspace?.problem.value = problem;
+    }
     if (_shortcuts.firstStart) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _askProfile());
     }
@@ -133,7 +143,7 @@ class _AgentShellState extends State<AgentShell> {
     final profile = await askProfile(context);
     // A question closed it before a choice; it asks again once it is answered.
     if (profile == null) return;
-    await _shortcuts.update(_shortcuts.value.choose(profile));
+    await _shortcuts.change(_shortcuts.value.choose(profile));
   }
 
   /// Settings replace the main area; closing them gives the keys back to the shell.
@@ -185,7 +195,9 @@ class _AgentShellState extends State<AgentShell> {
     _comparing.dispose();
     _settings.dispose();
     _focus.dispose();
-    _shortcuts.report = null;
+    for (final settings in _saved) {
+      settings?.report = null;
+    }
     if (widget.shortcuts == null) _shortcuts.dispose();
     _diffSettings.removeListener(_hideWhitespace);
     if (widget.diffSettings == null) _diffSettings.dispose();

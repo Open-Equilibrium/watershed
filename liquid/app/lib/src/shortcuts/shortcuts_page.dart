@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../appearance.dart';
 import '../controls.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
@@ -108,41 +107,18 @@ const List<_Group> _right = [
   ),
 ];
 
-/// A section of Settings.
-enum _Section { appearance, shortcuts, worktrees }
-
-/// Settings: Appearance with theme and text size, Shortcuts with the
-/// profile, every action's keys and recording new ones, and Worktrees with a session. It
-/// replaces the main area; esc closes it.
-class SettingsPage extends StatefulWidget {
-  const SettingsPage({
-    super.key,
-    required this.shortcuts,
-    required this.onClose,
-    this.appearance,
-    this.worktrees,
-  });
+/// Settings → Shortcuts: the profile, every action's keys and recording new ones.
+class ShortcutsPane extends StatefulWidget {
+  const ShortcutsPane({super.key, required this.shortcuts});
 
   final ShortcutController shortcuts;
-  final VoidCallback onClose;
-
-  /// Theme and text size; without them Settings show only Shortcuts.
-  final AppearanceController? appearance;
-
-  /// The Worktrees section; none without a session.
-  final Widget? worktrees;
 
   @override
-  State<SettingsPage> createState() => _SettingsPageState();
+  State<ShortcutsPane> createState() => _ShortcutsPaneState();
 }
 
-class _SettingsPageState extends State<SettingsPage> {
+class _ShortcutsPaneState extends State<ShortcutsPane> {
   final _keys = FocusNode(debugLabel: 'shortcuts');
-
-  /// The section shown; Appearance opens first.
-  late _Section _section = widget.appearance != null
-      ? _Section.appearance
-      : _Section.shortcuts;
   final _search = TextEditingController();
 
   /// The command taking new keys, the keys pressed for it and who runs them already.
@@ -166,8 +142,6 @@ class _SettingsPageState extends State<SettingsPage> {
     _search.addListener(() => setState(() {}));
     _keys.addListener(_focusChanged);
     _shortcuts.addListener(_settingsChanged);
-    // The shell keeps the focus otherwise, and esc would not reach the page.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _keys.requestFocus());
   }
 
   @override
@@ -229,7 +203,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   void _apply(Command command, Keys keys, Command? clear) {
-    _shortcuts.update(_shortcuts.value.change(command, keys, clear: clear));
+    _shortcuts.change(_shortcuts.value.change(command, keys, clear: clear));
     _done();
   }
 
@@ -310,107 +284,13 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    return CallbackShortcuts(
-      bindings: {escapeKey: widget.onClose},
-      child: Focus(
-        focusNode: _keys,
-        onKeyEvent: _onKey,
-        child: ValueListenableBuilder(
-          valueListenable: _shortcuts,
-          builder: (context, settings, _) => Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Container(
-                width: 150,
-                padding: const EdgeInsets.all(WsMetrics.space4),
-                decoration: BoxDecoration(
-                  color: ws.subtle,
-                  border: Border(right: BorderSide(color: ws.border)),
-                ),
-                // Hover and focus ink paints on a Material above the background.
-                child: Material(
-                  type: MaterialType.transparency,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        'Settings',
-                        style: TextStyle(
-                          color: ws.textFaint,
-                          fontSize: WsMetrics.fsSmall,
-                        ),
-                      ),
-                      const SizedBox(height: WsMetrics.space2),
-                      for (final (label, section) in [
-                        if (widget.appearance != null)
-                          ('Appearance', _Section.appearance),
-                        ('Shortcuts', _Section.shortcuts),
-                        if (widget.worktrees != null)
-                          ('Worktrees', _Section.worktrees),
-                      ])
-                        Semantics(
-                          selected: _section == section,
-                          child: Shortcuts(
-                            shortcuts: activateKeys,
-                            child: InkWell(
-                              onTap: () => setState(() => _section = section),
-                              borderRadius: BorderRadius.circular(
-                                WsMetrics.radiusMd,
-                              ),
-                              // Ink, so the highlights paint above the chosen section too.
-                              child: Ink(
-                                height: WsMetrics.rowNav,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: WsMetrics.space3,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: _section == section
-                                      ? ws.selected
-                                      : null,
-                                  borderRadius: BorderRadius.circular(
-                                    WsMetrics.radiusMd,
-                                  ),
-                                ),
-                                child: Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: Text(
-                                    label,
-                                    style: const TextStyle(
-                                      fontWeight: WsMetrics.fwMedium,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-              Expanded(
-                child: switch ((
-                  _section,
-                  widget.appearance,
-                  widget.worktrees,
-                )) {
-                  (_Section.appearance, final appearance?, _) => AppearancePane(
-                    appearance: appearance,
-                  ),
-                  (_Section.worktrees, _, final worktrees?) => worktrees,
-                  _ => _main(context, settings),
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Focus(
+    focusNode: _keys,
+    onKeyEvent: _onKey,
+    child: ValueListenableBuilder(valueListenable: _shortcuts, builder: _main),
+  );
 
-  Widget _main(BuildContext context, ShortcutSettings settings) {
+  Widget _main(BuildContext context, ShortcutSettings settings, Widget? _) {
     final ws = context.ws;
     final small = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
     List<_Group> visible(List<_Group> groups) => [
@@ -520,7 +400,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 const Spacer(),
                 _Link(
                   'Reset all to defaults',
-                  onTap: () => _shortcuts.update(settings.resetAll()),
+                  onTap: () => _shortcuts.change(settings.resetAll()),
                 ),
               ],
             ),
@@ -648,7 +528,7 @@ class _SettingsPageState extends State<SettingsPage> {
           if (changed)
             _Link(
               defaults.isEmpty ? 'Reset' : 'Reset to $defaults',
-              onTap: () => _shortcuts.update(settings.reset(command)),
+              onTap: () => _shortcuts.change(settings.reset(command)),
             ),
         ],
       ),
@@ -688,7 +568,7 @@ class _ProfileRow extends StatelessWidget {
                 ],
                 selected: settings.profile,
                 onSelect: (profile) =>
-                    shortcuts.update(settings.choose(profile)),
+                    shortcuts.change(settings.choose(profile)),
               ),
               if (settings.profile == Profile.custom)
                 Text(
@@ -720,7 +600,7 @@ class _ProfileRow extends StatelessWidget {
                   child: Switch(
                     value: settings.liquidKey,
                     onChanged: (on) =>
-                        shortcuts.update(settings.withLiquidKey(on)),
+                        shortcuts.change(settings.withLiquidKey(on)),
                   ),
                 ),
               ),

@@ -122,4 +122,20 @@ index 0..2
       ],
     );
   });
+
+  test('measures a line of wide characters among longer narrow ones', () {
+    // A hundred Chinese characters are wider than 120 Latin ones.
+    final wide = '变' * 100;
+    final lines = [
+      for (var index = 0; index < 8; index++)
+        DiffLine(DiffKind.added, 'x' * (120 + index)),
+      DiffLine(DiffKind.added, wide),
+    ];
+    expect(widestLines(lines), contains(wide));
+  });
+
+  test('measures a cut line as shown', () {
+    final widest = widestLines([DiffLine(DiffKind.added, 'x' * 5000)]);
+    expect(widest.single, '${'x' * shownChars}…');
+  });
 }

@@ -5,6 +5,16 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'trajectory_model.dart';
 
+/// A [TextStyle.height] that sets lines of `size` text `line` pixels apart.
+double lineHeight(double line, double size) => line / size;
+
+/// A step kind's color, the same in the Kind tags, the timeline and the session tree.
+Color kindColor(WsPalette ws, BridgeRecordKind kind) => switch (kind) {
+  BridgeRecordKind.user => ws.textMuted,
+  BridgeRecordKind.message => ws.accent,
+  BridgeRecordKind.tool => ws.data2,
+};
+
 /// A step's kind as a colored tag: User, Message or Tool.
 class KindTag extends StatelessWidget {
   const KindTag(this.kind, {super.key});
@@ -14,14 +24,11 @@ class KindTag extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    final (label, color, background) = switch (kind) {
-      BridgeRecordKind.user => ('User', ws.textMuted, ws.hover),
-      BridgeRecordKind.message => ('Message', ws.accent, ws.accentSubtle),
-      BridgeRecordKind.tool => (
-        'Tool',
-        ws.data2,
-        ws.data2.withValues(alpha: 0.14),
-      ),
+    final color = kindColor(ws, kind);
+    final (label, background) = switch (kind) {
+      BridgeRecordKind.user => ('User', ws.hover),
+      BridgeRecordKind.message => ('Message', ws.accentSubtle),
+      BridgeRecordKind.tool => ('Tool', color.withValues(alpha: 0.14)),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space2),
@@ -34,7 +41,7 @@ class KindTag extends StatelessWidget {
         style: TextStyle(
           color: color,
           fontSize: WsMetrics.fsSmall,
-          height: 20 / WsMetrics.fsSmall,
+          height: lineHeight(20, WsMetrics.fsSmall),
           fontWeight: WsMetrics.fwMedium,
         ),
       ),

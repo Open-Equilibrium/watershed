@@ -4,9 +4,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../rust/api/history.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'step_parts.dart';
 import 'trajectory_model.dart';
 
 /// One track of the overview, such as `Model` or a compared branch.
@@ -137,7 +139,10 @@ class _OverviewState extends State<Overview> {
           LayoutBuilder(
             builder: (context, constraints) {
               final width =
-                  constraints.maxWidth - 56 - WsMetrics.space2 - _infoSize;
+                  constraints.maxWidth -
+                  _labelWidth -
+                  WsMetrics.space2 -
+                  _infoSize;
               double at(double x) =>
                   visible.$1 +
                   (x.clamp(0, width) / width) * (visible.$2 - visible.$1);
@@ -163,18 +168,18 @@ class _OverviewState extends State<Overview> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   SizedBox(
-                    width: 56,
+                    width: _labelWidth,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const SizedBox(height: 14),
+                        const SizedBox(height: _axisHeight),
                         for (final track in tracks)
                           Padding(
                             padding: const EdgeInsets.only(
                               top: WsMetrics.space2,
                             ),
                             child: SizedBox(
-                              height: 12,
+                              height: _trackHeight,
                               child: Text(
                                 track.label,
                                 style: small.copyWith(height: 1),
@@ -211,7 +216,7 @@ class _OverviewState extends State<Overview> {
                             child: Column(
                               children: [
                                 SizedBox(
-                                  height: 14,
+                                  height: _axisHeight,
                                   width: double.infinity,
                                   child: CustomPaint(
                                     painter: _AxisPainter(
@@ -228,7 +233,7 @@ class _OverviewState extends State<Overview> {
                                       top: WsMetrics.space2,
                                     ),
                                     child: SizedBox(
-                                      height: 12,
+                                      height: _trackHeight,
                                       width: double.infinity,
                                       child: CustomPaint(
                                         painter: _TrackPainter(
@@ -285,18 +290,21 @@ class _OverviewState extends State<Overview> {
           ),
           if (legend)
             Padding(
-              padding: const EdgeInsets.only(left: 56, top: WsMetrics.space2),
+              padding: const EdgeInsets.only(
+                left: _labelWidth,
+                top: WsMetrics.space2,
+              ),
               child: Row(
                 children: [
-                  for (final (label, color) in [
-                    ('model', ws.accent),
-                    ('tool', ws.data2),
+                  for (final (label, kind) in [
+                    ('model', BridgeRecordKind.message),
+                    ('tool', BridgeRecordKind.tool),
                   ]) ...[
                     Container(
-                      width: 8,
-                      height: 8,
+                      width: WsMetrics.space3,
+                      height: WsMetrics.space3,
                       decoration: BoxDecoration(
-                        color: color,
+                        color: kindColor(ws, kind),
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
@@ -316,8 +324,18 @@ class _OverviewState extends State<Overview> {
   }
 }
 
+/// The track labels' column, as the approved mockup draws it; no token is this wide.
+const _labelWidth = 56.0;
+
+/// The time axis, one caption line, and each track.
+const _axisHeight = WsMetrics.lhCaption;
+const _trackHeight = WsMetrics.space4;
+
 /// The size of the hint's icon at the end of the axis.
-const _infoSize = 14.0;
+const _infoSize = _axisHeight;
+
+/// The width a range handle takes clicks in.
+const _handleWidth = WsMetrics.space3;
 
 /// The brush over the tracks with a handle at each end.
 class _BrushView extends StatefulWidget {
@@ -370,10 +388,13 @@ class _BrushViewState extends State<_BrushView> {
     // At least a hundredth of the shown axis, so the handles never cross.
     final gap = (visible.$2 - visible.$1) / 100;
     Widget handle(Key key, double center, bool start) => Positioned(
-      left: (center - 4).clamp(0.0, math.max(0.0, width - 8)),
-      top: 14 + WsMetrics.space2,
+      left: (center - _handleWidth / 2).clamp(
+        0.0,
+        math.max(0.0, width - _handleWidth),
+      ),
+      top: _axisHeight + WsMetrics.space2,
       bottom: 0,
-      width: 8,
+      width: _handleWidth,
       child: GestureDetector(
         key: key,
         behavior: HitTestBehavior.opaque,
@@ -408,7 +429,7 @@ class _BrushViewState extends State<_BrushView> {
         Positioned(
           left: left,
           width: right - left,
-          top: 14 + WsMetrics.space2 - 3,
+          top: _axisHeight + WsMetrics.space2 - 3,
           bottom: 0,
           child: Semantics(
             key: const Key('range-brush'),
@@ -437,7 +458,7 @@ class _BrushViewState extends State<_BrushView> {
                 decoration: BoxDecoration(
                   color: ws.accent.withValues(alpha: 0.08),
                   border: Border.all(color: ws.accent.withValues(alpha: 0.55)),
-                  borderRadius: BorderRadius.circular(4),
+                  borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
                 ),
               ),
             ),
@@ -572,6 +593,7 @@ class _TrackPainter extends CustomPainter {
       }
       switch (segment.lane) {
         case OverviewLane.model:
+          final color = kindColor(palette, BridgeRecordKind.message);
           final firstToken = segment.firstToken;
           final split = firstToken == null
               ? left
@@ -579,15 +601,15 @@ class _TrackPainter extends CustomPainter {
           _bar(
             canvas,
             Rect.fromLTRB(left, rect.top, split, rect.bottom),
-            palette.accent.withValues(alpha: 0.35),
+            color.withValues(alpha: 0.35),
           );
           _bar(
             canvas,
             Rect.fromLTRB(split, rect.top, right, rect.bottom),
-            palette.accent,
+            color,
           );
         case OverviewLane.tools:
-          _bar(canvas, rect, palette.data2);
+          _bar(canvas, rect, kindColor(palette, BridgeRecordKind.tool));
       }
       if (faint) canvas.restore();
     }

@@ -75,16 +75,22 @@ class ChannelLiquidKeyHost implements LiquidKeyHost {
 }
 
 /// The shortcut settings in use; changes are applied and saved in order.
-class ShortcutController extends ValueNotifier<ShortcutSettings> {
-  ShortcutController._(super.value, this._store, this._host, this.firstStart)
-    : _settled = value;
+class ShortcutController extends SavedSettings<ShortcutSettings> {
+  ShortcutController._(
+    ShortcutSettings value,
+    ShortcutStore? store,
+    this._host,
+    this.firstStart,
+  ) : _settled = value,
+      super(value, store?.save, 'the shortcuts');
 
   /// Settings that are neither stored nor applied, for a Liquid without its app data.
   ShortcutController.memory([ShortcutSettings? settings])
     : this._(settings ?? ShortcutSettings.standard(), null, null, false);
 
   /// The stored settings. A stored Liquid key is turned on again; when its login item was
-  /// turned off, Liquid reports it and continues without the Liquid key. The first frame does
+  /// turned off, Liquid reports it and continues without the Liquid key. Where the Liquid key
+  /// does not exist, it stays off without changing the stored settings. The first frame does
   /// not wait for it.
   static Future<ShortcutController> load(
     ShortcutStore store,
@@ -92,46 +98,27 @@ class ShortcutController extends ValueNotifier<ShortcutSettings> {
   ) async {
     final stored = await store.load();
     final shortcuts = ShortcutController._(
-      stored ?? ShortcutSettings.standard(),
+      switch (stored) {
+        null => ShortcutSettings.standard(),
+        _ when !host.available => stored.withoutLiquidKey(),
+        _ => stored,
+      },
       store,
       host,
       stored == null && host.available,
     );
-    if (stored != null && stored.liquidKey && host.available) {
-      unawaited(shortcuts._sync(save: false));
+    if (shortcuts.value.liquidKey) {
+      unawaited(shortcuts._sync(store: false));
     }
     return shortcuts;
   }
 
-  final ShortcutStore? _store;
   final LiquidKeyHost? _host;
 
   /// Whether the user has not chosen a profile yet.
   bool firstStart;
 
   bool get liquidKeyAvailable => _host?.available ?? false;
-
-  /// Receives what goes wrong saving or applying shortcuts; problems wait until it is set.
-  set report(void Function(String problem)? report) {
-    _report = report;
-    if (report == null) return;
-    for (final problem in _unreported) {
-      report(problem);
-    }
-    _unreported.clear();
-  }
-
-  void Function(String problem)? _report;
-  final _unreported = <String>[];
-
-  void _problem(String problem) {
-    final report = _report;
-    if (report == null) {
-      _unreported.add(problem);
-    } else {
-      report(problem);
-    }
-  }
 
   /// Whether this computer has the Liquid key on, as far as Liquid turned it.
   bool _applied = false;
@@ -140,35 +127,32 @@ class ShortcutController extends ValueNotifier<ShortcutSettings> {
   ShortcutSettings _settled;
   Future<void> _pending = Future.value();
 
-  Future<void> update(ShortcutSettings next) {
+  @override
+  Future<void> change(ShortcutSettings next) {
     value = next;
     firstStart = false;
     liquidKeyProblem.value = null;
-    return _sync(save: true);
+    return _sync(store: true);
   }
 
   /// Turns the Liquid key on or off as the latest settings say, then saves them; one at a
   /// time, so the last change wins. A Liquid key that cannot be turned on is left off, since
-  /// its profile would otherwise hide every shortcut hint.
-  Future<void> _sync({required bool save}) =>
+  /// its profile would otherwise hide every shortcut hint; one that cannot be turned off stays
+  /// on with the settings before, as macOS still maps Caps Lock.
+  Future<void> _sync({required bool store}) =>
       _pending = _pending.then((_) async {
         final want = value.liquidKey;
         var changed = false;
         if (want != _applied) {
           if (await _apply(want)) {
             _applied = want;
-          } else if (want) {
-            value = _withoutLiquidKey(value);
+          } else {
+            value = want ? _withoutLiquidKey(value) : _settled;
             changed = true;
           }
         }
         _settled = value;
-        if (!save && !changed) return;
-        try {
-          await _store?.save(value);
-        } on FileSystemException catch (error) {
-          _problem('Could not save the shortcuts: ${error.message}');
-        }
+        if (store || changed) await save();
       });
 
   /// `settings` without the Liquid key: a chosen Liquid key profile gives way to the profile
@@ -200,12 +184,12 @@ class ShortcutController extends ValueNotifier<ShortcutSettings> {
   void _failed(bool on, String reason) {
     final problem =
         'Could not turn the Liquid key ${on ? 'on' : 'off'}: $reason';
-    if (on) liquidKeyProblem.value = problem;
-    _problem(problem);
+    liquidKeyProblem.value = problem;
+    this.problem(problem);
   }
 
-  /// Why the Liquid key could not be turned on; Settings show it below the profile until the
-  /// next choice, since they cover the status bar.
+  /// Why the Liquid key could not be turned on or off; Settings show it below the profile until
+  /// the next choice, since they cover the status bar.
   final liquidKeyProblem = ValueNotifier<String?>(null);
 
   @override

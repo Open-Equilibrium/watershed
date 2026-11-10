@@ -11,7 +11,6 @@ class Branch {
     required this.tip,
     required this.ref,
     required this.name,
-    required this.lane,
     this.durationMs,
   });
 
@@ -23,7 +22,6 @@ class Branch {
 
   /// The tip's label, or the branch's latest prompt.
   final String name;
-  final int lane;
   final int? durationMs;
 }
 
@@ -130,7 +128,6 @@ SessionGraph sessionGraph(List<BridgeTreeNode> nodes, String? leaf) {
           tip: node.id,
           ref: _ref(branches.length),
           name: node.label ?? prompt ?? node.preview,
-          lane: lane,
           durationMs: at == null || startAt == null ? null : at - startAt,
         );
         branches.add(branch);
@@ -400,7 +397,8 @@ class StepFilter {
   );
 }
 
-/// Whether each record overlaps the focused `range` of the axis.
+/// Whether each record overlaps the focused `range` of the axis; touching an edge is no overlap,
+/// but a record without length counts within the range.
 List<bool> inRange(
   List<BridgeRecord> records,
   (double, double) range, {
@@ -408,7 +406,9 @@ List<bool> inRange(
 }) => [
   for (var index = 0; index < records.length; index++)
     switch (_extent(records, index, equalWidth: equalWidth)) {
-      (final start, final end) => start <= range.$2 && end >= range.$1,
+      (final start, final end) when start == end =>
+        start >= range.$1 && start <= range.$2,
+      (final start, final end) => start < range.$2 && end > range.$1,
     },
 ];
 
@@ -506,6 +506,27 @@ Comparison compareBranches(List<BridgeRecord> a, List<BridgeRecord> b) {
   return result();
 }
 
+/// One compared branch's bars: in real time its own steps start at the branch point, without
+/// the `idle` time it waited there.
+List<Segment> comparedSegments(
+  List<BridgeRecord> records, {
+  required int shared,
+  required int idle,
+  required bool equalWidth,
+}) => [
+  for (final segment in segments(records, equalWidth: equalWidth))
+    if (equalWidth || segment.index < shared || idle == 0)
+      segment
+    else
+      Segment(
+        segment.index,
+        segment.lane,
+        segment.start - idle,
+        segment.end - idle,
+        segment.firstToken == null ? null : segment.firstToken! - idle,
+      ),
+];
+
 /// A tool call as `tool · target`, such as `bash · npm test`.
 String toolSummary(BridgeRecord record) =>
     record.target.isEmpty ? record.label : '${record.label} · ${record.target}';
@@ -582,7 +603,6 @@ class BranchMarker {
   const BranchMarker({
     required this.fork,
     required this.ref,
-    required this.lane,
     required this.step,
     required this.other,
     required this.otherMore,
@@ -593,7 +613,6 @@ class BranchMarker {
 
   /// The current branch's letter, or `null` while its first prompt is still to come.
   final String? ref;
-  final int lane;
 
   /// The step number of the fork.
   final int step;
@@ -651,7 +670,6 @@ BranchMarker? branchMarker(List<BridgeTreeNode> tree, String? leaf) {
   return BranchMarker(
     fork: fork,
     ref: current?.ref,
-    lane: current?.lane ?? 0,
     step: step,
     other: other?.ref,
     otherMore: other == null ? 0 : stepAt(other.tip) - step,

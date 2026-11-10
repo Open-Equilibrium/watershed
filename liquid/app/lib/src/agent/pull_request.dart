@@ -519,7 +519,24 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
       _elapsed?.cancel();
       if (mounted) setState(() => _creating = false);
     }
-    if (!mounted) return outcome;
+    final problem = pullRequestProblem(outcome, device: widget.device);
+    final error = switch (outcome.kind) {
+      _ when problem == null => null,
+      BridgePullRequestOutcomeKind.unknown ||
+      BridgePullRequestOutcomeKind.notCreated => problem,
+      _ => '$problem No pull request was created.',
+    };
+    // A question closed the dialog meanwhile, so the status bar says what happened.
+    if (!mounted && outcome.kind != BridgePullRequestOutcomeKind.done) {
+      widget.state.notify(
+        error == null ? BridgeLevel.warning : BridgeLevel.error,
+        error ??
+            (outcome.kind == BridgePullRequestOutcomeKind.exists
+                ? 'Pull request #${outcome.pullRequest!.number} already exists.'
+                : '${plan.head} changed since this dialog opened. No pull request was created.'),
+      );
+      return outcome;
+    }
     switch (outcome.kind) {
       case BridgePullRequestOutcomeKind.done:
         final pull = outcome.pullRequest!;
@@ -527,7 +544,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
           BridgeLevel.info,
           'Created ${pull.state == BridgePullRequestState.draft ? 'draft ' : ''}pull request #${pull.number}: “${pull.title}”',
         );
-        Navigator.of(context).pop();
+        if (mounted) Navigator.of(context).pop();
       case BridgePullRequestOutcomeKind.exists:
         setState(() => _existing = outcome.pullRequest);
       case BridgePullRequestOutcomeKind.changed:
@@ -536,14 +553,9 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
           _changed = true;
         });
       default:
-        final problem = pullRequestProblem(outcome, device: widget.device)!;
         setState(() {
           _unknown = outcome.kind == BridgePullRequestOutcomeKind.unknown;
-          _error =
-              outcome.kind == BridgePullRequestOutcomeKind.unknown ||
-                  outcome.kind == BridgePullRequestOutcomeKind.notCreated
-              ? problem
-              : '$problem No pull request was created.';
+          _error = error;
         });
     }
     return outcome;

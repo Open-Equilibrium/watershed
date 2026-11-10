@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -124,7 +125,8 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   @override
   void initState() {
     super.initState();
-    widget.state.stored.addListener(_reload);
+    widget.state.stored.addListener(_stored);
+    widget.state.status.addListener(_statusChanged);
     widget.state.models.addListener(_modelsChanged);
     _scroll.addListener(_updateBrush);
     _reload();
@@ -136,8 +138,10 @@ class _TrajectoryViewState extends State<TrajectoryView> {
 
   @override
   void dispose() {
-    widget.state.stored.removeListener(_reload);
+    widget.state.stored.removeListener(_stored);
+    widget.state.status.removeListener(_statusChanged);
     widget.state.models.removeListener(_modelsChanged);
+    _throttle?.cancel();
     _details.dispose();
     _focus.dispose();
     _filterText.dispose();
@@ -154,6 +158,32 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     if (_comparing) return _picked;
     final shown = _shown;
     return shown == null ? const [] : [shown];
+  }
+
+  /// The reload that a running agent's stored changes wait for, at most one a second.
+  Timer? _throttle;
+
+  /// Stored changes reload at once, unless the agent runs: then they wait for the end of the
+  /// current second, so one reload shows the steps stored in it.
+  void _stored() {
+    if (!_busy) {
+      _reload();
+    } else {
+      _throttle ??= Timer(const Duration(seconds: 1), _throttled);
+    }
+  }
+
+  void _throttled() {
+    _throttle = null;
+    _reload();
+  }
+
+  /// The agent stopped running, so the reload its stored changes waited for runs now.
+  void _statusChanged() {
+    if (_busy) return;
+    _throttle?.cancel();
+    _throttle = null;
+    _reload();
   }
 
   /// Reads the history again; changes during a read cause one more read, never a queue. The
@@ -317,10 +347,18 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     _scroll.jumpTo(math.min(_lineTop(line), _scroll.position.maxScrollExtent));
   }
 
-  /// Selects step `index`, expanding its turn and leaving a range that hides it; call it in
-  /// [setState].
+  /// Selects step `index`, expanding its turn and moving a range that hides it there, its
+  /// length kept; call it in [setState].
   void _selectStep(int index) {
-    if (!(_inRange()?[index] ?? true)) _range = null;
+    if (_range case final range? when !_inRange()![index]) {
+      final (start, end) = stepExtent(_records, index, equalWidth: _equalWidth);
+      final length = range.$2 - range.$1;
+      final axis = span(_records, equalWidth: _equalWidth);
+      final from = ((start + end - length) / 2)
+          .clamp(0.0, math.max(0.0, axis - length))
+          .toDouble();
+      _range = (from, from + length);
+    }
     _folded.remove(_records[index].turn);
     _selected = _records[index].entry;
   }
@@ -686,9 +724,12 @@ class _TrajectoryViewState extends State<TrajectoryView> {
           child: ViewShortcuts(
             bindings: {
               ...keys.bind({
-                Command.foldAll: _foldAll,
+                Command.foldAll: () {
+                  if (!_comparing) _foldAll();
+                },
+                // What the comparison hides waits for it to end.
                 Command.openStep: () {
-                  if (_selected == null) return;
+                  if (_selected == null || _comparing) return;
                   setState(() => _inspecting = !_inspecting);
                   _reveal();
                 },
@@ -698,7 +739,9 @@ class _TrajectoryViewState extends State<TrajectoryView> {
                   if (_comparing) _pickCursor();
                 },
                 Command.closeStep: _escape,
-                Command.filterSteps: _openFilter,
+                Command.filterSteps: () {
+                  if (!_comparing) _openFilter();
+                },
               }),
               ...Fixed.previousOrNextStep.bind([
                 () => _move(-1),
@@ -763,7 +806,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
 
   Branch _branchFor(String tip) => _graph.branches.firstWhere(
     (branch) => branch.tip == tip,
-    orElse: () => Branch(tip: tip, ref: '?', name: '', lane: 0),
+    orElse: () => Branch(tip: tip, ref: '?', name: ''),
   );
 
   /// The shown branch, its steps, its duration and how many steps match the filters.
@@ -840,20 +883,12 @@ class _TrajectoryViewState extends State<TrajectoryView> {
         : _equalWidth
         ? shared.toDouble()
         : (a[shared - 1].startMs + (a[shared - 1].durationMs ?? 0)).toDouble();
-    // Each branch's own steps start at the branch point, without the idle time before them.
-    List<Segment> own(List<BridgeRecord> records, int idle) => [
-      for (final segment in segments(records, equalWidth: _equalWidth))
-        if (_equalWidth || segment.index < shared || idle == 0)
-          segment
-        else
-          Segment(
-            segment.index,
-            segment.lane,
-            segment.start - idle,
-            segment.end - idle,
-            segment.firstToken == null ? null : segment.firstToken! - idle,
-          ),
-    ];
+    List<Segment> own(List<BridgeRecord> records, int idle) => comparedSegments(
+      records,
+      shared: shared,
+      idle: idle,
+      equalWidth: _equalWidth,
+    );
     return Overview(
       tracks: [
         OverviewTrack(_branchFor(_picked[0]).ref, own(a, comparison.idleA)),

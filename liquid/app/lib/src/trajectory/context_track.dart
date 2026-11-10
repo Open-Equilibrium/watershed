@@ -56,10 +56,10 @@ class ContextTrack {
 /// steps no request read yet use the latest request's.
 ContextTrack contextTrack(List<BridgeRecord> records) {
   final first = records.where(_measured).firstOrNull;
-  var ratio = _ratio(first);
+  var request = first;
   final saw = first?.context;
   final start = ContextLevel(
-    saw == null ? 0 : ((saw.promptChars + saw.toolChars) * ratio).round(),
+    saw == null ? 0 : tokensOf(request, saw.promptChars + saw.toolChars),
     exact: false,
   );
   final levels = <ContextLevel>[];
@@ -69,7 +69,7 @@ ContextTrack contextTrack(List<BridgeRecord> records) {
   void estimate() {
     var level = base;
     for (var i = since; i < levels.length; i++) {
-      final added = (records[i].addedChars * ratio).round();
+      final added = tokensOf(request, records[i].addedChars);
       level += added;
       levels[i] = ContextLevel(
         level,
@@ -86,7 +86,7 @@ ContextTrack contextTrack(List<BridgeRecord> records) {
       levels.add(const ContextLevel(0, exact: false));
       continue;
     }
-    ratio = _ratio(record);
+    request = record;
     estimate();
     final measured = promptTokens(usage);
     for (var i = levels.length - 1; i >= since; i--) {
@@ -112,15 +112,18 @@ bool _measured(BridgeRecord record) =>
     record.kind == BridgeRecordKind.message &&
     (record.usage == null ? 0 : promptTokens(record.usage!)) > 0;
 
-/// Tokens per character of `request`, or pi's estimate of one token per four characters.
-double _ratio(BridgeRecord? request) {
+/// Tokens of `chars` characters at `request`'s tokens per character, or at pi's estimate of
+/// one token per four characters.
+int tokensOf(BridgeRecord? request, int chars) {
   final usage = request?.usage;
   final saw = request?.context;
-  final chars = saw == null
+  final total = saw == null
       ? 0
       : saw.promptChars + saw.toolChars + saw.messageChars;
-  if (usage == null || chars == 0 || promptTokens(usage) == 0) return 0.25;
-  return promptTokens(usage) / chars;
+  if (usage == null || total == 0 || promptTokens(usage) == 0) {
+    return (chars / 4).round();
+  }
+  return (chars * promptTokens(usage) / total).round();
 }
 
 /// The index of the request that read the step at `index`: a response's own, otherwise the
@@ -193,8 +196,7 @@ RequestParts requestParts(
       carried: total,
     );
   }
-  final ratio = _ratio(request);
-  int tokens(int chars) => (chars * ratio).round();
+  int tokens(int chars) => tokensOf(request, chars);
   final projectChars = [
     for (final section in detail?.sections ?? const <BridgeContextPart>[])
       if (section.name == 'project_context') section.chars,

@@ -119,25 +119,32 @@ private func disableLiquidKey() -> FlutterError? {
 }
 
 private struct HelperFailed: LocalizedError {
-  let reason: String
-  var errorDescription: String? { "the Liquid key helper \(reason)" }
+  let errorDescription: String?
 }
 
-/// Runs the helper once; one that does not finish within ten seconds is stopped.
+/// Runs the helper once; one that does not finish within ten seconds is stopped. A refusal
+/// quotes what the helper said, or else its exit status.
 private func runHelper(_ argument: String) throws {
   let helper = Bundle.main.bundleURL.appendingPathComponent(
     "Contents/Library/LoginItems/LiquidKey.app/Contents/MacOS/LiquidKey")
   let finished = DispatchSemaphore(value: 0)
   let run = Process()
+  let said = Pipe()
   run.executableURL = helper
   run.arguments = [argument]
+  run.standardError = said
   run.terminationHandler = { _ in finished.signal() }
   try run.run()
   if finished.wait(timeout: .now() + 10) == .timedOut {
     run.terminate()
-    throw HelperFailed(reason: "did not finish")
+    throw HelperFailed(errorDescription: "the Liquid key helper did not finish")
   }
   if run.terminationStatus != 0 {
-    throw HelperFailed(reason: "failed with status \(run.terminationStatus)")
+    let message = String(
+      decoding: said.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self
+    ).trimmingCharacters(in: .whitespacesAndNewlines)
+    throw HelperFailed(
+      errorDescription: message.isEmpty
+        ? "the Liquid key helper failed with status \(run.terminationStatus)" : message)
   }
 }
