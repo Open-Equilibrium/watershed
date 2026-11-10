@@ -48,11 +48,15 @@ class ChatView extends StatelessWidget {
   Widget build(BuildContext context) {
     return InputLane(
       input: input,
-      child: NotificationListener<ScrollNotification>(
+      child: NotificationListener<Notification>(
         onNotification: (notification) {
-          final metrics = notification.metrics;
-          if (metrics.pixels >= metrics.maxScrollExtent - _readAhead) {
-            state.loadEarlier();
+          // Layout changes count as well: a newest page that fits the viewport never scrolls.
+          if (notification
+              case ScrollNotification(:final metrics) ||
+                  ScrollMetricsNotification(:final metrics)) {
+            if (metrics.pixels >= metrics.maxScrollExtent - _readAhead) {
+              state.loadEarlier();
+            }
           }
           return false;
         },

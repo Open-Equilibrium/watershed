@@ -474,6 +474,29 @@ void main() {
     expect(backend.calls, contains('transcript u1'));
   });
 
+  testWidgets('a short newest page reads earlier messages without scrolling', (
+    tester,
+  ) async {
+    await show(tester);
+    backend.transcripts[''] = BridgeTranscript(
+      items: [chatItem('u2', BridgeItemKind.userMessage, text: 'Later')],
+      more: true,
+      start: 'u2',
+    );
+    backend.transcripts['u2'] = BridgeTranscript(
+      items: [chatItem('u1', BridgeItemKind.userMessage, text: 'First')],
+      more: false,
+      start: 'u1',
+    );
+    await state.loadChat();
+    await tester.pumpAndSettle();
+    expect(
+      find.text('First'),
+      findsOneWidget,
+      reason: 'the newest page fits the viewport, so nothing can scroll',
+    );
+  });
+
   testWidgets('shows notifications in the status bar', (tester) async {
     await show(tester);
     Future<void> notify(BridgeLevel level, String text) => emit(
