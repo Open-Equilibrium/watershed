@@ -367,6 +367,8 @@ readiness_shell='
             return 0
         fi
     }
+    # A group TERM can end the scan or sleep of this wait; the shell would report
+    # that job on the installer stderr.
     wait_for_readiness_group() {
         # Slow scans or late wakeups must not stretch the one-second grace.
         /bin/sleep 1 </dev/null >/dev/null 2>&1 &
@@ -378,7 +380,7 @@ readiness_shell='
             /bin/sleep 0.1
             wait_attempts=$((wait_attempts - 1))
         done
-    }
+    } 2>/dev/null
     IFS= read -r request || exit 1
     [ "$request" = start ] || exit 1
     if [ "$role" = outer ]; then

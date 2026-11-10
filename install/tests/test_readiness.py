@@ -265,7 +265,8 @@ class ReadinessContractTest(unittest.TestCase):
                  ("after-inner", False, "/usr/bin/pgrep"),
                  ("after-inner", True, "/usr/bin/pgrep"),
                  ("after-inner", True, "/missing/pgrep"),
-                 ("before-inner", False, "slow-pgrep"))
+                 ("before-inner", False, "slow-pgrep"),
+                 ("term-during-wait", False, "/usr/bin/pgrep"))
         for phase, separate_group, scanner in cases:
             with self.subTest(phase=phase, separate_group=separate_group, scanner=scanner), tempfile.TemporaryDirectory() as temporary:
                 root = pathlib.Path(temporary)
@@ -283,7 +284,7 @@ class ReadinessContractTest(unittest.TestCase):
                 flow.write_text("#!/bin/sh\nexit 65\n")
                 flow.chmod(0o755)
                 helper = (
-                    "import array, json, pathlib, signal, socket, subprocess, sys, time\n"
+                    "import array, json, os, pathlib, signal, socket, subprocess, sys, time\n"
                     "phase, separate, marker, owner = sys.argv[1:5]\n"
                     "if phase == 'failed': sys.exit(65)\n"
                     "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
@@ -298,6 +299,14 @@ class ReadinessContractTest(unittest.TestCase):
                     "        assert channel.recv(1) == b'S'\n"
                     "    else: child = subprocess.Popen(sys.argv[5:])\n"
                     "pathlib.Path(marker).touch()\n"
+                    "if phase == 'term-during-wait':\n"
+                    "    sys.stdin.read()\n"
+                    "    # A member signals the group while the supervisor sleeps in the foreground.\n"
+                    "    while subprocess.run(['/usr/bin/pgrep', '-g', '0', '-f', '^/bin/sleep 0.1$'],\n"
+                    "                         stdout=subprocess.DEVNULL).returncode: time.sleep(.001)\n"
+                    "    os.killpg(0, signal.SIGTERM)\n"
+                    "    pathlib.Path(marker).with_name('signalled').touch()\n"
+                    "    sys.exit(0)\n"
                     "if phase == 'after-inner':\n"
                     "    if separate == 'True':\n"
                     "        try: channel.recv(1)\n"
@@ -341,6 +350,9 @@ class ReadinessContractTest(unittest.TestCase):
                             _, stderr = process.communicate(timeout=5)
                             self.assertLess(time.monotonic() - started, 5, stderr)
                             self.assertIn(process.returncode, (0, -signal.SIGKILL), stderr)
+                            self.assertEqual(stderr, b"")
+                            if phase == "term-during-wait":
+                                self.assertTrue((root / "signalled").exists())
                             if phase == "after-inner":
                                 self.assertEqual((home / "status").read_text(), "65\n")
                             else:

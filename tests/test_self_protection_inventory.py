@@ -64,10 +64,14 @@ class DetachedHelperResult(unittest.TestCase):
         def invoke(command, cwd, log):
             # Stands in for the detached helper: the leader exits at once, then the
             # helper writes and publishes its result with a pause after creating it.
+            # Like the real helper, it gives up if the probe never releases it.
             target, release, result = map(Path, command[-3:])
 
             def helper():
-                while not release.exists(): time.sleep(.01)
+                deadline = time.monotonic() + 5
+                while not release.exists():
+                    if time.monotonic() >= deadline: return
+                    time.sleep(.01)
                 target.write_bytes(PROBE.CHANGED)
                 with result.open("w") as stream:
                     time.sleep(.2)

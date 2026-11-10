@@ -122,7 +122,6 @@ class M1ValidationContractTest(unittest.TestCase):
                     DECISION_REFERENCE_PATTERN.findall(path.read_text(encoding="utf-8"))
                 )
 
-        self.assertTrue(live_ids)
         self.assertEqual(referenced_ids - live_ids, set())
 
     def test_validation_scan_excludes_untracked_and_protected_files(self) -> None:
@@ -184,6 +183,13 @@ class M1ValidationContractTest(unittest.TestCase):
                         with self.assertRaisesRegex(AssertionError, "002"):
                             self.test_documented_decision_references_resolve_to_live_entries()
                         (repo / name).write_text("D-001", encoding="utf-8")
+                with self.subTest(open_decisions="none"):
+                    (repo / "docs/decisions/open-decisions.html").write_text(
+                        "<p>No open decisions.</p>", encoding="utf-8"
+                    )
+                    for name in ("docs/AGENTS.md", ".codex-tools/product.md"):
+                        (repo / name).write_text("Decided.", encoding="utf-8")
+                    self.test_documented_decision_references_resolve_to_live_entries()
 
             self.assertEqual(
                 set(tracked_validation_paths(repo)),
