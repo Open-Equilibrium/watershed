@@ -9,6 +9,7 @@ use crate::runtime::{
     openai_codex::{OPENAI_CODEX_CLIENT_ID, OPENAI_CODEX_ORIGINATOR, OPENAI_CODEX_PROVIDER_ID},
     types::RuntimeError,
 };
+use rustix::process::Pid;
 use sha2::{Digest, Sha256};
 use std::process::Command;
 use std::{
@@ -199,9 +200,15 @@ pub(crate) fn system_browser_launcher() -> &'static str {
 }
 
 fn open_system_browser(url: &str) -> Result<(), RuntimeError> {
-    Command::new(system_browser_launcher())
-        .arg(url)
-        .spawn()
-        .map(|_| ())
-        .map_err(|_| auth_protocol())
+    spawn_reaped(Command::new(system_browser_launcher()).arg(url)).map(|_| ())
+}
+
+/// Starts a launcher and reaps it on a detached thread, so callback handling never waits for it.
+pub(crate) fn spawn_reaped(command: &mut Command) -> Result<Pid, RuntimeError> {
+    let mut child = command.spawn().map_err(|_| auth_protocol())?;
+    let pid = Pid::from_child(&child);
+    thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(pid)
 }

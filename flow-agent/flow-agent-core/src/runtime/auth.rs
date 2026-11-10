@@ -11,7 +11,8 @@ use std::{thread, time::Instant};
 #[cfg(test)]
 pub(crate) use browser::{
     build_authorize_url, read_loopback_callback, read_loopback_callback_until,
-    run_browser_login_with_components, system_browser_launcher, write_loopback_response,
+    run_browser_login_with_components, spawn_reaped, system_browser_launcher,
+    write_loopback_response,
 };
 #[cfg(test)]
 pub(crate) use device::{

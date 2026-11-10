@@ -4,17 +4,21 @@ use crate::{
         RuntimeError,
         auth::{
             AuthStatus, auth_status_from_store, parse_token_body,
-            run_browser_login_with_components, store_login_credential, system_browser_launcher,
+            run_browser_login_with_components, spawn_reaped, store_login_credential,
+            system_browser_launcher,
         },
         credential_store::CredentialStore,
         oauth_credential::CredentialRecord,
     },
     tests::helpers::empty_workspace,
 };
+use rustix::process::test_kill_process;
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
+    process::Command,
     thread,
+    time::{Duration, Instant},
 };
 
 #[test]
@@ -24,6 +28,19 @@ fn system_browser_launcher_does_not_depend_on_path_lookup() {
         std::path::Path::new(executable).is_absolute(),
         "browser launcher must be an absolute trusted executable: {executable}"
     );
+}
+
+#[test]
+fn system_browser_launcher_child_is_reaped() {
+    let pid = spawn_reaped(&mut Command::new("/usr/bin/true")).expect("launcher spawns");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while test_kill_process(pid).is_ok() {
+        assert!(
+            Instant::now() < deadline,
+            "exited browser launcher remained a zombie"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 #[test]
