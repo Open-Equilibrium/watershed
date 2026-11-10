@@ -88,10 +88,11 @@ pub(super) fn parse_productive_recovery_records(
                 "productive recovery snapshot contains more than one header",
             ));
         }
-        if records
-            .iter()
-            .any(|record| matches!(record, ProductiveRecoveryRecord::Terminal { .. }))
-        {
+        // WHY: a terminal is always last, so the last record is the only one to check.
+        if matches!(
+            records.last(),
+            Some(ProductiveRecoveryRecord::Terminal { .. })
+        ) {
             return Err(protocol("productive recovery terminal record must be last"));
         }
         records.push(record);
