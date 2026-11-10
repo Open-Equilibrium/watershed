@@ -211,14 +211,14 @@ class _TrajectoryViewState extends State<TrajectoryView> {
         try {
           history = await widget.state.history(leaves);
         } on Object catch (error) {
-          // The last history stays.
+          // The last history stays, and a request made meanwhile is still read.
           if (mounted) {
             widget.state.reportRead(
               'history',
               'Could not read the session history: $error',
             );
           }
-          return;
+          continue;
         }
         widget.state.reportRead('history', null);
         if (!mounted) return;

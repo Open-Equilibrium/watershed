@@ -1161,6 +1161,25 @@ void main() {
     );
   }
 
+  testWidgets('a request queued behind a failed read is still read', (
+    tester,
+  ) async {
+    await showBranches(tester);
+    final gate = backend.gate = Completer<void>();
+    await tester.tap(find.byKey(const ValueKey('tree-e6')));
+    await tester.pump();
+    // Comparing needs a read of its own, which waits behind the one in progress.
+    await press(tester, LogicalKeyboardKey.keyC);
+    backend.gate = null;
+    gate.completeError(StateError('offline'));
+    await tester.pumpAndSettle();
+    expect(
+      backend.calls.last,
+      'history e6 b2',
+      reason: 'the request made during the failed read is still read',
+    );
+  });
+
   testWidgets(
     'leaving Settings shows the Trajectory keys outside a comparison',
     (tester) async {
