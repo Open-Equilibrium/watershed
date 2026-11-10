@@ -336,6 +336,8 @@ double span(List<BridgeRecord> records, {required bool equalWidth}) =>
 int? stepAt(List<BridgeRecord> records, double at, {required bool equalWidth}) {
   int? nearest;
   var distance = double.infinity;
+  // Whether the nearest record only ends at `at`: the record starting there takes the point.
+  var touching = false;
   for (var index = 0; index < records.length; index++) {
     final (start, end) = _extent(records, index, equalWidth: equalWidth);
     final away = at < start
@@ -343,9 +345,11 @@ int? stepAt(List<BridgeRecord> records, double at, {required bool equalWidth}) {
         : at > end
         ? at - end
         : 0.0;
-    if (away < distance) {
+    final ends = at == end && start < at;
+    if (away < distance || away == distance && touching && !ends) {
       nearest = index;
       distance = away;
+      touching = ends;
     }
   }
   return nearest;

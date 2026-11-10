@@ -418,6 +418,22 @@ void main() {
         true,
       ]);
     });
+
+    test('a slot start or a back-to-back start selects that record', () {
+      expect(
+        [
+          for (final at in [0.0, 1.0, 2.0, 3.0])
+            stepAt(records, at, equalWidth: true),
+        ],
+        [0, 1, 2, 2],
+        reason: 'the last slot also takes the axis end',
+      );
+      final back = [
+        record('a', 1, BridgeRecordKind.message, 'Run', 0, duration: 1000),
+        record('b', 1, BridgeRecordKind.tool, 'bash', 1000, duration: 500),
+      ];
+      expect(stepAt(back, 1000, equalWidth: false), 1);
+    });
   });
 
   test('aligns steps of the same kind after the shared steps', () {
