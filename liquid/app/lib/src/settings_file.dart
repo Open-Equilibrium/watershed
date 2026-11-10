@@ -31,8 +31,18 @@ class SettingsFile {
   Future<void> save(Map<String, Object?> json) async {
     await file.parent.create(recursive: true);
     final pending = File('${file.path}.$pid.${_saves++}.pending');
-    await pending.writeAsString(jsonEncode(json), flush: true);
-    await pending.rename(file.path);
+    try {
+      await pending.writeAsString(jsonEncode(json), flush: true);
+      await pending.rename(file.path);
+    } on Object {
+      // A failed save leaves no temporary file; the save's own error still propagates.
+      try {
+        await pending.delete();
+      } on FileSystemException {
+        // Never created, or already gone.
+      }
+      rethrow;
+    }
   }
 
   static var _saves = 0;
