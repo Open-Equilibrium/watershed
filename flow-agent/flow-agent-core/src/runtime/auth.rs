@@ -125,7 +125,7 @@ pub(crate) fn resolve_openai_codex_credential() -> Result<CredentialRecord, Runt
     let started = Instant::now();
     store.resolve_with_clock(
         now_epoch_milliseconds,
-        |prior| transport::refresh_credential(prior, now_epoch_milliseconds),
+        transport::refresh_credential,
         || started.elapsed(),
         thread::sleep,
     )
