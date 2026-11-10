@@ -332,9 +332,14 @@ async fn cut_output(
         if missing_config && status.code() == Some(1) && errors.is_empty() {
             return Ok((Vec::new(), false));
         }
-        return Err(DiffError::Git(
-            String::from_utf8_lossy(&errors).trim().to_owned(),
-        ));
+        let reason = String::from_utf8_lossy(&errors).trim().to_owned();
+        // An empty reason reads as a name that names nothing, which only Git's silent exit 1 means.
+        if reason.is_empty() && status.code() != Some(1) {
+            return Err(DiffError::Git(format!(
+                "Git ended without a reason: {status}"
+            )));
+        }
+        return Err(DiffError::Git(reason));
     }
     written?;
     Ok((output, false))
@@ -506,6 +511,24 @@ fn explicit_git_retains_output_when_the_child_exits_before_the_first_poll() {
                 ),
             }
         }
+    });
+}
+
+#[cfg(test)]
+#[test]
+fn a_git_ended_by_a_signal_without_output_is_an_error() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    runtime.block_on(async {
+        let mut command = Command::new("sh");
+        command.args(["-c", "kill -TERM $$"]);
+        let result = output(piped(command, &NO_PROMPTS), false, None).await;
+        assert!(
+            matches!(result, Err(DiffError::Git(ref reason)) if !reason.is_empty()),
+            "{result:?}"
+        );
     });
 }
 
