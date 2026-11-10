@@ -37,6 +37,13 @@ class Keys {
   /// Like [activator], and also while the key is held, as for moving through a list.
   ShortcutActivator get repeating => _KeysActivator(this, repeats: true);
 
+  /// These keys without the Liquid key, as the macOS menu bar takes them.
+  Keys get withoutLiquid =>
+      Keys(key, meta: meta, alt: alt, shift: shift, control: control);
+
+  /// A ⌘ chord without the Liquid key, which a menu item can show.
+  bool get menuChord => meta && !liquid;
+
   /// These keys as the macOS menu bar shows them; none with the Liquid key.
   SingleActivator? get menuShortcut => liquid
       ? null
@@ -392,13 +399,7 @@ enum Profile {
 /// command works; null when the keys are free.
 String? reserved(Command command, Keys keys) {
   // The menu bar ignores the Liquid key, so ⇪⌘Q still quits.
-  final menu = Keys(
-    keys.key,
-    meta: keys.meta,
-    alt: keys.alt,
-    shift: keys.shift,
-    control: keys.control,
-  );
+  final menu = keys.withoutLiquid;
   for (final (area, reserved, use) in _reserved) {
     if (area == null
         ? reserved == menu
@@ -534,13 +535,23 @@ class ShortcutSettings {
   /// What `command` shows when unchanged.
   String defaultLabel(Command command) => _defaults(command).first.label;
 
-  /// The other command in `command`'s area that `keys` already runs.
+  /// Whether `bound`, a combination of a command in `area`, runs `keys` too: the same keys, or
+  /// in the app area the same ⌘ keys, which the menu bar also runs under the Liquid key.
+  static bool _runsSame(Keys bound, Keys keys, Area area) =>
+      bound == keys ||
+      (area == Area.app &&
+          (bound.menuChord || keys.menuChord) &&
+          bound.withoutLiquid == keys.withoutLiquid);
+
+  /// The other command in `command`'s area that `keys` already runs, or that the menu bar runs
+  /// for them.
   Command? conflict(Command command, Keys keys) => Command.values
       .where(
         (other) =>
             other != command &&
             other.area == command.area &&
-            bindings(other).contains(keys),
+            bindings(other)
+                .any((bound) => _runsSame(bound, keys, command.area)),
       )
       .firstOrNull;
 
@@ -577,7 +588,11 @@ class ShortcutSettings {
     final rest = from.bindings(command).skip(1).where((other) => other != keys);
     put(command, [?keys, ...rest]);
     if (clear != null && keys != null) {
-      put(clear, [...from.bindings(clear).where((other) => other != keys)]);
+      put(clear, [
+        ...from
+            .bindings(clear)
+            .where((bound) => !_runsSame(bound, keys, clear.area)),
+      ]);
     }
     return ShortcutSettings._(
       Profile.custom,
@@ -596,6 +611,36 @@ class ShortcutSettings {
     ),
     null => this,
   };
+
+  /// Restores `command`'s default keys and takes them from the other commands in its area that
+  /// run them now.
+  ShortcutSettings resetTaking(Command command) {
+    final custom = _active;
+    if (custom == null) return this;
+    final defaults = _defaults(command);
+    final changes = {...custom.changes}..remove(command);
+    for (final other in Command.values) {
+      if (other == command || other.area != command.area) continue;
+      final bound = bindings(other);
+      final kept = [
+        for (final keys in bound)
+          if (!defaults.any(
+            (restored) => _runsSame(keys, restored, command.area),
+          ))
+            keys,
+      ];
+      if (kept.length == bound.length) continue;
+      if (listEquals(kept, _defaults(other))) {
+        changes.remove(other);
+      } else {
+        changes[other] = kept;
+      }
+    }
+    return ShortcutSettings._(
+      Profile.custom,
+      CustomProfile(custom.base, custom.liquidKey, changes),
+    );
+  }
 
   /// Drops every change; a Custom profile that then matches its base becomes that profile, so
   /// resetting never turns the Liquid key on or off.

@@ -67,6 +67,29 @@ void main() {
     expect(keys.conflict(Command.newSession, liquidN), isNull);
   });
 
+  test('a Liquid ⌘ chord conflicts with the command whose menu shows the same ⌘ keys', () {
+    const liquidCommandN = Keys(
+      LogicalKeyboardKey.keyN,
+      liquid: true,
+      meta: true,
+    );
+    final keys = ShortcutSettings.liquidKey();
+
+    expect(keys.conflict(Command.diff, liquidCommandN), Command.newSession);
+    final taken = keys.change(
+      Command.diff,
+      liquidCommandN,
+      clear: Command.newSession,
+    );
+    expect(
+      taken.menu(Command.newSession),
+      isNull,
+      reason: 'the menu bar would take the chord from Diff',
+    );
+    // The other way round: a ⌘ chord meets the Liquid key chord of another command.
+    expect(taken.conflict(Command.focusInput, commandN), Command.diff);
+  });
+
   test('taking keys anyway clears them from the other command', () {
     final keys = ShortcutSettings.liquidKey().change(
       Command.focusInput,
@@ -80,6 +103,21 @@ void main() {
     ]);
     expect(keys.bindings(Command.newSession), [commandN]);
     expect(keys.label(Command.newSession), '⌘N');
+  });
+
+  test('resetting a command takes its default keys back from the commands that run them', () {
+    final taken = ShortcutSettings.liquidKey().change(
+      Command.diff,
+      liquidN,
+      clear: Command.newSession,
+    );
+
+    final restored = taken.resetTaking(Command.newSession);
+    expect(restored.bindings(Command.newSession), [liquidN, commandN]);
+    expect(restored.bindings(Command.diff), [
+      const Keys(LogicalKeyboardKey.digit3, meta: true),
+    ]);
+    expect(restored.changed(Command.newSession), isFalse);
   });
 
   test('the Custom switch decides whether Liquid key combinations exist', () {

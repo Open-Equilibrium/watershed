@@ -126,6 +126,9 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
   Keys? _pressed;
   Command? _conflict;
 
+  /// Whether the keys shown are the defaults a Reset restores, which "Use anyway" takes.
+  bool _restoring = false;
+
   /// Why the keys pressed cannot be taken.
   String? _refused;
 
@@ -160,6 +163,7 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
       _pressed = null;
       _conflict = null;
       _refused = null;
+      _restoring = false;
     });
     _keys.requestFocus();
   }
@@ -170,7 +174,35 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
     _conflict = null;
     _refused = null;
     _replacing = null;
+    _restoring = false;
   });
+
+  /// Restores `command`'s defaults. Keys another command runs now are taken only after the
+  /// same question recording asks.
+  void _reset(Command command) {
+    final restored = _shortcuts.value.reset(command);
+    for (final keys in restored.bindings(command)) {
+      final conflict = restored.conflict(command, keys);
+      if (conflict != null) {
+        setState(() {
+          _recording = command;
+          _pressed = keys;
+          _conflict = conflict;
+          _refused = null;
+          _restoring = true;
+        });
+        _keys.requestFocus();
+        return;
+      }
+    }
+    _shortcuts.change(restored);
+  }
+
+  /// Restores `command`'s defaults, taking them from the commands that run them.
+  void _restore(Command command) {
+    _shortcuts.change(_shortcuts.value.resetTaking(command));
+    _done();
+  }
 
   /// Leaving the recording row stops recording, unless the focus went on to "Use anyway" or
   /// to the question whether to replace Custom.
@@ -260,6 +292,7 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
       setState(() {
         _pressed = keys;
         _conflict = use == null ? conflict : null;
+        _restoring = false;
         _refused = switch (use) {
           null => null,
           'typing' => '${keys.label} is for typing here.',
@@ -502,7 +535,9 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
               ),
               _Link(
                 'Use anyway, clear ${conflict.label}',
-                onTap: () => _change(command, pressed, clear: conflict),
+                onTap: () => _restoring
+                    ? _restore(command)
+                    : _change(command, pressed, clear: conflict),
               ),
             ],
           ),
@@ -528,7 +563,7 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
           if (changed)
             _Link(
               defaults.isEmpty ? 'Reset' : 'Reset to $defaults',
-              onTap: () => _shortcuts.change(settings.reset(command)),
+              onTap: () => _reset(command),
             ),
         ],
       ),

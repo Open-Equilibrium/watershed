@@ -159,6 +159,36 @@ void main() {
     expect(shortcuts.value, ShortcutSettings.standard());
   });
 
+  testWidgets(
+    'resetting a command whose keys another command took asks first',
+    (tester) async {
+      await show(tester, ShortcutSettings.liquidKey());
+      await openSettings(tester);
+      await tester.tap(find.text('⇪3'));
+      await tester.pumpAndSettle();
+      await press(tester, LogicalKeyboardKey.keyN, holding: liquidKey);
+      await tester.tap(find.text('Use anyway, clear New Session'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Reset to ⇪N'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('already runs Diff'), findsOneWidget);
+      expect(shortcuts.value.bindings(Command.newSession), [
+        const Keys(LogicalKeyboardKey.keyN, meta: true),
+      ], reason: 'nothing changes before the user agrees');
+
+      await tester.tap(find.text('Use anyway, clear Diff'));
+      await tester.pumpAndSettle();
+      expect(shortcuts.value.bindings(Command.newSession), [
+        const Keys(LogicalKeyboardKey.keyN, liquid: true),
+        const Keys(LogicalKeyboardKey.keyN, meta: true),
+      ]);
+      expect(shortcuts.value.bindings(Command.diff), [
+        const Keys(LogicalKeyboardKey.digit3, meta: true),
+      ]);
+    },
+  );
+
   testWidgets('recording the keys a command already has changes nothing', (
     tester,
   ) async {
