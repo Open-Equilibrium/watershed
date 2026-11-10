@@ -127,7 +127,7 @@ fn recovery_context_round_trips_active_state_and_rejects_invalid_snapshots() {
     let object = history.recovery_object().expect("history serializes");
     assert_eq!(object.digest, sha256_hex(&object.bytes));
     let restored =
-        ContextHistory::from_recovery_bytes(&object.bytes).expect("history deserializes");
+        ContextHistory::from_recovery_bytes(&object.bytes, 4).expect("history deserializes");
     assert_eq!(restored.completed_interactions, 1);
     assert_eq!(
         restored.pending_deltas["message-2"][0]["content_delta"],
@@ -173,7 +173,7 @@ fn recovery_context_round_trips_active_state_and_rejects_invalid_snapshots() {
         ),
         (
             br#"{"completed_interactions":2,"latest_completed":{"deltas":[],"payload":{},"sequence":1},"pending_deltas":{},"unresolved_tools":[]}"#.as_slice(),
-            "completed interaction count exceeds the latest event sequence",
+            "completed interaction count exceeds the cumulative event count",
         ),
         (
             br#"{"completed_interactions":1,"latest_completed":{"deltas":[],"payload":{},"sequence":0},"pending_deltas":{},"unresolved_tools":[]}"#.as_slice(),
@@ -186,7 +186,7 @@ fn recovery_context_round_trips_active_state_and_rejects_invalid_snapshots() {
     ];
     for (bytes, expected) in invalid {
         assert!(
-            ContextHistory::from_recovery_bytes(bytes)
+            ContextHistory::from_recovery_bytes(bytes, 1)
                 .err()
                 .expect("invalid recovery snapshot is rejected")
                 .to_string()
@@ -200,7 +200,7 @@ fn recovery_context_round_trips_active_state_and_rejects_invalid_snapshots() {
         MAX_FLOW_EVENTS + 1,
     );
     assert!(
-        ContextHistory::from_recovery_bytes(over_budget.as_bytes())
+        ContextHistory::from_recovery_bytes(over_budget.as_bytes(), u64::MAX)
             .err()
             .expect("an over-budget recovery count is rejected")
             .to_string()
@@ -209,6 +209,7 @@ fn recovery_context_round_trips_active_state_and_rejects_invalid_snapshots() {
     assert!(
         ContextHistory::from_recovery_bytes(
             b"{ \"completed_interactions\":0,\"latest_completed\":null,\"pending_deltas\":{},\"unresolved_tools\":[]}",
+            0,
         )
         .err()
         .expect("non-canonical recovery snapshot is rejected")
@@ -222,7 +223,7 @@ fn recovery_context_enforces_object_size_and_complete_interaction_boundaries() {
     let oversized =
         vec![b'x'; usize::try_from(MAX_SESSION_OBJECT_BYTES).expect("object limit fits usize") + 1];
     assert!(
-        ContextHistory::from_recovery_bytes(&oversized)
+        ContextHistory::from_recovery_bytes(&oversized, 0)
             .err()
             .expect("oversized recovery context must fail")
             .to_string()
@@ -291,7 +292,7 @@ fn recovery_context_size_fallback_preserves_pending_message_deltas() {
         .recovery_object()
         .expect("completed content may be omitted while pending state remains");
     let restored =
-        ContextHistory::from_recovery_bytes(&object.bytes).expect("fallback snapshot restores");
+        ContextHistory::from_recovery_bytes(&object.bytes, 3).expect("fallback snapshot restores");
     assert_eq!(
         restored.pending_deltas["pending"][0]["content_delta"],
         "pending-content"

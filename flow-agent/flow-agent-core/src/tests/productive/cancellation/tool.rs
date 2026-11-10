@@ -10,9 +10,10 @@ use crate::{
     },
     tests::{
         productive::support::{
-            FakeToolExecutor, InterruptingSink, MemoryAttempts, ScriptedProvider,
-            assert_controlled_cancellation_lifecycle, execute_scripted_productive_case_with_tools,
-            single_tool_provider_turn, smoke_productive_execution_fixture,
+            FakeToolExecutionFault, FakeToolExecutor, InterruptingSink, MemoryAttempts,
+            ScriptedProvider, assert_controlled_cancellation_lifecycle,
+            execute_scripted_productive_case_with_tools, single_tool_provider_turn,
+            smoke_productive_execution_fixture,
         },
         support::run_isolated_test,
     },
@@ -74,6 +75,46 @@ fn cancellation_after_tool_started_settles_without_dispatch() {
         "pre-Start cancellation remains reconstructable after a recovery write failure"
     );
     assert_controlled_cancellation_lifecycle(&sink.events);
+}
+
+#[test]
+fn cancellation_during_executor_preflight_settles_the_tool_attempt() {
+    const CHILD_ENV: &str = "WATERSHED_TOOL_PREFLIGHT_CANCELLATION_CHILD";
+    if run_isolated_test(CHILD_ENV) {
+        return;
+    }
+
+    crate::begin_productive_operation().expect("Tool operation begins");
+    let (execution, _, attempts, sink, tools) = execute_scripted_productive_case_with_tools(
+        "tool-preflight-cancellation",
+        [single_tool_provider_turn(
+            "response-tool-preflight-cancellation",
+            "call-tool-preflight-cancellation",
+        )],
+        |_| {},
+        |tools| tools.fault = FakeToolExecutionFault::PreflightInterrupted,
+    )
+    .expect("cancellation during preflight closes the lifecycle");
+    crate::settle_productive_operation();
+
+    assert!(execution.failed);
+    assert!(matches!(
+        execution.terminal_error,
+        Some(RuntimeError::Cancelled)
+    ));
+    assert_eq!(tools.preflights, 1);
+    assert!(tools.invocations.is_empty());
+    assert_eq!(attempts.intents.len(), 2);
+    assert_eq!(attempts.results.len(), 2);
+    assert_eq!(attempts.results[1].0, RunAttemptKind::Tool);
+    assert_eq!(attempts.results[1].2, CANCELLED_REASON);
+    assert!(
+        !sink
+            .0
+            .iter()
+            .any(|event| event.event_type == EventType::ToolStarted)
+    );
+    assert_controlled_cancellation_lifecycle(&sink.0);
 }
 
 #[test]

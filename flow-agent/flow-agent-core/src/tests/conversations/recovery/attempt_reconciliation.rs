@@ -4,6 +4,7 @@ use crate::runtime::{
     context::ContextObject,
     conversations::{
         RunObjectStore, append_run_attempt_intent, append_run_attempt_result, inspect_run_attempts,
+        set_conversation_file_sync_error_for_path_for_test,
     },
     digest::sha256_hex,
     productive::{
@@ -14,7 +15,10 @@ use crate::runtime::{
         ToolEnforcementExpectation,
     },
 };
-use std::fs::{self};
+use std::{
+    fs::{self},
+    io,
+};
 
 fn tool_intent(attempt_id: &str) -> RunAttemptIntent {
     RunAttemptIntent {
@@ -66,8 +70,13 @@ fn run_log_synchronizes_intent_before_result_and_surfaces_uncertain_attempts() {
     let workspace = empty_workspace("run-log");
     create_review_run(&workspace);
     let first = tool_intent("tool-001");
-    append_run_attempt_intent(&workspace, "review", "review-1", &first)
-        .expect("intent synchronizes");
+    let run_log = crate::tests::helpers::workspace_session_dir(&workspace)
+        .join("review/runs/review-1/run-log.jsonl");
+    set_conversation_file_sync_error_for_path_for_test(&run_log, io::ErrorKind::Other);
+    assert!(
+        append_run_attempt_intent(&workspace, "review", "review-1", &first).is_err(),
+        "an intent that cannot be synchronized must not permit dispatch"
+    );
     let states =
         inspect_run_attempts(&workspace, "review", "review-1").expect("uncertain state reads");
     assert_eq!(states.len(), 1);

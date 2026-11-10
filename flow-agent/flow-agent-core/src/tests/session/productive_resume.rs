@@ -36,7 +36,7 @@ use crate::{
     },
 };
 use proto::EventType;
-use std::{fs, time::Duration};
+use std::{collections::BTreeMap, fs, time::Duration};
 
 struct ProductiveResumeFixture {
     clock: EventClock,
@@ -265,6 +265,86 @@ fn exact_productive_resume_reuses_the_committed_attempt_and_finishes_the_address
             .len(),
         1
     );
+}
+
+fn interrupted_before_terminal_snapshot() -> ProductiveResumeFixture {
+    let workspace = workspace_copy("smoke-flow");
+    disable_smoke_echo_tool(&workspace);
+    let fixture = ProductiveResumeFixture::new(workspace);
+    let prior_history = ContextHistory::default();
+    let (mut recovery, mut writer, mut attempts) = fixture.open_recovery_prefix(&prior_history);
+    let mut interruption =
+        InterruptingProductiveRecovery::new(&mut recovery, ProductiveInterruptionPoint::Terminal);
+    execute_productive_flow_with_recovery(
+        fixture.execution(prior_history),
+        &mut SessionProvider::default(),
+        &mut attempts,
+        &mut writer,
+        &mut interruption,
+    )
+    .expect_err("interruption leaves every pre-terminal recovery boundary");
+    writer.finish().expect("event prefix finalizes");
+    fixture
+}
+
+fn run_objects(fixture: &ProductiveResumeFixture) -> BTreeMap<String, Vec<u8>> {
+    let objects = crate::tests::helpers::workspace_session_dir(&fixture.workspace)
+        .join("conversation/runs/run/objects");
+    fs::read_dir(objects)
+        .expect("run objects list")
+        .map(|entry| {
+            let entry = entry.expect("run object entry reads");
+            (
+                entry.file_name().into_string().expect("object name"),
+                fs::read(entry.path()).expect("run object reads"),
+            )
+        })
+        .collect()
+}
+
+fn resume_exact_run(fixture: &ProductiveResumeFixture) -> Result<bool, RuntimeError> {
+    let mut provider = SessionProvider::default();
+    let output = resume_conversation_run_with_provider(
+        &fixture.workspace,
+        "conversation",
+        "run",
+        EmitMode::Human,
+        || Ok(fixture.execution_fixture.credential().clone()),
+        &mut provider,
+    )?;
+    assert_eq!(provider.calls, 0, "provider must not redispatch");
+    Ok(output.failed)
+}
+
+#[test]
+fn exact_productive_resume_completes_an_interrupted_run_object_write() {
+    let reference = interrupted_before_terminal_snapshot();
+    let prefix_objects = run_objects(&reference);
+    assert_eq!(resume_exact_run(&reference).ok(), Some(false));
+    let completed_objects = run_objects(&reference);
+    let resume_objects = completed_objects
+        .iter()
+        .filter(|(name, _)| !prefix_objects.contains_key(*name))
+        .collect::<Vec<_>>();
+    assert!(
+        !resume_objects.is_empty(),
+        "Resume writes a terminal object"
+    );
+
+    let fixture = interrupted_before_terminal_snapshot();
+    assert_eq!(run_objects(&fixture), prefix_objects);
+    let objects = crate::tests::helpers::workspace_session_dir(&fixture.workspace)
+        .join("conversation/runs/run/objects");
+    for (name, bytes) in &resume_objects {
+        fs::write(objects.join(name), &bytes[..bytes.len() / 2])
+            .expect("fixture leaves an interrupted object write");
+    }
+
+    assert_eq!(
+        resume_exact_run(&fixture).map_err(|error| error.to_string()),
+        Ok(false)
+    );
+    assert_eq!(run_objects(&fixture), completed_objects);
 }
 
 #[test]

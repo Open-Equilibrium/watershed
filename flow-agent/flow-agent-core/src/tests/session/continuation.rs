@@ -486,6 +486,61 @@ fn productive_continuation_uses_the_selected_history_input_and_live_checkpoint_s
 }
 
 #[test]
+fn newest_entry_continuations_outgrow_any_single_run_event_sequence() {
+    let (workspace, fixture) = disabled_configured_smoke_productive_execution_fixture();
+    let config = load_global_config().expect("productive config");
+    let credential = fixture.credential();
+    let mut provider = SessionProvider::default();
+    let model_profile = ContextModelProfile {
+        context_limit: 128000,
+        id: OPERATOR_MODEL_PROFILE_ID,
+        output_reserve: 16384,
+        safety_margin: CONTEXT_SAFETY_MARGIN,
+    };
+    run_productive_session_with_provider(
+        &workspace,
+        &fixture.anchored,
+        &config,
+        "gpt-fixture",
+        model_profile,
+        &fixture.registry,
+        fixture.smoke_flow(),
+        &fixture.policy,
+        None,
+        false,
+        || Ok(credential.clone()),
+        "Agent guidance.",
+        None,
+        &mut provider,
+    )
+    .expect("root productive run completes");
+    let conversation_id = conversation_status_page(&workspace, None)
+        .expect("conversation status")
+        .conversations[0]
+        .conversation_id
+        .clone();
+
+    for continuation in 1..=7 {
+        let output = continue_conversation_with_provider(
+            &workspace,
+            &conversation_id,
+            None,
+            None,
+            None,
+            false,
+            || Ok(credential.clone()),
+            &mut provider,
+        )
+        .unwrap_or_else(|error| panic!("continuation {continuation} failed: {error}"));
+        assert!(!output.failed, "continuation {continuation} failed");
+    }
+
+    let page = conversation_status_page(&workspace, None).expect("final conversation status");
+    assert_eq!(page.conversations[0].run_count, 8);
+    assert_eq!(provider.calls, 8);
+}
+
+#[test]
 fn conversation_continuation_rejects_registry_drift_before_auth_or_run_creation() {
     let workspace = workspace_copy("smoke-flow");
     write_productive_workspace_config(&workspace);

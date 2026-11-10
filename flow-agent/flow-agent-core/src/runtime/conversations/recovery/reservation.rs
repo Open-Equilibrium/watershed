@@ -2,7 +2,8 @@ use super::super::run_objects::read_run_object_uri;
 use super::super::{
     contract::{
         CONVERSATION_RUNS_DIR, RUN_CONTEXTS_STEM, RUN_EVENTS_LEAF, RUN_EVENTS_STEM,
-        RUN_OBJECTS_DIR, RUN_SESSION_LOCK_LEAF, protocol, validate_id,
+        RUN_OBJECTS_DIR, RUN_SESSION_LOCK_LEAF, UNPUBLISHED_PRODUCTIVE_RUN_MARKER, protocol,
+        validate_id,
     },
     history_index::with_conversation_history_index,
     lifecycle::{
@@ -254,7 +255,16 @@ pub(crate) fn reserve_conversation_continuation(
                 };
                 let candidate_path = runs.path.join(&candidate);
                 match runs.dir.symlink_metadata(&candidate) {
-                    Ok(_) => continue,
+                    Ok(metadata) if !metadata.is_dir() => continue,
+                    // WHY: an interrupted continuation leaves an unpublished Run that only
+                    // reclamation under its Run lease may remove.
+                    Ok(_) => match runs.dir.symlink_metadata(
+                        Path::new(&candidate).join(UNPUBLISHED_PRODUCTIVE_RUN_MARKER),
+                    ) {
+                        Ok(_) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                        Err(source) => return Err(path_io_error(&candidate_path, source)),
+                    },
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                     Err(source) => return Err(path_io_error(&candidate_path, source)),
                 }
@@ -266,17 +276,21 @@ pub(crate) fn reserve_conversation_continuation(
                         Err(RuntimeError::ActiveSession { .. }) => continue,
                         Err(error) => return Err(error),
                     };
-                match runs.dir.symlink_metadata(&candidate) {
-                    Ok(_) => {
+                let occupied =
+                    reclaim_unpublished_productive_run(workspace, conversation_id, &candidate)
+                        .and_then(|()| match runs.dir.symlink_metadata(&candidate) {
+                            Ok(_) => Ok(true),
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+                            Err(source) => Err(path_io_error(&candidate_path, source)),
+                        });
+                match occupied {
+                    Ok(true) => {
                         run_lease.release()?;
                         continue;
                     }
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(source) => {
-                        return reconcile_operation_and_cleanup(
-                            Err(path_io_error(&candidate_path, source)),
-                            run_lease.release(),
-                        );
+                    Ok(false) => {}
+                    Err(error) => {
+                        return reconcile_operation_and_cleanup(Err(error), run_lease.release());
                     }
                 }
                 return Ok(ProductiveContinuationReservationState {
@@ -446,10 +460,10 @@ pub(crate) fn reserve_conversation_run_recovery(
             ));
         }
         let objects = required_child(&run, RUN_OBJECTS_DIR, "run object directory")?;
-        let prior_history = ContextHistory::from_recovery_bytes(&read_run_object_uri(
-            &objects,
-            &prior_history_object,
-        )?)?;
+        let prior_history = ContextHistory::from_recovery_bytes(
+            &read_run_object_uri(&objects, &prior_history_object)?,
+            prior_event_count,
+        )?;
         let prior_event_count = usize::try_from(prior_event_count)
             .map_err(|_| protocol("prior conversation event count exceeds this platform"))?;
         let recovery_root_input = if root_input.is_null() {

@@ -27,6 +27,8 @@ pub(in super::super) enum FakeToolExecutionFault {
     None,
     PrepareError,
     PolicyRejected,
+    PreflightError,
+    PreflightInterrupted,
     StartedExecutorError,
     ExecutorError,
 }
@@ -94,10 +96,26 @@ impl ProductiveToolExecutor for FakeToolExecutor {
         prepared: Self::Prepared,
     ) -> Result<ProductiveToolPreflight<Self::Waiting>, RuntimeError> {
         self.preflights += 1;
-        if matches!(self.fault, FakeToolExecutionFault::PolicyRejected) {
-            return Ok(ProductiveToolPreflight::Rejected(
-                proto::ExecutorErrorCodeV0::PolicyUnsupported,
-            ));
+        match self.fault {
+            FakeToolExecutionFault::PolicyRejected => {
+                return Ok(ProductiveToolPreflight::Rejected(
+                    proto::ExecutorErrorCodeV0::PolicyUnsupported,
+                ));
+            }
+            FakeToolExecutionFault::PreflightError => {
+                return Err(RuntimeError::executor(
+                    proto::ExecutorErrorCodeV0::InvalidResponse,
+                    "Executor preflight timed out",
+                ));
+            }
+            FakeToolExecutionFault::PreflightInterrupted => {
+                assert_eq!(
+                    crate::request_productive_interrupt(),
+                    crate::ProductiveInterruptAction::Cancel
+                );
+                return Err(RuntimeError::Cancelled);
+            }
+            _ => {}
         }
         Ok(ProductiveToolPreflight::Ready(prepared))
     }

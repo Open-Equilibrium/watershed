@@ -750,7 +750,9 @@ fn append_jsonl_with_status_inner(
     record_status_transaction(conversation, &transaction)?;
     #[cfg(test)]
     status_transaction_checkpoint(StatusTransactionCrashPoint::TransactionRecorded)?;
-    match append_anchored_status_line(base, &line) {
+    match append_anchored_status_line(base, &line)
+        .and_then(|()| sync_anchored_stream(base, STATUS_APPEND_STREAM_LIMITS))
+    {
         Ok(()) => {
             #[cfg(test)]
             status_transaction_checkpoint(StatusTransactionCrashPoint::CanonicalMutationApplied)?;

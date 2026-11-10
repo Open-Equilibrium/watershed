@@ -12,10 +12,10 @@ impl ProductiveRecovery for RecoveryObjectTerminal {
         &mut self,
         history: &ContextHistory,
         _failed: bool,
-        _run_event_count: u64,
+        run_event_count: u64,
     ) -> Result<(), RuntimeError> {
         let object = history.recovery_object()?;
-        ContextHistory::from_recovery_bytes(&object.bytes).map(|_| ())
+        ContextHistory::from_recovery_bytes(&object.bytes, run_event_count).map(|_| ())
     }
 }
 
