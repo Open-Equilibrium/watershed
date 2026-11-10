@@ -683,9 +683,13 @@ class FakeBackend implements SessionBackend {
   /// Holds reverts until it completes.
   Completer<void>? revertGate;
 
+  /// Holds the revert plan until it completes.
+  Completer<void>? revertPlanGate;
+
   @override
   Future<BridgeRevertPlan> revertPlan(String turn) async {
     calls.add('revert plan $turn');
+    await revertPlanGate?.future;
     return revertPlanned;
   }
 
@@ -707,9 +711,14 @@ class FakeBackend implements SessionBackend {
   List<BridgeCheckpointSession> checkpointed = const [];
   Object? removeError;
 
+  /// Holds the checkpoint sessions read until it completes.
+  Completer<void>? checkpointGate;
+
   @override
-  Future<List<BridgeCheckpointSession>> checkpointSessions() async =>
-      checkpointed;
+  Future<List<BridgeCheckpointSession>> checkpointSessions() async {
+    await checkpointGate?.future;
+    return checkpointed;
+  }
 
   @override
   Future<void> removeAllCheckpoints() async {
@@ -734,8 +743,14 @@ class FakeBackend implements SessionBackend {
   /// Turns with checkpoints by session file.
   Map<String, int> turnCounts = const {};
 
+  /// Holds the turn counts read until it completes.
+  Completer<void>? storedTurnsGate;
+
   @override
-  Future<int> storedTurns(String path) async => turnCounts[path] ?? 0;
+  Future<int> storedTurns(String path) async {
+    await storedTurnsGate?.future;
+    return turnCounts[path] ?? 0;
+  }
 
   @override
   Future<void> deleteSession(String path) async {

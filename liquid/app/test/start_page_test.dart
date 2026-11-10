@@ -296,6 +296,82 @@ void main() {
     expect(backend.calls.where((call) => call.startsWith('delete')), isEmpty);
   });
 
+  testWidgets(
+    'a question that arrives while a deletion is prepared keeps the keys',
+    (tester) async {
+      await show(
+        tester,
+        setUp: () => backend
+          ..storedSessions = [
+            BridgeStoredSession(
+              path: '/sessions/a.jsonl',
+              title: 'Rate limit for /login',
+              modifiedMs: DateTime.now().millisecondsSinceEpoch,
+            ),
+          ]
+          ..storedTurnsGate = Completer(),
+      );
+      await rightClick(tester, find.text('Rate limit for /login'));
+      await tester.tap(find.text('Delete session…'));
+      await tester.pump();
+      backend.controller.add(
+        event(
+          BridgeEventKind.userInputRequested,
+          request: BridgeRequest(
+            id: 'q1',
+            question: BridgeQuestion(
+              kind: BridgeQuestionKind.confirm,
+              title: 'Deploy now?',
+              detail: '',
+              options: const [],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      backend.storedTurnsGate!.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('Delete “Rate limit for /login”?'), findsNothing);
+      expect(backend.calls.where((call) => call.startsWith('delete')), isEmpty);
+    },
+  );
+
+  testWidgets(
+    'a question that arrives while checkpoints are read keeps the keys',
+    (tester) async {
+      await show(
+        tester,
+        setUp: () => backend
+          ..checkpointed = const [
+            BridgeCheckpointSession(title: 'Rate limit for /login', turns: 3),
+          ]
+          ..checkpointGate = Completer(),
+      );
+      await rightClick(tester, find.text('acme-api').first);
+      await tester.tap(find.text('Remove all checkpoints…'));
+      await tester.pump();
+      backend.controller.add(
+        event(
+          BridgeEventKind.userInputRequested,
+          request: BridgeRequest(
+            id: 'q1',
+            question: BridgeQuestion(
+              kind: BridgeQuestionKind.confirm,
+              title: 'Deploy now?',
+              detail: '',
+              options: const [],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      backend.checkpointGate!.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('Remove all checkpoints of acme-api?'), findsNothing);
+      expect(backend.calls, isNot(contains('remove all checkpoints')));
+    },
+  );
+
   testWidgets('removes all checkpoints of the project from its menu', (
     tester,
   ) async {

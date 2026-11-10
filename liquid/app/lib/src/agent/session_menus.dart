@@ -157,7 +157,8 @@ Future<void> confirmDeleteSession(
     state.notify(BridgeLevel.error, 'Could not read the session: $error');
     return;
   }
-  if (!context.mounted) return;
+  // A question that arrived meanwhile takes the keys, so no dialog opens over it.
+  if (!context.mounted || state.asking) return;
   final checkpoints = switch (turns) {
     0 => 'Its pi session file is deleted',
     1 => 'Its pi session file and its turn’s checkpoints are deleted',
@@ -194,7 +195,8 @@ Future<void> confirmRemoveCheckpoints(
     state.notify(BridgeLevel.error, 'Could not read the checkpoints: $error');
     return;
   }
-  if (!context.mounted) return;
+  // A question that arrived meanwhile takes the keys, so no dialog opens over it.
+  if (!context.mounted || state.asking) return;
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (context) {

@@ -124,6 +124,62 @@ void main() {
   });
 
   testWidgets(
+    'a question that arrives while a revert is prepared keeps the keys',
+    (tester) async {
+      await show(tester);
+      BridgeTreeNode node(String id, String? parent, BridgeEntryKind kind) =>
+          BridgeTreeNode(
+            failed: false,
+            id: id,
+            parent: parent,
+            kind: kind,
+            preview: id,
+          );
+      backend
+        ..stored = historyOf(
+          [],
+          tree: [
+            node('c1', null, BridgeEntryKind.custom),
+            node('u1', 'c1', BridgeEntryKind.user),
+            node('a1', 'u1', BridgeEntryKind.assistant),
+            node('c2', 'a1', BridgeEntryKind.custom),
+          ],
+          leaf: 'c2',
+        )
+        ..transcripts[''] = BridgeTranscript(
+          items: [
+            chatItem('u1', BridgeItemKind.userMessage, text: 'Go'),
+            chatItem('a1', BridgeItemKind.assistantMessage, text: 'Done'),
+          ],
+          more: false,
+        )
+        ..turnList = [
+          turnOf(
+            'T1',
+            number: 1,
+            startEntry: 'c1',
+            endEntry: 'c2',
+            added: 2,
+            removed: 1,
+          ),
+        ]
+        ..revertPlanned = revertPlanOf(
+          files: [revertedFile('a.txt', BridgeChangeStatus.modified)],
+        )
+        ..revertPlanGate = Completer();
+      await state.loadChat();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Revert files to before this turn…'));
+      await tester.pump();
+      await emit(tester, confirm('q1'));
+      backend.revertPlanGate!.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('Revert to before turn 1?'), findsNothing);
+      expect(backend.calls, isNot(contains('revert T1')));
+    },
+  );
+
+  testWidgets(
     'the input area floats at the bottom of each tab\'s main column',
     (tester) async {
       await show(tester);

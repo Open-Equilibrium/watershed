@@ -26,7 +26,8 @@ Future<void> confirmRevert(
     );
     return;
   }
-  if (!context.mounted) return;
+  // A question that arrived meanwhile takes the keys, so no dialog opens over it.
+  if (!context.mounted || state.asking) return;
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (context) => _RevertDialog(turn: turn, plan: plan),
