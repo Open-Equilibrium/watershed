@@ -27,6 +27,7 @@ pub fn compile_provider_turn_context(
         session_id,
         history,
         "",
+        true,
     )
 }
 
@@ -42,6 +43,7 @@ pub(crate) fn compile_provider_turn_context_with_agent_instructions(
     session_id: &str,
     history: &ContextHistory,
     agent_instructions: &str,
+    include_recent: bool,
 ) -> Result<CompiledContext, RuntimeError> {
     validate_provider_turn_scope(registry, flow_block, phase)?;
     let input_budget_tokens = model.input_budget_tokens()?;
@@ -84,7 +86,10 @@ pub(crate) fn compile_provider_turn_context_with_agent_instructions(
         }),
         input_budget_tokens,
     )?;
-    let (tier_one, omitted) = history.continuity()?;
+    let (mut tier_one, mut omitted) = history.continuity()?;
+    if !include_recent && tier_one.take().is_some() {
+        omitted.recent_complete_interaction += 1;
+    }
     let tier_zero = [
         context_source(
             "base-runtime-security",

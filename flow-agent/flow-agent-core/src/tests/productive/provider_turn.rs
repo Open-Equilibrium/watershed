@@ -7,8 +7,13 @@ use super::support::{
     load_productive_execution_fixture_for_flow, smoke_productive_execution_fixture,
 };
 use crate::runtime::{
-    context::{CONTEXT_SAFETY_MARGIN, ContextHistory, ContextModelProfile},
-    openai_codex::{ProviderToolCall, ProviderTurn, derive_prompt_cache_key},
+    context::{
+        CONTEXT_SAFETY_MARGIN, ContextHistory, ContextManifestCheckpoint, ContextModelProfile,
+    },
+    event_writer::RuntimeEventSink,
+    openai_codex::{
+        ProviderToolCall, ProviderTurn, derive_prompt_cache_key, responses_request_input_bytes,
+    },
     productive::{
         MAX_ACCUMULATED_PROVIDER_INPUT_BYTES, ProductiveExecution, execute_productive_flow,
         execute_productive_flow_with_tool_executor, tool_result_value,
@@ -436,6 +441,98 @@ fn productive_leaf_dispatches_once_and_commits_its_typed_result() {
     assert!(!durable_text.contains("secret-access"));
     assert!(!durable_text.contains("secret-refresh"));
     assert!(!durable_text.contains("secret-account"));
+}
+
+#[derive(Default)]
+struct ContextManifestSink {
+    manifest: String,
+}
+
+impl RuntimeEventSink for ContextManifestSink {
+    fn commit(
+        &mut self,
+        _event: &EventEnvelope,
+        _canonical_jsonl: &str,
+        context: Option<ContextManifestCheckpoint>,
+    ) -> Result<(), RuntimeError> {
+        if let Some(context) = context {
+            self.manifest = context.manifest.line;
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn leaf_turn_omits_recent_history_when_only_the_mandatory_request_fits() {
+    let (_workspace, fixture) = disabled_smoke_productive_execution_fixture();
+    let flow = fixture.smoke_flow();
+    let mut recent_history = ContextHistory::default();
+    recent_history.record(&EventEnvelope::new(
+        "prior-delta",
+        EventType::MessageDelta,
+        "prior-run",
+        1,
+        "2026-07-30T12:00:00Z",
+        "flow-agent-cli",
+        serde_json::json!({
+            "content_delta": "prior answer",
+            "message_id": "prior-message",
+            "role": "assistant",
+        }),
+    ));
+    recent_history.record(&EventEnvelope::new(
+        "prior-completed",
+        EventType::MessageCompleted,
+        "prior-run",
+        2,
+        "2026-07-30T12:00:01Z",
+        "flow-agent-cli",
+        serde_json::json!({"message_id": "prior-message", "role": "assistant"}),
+    ));
+
+    // The complete request with the recent interaction sets the budget one byte below it.
+    let mut complete = FakeProvider::default();
+    execute_productive_flow(
+        ProductiveExecution {
+            prior_history: recent_history.clone(),
+            ..fixture.execution(flow, "productive-fixture")
+        },
+        &mut complete,
+        &mut MemoryAttempts::default(),
+        &mut MemorySink::default(),
+    )
+    .expect("productive execution");
+    let complete_request_bytes =
+        responses_request_input_bytes(&complete.bodies[0]).expect("request size measures");
+
+    let mut provider = FakeProvider::default();
+    let mut sink = ContextManifestSink::default();
+    let execution = execute_productive_flow(
+        ProductiveExecution {
+            model_profile: ContextModelProfile {
+                context_limit: complete_request_bytes - 1,
+                id: "recent-history-budget-test-v0",
+                output_reserve: 0,
+                safety_margin: 0,
+            },
+            prior_history: recent_history,
+            ..fixture.execution(flow, "productive-fixture")
+        },
+        &mut provider,
+        &mut MemoryAttempts::default(),
+        &mut sink,
+    )
+    .expect("productive execution");
+
+    assert!(!execution.failed, "{:?}", execution.terminal_error);
+    assert_eq!(provider.bodies.len(), 1, "the mandatory request dispatches");
+    assert!(!provider.bodies[0].to_string().contains("prior answer"));
+    let manifest: serde_json::Value =
+        serde_json::from_str(sink.manifest.trim_end()).expect("manifest parses");
+    assert_eq!(
+        manifest["omitted_source_counts"]["recent_complete_interaction"],
+        1
+    );
 }
 
 #[test]

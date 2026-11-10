@@ -278,37 +278,49 @@ where
     let mut seen_call_ids = BTreeSet::new();
     loop {
         crate::runtime::cancellation::ensure_productive_dispatch_allowed()?;
-        let compiled = compile_provider_turn_context_with_agent_instructions(
-            &context.execution.model_profile,
-            context.execution.registry,
-            flow,
-            phase,
-            phase_execution_id,
-            input,
-            invocation,
-            context.execution.session_id,
-            &builder.history,
-            context.execution.agent_instructions,
-        )?;
-        let mut instructions =
-            String::from_utf8(compiled.provider_bytes.clone()).map_err(|_| {
-                RuntimeError::Protocol("compiled provider context is not UTF-8".to_owned())
-            })?;
-        instructions.push('\n');
-        instructions.push_str(&output_contract_instruction(&phase.output)?);
-        let prompt_cache_key =
-            derive_prompt_cache_key(context.execution.conversation_id, context.execution.model);
-        let body = build_responses_request_body(
-            context.execution.model,
-            &prompt_cache_key,
-            &instructions,
-            provider_input.items(),
-            &tools,
-        )?;
-        context
-            .execution
-            .model_profile
-            .ensure_input_budget(responses_request_input_bytes(&body)?)?;
+        let build_request =
+            |include_recent: bool| -> Result<(CompiledContext, serde_json::Value), RuntimeError> {
+                let compiled = compile_provider_turn_context_with_agent_instructions(
+                    &context.execution.model_profile,
+                    context.execution.registry,
+                    flow,
+                    phase,
+                    phase_execution_id,
+                    input,
+                    invocation,
+                    context.execution.session_id,
+                    &builder.history,
+                    context.execution.agent_instructions,
+                    include_recent,
+                )?;
+                let mut instructions =
+                    String::from_utf8(compiled.provider_bytes.clone()).map_err(|_| {
+                        RuntimeError::Protocol("compiled provider context is not UTF-8".to_owned())
+                    })?;
+                instructions.push('\n');
+                instructions.push_str(&output_contract_instruction(&phase.output)?);
+                let prompt_cache_key = derive_prompt_cache_key(
+                    context.execution.conversation_id,
+                    context.execution.model,
+                );
+                let body = build_responses_request_body(
+                    context.execution.model,
+                    &prompt_cache_key,
+                    &instructions,
+                    provider_input.items(),
+                    &tools,
+                )?;
+                context
+                    .execution
+                    .model_profile
+                    .ensure_input_budget(responses_request_input_bytes(&body)?)?;
+                Ok((compiled, body))
+            };
+        // WHY: optional history yields first; the retry still passes the whole-request check.
+        let (compiled, body) = match build_request(true) {
+            Err(RuntimeError::ContextBudgetExceeded { .. }) => build_request(false)?,
+            request => request?,
+        };
         let request_hash = canonical_request_hash(&body)?;
         context.provider_attempts = context.provider_attempts.saturating_add(1);
         let attempt_id = format!("provider-{:06}", context.provider_attempts);
