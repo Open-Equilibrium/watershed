@@ -1256,6 +1256,87 @@ void main() {
     expect(backend.calls.last, 'history e6');
   });
 
+  testWidgets('a comparison keeps its labels with the records shown', (
+    tester,
+  ) async {
+    final branchB = [
+      ...branchA.take(3),
+      record('b1', 2, BridgeRecordKind.user, 'Use a token bucket', 60000),
+      record('b2', 2, BridgeRecordKind.tool, 'bash', 61000, duration: 900),
+    ];
+    final branchC = [
+      ...branchA.take(3),
+      record('c1', 2, BridgeRecordKind.user, 'Try a queue', 60000),
+    ];
+    final tree = [
+      for (final (index, step) in branchA.indexed)
+        BridgeTreeNode(
+          failed: false,
+          id: step.entry,
+          parent: index == 0 ? null : branchA[index - 1].entry,
+          kind: BridgeEntryKind.other,
+          preview: step.label,
+        ),
+      const BridgeTreeNode(
+        failed: false,
+        id: 'b1',
+        parent: 'e3',
+        kind: BridgeEntryKind.user,
+        preview: 'Use a token bucket',
+      ),
+      const BridgeTreeNode(
+        failed: false,
+        id: 'b2',
+        parent: 'b1',
+        kind: BridgeEntryKind.toolResult,
+        preview: 'bash',
+      ),
+      const BridgeTreeNode(
+        failed: false,
+        id: 'c1',
+        parent: 'e3',
+        kind: BridgeEntryKind.user,
+        preview: 'Try a queue',
+      ),
+    ];
+    await show(
+      tester,
+      historyOf(branchB, tree: tree, leaf: 'b2'),
+      size: shortest,
+    );
+    // Comparing B with C, the branches after the shared steps, then picking A in place of C.
+    backend.histories['b2 c1'] = historyOf(
+      branchB,
+      tree: tree,
+      leaf: 'b2',
+      others: [branchC],
+    );
+    await press(tester, LogicalKeyboardKey.keyC);
+    final gate = backend.gate = Completer<void>();
+    await tester.tap(find.byKey(const ValueKey('tree-e6')));
+    await tester.pump();
+
+    Finder inCompare(Finder finder) =>
+        find.descendant(of: find.byType(CompareView), matching: finder);
+    expect(
+      inCompare(find.text('B')),
+      findsOneWidget,
+      reason: 'while A is read, the headers still name the loaded B and C',
+    );
+    expect(inCompare(find.text('C')), findsOneWidget);
+
+    backend.gate = null;
+    gate.completeError(StateError('offline'));
+    await tester.pumpAndSettle();
+    expect(
+      inCompare(find.text('B')),
+      findsOneWidget,
+      reason: 'a failed read keeps the records and their labels together',
+    );
+    expect(inCompare(find.text('C')), findsOneWidget);
+    expect(inCompare(find.text('A')), findsNothing);
+  });
+
   testWidgets('a comparison names its branches by their refs', (tester) async {
     await tester.binding.setSurfaceSize(shortest);
     final shared = [

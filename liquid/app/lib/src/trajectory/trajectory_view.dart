@@ -113,6 +113,10 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   List<_Line> _shownLines = const [];
   bool _comparing = false;
   List<String> _picked = const [];
+
+  /// The tips the loaded history was read for, so a comparison's labels match its records
+  /// while another pair is picked or read.
+  List<String> _loaded = const [];
   String? _cursor;
 
   /// The history read in progress.
@@ -223,6 +227,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
         setState(() {
           _history = history;
           _graph = graph;
+          _loaded = [for (final tip in leaves) grown(tip)];
           _track = contextTrack(
             history.trajectories.firstOrNull?.records ?? const [],
           );
@@ -773,8 +778,8 @@ class _TrajectoryViewState extends State<TrajectoryView> {
                                       a: compared.trajectories[0],
                                       b: compared.trajectories[1],
                                       comparison: _comparison(compared),
-                                      branchA: _branchFor(_picked[0]),
-                                      branchB: _branchFor(_picked[1]),
+                                      branchA: _branchFor(_loaded[0]),
+                                      branchB: _branchFor(_loaded[1]),
                                       bottom: _clearance,
                                     )
                                   : _ledger(),
@@ -868,7 +873,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   String _compareSummary(BridgeHistory history) {
     final shared = _comparison(history).shared;
     return [
-      '${_branchFor(_picked[0]).ref} ↔ ${_branchFor(_picked[1]).ref} on one time axis',
+      '${_branchFor(_loaded[0]).ref} ↔ ${_branchFor(_loaded[1]).ref} on one time axis',
       if (shared > 0) '◆ branch point after step $shared',
     ].join(' · ');
   }
@@ -889,8 +894,8 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     );
     return Overview(
       tracks: [
-        OverviewTrack(_branchFor(_picked[0]).ref, own(a, comparison.idleA)),
-        OverviewTrack(_branchFor(_picked[1]).ref, own(b, comparison.idleB)),
+        OverviewTrack(_branchFor(_loaded[0]).ref, own(a, comparison.idleA)),
+        OverviewTrack(_branchFor(_loaded[1]).ref, own(b, comparison.idleB)),
       ],
       span: _equalWidth
           ? math.max(a.length, b.length).toDouble()
