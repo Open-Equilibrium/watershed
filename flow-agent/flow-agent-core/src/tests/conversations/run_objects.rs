@@ -6,7 +6,7 @@ use crate::runtime::{
     context::ContextObject,
     conversations::{
         RunObjectReadStage, RunObjectStore, RunObjectUsageSnapshot,
-        with_run_object_read_observer_for_test,
+        set_conversation_file_sync_error_for_path_for_test, with_run_object_read_observer_for_test,
     },
     digest::sha256_hex,
     types::MAX_SESSION_OBJECT_BYTES,
@@ -215,6 +215,65 @@ fn reopened_run_object_store_closes_after_existing_object_verification_fails() {
     assert!(
         reopened.usage_snapshot().is_err(),
         "the store remains closed after integrity failure"
+    );
+}
+
+#[test]
+fn failed_prefix_repair_sync_closes_the_object_store() {
+    let workspace = empty_workspace("run-object-prefix-sync-failure");
+    create_review_run(&workspace);
+    let object = ContextObject {
+        digest: sha256_hex(b"durable object"),
+        bytes: b"durable object".to_vec(),
+    };
+    let uri = format!("session-object:sha256:{}", object.digest);
+    let object_path = workspace_session_dir(&workspace)
+        .join("review/runs/review-1/objects")
+        .join(&object.digest);
+    fs::write(&object_path, &object.bytes[..7]).expect("fixture leaves an interrupted prefix");
+    let store =
+        RunObjectStore::open(&workspace, "review", "review-1").expect("the object store opens");
+    set_conversation_file_sync_error_for_path_for_test(&object_path, std::io::ErrorKind::Other);
+
+    let error = store
+        .persist(std::slice::from_ref(&object))
+        .expect_err("a failed prefix repair synchronization fails the write");
+    assert!(
+        error
+            .to_string()
+            .contains("injected conversation file synchronization failure"),
+        "{error}"
+    );
+    let unpublished = ContextObject {
+        digest: sha256_hex(b"unpublished object"),
+        bytes: b"unpublished object".to_vec(),
+    };
+    assert!(
+        store
+            .persist(std::slice::from_ref(&unpublished))
+            .expect_err("a failed prefix repair closes persistence")
+            .to_string()
+            .contains("closed")
+    );
+    assert!(
+        store
+            .read(&uri)
+            .expect_err("a failed prefix repair closes reads")
+            .to_string()
+            .contains("closed")
+    );
+    assert!(
+        store.usage_snapshot().is_err(),
+        "a failed prefix repair closes usage reporting"
+    );
+    let reopened = RunObjectStore::open(&workspace, "review", "review-1")
+        .expect("the store reopens from its on-disk inventory");
+    assert_eq!(
+        reopened.usage_snapshot().expect("reopened usage reads"),
+        RunObjectUsageSnapshot {
+            object_bytes: u64::try_from(object.bytes.len()).expect("object length fits"),
+            object_count: 1,
+        }
     );
 }
 

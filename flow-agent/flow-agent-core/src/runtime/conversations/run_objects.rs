@@ -333,9 +333,12 @@ impl RunObjectWriter {
             if let Err(source) = file.write_all(&object.bytes[bytes.len()..]) {
                 return self.fail(path_io_error(path.diagnostic_path(), source));
             }
-            conversation_file_sync_checkpoint(path.diagnostic_path())?;
-            file.sync_all()
-                .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
+            if let Err(error) = conversation_file_sync_checkpoint(path.diagnostic_path()) {
+                return self.fail(error);
+            }
+            if let Err(source) = file.sync_all() {
+                return self.fail(path_io_error(path.diagnostic_path(), source));
+            }
             let length =
                 u32::try_from(object.bytes.len()).expect("session object byte limit fits in u32");
             self.accounted_bytes += u64::from(length - entry.length);
