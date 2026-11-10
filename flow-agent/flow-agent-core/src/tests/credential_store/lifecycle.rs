@@ -5,9 +5,11 @@ use crate::runtime::{
     oauth_credential::{CredentialRecord, MAX_OAUTH_FIELD_BYTES, MAX_OAUTH_SECRET_BYTES},
     types::RuntimeError,
 };
+use crate::tests::test_support::TempWorkspace;
 use std::{
     cell::{Cell, RefCell},
     fs,
+    path::PathBuf,
     time::Duration,
 };
 
@@ -315,4 +317,80 @@ fn credential_refresh_reuses_a_winner_after_lock_contention() {
 
     assert_eq!(resolved, winner);
     assert_eq!(waits.get(), 1);
+}
+
+const RECORD_WITHOUT_ROUTING: &[u8] =
+    br#"{"openai-codex":{"type":"oauth","access":"a","refresh":"r","expires":1,"accountId":"x"}}"#;
+
+fn store_with_undecodable_record(name: &str) -> (TempWorkspace, CredentialStore, PathBuf) {
+    let workspace = empty_workspace(name);
+    let path = workspace.join("private/credentials.json");
+    let store = CredentialStore::at(path.clone());
+    store.logout().expect("private empty document initializes");
+    fs::write(&path, RECORD_WITHOUT_ROUTING).expect("undecodable record writes");
+    assert!(store.read().is_err());
+    (workspace, store, path)
+}
+
+#[test]
+fn reauthentication_and_logout_replace_an_undecodable_record() {
+    let (_workspace, store, _) = store_with_undecodable_record("credential-undecodable-replace");
+    let replacement = credential(900_000);
+    store
+        .replace(&replacement)
+        .expect("login replaces an undecodable record");
+    assert_eq!(store.read().expect("replacement reads"), Some(replacement));
+
+    let (_workspace, store, _) = store_with_undecodable_record("credential-undecodable-logout");
+    assert!(
+        store
+            .logout()
+            .expect("logout removes an undecodable record")
+    );
+    assert_eq!(store.read().expect("logged-out store reads"), None);
+}
+
+#[test]
+fn credential_resolution_requires_reauthentication_for_an_undecodable_record() {
+    let (_workspace, store, _) = store_with_undecodable_record("credential-undecodable-resolve");
+    let error = store
+        .resolve_with_clock(
+            1,
+            |_| panic!("an undecodable record cannot refresh"),
+            || Duration::ZERO,
+            |_| {},
+        )
+        .expect_err("an undecodable record is rejected");
+    assert!(matches!(error, RuntimeError::AuthenticationRequired(_)));
+}
+
+#[test]
+fn credential_mutation_fails_closed_for_an_unsafe_document() {
+    use std::os::unix::{fs::PermissionsExt as _, fs::symlink};
+
+    let (_workspace, store, path) = store_with_undecodable_record("credential-unsafe-mode");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("credential mode changes");
+    assert!(store.replace(&credential(900_000)).is_err());
+    assert!(store.logout().is_err());
+    assert_eq!(
+        fs::read(&path).expect("unsafe document remains"),
+        RECORD_WITHOUT_ROUTING
+    );
+
+    let (_workspace, store, path) = store_with_undecodable_record("credential-unsafe-symlink");
+    let target = path.with_file_name("target.json");
+    fs::rename(&path, &target).expect("symlink target moves");
+    symlink(&target, &path).expect("credential symlink creates");
+    assert!(store.replace(&credential(900_000)).is_err());
+    assert!(store.logout().is_err());
+    assert_eq!(
+        fs::read(&target).expect("symlink target remains"),
+        RECORD_WITHOUT_ROUTING
+    );
+    assert!(
+        fs::symlink_metadata(&path)
+            .expect("credential symlink remains")
+            .file_type()
+            .is_symlink()
+    );
 }

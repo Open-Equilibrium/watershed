@@ -33,10 +33,11 @@ use std::{
 pub(crate) const CREDENTIAL_STORE_MAX_BYTES: u64 = 256 * 1024;
 const REFRESH_WINDOW_MILLISECONDS: u64 = 5 * 60 * 1_000;
 
-fn decode_credential_document(bytes: &[u8]) -> Result<Option<CredentialRecord>, RuntimeError> {
-    if bytes.len() as u64 > CREDENTIAL_STORE_MAX_BYTES {
-        return Err(auth_store_failure());
-    }
+/// A protected document's record, or why it does not decode or validate. Only a document that
+/// passed every file-safety check is decoded, so a locked mutation may replace an undecodable one.
+type DecodedDocument = Result<Option<CredentialRecord>, RuntimeError>;
+
+fn decode_credential_document(bytes: &[u8]) -> DecodedDocument {
     let document: CredentialDocument =
         serde_json::from_slice(bytes).map_err(|_| auth_store_failure())?;
     if let Some(credential) = &document.openai_codex {
@@ -105,7 +106,7 @@ impl CredentialStore {
         let Some(parent) = self.open_protected_parent(false)? else {
             return Ok(None);
         };
-        self.read_anchored(&parent)
+        self.read_anchored(&parent)?
     }
 
     pub(crate) fn replace_with_clock(
@@ -115,7 +116,8 @@ impl CredentialStore {
         wait: impl FnMut(Duration),
     ) -> Result<(), RuntimeError> {
         validate_credential_record(credential)?;
-        self.mutate_with_clock(now, wait, |_| Some(credential.clone()))
+        self.mutate_with_clock(now, wait, Some(credential.clone()))
+            .map(|_| ())
     }
 
     pub(crate) fn logout_with_clock(
@@ -123,12 +125,7 @@ impl CredentialStore {
         now: impl FnMut() -> Duration,
         wait: impl FnMut(Duration),
     ) -> Result<bool, RuntimeError> {
-        let mut removed = false;
-        self.mutate_with_clock(now, wait, |current| {
-            removed = current.is_some();
-            None
-        })?;
-        Ok(removed)
+        self.mutate_with_clock(now, wait, None)
     }
 
     pub(crate) fn resolve_with_clock(
@@ -138,7 +135,10 @@ impl CredentialStore {
         lock_now: impl FnMut() -> Duration,
         wait: impl FnMut(Duration),
     ) -> Result<CredentialRecord, RuntimeError> {
-        let current = self.read()?.ok_or_else(authentication_required)?;
+        let Some(parent) = self.open_protected_parent(false)? else {
+            return Err(authentication_required());
+        };
+        let current = require_record(self.read_anchored(&parent)?)?;
         if !needs_refresh(&current, now_epoch_milliseconds) {
             return Ok(current);
         }
@@ -147,9 +147,7 @@ impl CredentialStore {
             .ok_or_else(auth_store_failure)?;
         let lock_path = parent.file(self.lock_leaf()?);
         let _lock = StoreLock::acquire_anchored(&lock_path, lock_now, wait)?;
-        let current = self
-            .read_anchored_and_finalize(&parent)?
-            .ok_or_else(authentication_required)?;
+        let current = require_record(self.read_anchored_and_finalize(&parent)?)?;
         if !needs_refresh(&current, now_epoch_milliseconds) {
             return Ok(current);
         }
@@ -169,23 +167,24 @@ impl CredentialStore {
         self.logout_with_clock(|| started.elapsed(), thread::sleep)
     }
 
+    /// Writes `replacement` under the lock and reports whether a record was present.
     fn mutate_with_clock(
         &self,
         now: impl FnMut() -> Duration,
         wait: impl FnMut(Duration),
-        mutation: impl FnOnce(Option<&CredentialRecord>) -> Option<CredentialRecord>,
-    ) -> Result<(), RuntimeError> {
+        replacement: Option<CredentialRecord>,
+    ) -> Result<bool, RuntimeError> {
         let parent = self
             .open_protected_parent(true)?
             .ok_or_else(auth_store_failure)?;
         let lock_path = parent.file(self.lock_leaf()?);
         let _lock = StoreLock::acquire_anchored(&lock_path, now, wait)?;
-        let current = self.read_anchored_and_finalize(&parent)?;
-        let replacement = mutation(current.as_ref());
+        let present = !matches!(self.read_anchored_and_finalize(&parent)?, Ok(None));
         if let Some(credential) = &replacement {
             validate_credential_record(credential)?;
         }
-        self.write_document_anchored(&parent, replacement)
+        self.write_document_anchored(&parent, replacement)?;
+        Ok(present)
     }
 
     #[cfg(test)]
@@ -235,16 +234,13 @@ impl CredentialStore {
         Ok(Some(bound.parent.clone()))
     }
 
-    fn read_anchored(
-        &self,
-        parent: &AnchoredDir,
-    ) -> Result<Option<CredentialRecord>, RuntimeError> {
+    fn read_anchored(&self, parent: &AnchoredDir) -> Result<DecodedDocument, RuntimeError> {
         parent.validate_private()?;
         let path = parent.file(self.credential_leaf()?);
         let (mut file, metadata) = match open_anchored_file_for_read(&path) {
             Ok(opened) => opened,
             Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
-                return Ok(None);
+                return Ok(Ok(None));
             }
             Err(error) => return Err(error),
         };
@@ -257,13 +253,16 @@ impl CredentialStore {
             .take(CREDENTIAL_STORE_MAX_BYTES + 1)
             .read_to_end(&mut bytes)
             .map_err(|error| store_io(path.diagnostic_path(), error))?;
-        decode_credential_document(&bytes)
+        if bytes.len() as u64 > CREDENTIAL_STORE_MAX_BYTES {
+            return Err(auth_store_failure());
+        }
+        Ok(decode_credential_document(&bytes))
     }
 
     fn read_anchored_and_finalize(
         &self,
         parent: &AnchoredDir,
-    ) -> Result<Option<CredentialRecord>, RuntimeError> {
+    ) -> Result<DecodedDocument, RuntimeError> {
         recover_abandoned_stages_anchored(&parent.file(self.credential_leaf()?))?;
         let current = self.read_anchored(parent)?;
         sync_anchored_directory(parent)?;
@@ -341,6 +340,11 @@ fn open_credential_parent(
 
 fn needs_refresh(credential: &CredentialRecord, now_epoch_milliseconds: u64) -> bool {
     credential.expires <= now_epoch_milliseconds.saturating_add(REFRESH_WINDOW_MILLISECONDS)
+}
+
+/// An absent or undecodable record fails closed and requires reauthentication.
+fn require_record(document: DecodedDocument) -> Result<CredentialRecord, RuntimeError> {
+    document.ok().flatten().ok_or_else(authentication_required)
 }
 
 fn authentication_required() -> RuntimeError {

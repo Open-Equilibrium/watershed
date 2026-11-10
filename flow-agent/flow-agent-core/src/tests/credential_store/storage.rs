@@ -347,6 +347,8 @@ fn protected_credential_mutation_recovers_an_abandoned_stage() {
 
 #[test]
 fn credential_store_convenience_methods_and_error_paths_release_lock_ownership() {
+    use std::os::unix::fs::PermissionsExt as _;
+
     let workspace = empty_workspace("credential-store-lock-cleanup");
     let path = workspace.join("private/credentials.json");
     let lock = path.with_extension("lock");
@@ -365,7 +367,8 @@ fn credential_store_convenience_methods_and_error_paths_release_lock_ownership()
         .acquire_lock_for_test(|| Duration::ZERO, |_| {})
         .expect("logout releases its lock");
 
-    fs::write(&path, b"not-json").expect("malformed fixture write");
+    fs::write(&path, b"{}").expect("empty document write");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("unsafe mode applies");
     assert!(
         store
             .replace_with_clock(&credential(1_000_000), || Duration::ZERO, |_| {})
