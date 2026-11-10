@@ -123,12 +123,16 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   Future<void>? _loading;
   bool _again = false;
 
+  /// The session generation the branches and the selection above belong to.
+  late int _generation;
+
   List<BridgeRecord> get _records =>
       _history?.trajectories.firstOrNull?.records ?? const [];
 
   @override
   void initState() {
     super.initState();
+    _generation = widget.state.generation;
     widget.state.stored.addListener(_stored);
     widget.state.status.addListener(_statusChanged);
     widget.state.models.addListener(_modelsChanged);
@@ -170,11 +174,29 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   /// Stored changes reload at once, unless the agent runs: then they wait for the end of the
   /// current second, so one reload shows the steps stored in it.
   void _stored() {
+    if (widget.state.generation != _generation) _sessionSwitched();
     if (!_busy) {
       _reload();
     } else {
       _throttle ??= Timer(const Duration(seconds: 1), _throttled);
     }
+  }
+
+  /// A session switch: the new session's current branch replaces the branches shown and the
+  /// selection made in the old session.
+  void _sessionSwitched() {
+    _generation = widget.state.generation;
+    widget.comparing.value = false;
+    setState(() {
+      _shown = null;
+      _picked = const [];
+      _comparing = false;
+      _selected = null;
+      _inspecting = false;
+      _range = null;
+      _window = null;
+      _folded.clear();
+    });
   }
 
   void _throttled() {

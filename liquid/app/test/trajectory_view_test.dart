@@ -1180,6 +1180,26 @@ void main() {
     );
   });
 
+  testWidgets('a session switch shows the new session\'s current branch', (
+    tester,
+  ) async {
+    await showBranches(tester);
+    await press(tester, LogicalKeyboardKey.keyC);
+    expect(find.text('Comparing'), findsOneWidget);
+
+    await state.newSession();
+    await tester.pumpAndSettle();
+    expect(
+      backend.calls
+          .skipWhile((call) => call != 'new session')
+          .where((call) => call.startsWith('history'))
+          .toSet(),
+      {'history'},
+      reason: 'the branches of the old session are not read in the new one',
+    );
+    expect(find.text('Comparing'), findsNothing);
+  });
+
   testWidgets(
     'leaving Settings shows the Trajectory keys outside a comparison',
     (tester) async {
