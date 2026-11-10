@@ -562,6 +562,30 @@ void main() {
     ]);
   });
 
+  test('a turn keeps its place when only an earlier read succeeded', () async {
+    // A read that began before the turn ended returns the turns from before its end.
+    backend.turnList = const [];
+    backend.turnsGate = Completer();
+    final earlier = state.readChanges();
+    await turn(1);
+    backend.turnsFailFrom = backend.turnReads + 1;
+    backend.turnsGate!.complete();
+    await earlier;
+    await pumpEventQueue();
+    backend.turnsFailFrom = null;
+    backend.turnList = [
+      turnOf('T1', number: 1, added: 1, removed: 0),
+      turnOf('T2', number: 2, added: 1, removed: 0),
+    ];
+    await turn(2);
+    expect(state.items.value.map((view) => view.turnEnd?.id ?? '${view.id}'), [
+      '1',
+      'T1',
+      '2',
+      'T2',
+    ]);
+  });
+
   test('says nothing below a turn that changed no file', () async {
     backend.turnList = [
       turnOf('T1', number: 1, files: 0, added: 0, removed: 0),

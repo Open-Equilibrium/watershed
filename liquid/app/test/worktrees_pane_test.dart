@@ -131,6 +131,19 @@ void main() {
       findsOneWidget,
     );
     expect(button('Open folder'), findsOneWidget);
+
+    await tester.tap(button('Close'));
+    await tester.pumpAndSettle();
+    backend.reviews[hotfix.path] = removalOf(hotfix, moreIgnored: true);
+    await tester.tap(button('Remove…'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'Git ignores files in this folder. Checkpoints and a normal stash do not save them. Move or remove them yourself before removing the worktree.',
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('a worktree that changed during review is shown again', (

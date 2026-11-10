@@ -215,6 +215,12 @@ impl Checkpoints {
     pub async fn capture(&self, checkpoint: &Checkpoint) -> Result<(), DiffError> {
         let reference = checkpoint.reference()?;
         let mut tree = Err(DiffError::Closed);
+        // Set before the first await of an end checkpoint, and cleared however the capture ends.
+        let _ending = (checkpoint.phase == Phase::End).then(|| {
+            self.ending
+                .store(self.guards(checkpoint), Ordering::Relaxed);
+            EndingMark(&self.ending)
+        });
         if checkpoint.phase == Phase::Start {
             // A start whose run never settled ends that mark first, so it removes no name the
             // new one holds.
@@ -255,8 +261,6 @@ impl Checkpoints {
             }
             *slot = Some((checkpoint.clone(), running));
         } else {
-            self.ending
-                .store(self.guards(checkpoint), Ordering::Relaxed);
             tree = self.tree().await;
         }
         let captured = async {
@@ -275,7 +279,6 @@ impl Checkpoints {
             }) {
                 slot.take();
             }
-            self.ending.store(false, Ordering::Relaxed);
         }
         captured
     }
@@ -505,7 +508,9 @@ impl Checkpoints {
     pub async fn sessions(&self) -> Result<Vec<(String, usize)>, DiffError> {
         let tree = self.tree().await?;
         let mut sessions: Vec<(String, usize)> = Vec::new();
-        // Git lists the refs sorted, so each session's and each turn's refs come together.
+        // Git lists the refs in name order, so each session's and each turn's refs come together.
+        // That order may differ from the order of the ids (`a-b` lists before `a`), so the
+        // sessions are sorted below.
         let mut last = String::new();
         self.bounded(tree.each_reference(REFS, |reference| {
             let mut ids = reference.trim_start_matches(REFS).split('/');
@@ -534,6 +539,9 @@ impl Checkpoints {
     /// the checkpoints' space at its next cleanup; outside Git only the file goes.
     pub async fn delete_session(&self, session: &str, file: &Path) -> Result<(), DiffError> {
         valid_id(session)?;
+        // This window's ending turn is waited for before the folder is held, since every turn
+        // start takes the folder first and would stall meanwhile.
+        self.await_own_ending().await;
         // Turns outside Git hold the folder's guard, which Initialize Git takes too, so it is
         // held before the repository is looked up and until the file is gone.
         let _folder = Checkout::folder(&self.dir)?.alone().await?;
@@ -545,7 +553,7 @@ impl Checkpoints {
         // Held until the file is gone.
         let _alone = match &tree {
             Some(tree) => {
-                let alone = self.alone_everywhere(tree).await?;
+                let alone = self.alone_everywhere(tree, false).await?;
                 self.bounded(tree.delete_references(&format!("{REFS}{session}/")))
                     .await?;
                 Some(alone)
@@ -559,7 +567,7 @@ impl Checkpoints {
     /// refused while an agent runs in any of them.
     pub async fn remove_all(&self) -> Result<(), DiffError> {
         let tree = self.tree().await?;
-        let _alone = self.alone_everywhere(&tree).await?;
+        let _alone = self.alone_everywhere(&tree, true).await?;
         self.bounded(tree.delete_references(REFS)).await
     }
 
@@ -586,7 +594,7 @@ impl Checkpoints {
         reviewed: &crate::WorktreeRemoval,
     ) -> Result<crate::WorktreeRemoved, DiffError> {
         let tree = self.tree().await?;
-        let _alone = self.alone_everywhere(&tree).await?;
+        let _alone = self.alone_everywhere(&tree, true).await?;
         let recheck = || async {
             let now = self
                 .bounded(tree.worktree_removal(&reviewed.worktree.path))
@@ -614,10 +622,14 @@ impl Checkpoints {
     }
 
     /// Holds the repository alone, so no turn runs or starts in any of its worktrees, waiting a
-    /// moment for a turn that is ending, and while only this session's turn whose end checkpoint
-    /// is being taken runs, up to the time limit; a refusal names the sessions running in its
-    /// worktrees.
-    async fn alone_everywhere(&self, tree: &WorkingTree) -> Result<Alone, DiffError> {
+    /// moment for a turn that is ending, and with `ending_wait` while only this session's turn
+    /// whose end checkpoint is being taken runs, up to the time limit; a refusal names the
+    /// sessions running in its worktrees.
+    async fn alone_everywhere(
+        &self,
+        tree: &WorkingTree,
+        ending_wait: bool,
+    ) -> Result<Alone, DiffError> {
         let checkouts = tree.checkouts()?;
         let running = || -> Vec<String> {
             checkouts
@@ -627,7 +639,8 @@ impl Checkpoints {
         };
         let ending_alone = |named: &[String]| {
             let slot = self.running.lock().expect("running lock");
-            self.ending.load(Ordering::Relaxed)
+            ending_wait
+                && self.ending.load(Ordering::Relaxed)
                 && slot
                     .as_ref()
                     .is_some_and(|(start, _)| named.iter().all(|name| *name == start.session))
@@ -643,6 +656,14 @@ impl Checkpoints {
                 }
                 held => return held,
             }
+        }
+    }
+
+    /// Waits, up to the time limit, while this window's end checkpoint is being taken.
+    async fn await_own_ending(&self) {
+        let waited = Instant::now();
+        while self.ending.load(Ordering::Relaxed) && waited.elapsed() < self.timeout {
+            tokio::time::sleep(RETRY).await;
         }
     }
 
@@ -781,6 +802,16 @@ impl Checkpoints {
                 .map(|_| Err(DiffError::Closed))
         })
         .await
+    }
+}
+
+/// Marks a turn's end checkpoint as being taken until dropped, so a capture that ends early, or is
+/// dropped while it waits, leaves no mark for a later delete to wait on.
+struct EndingMark<'a>(&'a std::sync::atomic::AtomicBool);
+
+impl Drop for EndingMark<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Relaxed);
     }
 }
 

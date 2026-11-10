@@ -139,6 +139,8 @@ class ShortcutController extends SavedSettings<ShortcutSettings> {
   /// time, so the last change wins. A Liquid key that cannot be turned on is left off, since
   /// its profile would otherwise hide every shortcut hint; one that cannot be turned off stays
   /// on with the settings before, as macOS still maps Caps Lock.
+  /// `_pending` orders both applying and saving, so the chain that [SavedSettings] keeps adds
+  /// no ordering here.
   Future<void> _sync({required bool store}) =>
       _pending = _pending.then((_) async {
         final want = value.liquidKey;

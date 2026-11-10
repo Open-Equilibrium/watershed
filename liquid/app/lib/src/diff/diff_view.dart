@@ -883,14 +883,15 @@ Widget _code(BuildContext context, DiffLine line) {
       ).copyWith(fontSize: WsMetrics.fsSmall),
     );
   }
+  final crlf = !cut && text.endsWith('\r');
   final end = cut
       ? '…'
-      : text.endsWith('\r')
+      : crlf
       ? '␍'
       : null;
   final shown = highlight(
     context,
-    end == '␍' ? text.substring(0, text.length - 1) : text,
+    crlf ? text.substring(0, text.length - 1) : text,
   );
   return Text.rich(
     end == null

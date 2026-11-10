@@ -453,10 +453,11 @@ class SessionState {
   Future<void> _readChangesOnce() async {
     final generation = _generation;
     try {
+      final started = ++_turnReadsStarted;
       final read = await _backend.turns();
       if (generation != _generation) return;
       turns.value = read;
-      _turnReads++;
+      _turnsRead = started;
       if (diffScope.value is UncommittedChanges) {
         final whitespace = hideWhitespace.value;
         final (revision, files) = await _backend.uncommittedChanges(
@@ -555,15 +556,17 @@ class SessionState {
   /// `ended` turns had ended live when it was asked.
   Future<void> _endTurn(int ended) async {
     final generation = _generation;
-    final read = _turnReads;
+    final asked = _turnReadsStarted;
     unawaited(git.refresh());
     await readChanges();
     if (generation != _generation) return;
-    _chat.endTurns(turns.value, _turnReads == read ? 0 : ended);
+    _chat.endTurns(turns.value, _turnsRead > asked ? ended : 0);
   }
 
-  /// How often the turns were read, so a turn's end can tell a failed read.
-  int _turnReads = 0;
+  /// How many turn reads began, and the last of them that succeeded: a turn's end trusts
+  /// only the turns of a read that began after it.
+  int _turnReadsStarted = 0;
+  int _turnsRead = 0;
 
   static const _outsideGit = (
     title: 'Not a Git repository',

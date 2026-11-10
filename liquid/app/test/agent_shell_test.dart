@@ -1023,6 +1023,40 @@ void main() {
       ]);
       state.git.stop();
     });
+
+    testWidgets('warns of a worktree removal that changed meanwhile', (
+      tester,
+    ) async {
+      await showBranch(tester);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.comma);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Worktrees'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(InkWell, 'Remove…'));
+      await tester.pumpAndSettle();
+      final gate = backend.removeGate = Completer();
+      await tester.tap(find.widgetWithText(InkWell, 'Remove worktree'));
+      await tester.pump();
+
+      await emit(tester, confirm('q1'));
+      expect(find.text('Remove hotfix/login worktree?'), findsNothing);
+      gate.complete(
+        const BridgeWorktreeOutcome(
+          kind: BridgeWorktreeOutcomeKind.changed,
+          running: [],
+          detail: '',
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(notices(), [
+        '/code/api-hotfix changed since this dialog opened. Nothing was removed.',
+      ]);
+      expect(state.notices.value.single.level, BridgeLevel.warning);
+      await tester.pump(const Duration(seconds: 7));
+      state.git.stop();
+    });
   });
 
   testWidgets('answers a question in place of the composer', (tester) async {

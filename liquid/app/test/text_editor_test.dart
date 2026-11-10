@@ -952,6 +952,36 @@ void main() {
     expect(fake.textsOf(page), ['abcde'], reason: 'later edits go on');
   });
 
+  testWidgets('a refused edit is read again after a read that failed', (
+    tester,
+  ) async {
+    await show(tester, ['abcd']);
+    await caret(tester, 0, 1);
+    fake.gate = Completer();
+    fake.refuseNext = 1;
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'bcd',
+        selection: TextSelection.collapsed(offset: 0),
+      ),
+    );
+    await tester.pump();
+    field(tester, 0).controller!.selection = const TextSelection.collapsed(
+      offset: 3,
+    );
+    await type(tester, 0, 'X');
+    fake.refuseNextQuery = BridgeQueryKind.text;
+    fake.gate!.complete();
+    await tester.pumpAndSettle();
+
+    await type(tester, 0, 'Y');
+    await type(tester, 0, 'Z');
+    expect(fake.textsOf(page), [
+      'abcdZ',
+    ], reason: 'a key after a refused edit reads the text again');
+    expect(field(tester, 0).controller!.text, 'abcdZ');
+  });
+
   testWidgets('a person who moved to another Text Block keeps the caret', (
     tester,
   ) async {

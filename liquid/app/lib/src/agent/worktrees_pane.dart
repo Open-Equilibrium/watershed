@@ -263,7 +263,12 @@ class _RemoveWorktreeState extends State<_RemoveWorktree> {
       );
       if (mounted) Navigator.of(context).pop();
     } else if (!mounted) {
-      widget.state.notify(BridgeLevel.error, error!);
+      widget.state.notify(
+        outcome.kind == BridgeWorktreeOutcomeKind.changed
+            ? BridgeLevel.warning
+            : BridgeLevel.error,
+        error!,
+      );
     } else {
       setState(() {
         _removing = false;
@@ -378,7 +383,7 @@ class _RemoveWorktreeState extends State<_RemoveWorktree> {
             ),
           if (ignored > 0 || review.moreIgnored)
             Text(
-              'Git ignores ${review.moreIgnored ? 'more than ' : ''}${plural(ignored, 'file')} in this folder. Checkpoints and a normal stash do not save them. Move or remove them yourself before removing the worktree.',
+              '${ignored == 0 ? 'Git ignores files' : 'Git ignores ${review.moreIgnored ? 'more than ' : ''}${plural(ignored, 'file')}'} in this folder. Checkpoints and a normal stash do not save them. Move or remove them yourself before removing the worktree.',
               style: text,
             ),
           if (_error case final error?) WarningNotice(error),

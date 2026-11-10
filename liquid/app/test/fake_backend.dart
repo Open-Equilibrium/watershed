@@ -109,13 +109,20 @@ class FakeBackend implements SessionBackend {
 
   @override
   Future<List<BridgeTurn>> turns() async {
+    final read = ++turnReads;
     await turnsGate?.future;
-    if (failTurns) throw StateError('no turns');
+    if (failTurns || (turnsFailFrom != null && read >= turnsFailFrom!)) {
+      throw StateError('no turns');
+    }
     return turnList;
   }
 
-  /// Whether turn reads fail.
+  /// Whether turn reads fail, and the first read that fails while earlier ones succeed.
   bool failTurns = false;
+  int? turnsFailFrom;
+
+  /// How many turn reads began.
+  int turnReads = 0;
 
   /// Holds turn reads until it completes.
   Completer<void>? turnsGate;
@@ -1222,6 +1229,7 @@ BridgeWorktreeRemoval removalOf(
   int unpushed = 0,
   int stranded = 0,
   bool moreMarked = false,
+  bool moreIgnored = false,
 }) => BridgeWorktreeRemoval(
   worktree: worktree,
   head: 'c0ffee',
@@ -1229,12 +1237,13 @@ BridgeWorktreeRemoval removalOf(
   moreFiles: false,
   moreMarked: moreMarked,
   ignored: ignored,
-  moreIgnored: false,
+  moreIgnored: moreIgnored,
   unpushed: unpushed,
   stranded: stranded,
   removable:
       files.isEmpty &&
       ignored == 0 &&
+      !moreIgnored &&
       stranded == 0 &&
       !moreMarked &&
       !worktree.unreadable &&

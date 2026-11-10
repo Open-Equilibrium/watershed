@@ -48,7 +48,10 @@ pub use worktrees::{Worktree, WorktreeFile, WorktreeFileState, WorktreeRemoval, 
 
 #[cfg(test)]
 pub(crate) use process::REPOSITORY_ENV;
-use process::{Git, git, git_command, git_path, git_path_output, git_ref_output, unreadable};
+use process::{
+    Git, git, git_command, git_path, git_path_output, git_ref_output, sparse_checkout_enabled,
+    unreadable,
+};
 #[cfg(test)]
 pub(crate) use revert::holds_repository;
 
@@ -807,6 +810,7 @@ impl WorkingTree {
     /// Clears the marks with which the project told Git to assume files unchanged or outside its
     /// work in the copied index; `git add` would skip those files and hide their changes.
     async fn unmark(&self, env: &[(&'static str, OsString)]) -> Result<(), DiffError> {
+        let sparse = sparse_checkout_enabled(&self.root).await?;
         let mut command = git_command(&self.root, env, &["ls-files", "-z", "-v"]);
         let mut listing = Git::spawn(command.stderr(Stdio::null()))?;
         let stdout = listing.child.stdout.take().expect("stdout is piped");
@@ -821,14 +825,9 @@ impl WorkingTree {
             {
                 marked.extend_from_slice(path);
                 marked.push(0);
-                // A marked file absent from disk, as outside a sparse checkout, holds no edit;
-                // keeping its skip mark stops Git from listing it as deleted.
-                if self
-                    .root
-                    .join(OsStr::from_bytes(path))
-                    .symlink_metadata()
-                    .is_ok()
-                {
+                // A skip mark on a file that sparse checkout leaves out of the work stays: such a
+                // file holds no edit, and clearing its mark would list it as deleted.
+                if !left_out_by_sparse(&self.root, path, sparse) {
                     present.extend_from_slice(path);
                     present.push(0);
                 }
@@ -866,6 +865,14 @@ impl WorkingTree {
             ("GIT_OPTIONAL_LOCKS", "0".into()),
         ]
     }
+}
+
+/// Whether sparse checkout leaves the file at `path` out of the work: it is then absent from disk
+/// by design. Any other error, such as a permission failure, leaves the file to be checked.
+fn left_out_by_sparse(root: &Path, path: &[u8], sparse: bool) -> bool {
+    sparse
+        && std::fs::symlink_metadata(root.join(OsStr::from_bytes(path)))
+            .is_err_and(|error| error.kind() == ErrorKind::NotFound)
 }
 
 /// Each file's added and removed lines from `git diff --numstat -z`; a binary file counts none.

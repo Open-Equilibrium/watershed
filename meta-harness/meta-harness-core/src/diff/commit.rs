@@ -1,7 +1,7 @@
 //! Whole-file commits and the checkout compared with its last commit. Explicit writes use
 //! the user's Git and hooks; snapshots keep the user's index intact.
 
-use super::process::{paths as nul_paths, user_git, user_git_input};
+use super::process::{paths as nul_paths, sparse_checkout_enabled, user_git, user_git_input};
 use super::*;
 use std::collections::BTreeMap;
 
@@ -271,6 +271,7 @@ impl WorkingTree {
             // An untracked file must first be known to Git for --only. Intent-to-add leaves its
             // content unstaged, also if the user's hook refuses the commit. Staged deletions
             // are absent from the index too; --only records them without adding a missing path.
+            let sparse = sparse_checkout_enabled(&self.root).await?;
             let mut marked = Vec::new();
             let mut present = Vec::new();
             for entry in &entries {
@@ -280,14 +281,9 @@ impl WorkingTree {
                 {
                     marked.extend_from_slice(path);
                     marked.push(0);
-                    // A skip mark on a file absent from disk stays: outside a sparse checkout
+                    // A skip mark on a file that sparse checkout leaves out of the work stays:
                     // such a file holds no edit.
-                    if self
-                        .root
-                        .join(OsStr::from_bytes(path))
-                        .symlink_metadata()
-                        .is_ok()
-                    {
+                    if !left_out_by_sparse(&self.root, path, sparse) {
                         present.extend_from_slice(path);
                         present.push(0);
                     }

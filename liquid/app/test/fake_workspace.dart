@@ -41,6 +41,9 @@ class FakeWorkspace implements LiquidWorkspace {
   /// Fails every query with this text.
   String? refuseQueries;
 
+  /// Fails the next query of this kind, once.
+  BridgeQueryKind? refuseNextQuery;
+
   /// While set, each query of [deferredKinds] answers from the state at its call but waits
   /// for its own release.
   List<Completer<void>>? deferred;
@@ -442,6 +445,10 @@ class FakeWorkspace implements LiquidWorkspace {
   Future<BridgeAnswer> query({required BridgeQuery query}) async {
     asked.add(query);
     if (refuseQueries case final refused?) throw refused;
+    if (refuseNextQuery == query.kind) {
+      refuseNextQuery = null;
+      throw 'refused';
+    }
     final answer = _answer(query);
     if (deferred case final held? when deferredKinds.contains(query.kind)) {
       final release = Completer<void>();

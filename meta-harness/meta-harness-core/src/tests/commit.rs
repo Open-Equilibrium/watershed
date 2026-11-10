@@ -1,5 +1,5 @@
 use super::checkpoint::{Repo, at, run};
-use crate::{Checkpoints, DiffError, Phase, Whitespace};
+use crate::{ChangeStatus, Checkpoints, DiffError, Phase, Whitespace};
 
 fn identity(repo: &Repo) {
     repo.git(&["config", "user.name", "Test"]);
@@ -148,6 +148,50 @@ fn skip_marks_hide_only_files_absent_from_the_work() {
             repo.git(&["ls-tree", "-r", "--name-only", "HEAD"])
                 .lines()
                 .any(|path| path == "dir/b.txt")
+        );
+    });
+}
+
+#[test]
+fn skip_mark_without_sparse_checkout_keeps_a_deletion_visible() {
+    run(async {
+        // Without sparse checkout no file is left out of the work, so a deleted file is a deletion.
+        let repo = Repo::new("skip-deleted-without-sparse");
+        identity(&repo);
+        repo.write("b.txt", "b\n");
+        repo.git(&["add", "b.txt"]);
+        repo.git(&["commit", "-m", "Add b"]);
+        repo.git(&["update-index", "--skip-worktree", "b.txt"]);
+        std::fs::remove_file(repo.path().join("b.txt")).unwrap();
+        let checkpoints = Checkpoints::new(repo.path());
+        let (_, changes) = checkpoints
+            .uncommitted_changes(Whitespace::Shown)
+            .await
+            .unwrap();
+        assert_eq!(
+            changes
+                .iter()
+                .map(|file| (file.path.as_str(), file.status))
+                .collect::<Vec<_>>(),
+            [("b.txt", ChangeStatus::Deleted)]
+        );
+        let plan = checkpoints.commit_plan(&[]).await.unwrap();
+        assert_eq!(
+            plan.files
+                .iter()
+                .map(|file| (file.change.path.as_str(), file.change.status))
+                .collect::<Vec<_>>(),
+            [("b.txt", ChangeStatus::Deleted)]
+        );
+        checkpoints
+            .commit(&plan.snapshot, &["b.txt".into()], "Delete b", None)
+            .await
+            .unwrap();
+        assert!(
+            !repo
+                .git(&["ls-tree", "-r", "--name-only", "HEAD"])
+                .lines()
+                .any(|path| path == "b.txt")
         );
     });
 }

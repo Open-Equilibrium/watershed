@@ -1991,6 +1991,120 @@ fn deleting_waits_for_this_windows_turn_until_its_end_is_taken() {
 }
 
 #[test]
+fn a_dropped_end_checkpoint_clears_its_ending_mark() {
+    run(async {
+        let repo = Repo::new("ending-dropped");
+        let mut checkpoints = Checkpoints::new(repo.path());
+        // Long enough that a refusal after the long wait is told apart from one after the short wait.
+        checkpoints.set_timeout(Duration::from_secs(10));
+        checkpoints
+            .capture(&at("t1", Phase::Start))
+            .await
+            .expect("started");
+        // The end checkpoint waits for the capture in progress, and dropping it cancels that wait.
+        let held = checkpoints.hold().await;
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(100),
+                checkpoints.capture(&at("t1", Phase::End)),
+            )
+            .await
+            .is_err(),
+            "the end checkpoint waits"
+        );
+        drop(held);
+        checkpoints
+            .capture(&at("t2", Phase::Start))
+            .await
+            .expect("started");
+        let refused = std::time::Instant::now();
+        assert!(matches!(
+            checkpoints.remove_all().await,
+            Err(DiffError::AgentRunning(running)) if running == ["s1"]
+        ));
+        assert!(
+            refused.elapsed() < Duration::from_secs(10),
+            "refused after the short wait, not the long one"
+        );
+    });
+}
+
+#[test]
+fn a_delete_waiting_for_its_end_leaves_other_windows_turn_starts_free() {
+    run(async {
+        let repo = Repo::new("delete-ending-windows");
+        let mut checkpoints = Checkpoints::new(repo.path());
+        // Long enough that a refusal after the long wait is told apart from one after the short wait.
+        checkpoints.set_timeout(Duration::from_secs(10));
+        let checkpoints = std::sync::Arc::new(checkpoints);
+        checkpoints
+            .capture(&at("t1", Phase::Start))
+            .await
+            .expect("started");
+        let file = repo.path().join(".git/s1.jsonl");
+        std::fs::write(&file, "{}\n").expect("session file");
+        let theirs = |turn: &str, phase| Checkpoint {
+            session: "s2".to_owned(),
+            turn: turn.to_owned(),
+            phase,
+        };
+        let held = checkpoints.hold().await;
+        let ending = tokio::spawn({
+            let checkpoints = checkpoints.clone();
+            async move { checkpoints.capture(&at("t1", Phase::End)).await }
+        });
+        let deleting = tokio::spawn({
+            let (checkpoints, file) = (checkpoints.clone(), file.clone());
+            async move { checkpoints.delete_session("s1", &file).await }
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Another window of the repository starts a turn while this window's end waits for its
+        // capture; the delete holds nothing meanwhile, so the start does not wait for it.
+        let other = Checkpoints::new(repo.path());
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            other.capture(&theirs("u1", Phase::Start)),
+        )
+        .await
+        .expect("started without waiting for this window's end")
+        .expect("started");
+        other
+            .capture(&theirs("u1", Phase::End))
+            .await
+            .expect("ended");
+        drop(held);
+        ending.await.expect("joined").expect("ended");
+        deleting
+            .await
+            .expect("joined")
+            .expect("deleted once the turn ended");
+        assert!(!file.exists());
+
+        // A turn of the same session running in another window refuses the delete within the
+        // short wait, as no turn of this window is ending.
+        std::fs::write(&file, "{}\n").expect("session file");
+        other
+            .capture(&Checkpoint {
+                session: "s1".to_owned(),
+                turn: "u2".to_owned(),
+                phase: Phase::Start,
+            })
+            .await
+            .expect("started");
+        let refused = std::time::Instant::now();
+        assert!(matches!(
+            checkpoints.delete_session("s1", &file).await,
+            Err(DiffError::AgentRunning(running)) if running == ["s1"]
+        ));
+        assert!(
+            refused.elapsed() < Duration::from_secs(10),
+            "refused after the short wait, not the long one"
+        );
+        assert!(file.exists(), "kept");
+    });
+}
+
+#[test]
 fn checkpoints_listed_past_any_output_limit_are_counted_and_removed() {
     run(async {
         let repo = Repo::new("remove-many");

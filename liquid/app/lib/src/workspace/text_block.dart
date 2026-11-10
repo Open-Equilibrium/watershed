@@ -567,10 +567,14 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   }
 
   /// Sends the change from the stored text to `text` as one edit; after a refused one, none
-  /// until the stored text is read again.
+  /// until the stored text is read again, which each change asks for.
   void _send(String text) {
     final stored = _stored!;
-    if (text == stored || _edits.refused != null) return;
+    if (_edits.refused != null) {
+      unawaited(_read());
+      return;
+    }
+    if (text == stored) return;
     _stored = text;
     _write(textEdit(_page, block, stored, text), chain: _edits);
   }
