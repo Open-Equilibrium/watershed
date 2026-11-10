@@ -352,7 +352,8 @@ impl WorkingTree {
                     &[],
                     &["log", "-1", "--encoding=UTF-8", "--format=%s", dropped],
                 )
-                .await?
+                .await
+                .map_err(|error| lost(dropped, &error.to_string()))?
             };
             user_git(
                 &self.root,

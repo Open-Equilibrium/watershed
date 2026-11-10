@@ -2767,6 +2767,47 @@ fn a_stash_liquid_cannot_put_back_is_named_for_recovery() {
 }
 
 #[test]
+fn a_foreign_stash_whose_subject_cannot_be_read_is_named_for_recovery() {
+    run(async {
+        let repo = Repo::new("stash-subject-unreadable");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.git(&["branch", "other"]);
+        repo.write("a.txt", "mine\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("left");
+        checkpoints
+            .switch_branch(&local(&main), Changes::Bring)
+            .await
+            .expect("back");
+        let mine = stash_of(&checkpoints).await;
+        let theirs = external_stash(&repo, "theirs\n");
+        let root = repo.path().to_owned();
+        let stored = theirs.clone();
+        // Another Git stores a stash on top, so Liquid drops the other entry, and then the commit
+        // log cannot read its subject any more.
+        crate::diff::before_drop(repo.path(), move || {
+            let external = Repo(root.clone());
+            external.git(&["stash", "store", "-m", "theirs", &stored]);
+            external.git(&["config", "log.date", "bogus"]);
+            std::mem::forget(external);
+        });
+
+        let discarded = checkpoints.discard_stash(&mine).await;
+
+        let error = discarded
+            .expect_err("the other stash was dropped and cannot be read")
+            .to_string();
+        assert!(
+            error.contains(&format!("git stash store {theirs}")),
+            "{error}"
+        );
+    });
+}
+
+#[test]
 fn a_concurrent_store_during_save_preserves_the_own_stash_and_index() {
     run(async {
         for refused in [false, true] {
