@@ -698,6 +698,25 @@ fn a_git_that_cannot_read_the_project_is_reported_instead_of_outside_git() {
 }
 
 #[test]
+fn a_configuration_error_quoting_the_discovery_message_is_not_outside_git() {
+    run(async {
+        let repo = Repo::new("config-quoting-discovery");
+        repo.git(&["config", "core.abbrev", "not a git repository"]);
+        let checkpoints = Checkpoints::new(repo.path());
+        let opened = checkpoints.in_repository().await;
+        assert!(
+            matches!(&opened, Err(error) if error.to_string().contains("core.abbrev")),
+            "{opened:?}"
+        );
+        let started = checkpoints.capture(&at("t1", Phase::Start)).await;
+        assert!(
+            started.is_err(),
+            "a start falls back to the folder guard only outside Git: {started:?}"
+        );
+    });
+}
+
+#[test]
 fn a_project_that_could_not_be_captured_is_reported_instead_of_unchanged() {
     use std::os::unix::fs::PermissionsExt;
     run(async {
