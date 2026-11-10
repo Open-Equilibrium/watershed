@@ -631,7 +631,8 @@ fn cells(
 
 fn matches(cell: Option<&Cell>, matches: &Match) -> bool {
     match (matches, cell) {
-        (Match::Empty, cell) => cell.is_none(),
+        // A value that is no cell matches the same rows as Empty: the index keeps no empty cell.
+        (Match::Empty | Match::Is(Cell::Empty), cell) => cell.is_none(),
         (Match::NotEmpty, cell) => cell.is_some(),
         // Numbers by value, so either zero finds a stored zero.
         (Match::Is(Cell::Number(value)), Some(Cell::Number(stored))) => value == stored,

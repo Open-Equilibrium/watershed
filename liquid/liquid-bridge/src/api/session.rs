@@ -21,7 +21,7 @@ use crate::api::history::{
 use crate::convert::describe;
 use crate::frb_generated::StreamSink;
 use crate::ready::{SHUTDOWN_GRACE, error_output, ready};
-use crate::stream::{STREAM_WINDOW, gather, push};
+use crate::stream;
 
 pub(crate) static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
@@ -168,34 +168,16 @@ impl AgentSession {
     #[flutter_rust_bridge::frb(ignore)]
     pub fn forward(
         &self,
-        mut deliver: impl FnMut(BridgeEvent) -> bool + Send + 'static,
+        deliver: impl FnMut(BridgeEvent) -> bool + Send + 'static,
     ) -> Result<(), String> {
-        let mut receiver = self
+        let receiver = self
             .receiver
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take()
             .ok_or_else(|| "the session's events already have a subscriber".to_owned())?;
         let early = std::mem::take(&mut *self.early.lock().unwrap_or_else(PoisonError::into_inner));
-        RUNTIME.spawn(async move {
-            // Events from before the start finished come first.
-            let mut batch = Vec::new();
-            for event in early {
-                push(&mut batch, BridgeEvent::from(event));
-            }
-            if !std::mem::take(&mut batch).into_iter().all(&mut deliver) {
-                return;
-            }
-            while let Some(event) = receiver.recv().await {
-                push(&mut batch, BridgeEvent::from(event));
-                // Bounded by the window, so a busy agent never holds delivery back.
-                gather(&mut batch, &mut receiver, tokio::time::sleep(STREAM_WINDOW)).await;
-                // Dart closed the stream: stop; dropping the session ends the agent.
-                if !std::mem::take(&mut batch).into_iter().all(&mut deliver) {
-                    break;
-                }
-            }
-        });
+        RUNTIME.spawn(stream::forward(early, receiver, deliver));
         Ok(())
     }
 

@@ -21,7 +21,7 @@ use crate::api::session::{
     AgentSession, BridgeCheckpointSession, BridgeModel, BridgeStoredSession, SessionConfig,
 };
 use crate::convert::describe;
-use crate::stream::{gather, push};
+use crate::stream::{forward, gather, push};
 
 /// The extension path the fake agents are started with.
 const EXTENSION: &str = "/w/meta-harness/pi-extension/watershed.ts";
@@ -575,6 +575,51 @@ fn gathers_streaming_text_until_its_window_passes() {
         gather(&mut batch, &mut receiver, std::future::pending()).await;
         assert_eq!(batch.len(), 2);
     });
+}
+
+#[test]
+fn forwards_streaming_text_once_its_window_passed() {
+    let delta = |text: &str| {
+        SessionEvent::Agent(AgentEvent::ContentDelta {
+            item: ItemId(1),
+            delta: text.to_owned(),
+        })
+    };
+    let ms = Duration::from_millis;
+    tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .start_paused(true)
+        .build()
+        .expect("runtime starts")
+        .block_on(async {
+            let (events, receiver) = tokio::sync::mpsc::channel(16);
+            let (delivered, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
+            let start = tokio::time::Instant::now();
+            tokio::spawn(forward(Vec::new(), receiver, move |event| {
+                delivered
+                    .send((start.elapsed(), event.kind, event.text))
+                    .is_ok()
+            }));
+            let streamed =
+                |at, text: &str| Some((at, BridgeEventKind::ContentDelta, Some(text.to_owned())));
+            events.send(delta("Hel")).await.expect("sent");
+            tokio::time::sleep(ms(30)).await;
+            events.send(delta("lo")).await.expect("sent");
+            assert_eq!(deliveries.recv().await, streamed(ms(50), "Hello"));
+            // Anything else ends the window at once, with the text before it.
+            tokio::time::sleep(ms(10)).await;
+            events.send(delta("!")).await.expect("sent");
+            let completed = AgentEvent::TurnCompleted { turn: TurnId(1) };
+            events
+                .send(SessionEvent::Agent(completed))
+                .await
+                .expect("sent");
+            assert_eq!(deliveries.recv().await, streamed(ms(60), "!"));
+            assert_eq!(
+                deliveries.recv().await,
+                Some((ms(60), BridgeEventKind::TurnCompleted, None))
+            );
+        });
 }
 
 #[test]

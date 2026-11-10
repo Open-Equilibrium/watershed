@@ -293,6 +293,9 @@ fn rows_come_in_filtered_and_sorted_windows() {
         expenses.names(filtered(BridgeMatch::Is, &amount, Some(number(84.2)))),
         ["groceries"]
     );
+    let no_value = filtered(BridgeMatch::Is, &amount, Some(cell(BridgeCellKind::Empty)));
+    assert_eq!(expenses.names(no_value.clone()), ["Gift"]);
+    assert_eq!(expenses.rows(no_value).unwrap().count, 1);
     let containing = filtered(BridgeMatch::Contains, &expenses.name, Some(text("E")));
     assert_eq!(expenses.names(containing.clone()), ["groceries", "Rent"]);
     assert_eq!(expenses.rows(containing).unwrap().count, 2);
