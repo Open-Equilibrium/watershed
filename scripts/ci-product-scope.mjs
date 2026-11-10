@@ -48,9 +48,14 @@ if (process.env.GITHUB_EVENT_NAME !== "workflow_dispatch") {
       break;
     case "push":
       base = event.before;
-      if (base === "0".repeat(40)) {
+      // A new branch has no previous tip, and a rebased one's can be absent from the
+      // clone: both compare the complete branch against main.
+      if (
+        base === "0".repeat(40) ||
+        (/^[a-f0-9]{40}$/i.test(base) && git("cat-file", "-e", `${base}^{commit}`).status !== 0)
+      ) {
         const mergeBase = git("merge-base", "HEAD", "origin/main");
-        if (mergeBase.status !== 0) throw new Error("Cannot find the new branch's CI base");
+        if (mergeBase.status !== 0) throw new Error("Cannot find the branch's CI base");
         base = mergeBase.stdout.trim();
       }
       break;

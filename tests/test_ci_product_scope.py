@@ -83,7 +83,7 @@ class CiProductScopeTest(unittest.TestCase):
         result, output = self.run_scope(event_name, event)
         if expected is None:
             self.assertEqual(result.returncode, 1)
-            self.assertIn("Cannot compare CI product changes", result.stderr)
+            self.assertIn("Cannot find the branch's CI base", result.stderr)
             self.assertEqual(output, "")
             return {}
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -250,8 +250,19 @@ class CiProductScopeTest(unittest.TestCase):
                 self.push(before, expected)
                 before = current
 
+    def test_a_previous_tip_absent_from_the_clone_compares_the_branch_against_main(self) -> None:
+        # A rebase and force-push leaves the previous tip on no fetched ref.
+        main = self.commit({"meta-harness/pi-extension/watershed.ts": "Fixture\n"})
+        self.git("update-ref", "refs/remotes/origin/main", main)
+        self.commit({"flow-agent/flow-agent-core/src/lib.rs": "Fixture\n"})
+        self.commit({"liquid/app/lib/main.dart": "Fixture\n"})
+        self.push("f" * 40, scope(True, "flow_agent", "liquid"))
+
     def test_unavailable_comparison_base_fails_without_a_skip_result(self) -> None:
-        self.classify("push", {"before": "f" * 40}, None)
+        self.git("update-ref", "-d", "refs/remotes/origin/main")
+        for before in ("0" * 40, "f" * 40):
+            with self.subTest(before=before):
+                self.classify("push", {"before": before}, None)
 
 
 class CiJobScopeTest(unittest.TestCase):

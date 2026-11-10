@@ -14,6 +14,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// The inner Executor writes this instead of a Tool status when it fails before
+/// any Tool launch. It is longer than a status, so no truncated status matches it.
+const NOT_LAUNCHED_RECORD: &[u8] = b"tool-not-launched";
+
 pub(crate) struct PreparedExecution {
     request: ExecutorRequestV0,
     backend_version: String,
@@ -72,7 +76,10 @@ pub(super) fn execute(prepared: PreparedExecution) -> Result<ExecutorResponseV0,
     let (sender, receiver) = mpsc::sync_channel(1);
     thread::spawn(move || {
         let mut bytes = Vec::new();
-        let result = reader.take(5).read_to_end(&mut bytes).map(|_| bytes);
+        let result = reader
+            .take(NOT_LAUNCHED_RECORD.len() as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map(|_| bytes);
         let _ = sender.send(result);
     });
     let limits = &request.resolved_policy.limits;
@@ -114,6 +121,11 @@ pub(super) fn apply_inner_status(
     outcome: &mut supervision::ProcessOutcome,
     record: &[u8],
 ) -> Result<(), BackendError> {
+    if record == NOT_LAUNCHED_RECORD {
+        return Err(BackendError::setup(
+            "trusted inner Executor failed before Tool launch",
+        ));
+    }
     let status: [u8; 4] = record.try_into().map_err(|_| {
         BackendError::uncertain("native protection did not prove a reaped Tool root")
     })?;
@@ -149,6 +161,53 @@ pub(crate) fn run_inner(status_descriptor: &str, input: impl Read) -> Result<(),
         .map_err(|_| "invalid inner status descriptor".to_owned())?;
     let descriptor = protection::borrow_descriptor(descriptor)?;
     let mut status_file = std::fs::File::from(protection::retain_descriptor(descriptor)?);
+    let (mut child, cancelled, deadline) = match launch(&status_file, input) {
+        Ok(launched) => launched,
+        Err(error) => {
+            // No Tool exists, so the outer Executor may report a setup failure.
+            let _ = status_file.write_all(NOT_LAUNCHED_RECORD);
+            return Err(error);
+        }
+    };
+    let mut cleanup = None;
+    loop {
+        // On Linux the inner Executor is PID 1 of the Tool's PID namespace and
+        // inherits orphaned descendants; reaping any child keeps them from
+        // lingering as zombies. Only this loop reaps, and it returns on the
+        // root, so its PID is never reused while it is still compared.
+        while let Some((pid, status)) = rustix::process::wait(rustix::process::WaitOptions::NOHANG)
+            .map_err(|error| format!("failed to reap Tool: {error}"))?
+        {
+            if pid.as_raw_nonzero().get() as u32 == child.id() {
+                return status_file
+                    .write_all(&status.as_raw().to_ne_bytes())
+                    .map_err(|error| format!("failed to record Tool status: {error}"));
+            }
+        }
+        let now = Instant::now();
+        if cleanup.is_none() && (cancelled.load(Ordering::Acquire) || now >= deadline) {
+            supervision::signal_child(&child, rustix::process::Signal::TERM);
+            cleanup = Some(crate::lifecycle::CleanupController::new(now));
+        }
+        if let Some(cleanup) = &mut cleanup {
+            match cleanup.advance(now, false, false) {
+                crate::lifecycle::CleanupAction::ForceKill => {
+                    let _ = child.kill();
+                }
+                crate::lifecycle::CleanupAction::FailClosed => {
+                    return Err("Tool root could not be reaped within its bound".to_owned());
+                }
+                _ => {}
+            }
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn launch(
+    status_file: &std::fs::File,
+    input: impl Read,
+) -> Result<(std::process::Child, Arc<AtomicBool>, Instant), String> {
     let mut control = status_file
         .try_clone()
         .map_err(|error| format!("failed to retain inner cancellation channel: {error}"))?;
@@ -178,7 +237,7 @@ pub(crate) fn run_inner(status_descriptor: &str, input: impl Read) -> Result<(),
     let deadline = Instant::now()
         .checked_add(Duration::from_millis(policy.limits.timeout_ms))
         .ok_or_else(|| "Tool timeout overflows the host clock".to_owned())?;
-    let mut child = Command::new(&policy.executable)
+    let child = Command::new(&policy.executable)
         .args(&policy.argv)
         .env_clear()
         .envs(&policy.environment)
@@ -186,34 +245,7 @@ pub(crate) fn run_inner(status_descriptor: &str, input: impl Read) -> Result<(),
         .stdin(Stdio::null())
         .spawn()
         .map_err(|error| format!("failed to launch Tool: {error}"))?;
-    let mut cleanup = None;
-    loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|error| format!("failed to reap Tool: {error}"))?
-        {
-            return status_file
-                .write_all(&status.into_raw().to_ne_bytes())
-                .map_err(|error| format!("failed to record Tool status: {error}"));
-        }
-        let now = Instant::now();
-        if cleanup.is_none() && (cancelled.load(Ordering::Acquire) || now >= deadline) {
-            supervision::signal_child(&child, rustix::process::Signal::TERM);
-            cleanup = Some(crate::lifecycle::CleanupController::new(now));
-        }
-        if let Some(cleanup) = &mut cleanup {
-            match cleanup.advance(now, false, false) {
-                crate::lifecycle::CleanupAction::ForceKill => {
-                    let _ = child.kill();
-                }
-                crate::lifecycle::CleanupAction::FailClosed => {
-                    return Err("Tool root could not be reaped within its bound".to_owned());
-                }
-                _ => {}
-            }
-        }
-        thread::sleep(Duration::from_millis(5));
-    }
+    Ok((child, cancelled, deadline))
 }
 
 pub(super) fn readiness() -> Result<String, BackendError> {

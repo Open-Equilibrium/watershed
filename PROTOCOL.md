@@ -280,7 +280,7 @@ Mac invokes Apple's `/usr/bin/sandbox-exec` with a narrow Seatbelt policy: allow
 
 Both backends launch enforcement code with a sanitized environment, apply admitted Tool environment values only inside the established boundary, and remove inherited authority before Tool execution. Missing mechanisms, unsupported paths or failed identity/protection setup reject without fallback. Restriction inheritance must persist in surviving children, including new sessions and after parent exit. Supervision bounds output, Tool-root waiting, termination and cancellation; it neither rolls back effects nor proves absolute cleanup of arbitrary hostile descendants.
 
-A private local control channel signals cancellation by closing its sending direction and returns the observed Tool-root status in the other direction. It is not inherited by Tools. The outer Executor gives the trusted inner supervisor bounded cleanup time before force-stopping its launcher; killing the Bubblewrap monitor first would destroy the root-status evidence. A missing or malformed status remains uncertain, never an invented successful cleanup.
+A private local control channel signals cancellation by closing its sending direction and returns the observed Tool-root status in the other direction; an inner failure before Tool launch returns an explicit not-launched record instead, reported as `sandbox_setup_failed`. It is not inherited by Tools. The outer Executor gives the trusted inner supervisor bounded cleanup time before force-stopping its launcher; killing the Bubblewrap monitor first would destroy the root-status evidence. A missing or malformed status remains uncertain, never an invented successful cleanup.
 
 ## Local run storage and M1.1 conversation trees
 
