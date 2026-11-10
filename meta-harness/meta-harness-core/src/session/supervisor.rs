@@ -256,9 +256,7 @@ impl Supervisor {
                     true
                 }
                 AgentEvent::TurnStarted { .. } => {
-                    let mut shared = self.state.lock();
-                    shared.running = true;
-                    shared.stopping = false;
+                    self.state.lock().running = true;
                     true
                 }
                 AgentEvent::TurnCompleted { .. } | AgentEvent::TurnAborted { .. } => {

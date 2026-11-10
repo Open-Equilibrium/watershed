@@ -1146,6 +1146,42 @@ fn stopping_dismisses_a_question_that_arrives_late() {
 }
 
 #[test]
+fn an_abort_dismisses_questions_after_a_late_turn_start() {
+    run(async {
+        // The turn's start reaches the core only after the abort was sent, so its question is
+        // still dismissed: pi answers the abort only once that question is answered.
+        let script = [
+            expect_response(&[r#""type":"abort""#]),
+            r#"printf '%s\n' '{"type":"agent_start"}'
+"#
+            .to_owned(),
+            question("q1"),
+            expect_response(&[r#""id":"q1""#, r#""cancelled":true"#]),
+            r#"printf '%s\n' '{"id":"1","type":"response","command":"abort","success":true}'
+"#
+            .to_owned(),
+            "IFS= read -r line || exit 0\n".to_owned(),
+        ]
+        .concat();
+        let (mut session, mut events) = fake_agent(&script);
+        let stopping = session.abort().await.expect("abort sent");
+        assert!(matches!(
+            next(&mut events).await,
+            SessionEvent::Agent(AgentEvent::TurnStarted { .. })
+        ));
+        assert_eq!(
+            timeout(WAIT, stopping.accepted()).await,
+            Ok(Ok(())),
+            "the abort finishes once the late question is dismissed"
+        );
+        assert!(
+            events.try_recv().is_err(),
+            "the late question was dismissed, not asked"
+        );
+    });
+}
+
+#[test]
 fn asks_the_user_again_once_an_abort_found_the_agent_idle() {
     run(async {
         // pi answers the abort of an idle agent without any turn event.
