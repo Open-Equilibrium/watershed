@@ -350,6 +350,16 @@ fn wait_for_ownership_child(workspace: &Path, child: &mut std::process::Child) {
 fn release_ownership_child(workspace: &Path, child: &mut std::process::Child) {
     fs::write(workspace.join("ownership-child-release"), b"release")
         .expect("ownership child release marker written");
-    let status = child.wait().expect("ownership child exits");
-    assert!(status.success(), "ownership child failed: {status}");
+    // Bounded like readiness, so a hung child fails this test instead of stalling it.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        if let Some(status) = child.try_wait().expect("ownership child status reads") {
+            assert!(status.success(), "ownership child failed: {status}");
+            return;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    child.kill().expect("timed-out ownership child terminates");
+    child.wait().expect("timed-out ownership child reaped");
+    panic!("ownership child did not exit after release");
 }
