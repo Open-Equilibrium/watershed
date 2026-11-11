@@ -499,6 +499,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
       names: listed.bases,
       more: listed.moreBases,
       unknown: _recorded == null && plan.defaultBranch == null,
+      search: (query) => _pulls.searchBases(plan.identity.host, target, query),
     );
     if (chosen != null && mounted) {
       await _read(target: target, base: chosen.name);
