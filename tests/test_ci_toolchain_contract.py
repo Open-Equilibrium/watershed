@@ -659,6 +659,16 @@ class CiWorkflowContractTest(unittest.TestCase):
             assert_step_state(self, workflow, name, job="liquid", condition=condition)
         assert_step_state(self, workflow, "Build the Liquid macOS app", job="liquid",
                           condition=MAC, continue_on_error=True)
+        # The scheme's test action runs RunnerTests, and it needs the build's Flutter configuration.
+        assert_step_state(self, workflow, "Run the Liquid macOS app tests", job="liquid", condition=MAC)
+        self.assertEqual(
+            shlex.split(step_run(workflow, "Run the Liquid macOS app tests")),
+            ["xcodebuild", "test", "-workspace", "macos/Runner.xcworkspace", "-scheme", "Runner",
+             "-destination", "platform=macOS"],
+        )
+        names = step_names(workflow, "liquid")
+        self.assertLess(names.index("Build the Liquid macOS app"),
+                        names.index("Run the Liquid macOS app tests"))
         self.assertEqual(
             step_run(workflow, "Check the Liquid app").splitlines(),
             ["flutter pub get --enforce-lockfile", "flutter analyze", "flutter test --coverage",
