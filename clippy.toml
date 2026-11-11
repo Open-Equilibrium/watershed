@@ -1,1 +1,2 @@
 warn-on-all-wildcard-imports = true
+allow-unwrap-in-tests = true

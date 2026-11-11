@@ -30,7 +30,7 @@ fn request(mutation: Mutation) -> Request {
 fn created(workspace: &mut Workspace<Sqlite>, mutation: Mutation) -> Created {
     workspace
         .apply(request(mutation))
-        .unwrap()
+        .expect("the fixture mutation is accepted")
         .created
         .expect("a created object")
 }
@@ -62,7 +62,7 @@ fn summary(name: &str, mut times: Vec<Duration>) {
         "{name}: median {:.1} µs, p99 {:.1} µs, max {:.1} µs",
         at(0.5).as_secs_f64() * 1e6,
         at(0.99).as_secs_f64() * 1e6,
-        times.last().unwrap().as_secs_f64() * 1e6
+        times.last().expect("a summary has samples").as_secs_f64() * 1e6
     );
 }
 
@@ -72,16 +72,16 @@ fn main() {
         return;
     }
     let dir = std::env::temp_dir().join(format!("liquid-replica-observe-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::create_dir_all(&dir).expect("the temporary directory can be created");
     let path = dir.join("replica.db");
 
     // Typing: one durable commit per keystroke, the worst case for an editor that groups
     // keystrokes into one commit.
     let mut workspace = Workspace::create(
         PersonId::new("observer"),
-        Sqlite::open(&path, &KEY).unwrap(),
+        Sqlite::open(&path, &KEY).expect("a new replica opens"),
     )
-    .unwrap();
+    .expect("the replica accepts a new Workspace");
     let lisbon = page(&mut workspace);
     let add = Mutation::AddTextBlock {
         page: lisbon.clone(),
@@ -101,7 +101,9 @@ fn main() {
             insert: if i % 7 == 6 { " " } else { "x" }.into(),
         };
         let start = Instant::now();
-        workspace.apply(request(edit)).unwrap();
+        workspace
+            .apply(request(edit))
+            .expect("the fixture edit is accepted");
         times.push(start.elapsed());
     }
     summary(
@@ -123,8 +125,14 @@ fn main() {
     }
     drop(workspace);
     let size: u64 = std::fs::read_dir(&dir)
-        .unwrap()
-        .map(|entry| entry.unwrap().metadata().unwrap().len())
+        .expect("the replica directory is readable")
+        .map(|entry| {
+            entry
+                .expect("a directory entry is readable")
+                .metadata()
+                .expect("its metadata is readable")
+                .len()
+        })
         .sum();
     println!(
         "database with its log after both: {:.1} MiB",
@@ -137,15 +145,28 @@ fn main() {
 /// removes the replica.
 fn reopen(path: &Path) {
     let start = Instant::now();
-    let mut workspace = Workspace::open(Sqlite::open(path, &KEY).unwrap()).unwrap();
-    let area = workspace.areas().unwrap().remove(0).id;
-    let page = workspace.pages(&area).unwrap().remove(0).id;
-    let views = workspace.views(&page, 0, usize::MAX).unwrap();
+    let mut workspace =
+        Workspace::open(Sqlite::open(path, &KEY).expect("the replica opens with its key"))
+            .expect("the replica reopens as a Workspace");
+    let area = workspace
+        .areas()
+        .expect("the replica lists its Areas")
+        .remove(0)
+        .id;
+    let page = workspace
+        .pages(&area)
+        .expect("the replica lists its Pages")
+        .remove(0)
+        .id;
+    let views = workspace
+        .views(&page, 0, usize::MAX)
+        .expect("the replica reads the Page's Views");
     println!(
         "a new process opening the replica and reading that Page's {} Views: {:.1} ms",
         views.len(),
         start.elapsed().as_secs_f64() * 1e3
     );
     drop(workspace);
-    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::remove_dir_all(path.parent().expect("the replica is in its own directory"))
+        .expect("the replica directory is removed");
 }

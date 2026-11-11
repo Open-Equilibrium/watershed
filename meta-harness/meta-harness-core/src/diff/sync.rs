@@ -126,7 +126,9 @@ impl WorkingTree {
         let upstream = status.upstream.clone().unwrap_or_else(|| {
             format!(
                 "{remote}/{}",
-                reference.strip_prefix("refs/heads/").unwrap()
+                reference
+                    .strip_prefix("refs/heads/")
+                    .expect("the reference was checked to start with refs/heads/")
             )
         });
         let confirmation = PushConfirmation {

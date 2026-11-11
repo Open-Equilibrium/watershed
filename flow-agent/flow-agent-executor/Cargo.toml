@@ -12,6 +12,10 @@ publish.workspace = true
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
 
+# Crate-specific lints cannot be combined with `lints.workspace = true`.
+[lints.clippy]
+unwrap_used = "deny"
+
 [dependencies]
 proto.workspace = true
 rustix = { workspace = true, features = ["std"] }

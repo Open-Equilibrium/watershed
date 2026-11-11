@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 mod native_support;
 
 use native_support::{Fixture, limits};

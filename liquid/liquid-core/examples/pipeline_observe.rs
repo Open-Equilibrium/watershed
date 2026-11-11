@@ -32,7 +32,7 @@ fn page(workspace: &mut Workspace<MemoryStore>) -> PageId {
         .apply(request(Mutation::CreateArea {
             name: "Trips".into(),
         }))
-        .unwrap()
+        .expect("the fixture creates an Area")
         .created
     else {
         panic!("an area")
@@ -42,7 +42,11 @@ fn page(workspace: &mut Workspace<MemoryStore>) -> PageId {
         parent: None,
         title: "Lisbon".into(),
     };
-    match workspace.apply(request(create)).unwrap().created {
+    match workspace
+        .apply(request(create))
+        .expect("the fixture creates a Page")
+        .created
+    {
         Some(Created::Page(page)) => page,
         _ => panic!("a Page"),
     }
@@ -55,21 +59,25 @@ fn summary(name: &str, mut times: Vec<Duration>) {
         "{name}: median {:.1} µs, p99 {:.1} µs, max {:.1} µs",
         at(0.5).as_secs_f64() * 1e6,
         at(0.99).as_secs_f64() * 1e6,
-        times.last().unwrap().as_secs_f64() * 1e6
+        times.last().expect("a summary has samples").as_secs_f64() * 1e6
     );
 }
 
 fn main() {
     // Typing: one Action per keystroke, the worst case for an editor that groups keystrokes.
-    let mut workspace =
-        Workspace::create(PersonId::new("observer"), MemoryStore::default()).unwrap();
+    let mut workspace = Workspace::create(PersonId::new("observer"), MemoryStore::default())
+        .expect("a new in-memory Workspace opens");
     let lisbon = page(&mut workspace);
     let add = Mutation::AddTextBlock {
         page: lisbon.clone(),
         after: None,
         text: String::new(),
     };
-    let Some(Created::Block { block, .. }) = workspace.apply(request(add)).unwrap().created else {
+    let Some(Created::Block { block, .. }) = workspace
+        .apply(request(add))
+        .expect("the fixture creates a Block")
+        .created
+    else {
         panic!("a Block")
     };
     let mut times = Vec::with_capacity(KEYSTROKES);
@@ -82,7 +90,9 @@ fn main() {
             insert: if i % 7 == 6 { " " } else { "x" }.into(),
         };
         let start = Instant::now();
-        workspace.apply(request(edit)).unwrap();
+        workspace
+            .apply(request(edit))
+            .expect("the fixture edit is accepted");
         times.push(start.elapsed());
     }
     summary(
@@ -91,8 +101,8 @@ fn main() {
     );
 
     // A long Page: each Text Block added after the last one.
-    let mut workspace =
-        Workspace::create(PersonId::new("observer"), MemoryStore::default()).unwrap();
+    let mut workspace = Workspace::create(PersonId::new("observer"), MemoryStore::default())
+        .expect("a new in-memory Workspace opens");
     let lisbon = page(&mut workspace);
     let mut after = None;
     let mut times = Vec::with_capacity(BLOCKS);
@@ -103,7 +113,10 @@ fn main() {
             text: "Five days in Lisbon, one in Porto.".into(),
         };
         let start = Instant::now();
-        let created = workspace.apply(request(add)).unwrap().created;
+        let created = workspace
+            .apply(request(add))
+            .expect("the fixture adds a Block")
+            .created;
         times.push(start.elapsed());
         if let Some(Created::Block { view, .. }) = created {
             after = Some(view);
@@ -114,7 +127,9 @@ fn main() {
         times,
     );
     let start = Instant::now();
-    let views = workspace.views(&lisbon, 0, usize::MAX).unwrap();
+    let views = workspace
+        .views(&lisbon, 0, usize::MAX)
+        .expect("the Page reads its Views");
     println!(
         "reading that Page's {} Views in order: {:.2} ms",
         views.len(),
@@ -123,19 +138,27 @@ fn main() {
 
     // A Database of 5,000 rows with four fields, as the CRDT spike measured, then one sorted
     // and filtered window as a Table View reads it.
-    let mut workspace =
-        Workspace::create(PersonId::new("observer"), MemoryStore::default()).unwrap();
+    let mut workspace = Workspace::create(PersonId::new("observer"), MemoryStore::default())
+        .expect("a new in-memory Workspace opens");
     let budget = page(&mut workspace);
     let add = Mutation::AddDatabaseBlock {
         page: budget.clone(),
         after: None,
         name: "Expenses".into(),
     };
-    let Some(Created::Block { block, .. }) = workspace.apply(request(add)).unwrap().created else {
+    let Some(Created::Block { block, .. }) = workspace
+        .apply(request(add))
+        .expect("the fixture creates a Database Block")
+        .created
+    else {
         panic!("a Database")
     };
     let mut fields = vec![
-        workspace.database(&budget, &block).unwrap().unwrap().fields[0]
+        workspace
+            .database(&budget, &block)
+            .expect("the Database reads its Block")
+            .expect("the Block has a Database")
+            .fields[0]
             .id
             .clone(),
     ];
@@ -151,7 +174,11 @@ fn main() {
             name: name.into(),
             kind,
         };
-        let Some(Created::Field(field)) = workspace.apply(request(add)).unwrap().created else {
+        let Some(Created::Field(field)) = workspace
+            .apply(request(add))
+            .expect("the fixture creates a field")
+            .created
+        else {
             panic!("a field")
         };
         fields.push(field);
@@ -164,7 +191,11 @@ fn main() {
             place: Place::Last,
         };
         let start = Instant::now();
-        let Some(Created::Row(row)) = workspace.apply(request(add)).unwrap().created else {
+        let Some(Created::Row(row)) = workspace
+            .apply(request(add))
+            .expect("the fixture creates a row")
+            .created
+        else {
             panic!("a row")
         };
         added.push(start.elapsed());
@@ -183,7 +214,9 @@ fn main() {
                 value,
             };
             let start = Instant::now();
-            workspace.apply(request(set)).unwrap();
+            workspace
+                .apply(request(set))
+                .expect("the fixture cell is set");
             filled.push(start.elapsed());
         }
     }
@@ -205,7 +238,9 @@ fn main() {
         limit: 100,
     };
     let start = Instant::now();
-    let window = workspace.rows(&budget, &block, &query).unwrap();
+    let window = workspace
+        .rows(&budget, &block, &query)
+        .expect("the Database reads its rows");
     println!(
         "a window of {} of its {} paid rows, sorted by amount: {:.2} ms",
         window.rows.len(),

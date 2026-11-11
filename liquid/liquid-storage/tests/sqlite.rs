@@ -1,6 +1,8 @@
 //! The local replica as a later session sees it: what was acknowledged is there after a
 //! reopen, and the file reveals nothing without its key.
 
+#![allow(clippy::unwrap_used)]
+
 use std::path::{Path, PathBuf};
 
 use liquid_core::{

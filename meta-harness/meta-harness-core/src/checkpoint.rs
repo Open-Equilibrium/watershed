@@ -244,9 +244,8 @@ impl Checkpoints {
                                 .await
                         }
                         Err(DiffError::NotARepository) => Ok(folder),
-                        Err(_) => {
-                            Err(std::mem::replace(&mut tree, Err(DiffError::Closed)).unwrap_err())
-                        }
+                        Err(_) => Err(std::mem::replace(&mut tree, Err(DiffError::Closed))
+                            .expect_err("the match arm saw an error")),
                     }
                 })
                 .await;

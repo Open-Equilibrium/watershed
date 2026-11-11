@@ -527,7 +527,11 @@ fn identifier_record_kind(
 }
 
 fn identifier_record_offset(record: &EventIdentifierRecord) -> u64 {
-    u64::from_le_bytes(record[40..48].try_into().unwrap())
+    u64::from_le_bytes(
+        record[40..48]
+            .try_into()
+            .expect("the offset field is eight bytes"),
+    )
 }
 
 fn compare_event_identifier_records(

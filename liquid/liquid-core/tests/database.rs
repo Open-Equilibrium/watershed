@@ -2,6 +2,9 @@
 //! one pipeline and read in sorted, filtered windows that Rust computes (client architecture
 //! rule 13).
 
+// Integration tests are test code, but clippy.toml's exemption covers only #[test] items.
+#![allow(clippy::unwrap_used)]
+
 use liquid_core::{
     Actor, Applied, BlockId, BlockKind, Cell, Created, Error, FieldId, FieldKind, MAX_FIELDS,
     MAX_OPTIONS, Match, MemoryStore, Mutation, Origin, PageId, PersonId, Place, Request, RowId,

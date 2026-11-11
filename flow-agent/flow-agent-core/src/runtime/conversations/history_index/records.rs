@@ -211,7 +211,7 @@ fn record_ordinal(record: &IndexRecord) -> u64 {
     u64::from_le_bytes(
         record[INDEX_ORDINAL_OFFSET..INDEX_EVENT_SEQUENCE_OFFSET]
             .try_into()
-            .unwrap(),
+            .expect("the ordinal field is eight bytes"),
     )
 }
 
@@ -223,7 +223,7 @@ pub(super) fn event_pointer_sequence(record: &EventPointerRecord) -> u64 {
     u64::from_le_bytes(
         record[EVENT_POINTER_SEQUENCE_OFFSET..EVENT_POINTER_RECORD_BYTES]
             .try_into()
-            .unwrap(),
+            .expect("the sequence field is eight bytes"),
     )
 }
 

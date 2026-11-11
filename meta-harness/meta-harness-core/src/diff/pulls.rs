@@ -1139,7 +1139,12 @@ async fn both<A, B, E>(
             b = Some(result?);
         }
         if a.is_some() && b.is_some() {
-            Poll::Ready(Ok((a.take().unwrap(), b.take().unwrap())))
+            Poll::Ready(Ok((
+                a.take()
+                    .expect("first result is stored before both are checked"),
+                b.take()
+                    .expect("second result is stored before both are checked"),
+            )))
         } else {
             Poll::Pending
         }
