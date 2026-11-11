@@ -141,11 +141,15 @@ fn native_executor_protects_own_files_and_leaves_project_work_available() {
     if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
         command.env("LLVM_PROFILE_FILE", profile);
     }
-    let descriptors = handles.each_ref().map(|handle| handle.as_raw_fd());
+    // Stage every source above the fixed slots first. A source already in 32..=34 would
+    // otherwise be overwritten by an earlier dup2, or keep its close-on-exec flag.
+    let staged = handles
+        .each_ref()
+        .map(|handle| rustix::io::fcntl_dupfd_cloexec(handle, 256).unwrap());
     unsafe {
         command.pre_exec(move || {
-            for (index, descriptor) in descriptors.iter().enumerate() {
-                if dup2(*descriptor, 32 + index as i32) < 0 {
+            for (index, descriptor) in staged.iter().enumerate() {
+                if dup2(descriptor.as_raw_fd(), 32 + index as i32) < 0 {
                     return Err(std::io::Error::last_os_error());
                 }
             }
