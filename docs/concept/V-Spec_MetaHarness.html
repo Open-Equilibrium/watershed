@@ -76,6 +76,7 @@ Liquid        = standalone native workspace / app-building product</code></pre>
           <li>a full separate rich GUI in the MVP.</li>
         </ul></div>
       </div>
+      <p><strong>Session record (ADR-0257):</strong> “Export record” writes what Meta-Harness already records about one stored session as a folder in Downloads: pi's session file unchanged, and <code>record.json</code> with each turn's times, how it ended, its checkpoint commits and the files it changed, plus a <code>README.txt</code> that says what it leaves out. It is observe-only, adds no gate or recording, and claims no completeness (ADR-0222). Its turns are only those that ran through Meta-Harness, and its file changes are those between checkpoints, in files Git does not ignore.</p>
     </div></section>
 
     <section id="flow-agent" class="section"><h2>3. Relationship to Flow Agent</h2><div class="body">

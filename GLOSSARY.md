@@ -165,6 +165,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Agent-sessions area** — The area where Meta-Harness mirrors agent session records at turn boundaries, so another of the person's agent hosts can continue a session (ADR-0229).
 - **Replay-safe** — A tool that may run again after a crash without a second effect, such as pi's own reading tools or a Flow Agent Tool declared so; other tools report "interrupted" instead (ADR-0229).
 - **Shown session** — The stored session a Liquid window displays. It holds a shared lock, so deleting that session is refused while any window of the project shows it (ADR-0271). Unlike a running agent, it does not block reverts or commits.
+- **Session record** — The folder “Export record” writes into Downloads for one stored session: pi's session file unchanged, `record.json` with its turns, and a `README.txt` of what it leaves out (ADR-0257).
 - **Checkpoint ref** — A Git ref under Meta-Harness's own namespace, `refs/watershed/checkpoints/<session>/<turn>/<start|end>`, that points at a commit of the agent project's files at a turn's start or end, to show the turn's changes and to revert the files to it (ADR-0220, ADR-0234).
 - **Context track** — The Trajectory's column that draws each step's context against the model's window: exact at each request's prompt tokens, estimated between them, with pi's compaction point.
 - **Compliance replica** — A replica a company runs with its own key for search, legal hold and data-loss checks (ADR-0228).
