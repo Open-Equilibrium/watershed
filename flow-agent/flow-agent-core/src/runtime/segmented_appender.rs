@@ -694,6 +694,8 @@ impl EventLogAppender for SessionLogAppender {
 
             debug_assert!(batch_end > committed_events);
             let batch = &events[committed_events..batch_end];
+            #[cfg(test)]
+            crate::runtime::fs_guards::durable_step(current_path.diagnostic_path(), "append");
             if let Err(failure) = self.append_native_batch_to_current_with(
                 &current_path,
                 batch,

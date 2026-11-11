@@ -89,6 +89,8 @@ impl AnchoredFile {
         &self,
         options: &cap_std::fs::OpenOptions,
     ) -> Result<fs::File, RuntimeError> {
+        #[cfg(test)]
+        super::durable_step(&self.path, "create");
         let _publication = self
             .parent
             .publication_guard()
@@ -105,6 +107,8 @@ impl AnchoredFile {
 
     pub(crate) fn hard_link_to(&self, leaf: &Path) -> Result<(), RuntimeError> {
         let target = self.parent.file(leaf);
+        #[cfg(test)]
+        super::durable_step(&target.path, "link");
         let _publication = self
             .parent
             .publication_guard()

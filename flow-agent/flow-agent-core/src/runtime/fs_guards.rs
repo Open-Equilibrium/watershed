@@ -58,6 +58,14 @@ pub(crate) use durability::{
 pub(crate) use durability::{sync_directory, sync_retained_directory as sync_anchored_directory};
 
 #[cfg(test)]
+mod durable_steps;
+#[cfg(test)]
+pub(crate) use durable_steps::{
+    StoreImage, capture_store_image, durable_step, finish_durable_trace, restore_store_image,
+    start_durable_trace,
+};
+
+#[cfg(test)]
 pub(crate) fn test_path_key(path: &Path) -> PathBuf {
     let mut existing = path;
     let mut missing = Vec::new();
@@ -168,6 +176,8 @@ impl AnchoredDir {
             Ok(_) => false,
             Err(err) if err.kind() == io::ErrorKind::NotFound && !create => return Ok(None),
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                #[cfg(test)]
+                durable_step(&path, "mkdir");
                 let _publication = self
                     .publication_guard()
                     .map_err(|source| path_io_error(&path, source))?;
@@ -257,21 +267,29 @@ impl AnchoredDir {
     }
 
     pub(crate) fn create_dir(&self, leaf: impl AsRef<Path>) -> io::Result<()> {
+        #[cfg(test)]
+        durable_step(&self.path.join(leaf.as_ref()), "mkdir");
         let _publication = self.publication_guard()?;
         self.dir.create_dir(leaf)
     }
 
     pub(crate) fn remove_dir(&self, leaf: impl AsRef<Path>) -> io::Result<()> {
+        #[cfg(test)]
+        durable_step(&self.path.join(leaf.as_ref()), "rmdir");
         let _publication = self.publication_guard()?;
         self.dir.remove_dir(leaf)
     }
 
     pub(crate) fn remove_file(&self, leaf: impl AsRef<Path>) -> io::Result<()> {
+        #[cfg(test)]
+        durable_step(&self.path.join(leaf.as_ref()), "unlink");
         let _publication = self.publication_guard()?;
         self.dir.remove_file(leaf)
     }
 
     pub(crate) fn rename(&self, from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
+        #[cfg(test)]
+        durable_step(&self.path.join(to.as_ref()), "rename");
         let _publication = self.publication_guard()?;
         self.dir.rename(from, &self.dir, to)
     }

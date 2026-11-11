@@ -35,6 +35,8 @@ pub(in crate::runtime::conversations) fn create_anchored_jsonl_file(
         return Err(protocol("conversation record exceeds its byte limit"));
     }
     let mut file = create_anchored_file(path)?;
+    #[cfg(test)]
+    crate::runtime::fs_guards::durable_step(path.diagnostic_path(), "write");
     file.write_all(line.as_bytes())
         .and_then(|()| file.sync_all())
         .map_err(|source| path_io_error(path.diagnostic_path(), source))

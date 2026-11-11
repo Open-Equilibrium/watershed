@@ -330,6 +330,8 @@ impl RunObjectWriter {
             }
             // WHY: a strict prefix is an interrupted write; records reference an object only
             // after it is synchronized, so completing it cannot change committed state.
+            #[cfg(test)]
+            crate::runtime::fs_guards::durable_step(path.diagnostic_path(), "write");
             if let Err(source) = file.write_all(&object.bytes[bytes.len()..]) {
                 return self.fail(path_io_error(path.diagnostic_path(), source));
             }
@@ -363,6 +365,8 @@ impl RunObjectWriter {
                 Ok(file) => file,
                 Err(error) => return self.fail(error),
             };
+            #[cfg(test)]
+            crate::runtime::fs_guards::durable_step(path.diagnostic_path(), "write");
             if let Err(source) = file.write_all(&object.bytes).and_then(|()| file.sync_all()) {
                 drop(file);
                 return self.fail_created(path_io_error(path.diagnostic_path(), source), &path);

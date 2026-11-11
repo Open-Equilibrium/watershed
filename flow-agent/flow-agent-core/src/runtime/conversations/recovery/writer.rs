@@ -271,6 +271,8 @@ impl ProductiveRecoveryWriter {
         file.seek(SeekFrom::End(0))
             .map_err(|source| path_io_error(self.path.diagnostic_path(), source))?;
         let result = (|| {
+            #[cfg(test)]
+            crate::runtime::fs_guards::durable_step(self.path.diagnostic_path(), "write");
             file.write_all(line.as_bytes())
                 .map_err(|source| path_io_error(self.path.diagnostic_path(), source))?;
             conversation_file_sync_checkpoint(self.path.diagnostic_path())?;
