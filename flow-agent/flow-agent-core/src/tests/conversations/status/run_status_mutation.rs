@@ -1,11 +1,14 @@
 use super::super::super::helpers::empty_workspace;
 use super::super::super::test_support::TempWorkspace;
-use super::super::{FLOW_HASH, REGISTRY_HASH, create_review_run, file_tree_bytes};
+use super::super::recovery_fixtures::write_terminal_recovery_fixture;
+use super::super::{
+    FLOW_HASH, REGISTRY_HASH, create_review_run, file_tree_bytes, write_terminal_run,
+};
 use crate::runtime::{
     conversations::{
         StatusTransactionCrashPoint, conversation_status_page, create_conversation_run,
         create_unpublished_productive_conversation_run, reclaim_unpublished_productive_run,
-        set_status_transaction_crash_point,
+        reserve_conversation_continuation, set_status_transaction_crash_point,
     },
     fs_guards::{
         set_directory_sync_error_for_path_for_test, start_directory_sync_trace_for_test,
@@ -239,6 +242,88 @@ fn conversation_status_recovers_a_marker_bound_partial_known_stage() {
             .next()
             .is_none(),
         "partial stage is removed"
+    );
+}
+
+#[test]
+fn continuation_reservation_reclaims_a_staged_run_with_an_empty_run_log() {
+    let workspace = empty_workspace("conversation-run-create-empty-run-log");
+    create_conversation_run(
+        &workspace,
+        "review",
+        "review",
+        "review-flow",
+        REGISTRY_HASH,
+        FLOW_HASH,
+    )
+    .expect("root Run is created");
+    write_terminal_run(&workspace, "review", "review");
+    write_terminal_recovery_fixture(&workspace, "review", "review", "root");
+    set_status_transaction_crash_point(StatusTransactionCrashPoint::RunCreationStagePopulated);
+    let crash = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        create_unpublished_productive_conversation_run(
+            &workspace,
+            "review",
+            "review-2",
+            "review-flow",
+            REGISTRY_HASH,
+            FLOW_HASH,
+        )
+    }));
+    assert!(crash.is_err(), "continuation creation is interrupted");
+
+    let runs = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs");
+    let stage = fs::read_dir(&runs)
+        .expect("runs directory reads")
+        .map(|entry| entry.expect("run entry reads").path())
+        .find(|path| {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with(".run-review-2-"))
+        })
+        .expect("the interrupted continuation left a staged Run");
+    // WHY: a process that dies between creating and writing the definition leaves an empty
+    // run-log, which is known partial inventory of the staged Run (PROTOCOL.md).
+    fs::write(stage.join("run-log.jsonl"), b"").expect("definition is cut off before its write");
+
+    let reservation = reserve_conversation_continuation(&workspace, "review", None)
+        .expect("the next continuation reclaims the staged Run");
+    assert_eq!(reservation.run_session_id(), "review-2");
+    reservation.release().expect("continuation releases");
+    assert!(
+        fs::read_dir(&runs)
+            .expect("runs directory reads")
+            .all(|entry| !entry
+                .expect("run entry reads")
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".run-")),
+        "the staged Run is reclaimed"
+    );
+}
+
+#[test]
+fn conversation_status_still_refuses_an_empty_published_run_log() {
+    let workspace = empty_workspace("conversation-run-create-empty-published-run-log");
+    assert_run_creation_crashes(
+        &workspace,
+        "review-1",
+        StatusTransactionCrashPoint::RunCreationPublished,
+    );
+    let run_log = crate::tests::helpers::workspace_session_dir(&workspace)
+        .join("review/runs/review-1/run-log.jsonl");
+    fs::write(&run_log, b"").expect("published definition is emptied");
+
+    let error = conversation_status_page(&workspace, None)
+        .expect_err("a published Run must not recover from an empty definition");
+    assert!(
+        error.to_string().contains("definition is incomplete"),
+        "{error}"
+    );
+    assert!(
+        crate::tests::helpers::workspace_session_dir(&workspace)
+            .join("review/.status-transaction.json")
+            .is_file(),
+        "unresolved transaction must remain"
     );
 }
 
