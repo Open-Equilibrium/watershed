@@ -278,7 +278,7 @@ final class WsPalette {
     tag1: Color(0xFF5A5A5A),
     tag2: Color(0xFF603B2C),
     tag3: Color(0xFF854C1D),
-    tag4: Color(0xFF89632A),
+    tag4: Color(0xFF7D5A26),
     tag5: Color(0xFF2B593F),
     tag6: Color(0xFF28456C),
     tag7: Color(0xFF492F64),

@@ -11,6 +11,26 @@ SPEC = importlib.util.spec_from_file_location("design_tokens", ROOT / "scripts" 
 TOKENS = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(TOKENS)
 
+
+def channels(css_color, backdrop=(0.0, 0.0, 0.0)):
+    """A CSS color's channels from 0 to 1, drawn over an opaque backdrop when translucent."""
+    match = TOKENS.COLOR.fullmatch(css_color.strip())
+    if match.group(1):
+        values, alpha = [int(match.group(1)[i:i + 2], 16) / 255 for i in (0, 2, 4)], 1.0
+    else:
+        values, alpha = [int(match.group(i)) / 255 for i in (2, 3, 4)], float(match.group(5))
+    return [value * alpha + under * (1 - alpha) for value, under in zip(values, backdrop)]
+
+
+def luminance(rgb):
+    linear = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in rgb]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def contrast(first, second):
+    light, dark = sorted([luminance(first), luminance(second)], reverse=True)
+    return (light + 0.05) / (dark + 0.05)
+
 SAMPLE = """
 /* comment */
 :root {
@@ -85,18 +105,19 @@ class DesignTokens(unittest.TestCase):
     def test_the_committed_dart_tokens_match_the_canonical_css(self):
         self.assertEqual(TOKENS.main(["--check"]), 0)
 
+    def test_tag_text_meets_wcag_aa_on_every_tag_color(self):
+        blocks = TOKENS.blocks(TOKENS.CSS.read_text())
+        for theme in [".theme-light", ".theme-dark"]:
+            tokens = blocks[theme]
+            canvas = channels(tokens["canvas"])
+            for index in range(10):
+                with self.subTest(theme=theme, tag=index):
+                    # A translucent tag shows the canvas through it; its text is drawn over the tag.
+                    tag = channels(tokens[f"tag-{index}"], canvas)
+                    self.assertGreaterEqual(contrast(channels(tokens["tag-text"], tag), tag), 4.5)
+
     def test_text_tones_meet_wcag_aa_wherever_they_carry_content(self):
         blocks = TOKENS.blocks(TOKENS.CSS.read_text())
-
-        def luminance(hex_color):
-            channels = [int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
-            linear = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
-            return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
-
-        def contrast(first, second):
-            light, dark = sorted([luminance(first), luminance(second)], reverse=True)
-            return (light + 0.05) / (dark + 0.05)
-
         backgrounds = ["canvas", "subtle", "surface", "hover", "selected", "titlebar", "code",
                        "warning-subtle"]
         pairs = [(tone, background) for tone in ["text", "text-muted", "text-faint"]
@@ -116,7 +137,7 @@ class DesignTokens(unittest.TestCase):
             for tone, background in pairs:
                 with self.subTest(theme=theme, tone=tone, background=background):
                     self.assertGreaterEqual(
-                        contrast(tokens[tone], tokens[background]), 4.5)
+                        contrast(channels(tokens[tone]), channels(tokens[background])), 4.5)
 
     def test_liquid_sets_font_sizes_only_through_tokens(self):
         raw = re.compile(r"fontSize:\s*[\d.]+")
