@@ -208,7 +208,7 @@
       </details>
       <details id="d-091" class="decision">
         <summary><h3>D-091 - Build Meta-Harness Or Reuse T3 Code</h3></summary>
-        <p><strong>Status:</strong> Open before M2. T3 Code (MIT) already ships much of what PLAN.md's M2 lists. Compared on 2026-11-11 with T3 Code at <code>871b0090</code>:</p>
+        <p><strong>Status:</strong> Open before M2. T3 Code (MIT) already ships much of what PLAN.md's M2 lists. Compared on 2026-11-11 with T3 Code at <code>a03d9bce</code> (one Node 26 / TypeScript / Effect server per machine, with its own event store in SQLite):</p>
         <table>
           <tr><th>M2 area</th><th>Watershed today</th><th>T3 Code today</th></tr>
           <tr><td>CLI and background service</td><td>Planned; the core runs inside Liquid</td><td><code>t3</code> CLI and a launchd/systemd service</td></tr>
@@ -216,10 +216,10 @@
           <tr><td>Agents steering agents (MCP tools), handoff between harnesses</td><td>Planned (ADR-0231, ADR-0253 copy T3)</td><td>Shipped</td></tr>
           <tr><td>Scheduled tasks</td><td>Planned</td><td>Shipped (interval, time, webhook)</td></tr>
           <tr><td>Linked hosts, mobile and web access</td><td>Planned; Liquid ships native apps only (ADR-0228)</td><td>Linked environments in beta; web, mobile and desktop clients; internet reach through T3's hosted relay</td></tr>
-          <tr><td>Durability: attach, crash resume, continue on another host</td><td>Planned (ADR-0229)</td><td>Attach and resume shipped; no replay-safe tool rule; no continuing on another host</td></tr>
+          <tr><td>Durability: attach, crash resume, continue on another host</td><td>Planned (ADR-0229)</td><td>Clients attach to the server; the work of a lost agent process is retired, not resumed; a thread never leaves its machine</td></tr>
           <tr><td>Central harness configurations with approval and audit</td><td>Planned (ADR-0225, ADR-0227)</td><td>Per machine only; admin locks, no proposal or audit flow</td></tr>
           <tr><td>Git: checkpoints, revert, commit, PRs, worktrees</td><td>Shipped, except creating worktrees</td><td>Shipped, more forges; but models write commit messages, which the V-Spec rules out</td></tr>
-          <tr><td>Runtime</td><td>Rust, about 29k lines with tests</td><td>TypeScript on Node, about 570k lines</td></tr>
+          <tr><td>Runtime</td><td>Rust, about 29k lines with tests</td><td>TypeScript on Node 26 with Effect, about 570k lines; clients speak Effect RPC with JSON over WebSocket</td></tr>
         </table>
         <p><strong>Question:</strong> Should Watershed keep building its own Meta-Harness core, or reuse T3 Code?</p>
         <ul>
