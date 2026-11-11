@@ -39,9 +39,9 @@ type DecodedDocument = Result<Option<CredentialRecord>, RuntimeError>;
 
 fn decode_credential_document(bytes: &[u8]) -> DecodedDocument {
     let document: CredentialDocument =
-        serde_json::from_slice(bytes).map_err(|_| auth_store_failure())?;
+        serde_json::from_slice(bytes).map_err(|_| authentication_required())?;
     if let Some(credential) = &document.openai_codex {
-        validate_credential_record(credential)?;
+        validate_credential_record(credential).map_err(|_| authentication_required())?;
     }
     Ok(document.openai_codex)
 }

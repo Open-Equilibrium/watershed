@@ -22,6 +22,23 @@ fn credential_path(config_root: &Path) -> std::path::PathBuf {
 }
 
 #[test]
+fn auth_status_reports_an_undecodable_record_as_reauthentication_required() {
+    let config_root = empty_workspace_under(Path::new(env!("CARGO_TARGET_TMPDIR")));
+    assert!(run_auth(&config_root, "logout").status.success());
+    fs::write(credential_path(&config_root), "not a credential document")
+        .expect("undecodable credential is staged");
+
+    let status = run_auth(&config_root, "status");
+
+    assert!(status.status.success(), "{status:?}");
+    assert!(status.stderr.is_empty(), "{status:?}");
+    assert_eq!(
+        status.stdout,
+        b"openai-codex authentication is required; run flow auth login openai-codex\n"
+    );
+}
+
+#[test]
 fn auth_status_and_logout_manage_only_the_isolated_flow_agent_credential() {
     let config_root = empty_workspace_under(Path::new(env!("CARGO_TARGET_TMPDIR")));
 

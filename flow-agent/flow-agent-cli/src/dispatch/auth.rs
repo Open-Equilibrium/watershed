@@ -13,14 +13,17 @@ pub(super) fn authentication_command(command: AuthCommand) -> Result<(), Runtime
                     .expect("successful login has credential expiry"),
             ))
         }
-        AuthCommand::Status => {
-            let status = flow_agent_core::openai_codex_auth_status()?;
-            if let Some(expiry) = status.expires_epoch_milliseconds {
-                write_stdout(&authenticated_status_message(expiry))
-            } else {
-                write_stdout(&format!("{OPENAI_CODEX_PROVIDER_ID} not authenticated\n"))
+        AuthCommand::Status => match flow_agent_core::openai_codex_auth_status() {
+            Ok(status) => match status.expires_epoch_milliseconds {
+                Some(expiry) => write_stdout(&authenticated_status_message(expiry)),
+                None => write_stdout(&format!("{OPENAI_CODEX_PROVIDER_ID} not authenticated\n")),
+            },
+            // An undecodable record fails closed as a Run treats it, with the not-logged-in exit status.
+            Err(RuntimeError::AuthenticationRequired(message)) => {
+                write_stdout(&format!("{message}\n"))
             }
-        }
+            Err(error) => Err(error),
+        },
         AuthCommand::Logout => {
             let removed = flow_agent_core::logout_openai_codex()?;
             let message = if removed {
