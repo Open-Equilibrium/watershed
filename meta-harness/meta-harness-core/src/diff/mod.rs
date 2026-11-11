@@ -22,6 +22,7 @@ use tokio::sync::Mutex;
 
 mod branches;
 mod commit;
+mod github_remote;
 mod process;
 mod pull_text;
 mod pulls;
