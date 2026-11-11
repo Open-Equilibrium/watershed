@@ -337,6 +337,115 @@ fn productive_recovery_resumes_a_cancelled_provider_attempt() {
     assert_controlled_cancellation_lifecycle(&sink.0);
 }
 
+/// A completed Tool record whose Executor left its cleanup unknown, with `schema` and `mark`.
+fn cleanup_unknown_tool_output(schema: &str, mark: Option<bool>) -> serde_json::Value {
+    let mut output = fake_tool_attempt_output(serde_json::json!({
+        "type": "map",
+        "value": {
+            "schema": {"type": "string", "value": "flow-tool-result-v0"},
+            "status": {"type": "string", "value": "completed"},
+            "exit_code": {"type": "integer", "value": "0"},
+            "stdout": {"type": "string", "value": "stdout"},
+            "stderr": {"type": "string", "value": ""}
+        }
+    }));
+    output["schema"] = serde_json::json!(schema);
+    if let Some(mark) = mark {
+        output["process_cleanup_unknown"] = serde_json::json!(mark);
+    }
+    output
+}
+
+#[test]
+fn productive_recovery_stops_the_run_on_a_recorded_cleanup_unknown() {
+    let (_workspace, fixture) = smoke_productive_execution_fixture();
+    let flow = fixture.smoke_flow();
+    let mut provider = ScriptedProvider {
+        bodies: Vec::new(),
+        turns: VecDeque::from([single_tool_provider_turn("response-tool", "call-1")]),
+    };
+    let mut attempts = MemoryAttempts::default();
+    let mut sink = MemorySink::default();
+    let mut tools = FakeToolExecutor::default();
+    let mut recovery = InjectedAttemptRecovery::ToolResult(RunAttemptResult {
+        attempt_id: "tool-000001".to_owned(),
+        attempt_kind: RunAttemptKind::Tool,
+        outcome: RunAttemptOutcome::Completed,
+        classification: None,
+        exit_code: Some(0),
+        timestamp: "2026-07-30T12:00:00Z".to_owned(),
+        durable_output: Some(cleanup_unknown_tool_output(
+            "flow-tool-attempt-output-v2",
+            Some(true),
+        )),
+    });
+
+    let execution = execute_productive_flow_with_tool_executor_and_recovery(
+        fixture.execution(flow, "productive-cleanup-unknown-recovery"),
+        &mut provider,
+        &mut attempts,
+        &mut sink,
+        &mut tools,
+        &mut recovery,
+    )
+    .expect("a recorded cleanup-unknown Tool closes the Run on recovery");
+
+    assert!(execution.failed);
+    assert!(matches!(
+        execution.terminal_error,
+        Some(RuntimeError::ProcessCleanupUnknown)
+    ));
+    assert!(tools.invocations.is_empty(), "recovery must not redispatch");
+    assert_eq!(
+        provider.bodies.len(),
+        1,
+        "the Run stops before another turn"
+    );
+}
+
+#[test]
+fn productive_recovery_rejects_a_cleanup_mark_that_contradicts_its_schema() {
+    let (_workspace, fixture) = smoke_productive_execution_fixture();
+    let flow = fixture.smoke_flow();
+    for (name, schema, mark) in [
+        ("v1-with-mark", "flow-tool-attempt-output-v1", Some(true)),
+        ("v2-without-mark", "flow-tool-attempt-output-v2", None),
+    ] {
+        let mut provider = ScriptedProvider {
+            bodies: Vec::new(),
+            turns: VecDeque::from([single_tool_provider_turn("response-tool", "call-1")]),
+        };
+        let mut attempts = MemoryAttempts::default();
+        let mut sink = MemorySink::default();
+        let mut tools = FakeToolExecutor::default();
+        let mut recovery = InjectedAttemptRecovery::ToolResult(RunAttemptResult {
+            attempt_id: "tool-000001".to_owned(),
+            attempt_kind: RunAttemptKind::Tool,
+            outcome: RunAttemptOutcome::Completed,
+            classification: None,
+            exit_code: Some(0),
+            timestamp: "2026-07-30T12:00:00Z".to_owned(),
+            durable_output: Some(cleanup_unknown_tool_output(schema, mark)),
+        });
+
+        let error = execute_productive_flow_with_tool_executor_and_recovery(
+            fixture.execution(flow, &format!("productive-cleanup-mark-{name}")),
+            &mut provider,
+            &mut attempts,
+            &mut sink,
+            &mut tools,
+            &mut recovery,
+        )
+        .expect_err("a cleanup mark must match its schema");
+
+        assert!(
+            matches!(error, RuntimeError::Protocol(_)),
+            "{name}: {error}"
+        );
+        assert!(tools.invocations.is_empty(), "{name}");
+    }
+}
+
 #[test]
 fn productive_recovery_resumes_a_cancelled_tool_attempt_without_redispatch() {
     let (_workspace, fixture) = smoke_productive_execution_fixture();

@@ -1,6 +1,7 @@
 use super::super::process::{
-    BoundedRead, child_exited_without_reaping, configure_executor_child,
-    duplicate_executor_descriptor, set_nonblocking, terminate_child_or_fail_stop,
+    BoundedRead, ExecutorCleanup, child_exited_without_reaping, configure_executor_child,
+    duplicate_executor_descriptor, set_nonblocking, terminate_child_bounded,
+    terminate_child_or_fail_stop,
 };
 use super::{invalid_response, runtime_open_error};
 use crate::runtime::types::RuntimeError;
@@ -380,9 +381,13 @@ pub(super) fn preflight_one_shot_with_deadline(
     }
 }
 
-pub(super) fn start_one_shot(
-    waiting: WaitingExecutor,
-) -> Result<proto::ExecutorResponseV0, RuntimeError> {
+/// A terminal Executor answer and whether cleanup of its process group was left unknown.
+pub(super) struct StartedExecutor {
+    pub(super) response: proto::ExecutorResponseV0,
+    pub(super) cleanup_unknown: bool,
+}
+
+pub(super) fn start_one_shot(waiting: WaitingExecutor) -> Result<StartedExecutor, RuntimeError> {
     let timeout_ms = waiting.timeout_ms;
     let now = Instant::now;
     start_one_shot_with_deadlines(
@@ -394,10 +399,44 @@ pub(super) fn start_one_shot(
 }
 
 fn start_one_shot_with_deadlines(
+    waiting: WaitingExecutor,
+    start_deadline: impl FnOnce() -> Result<Instant, RuntimeError>,
+    terminal_deadline_after_start: impl FnMut(&mut Child) -> Result<Instant, RuntimeError>,
+    now: &impl Fn() -> Instant,
+) -> Result<StartedExecutor, RuntimeError> {
+    let mut cleanup_unknown = false;
+    let result = start_one_shot_inner(
+        waiting,
+        start_deadline,
+        terminal_deadline_after_start,
+        now,
+        &mut cleanup_unknown,
+    );
+    match result {
+        // A surviving group keeps only a Completed answer; any other outcome fails stop as before.
+        Ok(response) if cleanup_unknown => match response {
+            proto::ExecutorResponseV0::Completed { .. } => Ok(StartedExecutor {
+                response,
+                cleanup_unknown,
+            }),
+            _ => std::process::abort(),
+        },
+        Ok(response) => Ok(StartedExecutor {
+            response,
+            cleanup_unknown: false,
+        }),
+        // Without a valid answer to keep, a survivor still fails stop.
+        Err(_) if cleanup_unknown => std::process::abort(),
+        Err(error) => Err(error),
+    }
+}
+
+fn start_one_shot_inner(
     mut waiting: WaitingExecutor,
     start_deadline: impl FnOnce() -> Result<Instant, RuntimeError>,
     mut terminal_deadline_after_start: impl FnMut(&mut Child) -> Result<Instant, RuntimeError>,
     now: &impl Fn() -> Instant,
+    cleanup_unknown: &mut bool,
 ) -> Result<proto::ExecutorResponseV0, RuntimeError> {
     if crate::runtime::cancellation::productive_cancellation()
         .load(std::sync::atomic::Ordering::Acquire)
@@ -461,7 +500,11 @@ fn start_one_shot_with_deadlines(
             match child_exited_without_reaping(waiting.child.child_mut()) {
                 Ok(true) => {
                     let mut completed_child = waiting.child.take();
-                    terminate_child_or_fail_stop(&mut completed_child);
+                    match terminate_child_bounded(&mut completed_child) {
+                        ExecutorCleanup::Complete => {}
+                        ExecutorCleanup::Survived => *cleanup_unknown = true,
+                        ExecutorCleanup::Unobservable => std::process::abort(),
+                    }
                     let status = completed_child
                         .try_wait()
                         .map_err(|_| invalid_response("Executor process could not be reaped"))?
@@ -577,7 +620,7 @@ pub(super) fn start_one_shot_at_deadlines(
     start_deadline: Instant,
     terminal_deadline_after_start: impl FnMut(&mut Child) -> Result<Instant, RuntimeError>,
     now: impl Fn() -> Instant,
-) -> Result<proto::ExecutorResponseV0, RuntimeError> {
+) -> Result<StartedExecutor, RuntimeError> {
     start_one_shot_with_deadlines(
         waiting,
         || Ok(start_deadline),

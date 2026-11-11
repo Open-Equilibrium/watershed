@@ -29,6 +29,8 @@ pub(crate) enum ExecutorPreflightOutcome {
 pub(crate) struct ExecutorToolExecution {
     pub(crate) enforcement: proto::EnforcementReceiptV0,
     pub(crate) outcome: ToolExecutionOutcome,
+    /// Whether a process of the Tool's group survived cleanup after the Executor's answer.
+    pub(crate) cleanup_unknown: bool,
     #[cfg(any(test, feature = "m12-startup-evidence"))]
     pub(crate) request_hash: String,
 }
@@ -108,7 +110,8 @@ impl PreparedExecutor {
             prepared: _prepared,
             process,
         } = waiting;
-        match start_one_shot(process)? {
+        let started = start_one_shot(process)?;
+        match started.response {
             proto::ExecutorResponseV0::Completed {
                 enforcement,
                 tool_result,
@@ -119,6 +122,7 @@ impl PreparedExecutor {
                     ExecutorToolExecution {
                         enforcement,
                         outcome: decode_tool_outcome(tool_result)?,
+                        cleanup_unknown: started.cleanup_unknown,
                         #[cfg(any(test, feature = "m12-startup-evidence"))]
                         request_hash: _prepared.request_hash,
                     },
@@ -561,8 +565,9 @@ mod tests {
         let ExecutorPreflightProcess::Ready(waiting) = preflight else {
             panic!("cancellation fixture must reach readiness")
         };
-        let terminal =
-            start_one_shot(waiting).expect("Executor returns canonical cancellation evidence");
+        let terminal = start_one_shot(waiting)
+            .expect("Executor returns canonical cancellation evidence")
+            .response;
         interrupter.join().expect("interrupt thread joins");
         crate::settle_productive_operation();
 

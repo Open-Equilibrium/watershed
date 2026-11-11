@@ -95,6 +95,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Uncertain attempt** — A durable provider or Tool intent without a committed terminal result. Flow Agent never redispatches it automatically; `PROTOCOL.md` owns reconciliation behavior.
 - **Provider reply invalid** — A provider reply that ends but breaks the Responses format. It closes the attempt as `provider_reply_invalid`, is never retried, and differs from both `provider_error` and an uncertain attempt; its contract is in `PROTOCOL.md`.
 - **Tool attempt stage** — The `preflight` or `started` stage recorded with a cancelled Tool attempt, stating whether `tool.started` was committed; its contract is in `PROTOCOL.md`.
+- **Process cleanup unknown** — The recorded mark that a Tool's processes may outlive its cleanup after the Executor's answer. The attempt keeps that answer's status, output and exit code, and the Run stops with the same reason; its contract is in `PROTOCOL.md`.
 - **Run bundle** — One Run's event/context/recovery segments, Run Log including its definition metadata, and immutable objects.
 - **Conversation bundle** — One conversation history plus all owned Run bundles.
 - **Host-local session ownership leases** — Exclusive operating-system file leases in the private user-global Workspace store. `PROTOCOL.md` defines their ownership and acquisition contract. Process exit releases leases; none is durable or transferable across hosts.

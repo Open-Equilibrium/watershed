@@ -1,8 +1,12 @@
-use super::support::{DefaultRecovery, ObjectRecovery, fake_tool_attempt_output};
+use super::support::{
+    DefaultRecovery, ObjectRecovery, execute_scripted_productive_case_with_tools,
+    fake_tool_attempt_output, single_tool_provider_turn,
+};
 use crate::runtime::{
     productive::{recovered_tool_terminal, recovered_tool_value, tool_result_value, tool_terminal},
     run_attempts::{RunAttemptKind, RunAttemptOutcome, RunAttemptResult},
     tool_runner::{ToolExecutionOutcome, ToolTerminalClassification},
+    types::RuntimeError,
 };
 use proto::EventType;
 fn attempt_result(outcome: &str, durable_output: Option<serde_json::Value>) -> RunAttemptResult {
@@ -251,6 +255,51 @@ fn recovered_tool_results_enforce_terminal_matrix_and_stream_caps() {
 }
 
 type RecoveredToolMutation = fn(&mut serde_json::Value);
+
+#[test]
+fn process_cleanup_unknown_keeps_the_answer_records_the_mark_and_stops_the_run() {
+    let (execution, provider, attempts, sink, tools) = execute_scripted_productive_case_with_tools(
+        "tool-cleanup-unknown-fixture",
+        [single_tool_provider_turn("response-tool", "call-tool")],
+        |_| {},
+        |tools| tools.cleanup_unknown = true,
+    )
+    .expect("a recorded cleanup-unknown Tool closes the Run without a Protocol error");
+
+    assert!(execution.failed);
+    assert!(matches!(
+        execution.terminal_error,
+        Some(RuntimeError::ProcessCleanupUnknown)
+    ));
+    assert_eq!(tools.invocations.len(), 1);
+    assert_eq!(
+        provider.bodies.len(),
+        1,
+        "the Run stops before another turn"
+    );
+    assert_eq!(
+        attempts.results[1].2, "completed",
+        "the Executor's status is kept"
+    );
+    assert_eq!(attempts.results[1].3, None, "the Executor's answer is kept");
+    let durable = attempts.durable_outputs[1]
+        .as_ref()
+        .expect("the Tool attempt keeps its durable output");
+    assert_eq!(durable["schema"], "flow-tool-attempt-output-v2");
+    assert_eq!(durable["process_cleanup_unknown"], true);
+    assert!(
+        sink.0
+            .iter()
+            .any(|event| event.event_type == EventType::ToolCompleted),
+        "the Tool's answer is still reported"
+    );
+    let session_failed = sink
+        .0
+        .iter()
+        .find(|event| event.event_type == EventType::SessionFailed)
+        .expect("the Run records its stop");
+    assert_eq!(session_failed.payload["reason"], "process_cleanup_unknown");
+}
 
 #[test]
 fn recovered_tool_results_reject_semantically_inconsistent_durable_values() {

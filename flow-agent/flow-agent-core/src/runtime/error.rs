@@ -3,6 +3,7 @@ use std::{fmt, io, path::PathBuf};
 pub(crate) const MAX_PROVIDER_ERROR_MESSAGE_CHARS: usize = 4_000;
 pub(crate) const PROVIDER_ERROR_REASON: &str = "provider_error";
 pub(crate) const PROVIDER_REPLY_INVALID_REASON: &str = "provider_reply_invalid";
+pub(crate) const PROCESS_CLEANUP_UNKNOWN_REASON: &str = "process_cleanup_unknown";
 
 /// Stable bounded failure at the private Executor integration boundary.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -152,6 +153,8 @@ pub enum RuntimeError {
     ExecutionBackendUnavailable,
     /// Productive execution has no supported backend on this platform.
     ProductiveExecutionUnavailable,
+    /// A Tool's processes may outlive its cleanup; the Run stops after recording that.
+    ProcessCleanupUnknown,
     /// A provider rejected or could not conclusively finish an attempted request.
     Provider(ProviderFailure),
     /// Executor selection, framing or Sandbox preparation failed.
@@ -374,6 +377,7 @@ impl fmt::Display for RuntimeError {
             Self::ProductiveExecutionUnavailable => f.write_str(
                 "execution_backend_unavailable: productive execution is unavailable on this platform",
             ),
+            Self::ProcessCleanupUnknown => f.write_str(PROCESS_CLEANUP_UNKNOWN_REASON),
             Self::Provider(failure) => {
                 f.write_str(if failure.is_reply_invalid() {
                     PROVIDER_REPLY_INVALID_REASON
@@ -487,6 +491,7 @@ impl std::error::Error for RuntimeError {
             | Self::ReplayOutputLimitExceeded { .. }
             | Self::ExecutionBackendUnavailable
             | Self::ProductiveExecutionUnavailable
+            | Self::ProcessCleanupUnknown
             | Self::Provider(_)
             | Self::Executor(_)
             | Self::Cancelled

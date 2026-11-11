@@ -1,7 +1,8 @@
 use super::attempt_codec::{
-    ExecutorAttemptStage, cancelled_tool_attempt_output, executor_dispatch_failure_output,
-    recovered_cancelled_tool_stage, recovered_executor_dispatch_error, recovered_tool_output,
-    recovered_tool_terminal, recovered_tool_value_bound, tool_attempt_output,
+    ExecutorAttemptStage, cancelled_tool_attempt_output, cleanup_unknown_recorded,
+    executor_dispatch_failure_output, recovered_cancelled_tool_stage,
+    recovered_executor_dispatch_error, recovered_tool_output, recovered_tool_terminal,
+    recovered_tool_value_bound, tool_attempt_output,
 };
 #[cfg(test)]
 use super::observe_productive_result_persist;
@@ -97,6 +98,10 @@ where
         recovered_attempt,
         &result,
     )?;
+    // WHY: the Tool's answer is recorded first; its unknown cleanup then stops the Run.
+    if cleanup_unknown_recorded(&result) && result.outcome != RunAttemptOutcome::Cancelled {
+        return Err(RuntimeError::ProcessCleanupUnknown);
+    }
     if result.outcome != RunAttemptOutcome::Completed {
         if result.outcome == RunAttemptOutcome::Cancelled {
             return Err(RuntimeError::Cancelled);
@@ -319,14 +324,21 @@ where
         drop(waiting);
         return Err(error);
     }
-    let (enforcement, mut outcome) =
+    let (enforcement, mut outcome, cleanup_unknown) =
         start_fresh_tool(context, builder, invocation, tool, attempt, waiting)?;
     if outcome.status == RunAttemptOutcome::Completed
         && crate::runtime::cancellation::ensure_productive_dispatch_allowed().is_err()
     {
         outcome.mark_cancelled();
     }
-    persist_tool_outcome(context, tool, attempt, enforcement, outcome)
+    persist_tool_outcome(
+        context,
+        tool,
+        attempt,
+        enforcement,
+        outcome,
+        cleanup_unknown,
+    )
 }
 
 /// Validates a fresh Tool request before `Start`; every failure here is definitive.
@@ -403,7 +415,7 @@ fn start_fresh_tool<P, A, S, T>(
     tool: &core_script::ToolBlock,
     attempt: &ToolAttempt,
     waiting: T::Waiting,
-) -> Result<(proto::EnforcementReceiptV0, ToolExecutionOutcome), RuntimeError>
+) -> Result<(proto::EnforcementReceiptV0, ToolExecutionOutcome, bool), RuntimeError>
 where
     P: super::ProductiveProvider,
     A: ProductiveAttemptLog,
@@ -425,9 +437,11 @@ where
         Err(error) => Err(error),
     };
     match dispatched {
-        Ok(ExecutorDispatchOutcome::Completed(execution)) => {
-            Ok((execution.enforcement, execution.outcome))
-        }
+        Ok(ExecutorDispatchOutcome::Completed(execution)) => Ok((
+            execution.enforcement,
+            execution.outcome,
+            execution.cleanup_unknown,
+        )),
         Ok(ExecutorDispatchOutcome::Error(code)) => {
             persist_executor_dispatch_failure(
                 context.attempts,
@@ -493,6 +507,7 @@ fn persist_tool_outcome<P, A, S, T>(
     attempt: &ToolAttempt,
     enforcement: proto::EnforcementReceiptV0,
     mut outcome: ToolExecutionOutcome,
+    cleanup_unknown: bool,
 ) -> Result<(core_script::FlowValue, RunAttemptResult), RuntimeError>
 where
     P: super::ProductiveProvider,
@@ -528,6 +543,7 @@ where
             &enforcement,
             &attempt.request_hash,
             canonical,
+            cleanup_unknown,
         )),
     };
     context.attempts.terminal(&result)?;

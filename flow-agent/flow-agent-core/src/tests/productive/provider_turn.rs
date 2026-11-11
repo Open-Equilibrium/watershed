@@ -891,6 +891,7 @@ fn productive_failed_tool_closes_the_active_execution_without_another_provider_t
     let mut sink = MemorySink::default();
     let mut tools = FakeToolExecutor {
         cancel_before_outcome: false,
+        cleanup_unknown: false,
         error_after_interrupt: false,
         fault: Default::default(),
         invocations: Vec::new(),

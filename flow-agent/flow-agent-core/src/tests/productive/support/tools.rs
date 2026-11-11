@@ -14,6 +14,7 @@ pub(in super::super) struct FakePreparedTool {
 }
 pub(in super::super) struct FakeToolExecutor {
     pub(in super::super) cancel_before_outcome: bool,
+    pub(in super::super) cleanup_unknown: bool,
     pub(in super::super) error_after_interrupt: bool,
     pub(in super::super) fault: FakeToolExecutionFault,
     pub(in super::super) invocations: Vec<ToolInvocation>,
@@ -37,6 +38,7 @@ impl Default for FakeToolExecutor {
     fn default() -> Self {
         Self {
             cancel_before_outcome: false,
+            cleanup_unknown: false,
             error_after_interrupt: false,
             fault: FakeToolExecutionFault::None,
             invocations: Vec::new(),
@@ -151,6 +153,7 @@ impl ProductiveToolExecutor for FakeToolExecutor {
             ExecutorToolExecution {
                 enforcement: test_enforcement_receipt(prepared.policy_digest),
                 outcome: self.outcome.clone(),
+                cleanup_unknown: self.cleanup_unknown,
                 request_hash: prepared.request_hash,
             },
         )))

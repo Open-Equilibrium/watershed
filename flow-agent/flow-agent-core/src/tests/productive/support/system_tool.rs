@@ -76,6 +76,7 @@ impl ProductiveToolExecutor for SystemProductiveToolExecutor {
             ExecutorToolExecution {
                 enforcement: prepared.enforcement,
                 outcome,
+                cleanup_unknown: false,
                 request_hash: prepared.request_hash,
             },
         )))

@@ -1,4 +1,5 @@
 use crate::runtime::{
+    error::PROCESS_CLEANUP_UNKNOWN_REASON,
     event_construction::RuntimeEventBuilder,
     execution_plan::RuntimeFailure,
     stream_signature::FlowInvocation,
@@ -266,6 +267,11 @@ pub fn runtime_failure_for_unhandled_error(err: &RuntimeError) -> RuntimeFailure
             denial_message(reason.clone()),
             serde_json::Map::new(),
         ),
+        RuntimeError::ProcessCleanupUnknown => (
+            PROCESS_CLEANUP_UNKNOWN_REASON,
+            "Tool process cleanup is unknown; the Run stopped after recording the Tool result",
+            serde_json::Map::new(),
+        ),
         _ => (
             RUNTIME_ERROR_REASON,
             "runtime execution failed",
@@ -323,6 +329,7 @@ pub fn runtime_failure_for_tool_error(err: &RuntimeError, tool_id: &str) -> Opti
         | RuntimeError::ReplayOutputLimitExceeded { .. }
         | RuntimeError::ExecutionBackendUnavailable
         | RuntimeError::ProductiveExecutionUnavailable
+        | RuntimeError::ProcessCleanupUnknown
         | RuntimeError::Provider(_)
         | RuntimeError::Cancelled
         | RuntimeError::EventWriter(_)

@@ -48,6 +48,17 @@ pub(super) fn process_group_cleanup_calls_for_test() -> usize {
     PROCESS_GROUP_CLEANUP_CALLS.get()
 }
 
+#[cfg(test)]
+thread_local! {
+    static FORCE_CLEANUP_SURVIVOR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Makes the next completed-Executor cleanup report a group that survived its wait.
+#[cfg(test)]
+pub(super) fn force_cleanup_survivor_for_test() {
+    FORCE_CLEANUP_SURVIVOR.set(true);
+}
+
 pub(super) fn child_exited_without_reaping(
     child: &std::process::Child,
 ) -> rustix::io::Result<bool> {
@@ -61,7 +72,33 @@ pub(super) fn child_exited_without_reaping(
     .map(|status| status.is_some())
 }
 
-fn terminate_child_bounded(child: &mut std::process::Child) -> bool {
+/// How the cleanup of an Executor's process group ended.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ExecutorCleanup {
+    /// The leader was reaped and no process of its group remained.
+    Complete,
+    /// A process of the group outlived the cleanup wait.
+    Survived,
+    /// The leader could not be observed, so the cleanup cannot be judged.
+    Unobservable,
+}
+
+pub(super) fn terminate_child_bounded(child: &mut std::process::Child) -> ExecutorCleanup {
+    #[cfg(test)]
+    {
+        if FORCE_CLEANUP_SURVIVOR.replace(false) {
+            // Ends the real group first, so the injected survivor leaks no process.
+            if let Some(process_group) = rustix::process::Pid::from_raw(child.id() as i32) {
+                let _ = rustix::process::kill_process_group(
+                    process_group,
+                    rustix::process::Signal::KILL,
+                );
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            return ExecutorCleanup::Survived;
+        }
+    }
     let process_group = rustix::process::Pid::from_raw(child.id() as i32);
     // Signal the group before reaping its leader. The unreaped leader retains
     // the numeric PID/PGID, so this signal cannot race with identifier reuse.
@@ -76,7 +113,7 @@ fn terminate_child_bounded(child: &mut std::process::Child) -> bool {
         let leader_reaped = match child.try_wait() {
             Ok(Some(_)) => true,
             Ok(None) => false,
-            Err(_) => return false,
+            Err(_) => return ExecutorCleanup::Unobservable,
         };
         let group_gone =
             process_group.is_none_or(
@@ -87,15 +124,15 @@ fn terminate_child_bounded(child: &mut std::process::Child) -> bool {
                 },
             );
         if leader_reaped && group_gone {
-            return true;
+            return ExecutorCleanup::Complete;
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    false
+    ExecutorCleanup::Survived
 }
 
 pub(super) fn terminate_child_or_fail_stop(child: &mut std::process::Child) {
-    if !terminate_child_bounded(child) {
+    if terminate_child_bounded(child) != ExecutorCleanup::Complete {
         std::process::abort();
     }
 }
@@ -227,7 +264,10 @@ mod tests {
         let process_group = rustix::process::Pid::from_raw(child.id() as i32)
             .expect("child process group id is valid");
         let started = Instant::now();
-        assert!(terminate_child_bounded(&mut child));
+        assert_eq!(
+            terminate_child_bounded(&mut child),
+            ExecutorCleanup::Complete
+        );
         assert!(started.elapsed() < Duration::from_secs(2));
         assert!(matches!(child.try_wait(), Ok(Some(_))));
         assert_eq!(
