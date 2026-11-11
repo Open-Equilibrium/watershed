@@ -18,6 +18,7 @@ import 'commit_dialog.dart';
 import 'commit_draft.dart';
 import 'git_actions.dart';
 import 'pull_request_choice.dart';
+import 'pull_request_writing.dart';
 import 'session_menus.dart';
 
 /// The approved "Create pull request" dialog for a pushed branch (pull request mockups §2–3),
@@ -56,9 +57,6 @@ Future<void> showPullRequestDialog(
 
 /// What the dialog hands off to when the branch needs another step first.
 enum _Next { push, branch, commit, compose }
-
-/// Where the title and description came from.
-enum _Text { commit, written, failed }
 
 class _PullRequestDialog extends StatefulWidget {
   const _PullRequestDialog({
@@ -107,24 +105,9 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
 
   /// The Chat's model as `provider/id`, read when the dialog opened.
   late final String? _model = widget.state.model.value;
-  _Text _text = _Text.commit;
-  bool _writing = false;
 
-  /// What the model was last asked about, and how many commits it read.
-  String? _asked;
-  int _written = 0;
-
-  /// The model's text also describes uncommitted files.
-  bool _writtenFiles = false;
-  int _writes = 0;
-
-  /// Runs while Create waits after the model changed the fields, so a click meant for the
-  /// earlier text does not send unread text.
-  Timer? _settling;
-
-  /// What the dialog last put in the fields; a field that differs is the user's.
-  String _filledTitle = '';
-  String _filledBody = '';
+  /// The title and description the model writes into the fields the user has not edited.
+  late final PullRequestWriting _writing;
 
   /// "Commit, push & create PR": the uncommitted files, the selection and message, and the
   /// steps done so far, which a later run skips. Once pushed, the dialog creates as for a
@@ -154,6 +137,8 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
     super.initState();
     _title.addListener(() => setState(() {}));
     _bodyFocus.addListener(() => setState(() {}));
+    _writing = PullRequestWriting(pulls: _pulls, title: _title, body: _body)
+      ..addListener(() => setState(() {}));
     if (_compose && (widget.state.git.status.value?.changed ?? 0) > 0) {
       _files = CommitDraft(widget.state)..addListener(_filesChanged);
     }
@@ -175,8 +160,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
 
   @override
   void dispose() {
-    _stopWriting();
-    _settling?.cancel();
+    _writing.dispose();
     _elapsed?.cancel();
     _title.dispose();
     _body.dispose();
@@ -225,8 +209,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
 
   void _accept(BridgePullRequestPlan plan) {
     if (_plan == null) {
-      _title.text = _filledTitle = plan.subject;
-      _body.text = _filledBody = plan.body;
+      _writing.fillFromCommit(plan.subject, plan.body);
       // The form replaces the reading state, whose dialog took the focus first.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         // The commit message comes first when there is one to write.
@@ -252,7 +235,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
       // After the push the text stays as the user reviewed it.
       if (!_beforePush || _running || _loadingFiles) return;
       if (model == null || plan.open != null) {
-        _stopWriting();
+        _writing.stop();
         return;
       }
       final paths = _files?.paths ?? const <String>[];
@@ -260,7 +243,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
       final base = plan.target == plan.identity.headRepository
           ? plan.base?.name
           : null;
-      _ask(
+      _writing.ask(
         plan,
         'draft ${base ?? ''}\n${paths.join('\n')}',
         files: paths.isNotEmpty,
@@ -280,79 +263,14 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
         comparison.commits == 0 ||
         comparison.mergeBase.isEmpty) {
       // Text for other commits would not fit this plan.
-      _stopWriting();
+      _writing.stop();
       return;
     }
-    _ask(
+    _writing.ask(
       plan,
       '${comparison.mergeBase}..${plan.identity.headCommit}',
       () => _pulls.write(model, plan),
     );
-  }
-
-  /// Asks the model through `write` unless it already wrote for `key`; `write` gives none
-  /// when there is nothing to describe.
-  void _ask(
-    BridgePullRequestPlan plan,
-    String key,
-    Future<BridgePullRequestText?> Function() write, {
-    bool files = false,
-  }) {
-    if (key == _asked) return;
-    _asked = key;
-    final asked = ++_writes;
-    _writing = true;
-    unawaited(() async {
-      BridgePullRequestText? text;
-      var failed = false;
-      try {
-        text = await write();
-      } on Object {
-        failed = true;
-      }
-      if (!mounted || asked != _writes) return;
-      setState(() {
-        _writing = false;
-        _written = text?.commits.toInt() ?? 0;
-        _writtenFiles = files;
-        _text = failed
-            ? _Text.failed
-            : text == null
-            ? _Text.commit
-            : _Text.written;
-        // Without an answer, fields that still show earlier model text show the commit again.
-        _fill(text?.title ?? plan.subject, text?.body ?? plan.body);
-      });
-    }());
-  }
-
-  /// Puts `title` and `body` in the fields the user has not edited.
-  void _fill(String title, String body) {
-    var changed = false;
-    if (_title.text == _filledTitle && title != _filledTitle) {
-      _title.text = _filledTitle = title;
-      changed = true;
-    }
-    if (_body.text == _filledBody && body != _filledBody) {
-      _body.text = _filledBody = body;
-      changed = true;
-    }
-    if (!changed) return;
-    _settling?.cancel();
-    _settling = Timer(
-      const Duration(milliseconds: 500),
-      () => setState(() => _settling = null),
-    );
-  }
-
-  /// Stops waiting for the model; what it would have written is dropped, and the same commits
-  /// may be written for again.
-  void _stopWriting() {
-    if (!_writing) return;
-    _writes++;
-    _writing = false;
-    _asked = null;
-    unawaited(_pulls.stopWriting().catchError((Object _) {}));
   }
 
   bool get _sameBranch {
@@ -368,7 +286,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
         !_stale &&
         !_creating &&
         !_running &&
-        _settling == null &&
+        !_writing.settling &&
         plan.target != null &&
         plan.base != null &&
         !plan.baseMissing &&
@@ -393,7 +311,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
   Future<void> _run() async {
     if (!_ready) return;
     setState(() {
-      _stopWriting();
+      _writing.stop();
       _running = true;
       _result = null;
     });
@@ -490,7 +408,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
     if (!_ready) return null;
     final plan = _plan!;
     setState(() {
-      _stopWriting();
+      _writing.stop();
       _result = null;
       _creating = true;
       _seconds = 0;
@@ -643,27 +561,27 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
 
   /// Where the title and description came from (mockup §2's generating and failure states).
   Widget? _textNote(TextStyle faint) {
-    if (_writing) {
+    if (_writing.writing) {
       return Text(
         '◌ $_writer is writing the title and description… The fields stay editable.',
         style: faint,
       );
     }
-    return switch (_text) {
-      _Text.commit => null,
-      _Text.written => Text(
+    return switch (_writing.source) {
+      TextSource.commit => null,
+      TextSource.written => Text(
         'Written by $_writer from ${_compose
-            ? _writtenFiles
-                  ? _written == 0
+            ? _writing.writtenFiles
+                  ? _writing.written == 0
                         ? 'the files above'
                         : "the branch's commits and the files above"
-                  : "the branch's ${plural(_written, 'commit')}"
-            : _written == 1
+                  : "the branch's ${plural(_writing.written, 'commit')}"
+            : _writing.written == 1
             ? 'the commit and its diff'
-            : 'the $_written commits and their diff'}. Edit before creating.',
+            : 'the ${_writing.written} commits and their diff'}. Edit before creating.',
         style: faint,
       ),
-      _Text.failed => WarningNotice(
+      TextSource.failed => WarningNotice(
         "Could not write the text with $_writer. Filled from the latest commit's subject and body instead; edit before creating.",
       ),
     };
