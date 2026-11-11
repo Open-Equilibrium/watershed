@@ -139,17 +139,24 @@ class Sidebar extends StatelessWidget {
             danger: true,
           ),
         ],
-        child: Padding(
+        builder: (context, menu, _) => Padding(
           padding: const EdgeInsets.symmetric(
             horizontal: WsMetrics.space3,
             vertical: WsMetrics.space2,
           ),
-          child: Text(
-            info.project,
-            style: TextStyle(
-              color: ws.textMuted,
-              fontWeight: WsMetrics.fwMedium,
-            ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  info.project,
+                  style: TextStyle(
+                    color: ws.textMuted,
+                    fontWeight: WsMetrics.fwMedium,
+                  ),
+                ),
+              ),
+              menu,
+            ],
           ),
         ),
       ),
@@ -162,7 +169,7 @@ class Sidebar extends StatelessWidget {
           ),
         ],
         // Marked while it shows rather than a Page.
-        child: ValueListenableBuilder(
+        builder: (context, menu, shown) => ValueListenableBuilder(
           valueListenable: workspace?.open ?? _noPage,
           builder: (context, open, card) => Semantics(
             selected: open == null,
@@ -208,12 +215,23 @@ class Sidebar extends StatelessWidget {
                         ),
                         const SizedBox(width: WsMetrics.space3),
                         Expanded(child: SessionTitle(state: state)),
-                        Text(
-                          label,
-                          style: TextStyle(
-                            color: color,
-                            fontSize: WsMetrics.fsSmall,
-                          ),
+                        // The "···" takes the status word's place while it shows; the dot
+                        // keeps the status.
+                        Stack(
+                          alignment: Alignment.centerRight,
+                          children: [
+                            Opacity(
+                              opacity: shown ? 0 : 1,
+                              child: Text(
+                                label,
+                                style: TextStyle(
+                                  color: color,
+                                  fontSize: WsMetrics.fsSmall,
+                                ),
+                              ),
+                            ),
+                            menu,
+                          ],
                         ),
                       ],
                     ),

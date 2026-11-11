@@ -235,7 +235,7 @@ class _PageRow extends StatelessWidget {
       selected: selected,
       child: RowMenu(
         actions: [RowAction('Add a page inside', onAddInside)],
-        child: Shortcuts(
+        builder: (context, menu, _) => Shortcuts(
           shortcuts: activateKeys,
           child: InkWell(
             onTap: onOpen,
@@ -299,6 +299,7 @@ class _PageRow extends StatelessWidget {
                       ),
                     ),
                   ),
+                  menu,
                 ],
               ),
             ),

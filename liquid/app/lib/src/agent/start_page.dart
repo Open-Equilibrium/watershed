@@ -100,7 +100,7 @@ class _RecentRow extends StatelessWidget {
           danger: true,
         ),
       ],
-      child: InkWell(
+      builder: (context, menu, _) => InkWell(
         onTap: () => state.continueSession(session.path),
         borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
         child: Container(
@@ -124,6 +124,7 @@ class _RecentRow extends StatelessWidget {
                   fontSize: WsMetrics.fsSmall,
                 ),
               ),
+              menu,
             ],
           ),
         ),

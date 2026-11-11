@@ -11,6 +11,7 @@ import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
+import 'package:liquid/src/theme/tokens.g.dart';
 import 'package:liquid/src/workspace/page_view.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
@@ -439,6 +440,96 @@ void main() {
       reason: 'the hover is painted above the sidebar',
     );
   });
+
+  testWidgets(
+    'a hovered Page row shows its ··· inside the row, at its right end',
+    (tester) async {
+      await show(tester);
+      final row = tester.getRect(
+        find
+            .ancestor(of: inSidebar('Untitled'), matching: find.byType(InkWell))
+            .first,
+      );
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: tester.getCenter(inSidebar('Untitled')));
+      addTearDown(mouse.removePointer);
+      await tester.pumpAndSettle();
+
+      final more = tester.getRect(
+        find.descendant(
+          of: find.byType(Sidebar),
+          matching: find.byTooltip('More actions'),
+        ),
+      );
+      expect(
+        row.contains(more.center),
+        isTrue,
+        reason: 'the highlight covers the ···',
+      );
+      expect(
+        row.right - more.right,
+        lessThan(WsMetrics.space5),
+        reason: 'at the right end',
+      );
+    },
+  );
+
+  testWidgets(
+    'a hovered session card shows its ··· in place of the status word',
+    (tester) async {
+      await show(tester, session: SessionState(FakeBackend()));
+      final card = find.byKey(const Key('session-card'));
+      final status = find.descendant(of: card, matching: find.text('idle'));
+      final more = find.descendant(
+        of: card,
+        matching: find.byTooltip('More actions'),
+      );
+      // How visible `finder` is: its nearest fading ancestor's opacity, 1 when none fades it.
+      double opacity(Finder finder) {
+        final fades = find.ancestor(of: finder, matching: find.byType(Opacity));
+        return fades.evaluate().isEmpty
+            ? 1
+            : tester.widget<Opacity>(fades.first).opacity;
+      }
+
+      expect(opacity(status), 1);
+      expect(opacity(more), 0);
+
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: tester.getCenter(card));
+      addTearDown(mouse.removePointer);
+      await tester.pumpAndSettle();
+      expect(opacity(status), 0);
+      expect(opacity(more), 1);
+    },
+  );
+
+  testWidgets(
+    'Tab reaches a Page row’s ···, ⏎ there opens its menu and esc closes it',
+    (tester) async {
+      await show(tester);
+      await tabTo(
+        tester,
+        find.ancestor(
+          of: inSidebar('Untitled'),
+          matching: find.byType(InkWell),
+        ),
+      );
+      await tabTo(
+        tester,
+        find.descendant(
+          of: find.byType(Sidebar),
+          matching: find.byTooltip('More actions'),
+        ),
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(find.text('Add a page inside'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.text('Add a page inside'), findsNothing);
+    },
+  );
 
   testWidgets('every Tab stop around the sidebar shows where it is', (
     tester,
