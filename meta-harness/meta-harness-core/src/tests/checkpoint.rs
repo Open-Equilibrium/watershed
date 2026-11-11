@@ -653,6 +653,64 @@ fn outside_git_no_session_is_deleted_while_an_agent_runs_in_the_folder() {
 }
 
 #[test]
+fn outside_git_no_session_is_deleted_while_a_window_shows_it() {
+    run(async {
+        let dir = std::env::temp_dir().join(format!(
+            "watershed-checkpoint-no-git-shown-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("directory");
+        let file = dir.join("s1.jsonl");
+        std::fs::write(&file, "{}\n").expect("session file");
+        let window = Checkpoints::new(&dir);
+        let mine = Checkpoints::new(&dir);
+        window.show_session(Some("s1")).await.expect("shown");
+        assert!(matches!(
+            mine.delete_session("s1", &file).await,
+            Err(DiffError::SessionShown)
+        ));
+        assert!(file.exists(), "kept");
+        window.show_session(None).await.expect("no longer shown");
+        mine.delete_session("s1", &file).await.expect("deleted");
+        assert!(!file.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    });
+}
+
+#[test]
+fn a_session_shown_in_another_worktree_is_not_deleted() {
+    run(async {
+        let repo = Repo::new("delete-shown");
+        let linked = repo.path().with_file_name(format!(
+            "watershed-checkpoint-delete-shown-linked-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&linked);
+        repo.git(&["worktree", "add", "-q", &linked.display().to_string()]);
+        let file = repo.path().join(".git/s1.jsonl");
+        std::fs::write(&file, "{}\n").expect("session file");
+        // The window runs a turn of the session, which shows it after the turn too.
+        let window = Checkpoints::new(&linked);
+        window
+            .capture(&at("t1", Phase::Start))
+            .await
+            .expect("started");
+        window.capture(&at("t1", Phase::End)).await.expect("ended");
+        let mine = Checkpoints::new(repo.path());
+        assert!(matches!(
+            mine.delete_session("s1", &file).await,
+            Err(DiffError::SessionShown)
+        ));
+        assert!(file.exists(), "kept");
+        window.show_session(None).await.expect("no longer shown");
+        mine.delete_session("s1", &file).await.expect("deleted");
+        assert!(!file.exists());
+        let _ = std::fs::remove_dir_all(&linked);
+    });
+}
+
+#[test]
 fn a_linked_marker_folder_never_removes_a_file_elsewhere() {
     run(async {
         let repo = Repo::new("linked-running");
@@ -2022,6 +2080,8 @@ fn checkpoints_are_listed_and_removed_by_session_or_all() {
             .capture(&theirs("u2", Phase::End))
             .await
             .expect("ended");
+        // The window moved on to another session before deleting this one.
+        mine.show_session(None).await.expect("moved on");
         mine.delete_session("s1", &file).await.expect("deleted");
         assert!(!file.exists());
         assert_eq!(
@@ -2051,6 +2111,8 @@ fn deleting_waits_for_this_windows_turn_until_its_end_is_taken() {
             .capture(&at("t1", Phase::Start))
             .await
             .expect("started");
+        // The window moved on before deleting its session, as Liquid does.
+        checkpoints.show_session(None).await.expect("moved on");
         let file = repo.path().join(".git/s1.jsonl");
         std::fs::write(&file, "{}\n").expect("session file");
         // The stopped turn's end checkpoint takes longer than a moment.
@@ -2125,6 +2187,7 @@ fn a_delete_waiting_for_its_end_leaves_other_windows_turn_starts_free() {
             .capture(&at("t1", Phase::Start))
             .await
             .expect("started");
+        checkpoints.show_session(None).await.expect("moved on");
         let file = repo.path().join(".git/s1.jsonl");
         std::fs::write(&file, "{}\n").expect("session file");
         let theirs = |turn: &str, phase| Checkpoint {

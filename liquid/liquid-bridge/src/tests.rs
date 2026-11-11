@@ -1169,6 +1169,8 @@ fn deletes_a_stored_session_with_its_checkpoints_and_removes_all_checkpoints() {
             .expect("captured");
         }
     }
+    // The window that took these checkpoints moved on, as a switch or a new session does.
+    call(checkpoints.show_session(None)).expect("moved on");
     let script = [
         (2..=10).map(|id| state_with(id, &current)).collect(),
         "IFS= read -r line || exit 0".to_owned(),
@@ -1232,6 +1234,46 @@ fn deletes_a_stored_session_with_its_checkpoints_and_removes_all_checkpoints() {
     assert_eq!(call(checkpoints.sessions()).expect("listed"), []);
     call(checkpoints.close());
     assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn a_session_a_window_shows_is_not_deleted_by_another_window() {
+    let repo = repository("shown");
+    let sessions = repo.join(".git/pi-sessions");
+    std::fs::create_dir_all(&sessions).expect("sessions");
+    let header = |id: &str| {
+        format!(
+            r#"{{"type":"session","version":3,"id":"{id}","cwd":"{}"}}"#,
+            repo.display()
+        ) + "\n"
+    };
+    let current = sessions.join("current.jsonl");
+    let old = sessions.join("old.jsonl");
+    std::fs::write(&current, header("s1")).expect("current");
+    std::fs::write(&old, header("s9")).expect("old");
+    // This window resumes `old`, so it shows that session.
+    let window = AgentSession::launch(AgentCommand {
+        program: "/bin/sh".into(),
+        args: vec!["-c".into(), gated("IFS= read -r line || exit 0").into()],
+        extension: EXTENSION.into(),
+        session: Some(old.clone()),
+        cwd: repo.clone(),
+    })
+    .expect("agent starts");
+    let script = [
+        state_with(2, &current),
+        state_with(3, &current),
+        "IFS= read -r line || exit 0".to_owned(),
+    ]
+    .concat();
+    let other = launch(gated(&script), repo.display().to_string()).expect("agent starts");
+    assert!(other.delete_session(old.display().to_string()).is_err());
+    assert!(old.exists(), "kept while another window shows it");
+    assert!(call(window.shutdown()));
+    assert_eq!(other.delete_session(old.display().to_string()), Ok(()));
+    assert!(!old.exists());
+    assert!(call(other.shutdown()));
     let _ = std::fs::remove_dir_all(&repo);
 }
 

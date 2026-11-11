@@ -17,7 +17,7 @@ use tokio::sync::watch;
 mod git;
 pub use git::{CommitFile, CommitPlan};
 
-use crate::checkout::{Alone, Checkout, RETRY, Running};
+use crate::checkout::{Alone, Checkout, RETRY, Running, ShownSession};
 use crate::diff::{
     Branch, BranchTarget, ChangeStatus, Changes, DiffError, FileChange, GitStatus,
     RevertConfirmation, Stash, Whitespace, WorkingTree,
@@ -153,6 +153,8 @@ pub struct Checkpoints {
     /// Marks this session's agent as running in the checkout while a turn runs, with the turn's
     /// start checkpoint, as the agent may switch sessions between turns.
     running: std::sync::Mutex<Option<(Checkpoint, Running)>>,
+    /// The session this window shows, with its mark (ADR-0271).
+    shown: std::sync::Mutex<Option<(String, ShownSession)>>,
     /// Whether that turn's end checkpoint is being taken.
     ending: std::sync::atomic::AtomicBool,
     /// Whether a turn's start waits for a revert or another action that holds the checkout alone.
@@ -186,6 +188,7 @@ impl Checkpoints {
             closed: watch::Sender::new(false),
             captures: tokio::sync::Mutex::new(()),
             running: std::sync::Mutex::new(None),
+            shown: std::sync::Mutex::new(None),
             ending: std::sync::atomic::AtomicBool::new(false),
             waiting: watch::Sender::new(false),
             gh: "gh".into(),
@@ -196,6 +199,34 @@ impl Checkpoints {
     /// which can take a while.
     pub fn waiting(&self) -> watch::Receiver<bool> {
         self.waiting.subscribe()
+    }
+
+    /// Makes `session` the one this window shows, which deleting it is then refused for, in any
+    /// worktree of the project (ADR-0271); `None` shows none. A turn's start shows its session,
+    /// so only a switch or a new session needs this.
+    pub async fn show_session(&self, session: Option<&str>) -> Result<(), DiffError> {
+        let Some(session) = session else {
+            self.shown.lock().expect("shown lock").take();
+            return Ok(());
+        };
+        valid_id(session)?;
+        if self
+            .shown
+            .lock()
+            .expect("shown lock")
+            .as_ref()
+            .is_some_and(|(held, _)| held == session)
+        {
+            return Ok(());
+        }
+        let checkout = match self.tree().await {
+            Ok(tree) => tree.checkout(),
+            Err(DiffError::NotARepository) => Checkout::folder(&self.dir)?,
+            Err(error) => return Err(error),
+        };
+        let held = checkout.show(session).await?;
+        *self.shown.lock().expect("shown lock") = Some((session.to_owned(), held));
+        Ok(())
     }
 
     /// Whether the project is in a Git working tree, so it can have checkpoints.
@@ -252,6 +283,8 @@ impl Checkpoints {
             // Back to not waiting, telling only if it waited.
             self.waiting.send_if_modified(std::mem::take);
             let running = running?;
+            // Failing here keeps the turn from starting, as a missing checkout guard does.
+            self.show_session(Some(&checkpoint.session)).await?;
             let mut slot = self.running.lock().expect("running lock");
             // Closing empties the slot after telling it closed, so a mark that arrives later
             // drops here instead of outliving the session.
@@ -543,7 +576,8 @@ impl Checkpoints {
         self.await_own_ending().await;
         // Turns outside Git hold the folder's guard, which Initialize Git takes too, so it is
         // held before the repository is looked up and until the file is gone.
-        let _folder = Checkout::folder(&self.dir)?.alone().await?;
+        let folder = Checkout::folder(&self.dir)?;
+        let _folder = folder.alone().await?;
         let tree = match self.tree().await {
             Ok(tree) => Some(tree),
             Err(DiffError::NotARepository) => None,
@@ -551,14 +585,24 @@ impl Checkpoints {
         };
         // Held until the file is gone.
         let _alone = match &tree {
-            Some(tree) => {
-                let alone = self.alone_everywhere(tree, false).await?;
-                self.bounded(tree.delete_references(&format!("{REFS}{session}/")))
-                    .await?;
-                Some(alone)
-            }
+            Some(tree) => Some(self.alone_everywhere(tree, false).await?),
             None => None,
         };
+        // Refused while a window shows it, in any worktree of the repository.
+        let checkouts = match &tree {
+            Some(tree) => tree.checkouts()?,
+            None => vec![folder],
+        };
+        if checkouts
+            .iter()
+            .any(|checkout| checkout.shown().iter().any(|shown| shown == session))
+        {
+            return Err(DiffError::SessionShown);
+        }
+        if let Some(tree) = &tree {
+            self.bounded(tree.delete_references(&format!("{REFS}{session}/")))
+                .await?;
+        }
         std::fs::remove_file(file).map_err(DiffError::Io)
     }
 
@@ -671,6 +715,7 @@ impl Checkpoints {
         // Told first, so an open in progress stops instead of holding the project.
         self.closed.send_replace(true);
         self.running.lock().expect("running lock").take();
+        self.shown.lock().expect("shown lock").take();
         let tree = self.tree.lock().await.replace(Err(Unopened::Closed));
         let Some(Ok(tree)) = tree else {
             return;

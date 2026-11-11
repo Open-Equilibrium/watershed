@@ -3,10 +3,11 @@
 //! worktrees share, and a shared lock on a file named after its session in
 //! `<git-dir>/watershed`; a revert holds the checkout alone, and removing checkpoints, which all
 //! worktrees share, holds the repository alone. Stash writes hold a separate repository lock
-//! across lookup and mutation.
+//! across lookup and mutation. A window showing a session holds a shared lock on a name in
+//! `shown`, which keeps the session from deletion but not from reverts or commits (ADR-0271).
 //! The system drops the locks of a process that ends, so a crash leaves no agent running.
 
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::fs::{File, OpenOptions, TryLockError};
 use std::hash::{Hash, Hasher};
 use std::os::unix::ffi::OsStrExt;
@@ -37,26 +38,44 @@ pub(crate) struct Checkout {
     repository: PathBuf,
 }
 
+/// A session's name in one of the checkout's folders, the folder as it was opened, the name and
+/// the name's shared lock.
+type NameLock = (OwnedFd, CString, OwnedFd);
+
 /// Marks a session's agent as running in the checkout until dropped.
 #[derive(Debug)]
 pub(crate) struct Running {
     _checkout: File,
     _repository: File,
-    /// The `running` folder as it was opened, the name in it and the name's lock, when this
-    /// holder has it; the last holder removes the name, there, wherever a link now points.
-    name_lock: Option<(OwnedFd, CString, OwnedFd)>,
+    /// The name in the `running` folder, when this holder has it.
+    name_lock: Option<NameLock>,
 }
 
 impl Drop for Running {
     fn drop(&mut self) {
-        // Only the last holder can hold the name alone. It removes the name before its lock
-        // drops with the field, so no file outlives its holders.
-        if let Some((running, name, file)) = &self.name_lock
-            && rustix::fs::flock(file, FlockOperation::NonBlockingLockExclusive).is_ok()
-            && names(running, name, file)
-        {
-            let _ = rustix::fs::unlinkat(running, name.as_c_str(), AtFlags::empty());
+        if let Some(name_lock) = &self.name_lock {
+            release(name_lock);
         }
+    }
+}
+
+/// Marks a session as shown by a window of the checkout until dropped (ADR-0271).
+#[derive(Debug)]
+pub(crate) struct ShownSession(NameLock);
+
+impl Drop for ShownSession {
+    fn drop(&mut self) {
+        release(&self.0);
+    }
+}
+
+/// Removes the name when its holder is the last one. Only the last holder can hold the name
+/// alone, and it removes the name before its lock drops, so no file outlives its holders.
+fn release((folder, name, file): &NameLock) {
+    if rustix::fs::flock(file, FlockOperation::NonBlockingLockExclusive).is_ok()
+        && names(folder, name, file)
+    {
+        let _ = rustix::fs::unlinkat(folder, name.as_c_str(), AtFlags::empty());
     }
 }
 
@@ -118,7 +137,7 @@ impl Checkout {
             }
         }
         // The turn counts as running from here, even if its name cannot be kept.
-        let name_lock = self.name_lock(session).await;
+        let name_lock = self.name_lock(c"running", session).await;
         Ok(Running {
             _checkout: checkout,
             _repository: repository,
@@ -126,20 +145,20 @@ impl Checkout {
         })
     }
 
-    /// The `running` folder, the name file `session` in it and its shared lock, which the same
-    /// session's turns in other windows hold too, unless it cannot be had: a listing holds the
+    /// The `kind` folder, the name file `session` in it and its shared lock, which the same
+    /// session's holders in other windows hold too, unless it cannot be had: a listing holds the
     /// name alone briefly, and a writer of the Git directory can put something else there, so
     /// neither the folders nor the name are followed if they are links.
-    async fn name_lock(&self, session: &str) -> Option<(OwnedFd, CString, OwnedFd)> {
+    async fn name_lock(&self, kind: &CStr, session: &str) -> Option<NameLock> {
         let folder = OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::RDONLY;
         std::fs::create_dir_all(&self.dir).ok()?;
         let path = CString::new(self.dir.as_os_str().as_bytes()).ok()?;
         let dir = rustix::fs::open(path.as_c_str(), folder, Mode::empty()).ok()?;
-        match rustix::fs::mkdirat(&dir, c"running", Mode::from_raw_mode(0o777)) {
+        match rustix::fs::mkdirat(&dir, kind, Mode::from_raw_mode(0o777)) {
             Ok(()) | Err(rustix::io::Errno::EXIST) => {}
             Err(_) => return None,
         }
-        let running = rustix::fs::openat(&dir, c"running", folder, Mode::empty()).ok()?;
+        let running = rustix::fs::openat(&dir, kind, folder, Mode::empty()).ok()?;
         let name = CString::new(session).ok()?;
         let flags =
             OFlags::CREATE | OFlags::RDWR | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
@@ -200,12 +219,32 @@ impl Checkout {
         hold_alone(lock_file(&self.repository, "repository.lock")?, running).await
     }
 
+    /// Marks `session` as shown by a window of this checkout until the guard drops.
+    pub(crate) async fn show(&self, session: &str) -> Result<ShownSession, DiffError> {
+        match self.name_lock(c"shown", session).await {
+            Some(name_lock) => Ok(ShownSession(name_lock)),
+            None => Err(DiffError::Io(std::io::Error::other(format!(
+                "{session} could not be marked as shown"
+            )))),
+        }
+    }
+
     /// The sessions whose agents run in the checkout, sorted.
     pub(crate) fn running(&self) -> Vec<String> {
-        let Ok(entries) = std::fs::read_dir(self.running_dir()) else {
+        self.held("running")
+    }
+
+    /// The sessions a window of the checkout shows, sorted.
+    pub(crate) fn shown(&self) -> Vec<String> {
+        self.held("shown")
+    }
+
+    /// The sessions with a name held in the `kind` folder, sorted.
+    fn held(&self, kind: &str) -> Vec<String> {
+        let Ok(entries) = std::fs::read_dir(self.dir.join(kind)) else {
             return Vec::new();
         };
-        let mut running: Vec<String> = entries
+        let mut held: Vec<String> = entries
             .flatten()
             .filter(|entry| {
                 open(&entry.path(), false)
@@ -213,12 +252,8 @@ impl Checkout {
             })
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
             .collect();
-        running.sort();
-        running
-    }
-
-    fn running_dir(&self) -> PathBuf {
-        self.dir.join("running")
+        held.sort();
+        held
     }
 }
 

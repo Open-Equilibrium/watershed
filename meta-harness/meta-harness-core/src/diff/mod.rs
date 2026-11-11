@@ -147,6 +147,8 @@ pub enum DiffError {
     /// Agents of these sessions run in the checkout, so its files must not be reverted; none
     /// named while a turn starts or another revert runs.
     AgentRunning(Vec<String>),
+    /// A window shows the session, so it must not be deleted.
+    SessionShown,
     /// Git left these files below the working folder unreverted, such as one in a folder it
     /// may not write.
     NotReverted(Vec<String>),
@@ -226,6 +228,9 @@ impl fmt::Display for DiffError {
                 f.write_str("a turn or another revert is starting in this checkout")
             }
             Self::AgentRunning(_) => f.write_str("an agent runs in this checkout"),
+            Self::SessionShown => {
+                f.write_str("the session is open in a window; close it there before deleting it")
+            }
             Self::NotReverted(paths) => write!(f, "Git could not revert {}", paths.join(", ")),
             Self::PartlyReverted(error) => write!(f, "the files may be partly reverted: {error}"),
             Self::PlanChanged => f.write_str("files changed since you confirmed"),

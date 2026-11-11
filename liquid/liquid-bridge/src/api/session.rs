@@ -144,7 +144,12 @@ impl AgentSession {
         early.shrink_to_fit();
         let stopper = session.stopper();
         let checkpoints = session.checkpoints();
-        Ok(Self {
+        // The session pi resumes is the one this window shows (ADR-0271).
+        let resumed = command
+            .session
+            .as_deref()
+            .and_then(|file| session_id(file, &command.cwd));
+        let window = Self {
             stopper: std::sync::Mutex::new(stopper),
             responder: session.responder(),
             session: Mutex::new(Some(session)),
@@ -155,7 +160,11 @@ impl AgentSession {
             pi_program: command.program,
             pi_args: command.args,
             writing: std::sync::Mutex::new(None),
-        })
+        };
+        RUNTIME
+            .block_on(window.checkpoints.show_session(resumed.as_deref()))
+            .map_err(shown)?;
+        Ok(window)
     }
 
     /// Streams the session's events; a session has one subscriber.
@@ -626,7 +635,12 @@ impl AgentSession {
                 .await
                 .map_err(describe)?;
             // Waits without holding the session.
-            pending.switched().await.map_err(describe)
+            let switched = pending.switched().await.map_err(describe)?;
+            // A new session is shown once its first turn starts.
+            if switched {
+                self.checkpoints.show_session(None).await.map_err(shown)?;
+            }
+            Ok(switched)
         })
     }
 
@@ -637,7 +651,15 @@ impl AgentSession {
                 .switch_session(Path::new(&path))
                 .await
                 .map_err(describe)?;
-            pending.switched().await.map_err(describe)
+            let switched = pending.switched().await.map_err(describe)?;
+            if switched {
+                let id = session_id(Path::new(&path), &self.cwd);
+                self.checkpoints
+                    .show_session(id.as_deref())
+                    .await
+                    .map_err(shown)?;
+            }
+            Ok(switched)
         })
     }
 
