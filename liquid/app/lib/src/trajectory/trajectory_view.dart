@@ -711,6 +711,33 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     inspecting: _inspecting,
   );
 
+  /// The keys of the Trajectory tab: its list, its session tree and its steps.
+  Map<ShortcutActivator, VoidCallback> _bindings(ShortcutSettings keys) => {
+    ...keys.bind({
+      Command.foldAll: () {
+        if (!_comparing) _foldAll();
+      },
+      // What the comparison hides waits for it to end.
+      Command.openStep: () {
+        if (_selected == null || _comparing) return;
+        setState(() => _inspecting = !_inspecting);
+        _reveal();
+      },
+      Command.branch: _branch,
+      Command.compare: _toggleCompare,
+      Command.selectBranch: () {
+        if (_comparing) _pickCursor();
+      },
+      Command.closeStep: _escape,
+      Command.filterSteps: () {
+        if (!_comparing) _openFilter();
+      },
+    }),
+    ...Fixed.previousOrNextStep.bind([() => _move(-1), () => _move(1)]),
+    ...Fixed.foldTurn.bind([() => _fold(true), () => _fold(false)]),
+    ...Fixed.moveInTree.bind([() => _stepTree(-1), () => _stepTree(1)]),
+  };
+
   @override
   Widget build(BuildContext context) {
     final compared = _compared;
@@ -760,37 +787,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
           ),
         Expanded(
           child: ViewShortcuts(
-            bindings: {
-              ...keys.bind({
-                Command.foldAll: () {
-                  if (!_comparing) _foldAll();
-                },
-                // What the comparison hides waits for it to end.
-                Command.openStep: () {
-                  if (_selected == null || _comparing) return;
-                  setState(() => _inspecting = !_inspecting);
-                  _reveal();
-                },
-                Command.branch: _branch,
-                Command.compare: _toggleCompare,
-                Command.selectBranch: () {
-                  if (_comparing) _pickCursor();
-                },
-                Command.closeStep: _escape,
-                Command.filterSteps: () {
-                  if (!_comparing) _openFilter();
-                },
-              }),
-              ...Fixed.previousOrNextStep.bind([
-                () => _move(-1),
-                () => _move(1),
-              ]),
-              ...Fixed.foldTurn.bind([() => _fold(true), () => _fold(false)]),
-              ...Fixed.moveInTree.bind([
-                () => _stepTree(-1),
-                () => _stepTree(1),
-              ]),
-            },
+            bindings: _bindings(keys),
             child: Focus(
               focusNode: _focus,
               autofocus: true,
