@@ -293,6 +293,16 @@ fn names(running: &OwnedFd, name: &CString, file: &OwnedFd) -> bool {
 /// and otherwise Liquid's config folder. Only absolute locations count, since a relative one
 /// would differ between working directories.
 fn user_lock_folder() -> Result<PathBuf, DiffError> {
+    // Tests must not reach the real home; `isolate_user_home` records the one they use.
+    #[cfg(test)]
+    {
+        let isolated = TEST_HOME.lock().expect("test home").clone();
+        assert!(
+            isolated
+                .is_some_and(|home| std::env::var_os("HOME").as_deref() == Some(home.as_os_str())),
+            "tests must call isolate_user_home before reaching the lock folder"
+        );
+    }
     let absolute = |name: &str| {
         std::env::var_os(name)
             .map(PathBuf::from)
@@ -315,6 +325,29 @@ fn user_lock_folder() -> Result<PathBuf, DiffError> {
         .or_else(|| absolute("HOME").map(|home| home.join(".config")))
         .ok_or_else(unset)?;
     Ok(config.join("liquid/project-locks"))
+}
+
+/// The home `isolate_user_home` pointed `HOME` at.
+#[cfg(test)]
+static TEST_HOME: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+/// Points the lock folder at a test home, so tests never write into the real one. The test runner
+/// gives each test process its own (`WATERSHED_TEST_USER_HOME`); without it, a folder per process
+/// in the temporary folder. Each test runs in its own process under nextest, so it stays its own.
+#[cfg(test)]
+pub(crate) fn isolate_user_home() {
+    let home = std::env::var_os("WATERSHED_TEST_USER_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::temp_dir().join(format!("watershed-test-user-home-{}", std::process::id()))
+        });
+    std::fs::create_dir_all(&home).expect("test user home");
+    unsafe {
+        std::env::set_var("HOME", &home);
+        std::env::remove_var("XDG_RUNTIME_DIR");
+        std::env::remove_var("XDG_CONFIG_HOME");
+    }
+    *TEST_HOME.lock().expect("test home") = Some(home);
 }
 
 /// A namespace owned by this user, with no ancestor another user may replace from within it.
@@ -376,6 +409,7 @@ mod tests {
 
     #[test]
     fn folder_locks_use_a_private_owner_namespace() {
+        isolate_user_home();
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -400,12 +434,7 @@ mod tests {
         for dir in [&project, &root.join("tmp-a"), &root.join("tmp-b")] {
             std::fs::create_dir_all(dir).unwrap();
         }
-        // Each test runs in its own process under nextest, so these variables stay its own.
-        unsafe {
-            std::env::set_var("HOME", root.join("home"));
-            std::env::remove_var("XDG_RUNTIME_DIR");
-            std::env::remove_var("XDG_CONFIG_HOME");
-        }
+        isolate_user_home();
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()

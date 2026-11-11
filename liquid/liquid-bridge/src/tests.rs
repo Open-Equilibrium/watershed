@@ -45,8 +45,26 @@ fn gated(script: &str) -> String {
     format!("{}{script}", gate(1))
 }
 
+/// Points the per-user lock folder at a test home, so no test writes into the real one. The test
+/// runner gives each test process its own (`WATERSHED_TEST_USER_HOME`); without it, a folder per
+/// process in the temporary folder. Each test runs in its own process under nextest.
+fn isolate_user_home() {
+    let home = std::env::var_os("WATERSHED_TEST_USER_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::temp_dir().join(format!("watershed-bridge-test-home-{}", std::process::id()))
+        });
+    std::fs::create_dir_all(&home).expect("test user home");
+    unsafe {
+        std::env::set_var("HOME", home);
+        std::env::remove_var("XDG_RUNTIME_DIR");
+        std::env::remove_var("XDG_CONFIG_HOME");
+    }
+}
+
 /// Starts a scripted stand-in for pi in `cwd`; `sh` takes pi's arguments as `$0` and `$@`.
 fn launch(script: String, cwd: String) -> Result<AgentSession, String> {
+    isolate_user_home();
     AgentSession::launch(AgentCommand {
         program: "/bin/sh".into(),
         args: vec!["-c".into(), script.into()],
@@ -66,6 +84,7 @@ fn no_session_file(id: u32) -> String {
 /// Runs an async call as flutter_rust_bridge does: on a runtime of its own, apart from the
 /// bridge's.
 fn call<F: std::future::Future>(call: F) -> F::Output {
+    isolate_user_home();
     tokio::runtime::Runtime::new()
         .expect("runtime starts")
         .block_on(call)
@@ -1239,6 +1258,7 @@ fn deletes_a_stored_session_with_its_checkpoints_and_removes_all_checkpoints() {
 
 #[test]
 fn a_session_a_window_shows_is_not_deleted_by_another_window() {
+    isolate_user_home();
     let repo = repository("shown");
     let sessions = repo.join(".git/pi-sessions");
     std::fs::create_dir_all(&sessions).expect("sessions");

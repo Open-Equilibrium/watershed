@@ -62,6 +62,7 @@ impl Drop for Repo {
 }
 
 fn run<F: std::future::Future>(test: F) -> F::Output {
+    crate::checkout::isolate_user_home();
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

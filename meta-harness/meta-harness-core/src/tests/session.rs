@@ -31,6 +31,7 @@ fn fake_agent(script: &str) -> (Session, Receiver<SessionEvent>) {
 }
 
 fn run<F: Future>(test: F) -> F::Output {
+    crate::checkout::isolate_user_home();
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
