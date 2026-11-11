@@ -190,10 +190,15 @@ class _AgentShellState extends State<AgentShell> {
         : bare == draft.trim()
         ? typed
         : '$draft\n\n$typed';
-    _composer.value = TextEditingValue(
-      text: text,
-      selection: TextSelection.collapsed(offset: text.length),
-    );
+    setState(() {
+      _composer = renewController(
+        _composer,
+        TextEditingValue(
+          text: text,
+          selection: TextSelection.collapsed(offset: text.length),
+        ),
+      );
+    });
     // Taken, so the same text handed back again arrives again.
     state.draft.value = null;
   }

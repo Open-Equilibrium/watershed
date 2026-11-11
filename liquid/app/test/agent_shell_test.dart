@@ -526,6 +526,29 @@ void main() {
     variant: TargetPlatformVariant.only(TargetPlatform.macOS),
   );
 
+  testWidgets(
+    '⌘Z after text handed back to the composer does not bring back what it replaced',
+    (tester) async {
+      await show(tester);
+      final composer = find.byKey(const Key('composer'));
+      await tester.enterText(composer, 'Plan');
+      await tester.pump(const Duration(milliseconds: 600));
+      await emit(tester, event(BridgeEventKind.inputTextSet, text: 'Retry'));
+      expect(
+        tester.widget<TextField>(composer).controller?.text,
+        'Retry\n\nPlan',
+      );
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.tap(composer);
+      await undo(tester);
+      expect(
+        tester.widget<TextField>(composer).controller?.text,
+        'Retry\n\nPlan',
+      );
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+  );
+
   testWidgets('marks the branch in the rebuilt chat and reads earlier items', (
     tester,
   ) async {

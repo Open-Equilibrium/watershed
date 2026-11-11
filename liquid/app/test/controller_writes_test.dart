@@ -98,11 +98,6 @@ void main() {
       ),
       // Pending until their fix commits land.
       (
-        'lib/src/agent/shell.dart',
-        '_composer.value = TextEditingValue(',
-        'Pending: text handed back to the composer.',
-      ),
-      (
         'lib/src/workspace/table_block.dart',
         'if (_name.text != name) _name.text = name;',
         'Pending: a name changed elsewhere.',
