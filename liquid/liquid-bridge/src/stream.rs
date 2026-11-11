@@ -5,22 +5,34 @@ use tokio::sync::mpsc;
 
 use crate::api::events::{BridgeEvent, BridgeEventKind};
 
-/// Adds `event` to `batch`, appending a content delta to the one before it when both belong to
-/// the same item, so a batch holds one event per run of text however fast it streams.
+/// Adds `event` to `batch`. A content delta joins the one before it when both belong to the same
+/// item, and a partial output replaces the one before it for the same item, since each carries
+/// the item's whole output so far; a batch holds one event per run of text however fast it
+/// streams.
 pub(crate) fn push(batch: &mut Vec<BridgeEvent>, event: BridgeEvent) {
     if let Some(last) = batch.last_mut()
-        && last.kind == BridgeEventKind::ContentDelta
-        && event.kind == BridgeEventKind::ContentDelta
+        && last.kind == event.kind
         && last.item.as_ref().map(|item| item.id) == event.item.as_ref().map(|item| item.id)
-        && let (Some(text), Some(more)) = (last.text.as_mut(), event.text.as_deref())
     {
-        text.push_str(more);
-        return;
+        match event.kind {
+            BridgeEventKind::ItemUpdated => {
+                *last = event;
+                return;
+            }
+            BridgeEventKind::ContentDelta => {
+                if let (Some(text), Some(more)) = (last.text.as_mut(), event.text.as_deref()) {
+                    text.push_str(more);
+                    return;
+                }
+            }
+            _ => {}
+        }
     }
     batch.push(event);
 }
 
-/// How long streaming text gathers before Dart gets it, as T3 Code batches its stream.
+/// How long streaming text and partial output gather before Dart gets them, as T3 Code batches
+/// its stream.
 const STREAM_WINDOW: std::time::Duration = std::time::Duration::from_millis(50);
 
 /// Hands the session's events to `deliver` in batches until it returns `false`, those from
@@ -48,9 +60,9 @@ pub(crate) async fn forward(
     }
 }
 
-/// Adds what arrives to `batch` while it ends in streaming text and `window` has not passed, so
-/// Dart gets at most one update per item per window (client architecture rule 4); anything
-/// else ends the gathering at once.
+/// Adds what arrives to `batch` while it ends in streaming text or partial output and `window`
+/// has not passed, so Dart gets at most one update per item per window (client architecture rule
+/// 4); anything else ends the gathering at once.
 pub(crate) async fn gather(
     batch: &mut Vec<BridgeEvent>,
     receiver: &mut mpsc::Receiver<SessionEvent>,
@@ -58,10 +70,12 @@ pub(crate) async fn gather(
 ) {
     // Boxed, as `pin!` expands to `super let`, which flutter_rust_bridge's parser rejects.
     let mut window = Box::pin(window);
-    while batch
-        .last()
-        .is_some_and(|event| event.kind == BridgeEventKind::ContentDelta)
-    {
+    while batch.last().is_some_and(|event| {
+        matches!(
+            event.kind,
+            BridgeEventKind::ContentDelta | BridgeEventKind::ItemUpdated
+        )
+    }) {
         let next = std::future::poll_fn(|context| {
             if window.as_mut().poll(context).is_ready() {
                 return std::task::Poll::Ready(None);

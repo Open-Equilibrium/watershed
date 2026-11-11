@@ -700,6 +700,104 @@ fn merges_consecutive_deltas_of_one_item() {
     );
 }
 
+#[test]
+fn keeps_only_the_latest_partial_output_of_adjacent_updates() {
+    let output = |item: u64, text: &str| {
+        bridge(AgentEvent::ItemUpdated {
+            item: ItemId(item),
+            output: text.to_owned(),
+        })
+    };
+    let mut merged = Vec::new();
+    for event in [
+        output(1, "a"),
+        output(1, "ab"),
+        output(2, "x"),
+        output(1, "abc"),
+        bridge(AgentEvent::TurnCompleted { turn: TurnId(1) }),
+        output(1, "b"),
+    ] {
+        push(&mut merged, event);
+    }
+    let summary: Vec<_> = merged
+        .iter()
+        .map(|event| {
+            (
+                event.kind,
+                event.item.as_ref().map(|item| item.id),
+                event.text.clone(),
+            )
+        })
+        .collect();
+    // Each update carries the whole output so far, so an adjacent one replaces the last; an
+    // update after another item or event keeps its place in the order.
+    assert_eq!(
+        summary,
+        [
+            (BridgeEventKind::ItemUpdated, Some(1), Some("ab".to_owned())),
+            (BridgeEventKind::ItemUpdated, Some(2), Some("x".to_owned())),
+            (
+                BridgeEventKind::ItemUpdated,
+                Some(1),
+                Some("abc".to_owned())
+            ),
+            (BridgeEventKind::TurnCompleted, None, None),
+            (BridgeEventKind::ItemUpdated, Some(1), Some("b".to_owned())),
+        ]
+    );
+}
+
+#[test]
+fn forwards_partial_output_once_its_window_passed() {
+    let output = |text: &str| {
+        SessionEvent::Agent(AgentEvent::ItemUpdated {
+            item: ItemId(1),
+            output: text.to_owned(),
+        })
+    };
+    let ms = Duration::from_millis;
+    tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .start_paused(true)
+        .build()
+        .expect("runtime starts")
+        .block_on(async {
+            let (events, receiver) = tokio::sync::mpsc::channel(16);
+            let (delivered, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
+            let start = tokio::time::Instant::now();
+            tokio::spawn(forward(Vec::new(), receiver, move |event| {
+                delivered
+                    .send((start.elapsed(), event.kind, event.text))
+                    .is_ok()
+            }));
+            // Two updates within one window reach Dart as the latest output only.
+            events.send(output("a")).await.expect("sent");
+            tokio::time::sleep(ms(30)).await;
+            events.send(output("ab")).await.expect("sent");
+            assert_eq!(
+                deliveries.recv().await,
+                Some((ms(50), BridgeEventKind::ItemUpdated, Some("ab".to_owned())))
+            );
+            // Anything else ends the window at once, after the output before it.
+            tokio::time::sleep(ms(10)).await;
+            events.send(output("b")).await.expect("sent");
+            events
+                .send(SessionEvent::Agent(AgentEvent::TurnCompleted {
+                    turn: TurnId(1),
+                }))
+                .await
+                .expect("sent");
+            assert_eq!(
+                deliveries.recv().await,
+                Some((ms(60), BridgeEventKind::ItemUpdated, Some("b".to_owned())))
+            );
+            assert_eq!(
+                deliveries.recv().await,
+                Some((ms(60), BridgeEventKind::TurnCompleted, None))
+            );
+        });
+}
+
 /// A new Git repository with `a.txt` committed as `old`.
 fn repository(name: &str) -> std::path::PathBuf {
     let repo = std::env::temp_dir().join(format!("liquid-bridge-{name}-{}", std::process::id()));
