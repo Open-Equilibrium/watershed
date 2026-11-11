@@ -118,8 +118,17 @@ private func disableLiquidKey() -> FlutterError? {
   }
 }
 
-private struct HelperFailed: LocalizedError {
+struct HelperFailed: LocalizedError {
   let errorDescription: String?
+}
+
+/// What a refused helper run reports: what the helper said, or else its exit status.
+func helperRefusal(status: Int32, said: Data) -> HelperFailed {
+  let message = String(decoding: said, as: UTF8.self).trimmingCharacters(
+    in: .whitespacesAndNewlines)
+  return HelperFailed(
+    errorDescription: message.isEmpty
+      ? "the Liquid key helper failed with status \(status)" : message)
 }
 
 /// Runs the helper once; one that does not finish within ten seconds is stopped. A refusal
@@ -140,11 +149,7 @@ private func runHelper(_ argument: String) throws {
     throw HelperFailed(errorDescription: "the Liquid key helper did not finish")
   }
   if run.terminationStatus != 0 {
-    let message = String(
-      decoding: said.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self
-    ).trimmingCharacters(in: .whitespacesAndNewlines)
-    throw HelperFailed(
-      errorDescription: message.isEmpty
-        ? "the Liquid key helper failed with status \(run.terminationStatus)" : message)
+    throw helperRefusal(
+      status: run.terminationStatus, said: said.fileHandleForReading.readDataToEndOfFile())
   }
 }
