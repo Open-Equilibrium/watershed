@@ -20,13 +20,14 @@ use crate::runtime::{
         reset_session_stream_parent_sync_count_for_test, session_stream_parent_sync_count_for_test,
         set_session_stream_parent_sync_error_for_test,
     },
+    serial_event_writer::EVENT_WRITER_BATCH_WINDOW,
     session_reading::SessionEventReader,
 };
 use proto::{EventEnvelope, EventType};
 use std::{
     fs::{self, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 fn replay_prefix(writer: &mut ConversationEventWriter, events: &[EventEnvelope]) {
@@ -514,14 +515,19 @@ fn conversation_lone_delta_uses_the_shared_batch_deadline() {
             .expect("setup notification arrives");
     }
 
+    let enqueued_at = Instant::now();
     writer
         .commit(&event, &canonical, None)
         .expect("progress event enqueues");
-    assert_eq!(
-        receiver.highest_committed_sequence(),
-        3,
-        "batchable progress must not notify synchronously"
-    );
+    // The batch deadline fires no earlier than one window after enqueue. The watermark is read
+    // before the elapsed time, so a read inside the window proves that no early flush happened.
+    let unflushed_watermark = receiver.highest_committed_sequence();
+    if enqueued_at.elapsed() < EVENT_WRITER_BATCH_WINDOW {
+        assert_eq!(
+            unflushed_watermark, 3,
+            "batchable progress must not notify synchronously"
+        );
+    }
     assert_eq!(
         receiver
             .recv_timeout(Duration::from_millis(500))
