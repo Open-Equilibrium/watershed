@@ -213,6 +213,14 @@ pub(super) async fn gh(
     output(command, false, input).await
 }
 
+/// Runs the host's `ssh -G` for `alias` in `dir` and returns the configuration it resolves for
+/// that host, which Git's plain `ssh` reads too (ADR-0269).
+pub(super) async fn ssh_resolved(dir: &Path, alias: &str) -> Result<Vec<u8>, DiffError> {
+    let mut command = Command::new("ssh");
+    command.args(["-G", alias]).current_dir(dir);
+    output(piped(command, &NO_PROMPTS), false, None).await
+}
+
 /// Runs the host's pi (`program` with `args`) once in `dir` with `input` and returns what it
 /// printed; its login stays its own.
 pub(super) async fn pi_once(

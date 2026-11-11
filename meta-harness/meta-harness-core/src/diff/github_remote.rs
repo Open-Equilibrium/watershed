@@ -25,13 +25,53 @@ impl WorkingTree {
     pub(super) async fn github_remote(&self, remote: &str) -> Result<Repository, PullRequestError> {
         let urls = self.remote_urls(remote, false).await?;
         match urls.as_slice() {
-            [url] => github_repository(url).ok_or_else(|| PullRequestError::NotGitHub {
-                remote: remote.to_owned(),
-                host: url_host(url),
-                page: web_page(url),
-            }),
+            [url] => {
+                let mut repository =
+                    github_repository(url).ok_or_else(|| PullRequestError::NotGitHub {
+                        remote: remote.to_owned(),
+                        host: url_host(url),
+                        page: web_page(url),
+                    })?;
+                // An scp-like host may be an SSH alias from the user's configuration.
+                if !url.contains("://")
+                    && repository.host != GITHUB
+                    && let Some(host) = self.github_alias(&repository.host).await
+                {
+                    repository.host = host;
+                }
+                Ok(repository)
+            }
             _ => Err(DiffError::PushDestinations.into()),
         }
+    }
+
+    /// GitHub when `alias` resolves with `ssh -G` to GitHub's SSH host on its port, and only
+    /// while Git reaches SSH with plain `ssh`; otherwise None, so the alias stays refused.
+    async fn github_alias(&self, alias: &str) -> Option<String> {
+        if !self.plain_ssh().await.ok()? {
+            return None;
+        }
+        let output = process::ssh_resolved(&self.root, alias).await.ok()?;
+        let resolved = String::from_utf8_lossy(&output);
+        let field = |name: &str| {
+            resolved.lines().find_map(|line| {
+                let (key, value) = line.split_once(' ')?;
+                (key == name).then(|| value.to_ascii_lowercase())
+            })
+        };
+        let github = matches!(field("hostname")?.as_str(), "github.com" | "ssh.github.com");
+        (github && matches!(field("port")?.as_str(), "22" | "443")).then(|| GITHUB.to_owned())
+    }
+
+    /// Whether Git reaches SSH with plain `ssh`: neither `GIT_SSH` nor `GIT_SSH_COMMAND` names
+    /// another program, and `core.sshCommand` is unset or plain, so `ssh -G` reads what Git uses.
+    async fn plain_ssh(&self) -> Result<bool, DiffError> {
+        let plain =
+            |name: &str| std::env::var_os(name).is_none_or(|value| value.to_str() == Some("ssh"));
+        let configured = process::git_config(&self.root, &["--get", "core.sshCommand"]).await?;
+        Ok(plain("GIT_SSH")
+            && plain("GIT_SSH_COMMAND")
+            && matches!(configured.as_str(), "" | "ssh\n"))
     }
 }
 

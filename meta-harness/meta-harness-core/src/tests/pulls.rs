@@ -92,6 +92,85 @@ impl Pushed {
         checkpoints.set_gh(&script);
         checkpoints
     }
+
+    /// Puts a fake `ssh` first on PATH, whose `-G` prints `config` and which logs its calls.
+    fn ssh_config(&self, config: &str) {
+        let dir = self.repo.path().with_extension("ssh");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("config"), config).unwrap();
+        let script = dir.join("ssh");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nd={}\nprintf '%s\\n' \"$*\" >> \"$d/log\"\ncat \"$d/config\"\n",
+                shell_word(dir.display())
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let path =
+            std::env::join_paths(std::iter::once(dir).chain(std::env::split_paths(&path))).unwrap();
+        // Each test runs in its own process under nextest, so its PATH stays its own.
+        unsafe { std::env::set_var("PATH", path) };
+    }
+
+    fn ssh_log(&self) -> String {
+        std::fs::read_to_string(self.repo.path().with_extension("ssh").join("log"))
+            .unwrap_or_default()
+    }
+}
+
+/// Whether `checkpoints` refuses its remote `myalias` as not GitHub.
+async fn refuses_alias(checkpoints: &Checkpoints) -> bool {
+    matches!(
+        checkpoints.pull_request().await,
+        Err(PullRequestError::NotGitHub { host: Some(host), .. }) if host == "myalias"
+    )
+}
+
+#[test]
+fn an_ssh_alias_names_github_when_plain_ssh_resolves_it_there() {
+    run(async {
+        let pushed = Pushed::new("alias", "git@myalias:bw/api.git");
+        pushed.ssh_config("hostname github.com\nport 22\n");
+        assert!(matches!(
+            pushed.checkpoints("").pull_request().await,
+            Ok(None)
+        ));
+        assert!(
+            pushed.ssh_log().contains("-G myalias"),
+            "{}",
+            pushed.ssh_log()
+        );
+    });
+}
+
+#[test]
+fn an_ssh_alias_stays_refused_unless_plain_ssh_names_github() {
+    run(async {
+        let pushed = Pushed::new("alias-refused", "git@myalias:bw/api.git");
+        pushed.ssh_config("hostname github.com\nport 22\n");
+        // Git's own ssh command decides what it reaches, so ssh -G is not asked about it.
+        unsafe { std::env::set_var("GIT_SSH_COMMAND", "ssh -o ProxyJump=elsewhere") };
+        assert!(refuses_alias(&pushed.checkpoints("")).await);
+        unsafe { std::env::remove_var("GIT_SSH_COMMAND") };
+        unsafe { std::env::set_var("GIT_SSH", "/opt/other-ssh") };
+        assert!(refuses_alias(&pushed.checkpoints("")).await);
+        unsafe { std::env::remove_var("GIT_SSH") };
+        pushed
+            .repo
+            .git(&["config", "core.sshCommand", "ssh -i /keys/work"]);
+        assert!(refuses_alias(&pushed.checkpoints("")).await);
+        assert!(pushed.ssh_log().is_empty(), "{}", pushed.ssh_log());
+        pushed.repo.git(&["config", "--unset", "core.sshCommand"]);
+        // Plain ssh resolves the alias elsewhere, or to GitHub on another port.
+        pushed.ssh_config("hostname gitlab.com\nport 22\n");
+        assert!(refuses_alias(&pushed.checkpoints("")).await);
+        pushed.ssh_config("hostname github.com\nport 2222\n");
+        assert!(refuses_alias(&pushed.checkpoints("")).await);
+    });
 }
 
 fn draft(plan: &crate::PullRequestPlan, base: &str) -> PullRequestDraft {
