@@ -183,11 +183,15 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   }
 
   /// A session switch: the new session's current branch replaces the branches shown and the
-  /// selection made in the old session.
+  /// selection made in the old session, whose history no longer stands for anything.
   void _sessionSwitched() {
     _generation = widget.state.generation;
     widget.comparing.value = false;
     setState(() {
+      _history = null;
+      _graph = sessionGraph(const [], null);
+      _loaded = const [];
+      _track = contextTrack(const []);
       _shown = null;
       _picked = const [];
       _comparing = false;
@@ -229,6 +233,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
       do {
         _again = false;
         final leaves = _leaves;
+        final generation = widget.state.generation;
         final BridgeHistory history;
         try {
           history = await widget.state.history(leaves);
@@ -244,6 +249,12 @@ class _TrajectoryViewState extends State<TrajectoryView> {
         }
         widget.state.reportRead('history', null);
         if (!mounted) return;
+        // A read that began in the session before a switch is read again for the new one.
+        if (widget.state.generation != generation) {
+          if (widget.state.generation != _generation) _sessionSwitched();
+          _again = true;
+          continue;
+        }
         final graph = sessionGraph(history.tree, history.leaf);
         String grown(String tip) => graph.branchOf(tip)?.tip ?? tip;
         setState(() {

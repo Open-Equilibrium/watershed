@@ -1385,6 +1385,45 @@ void main() {
     expect(find.text('Comparing'), findsNothing);
   });
 
+  testWidgets('a failed read after a session switch shows no old step', (
+    tester,
+  ) async {
+    await show(tester, historyOf(branchA));
+    expect(find.byKey(const ValueKey('step-e1')), findsOneWidget);
+    backend.historyError = 'gone';
+    await state.newSession();
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('step-e1')),
+      findsNothing,
+      reason: 'the old session\'s history does not stand in for the new one',
+    );
+  });
+
+  testWidgets('a read of the old session that ends after a switch is dropped', (
+    tester,
+  ) async {
+    await show(tester, historyOf(branchA));
+    final gate = backend.gate = Completer<void>();
+    backend.answerAsAtStart = true;
+    state.stored.value++;
+    await tester.pump();
+    final switching = state.newSession();
+    await tester.pump();
+    backend
+      ..gate = null
+      ..answerAsAtStart = false
+      ..historyError = 'gone';
+    gate.complete();
+    await switching;
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('step-e1')),
+      findsNothing,
+      reason: 'a response that began in the old session is not shown in the new one',
+    );
+  });
+
   testWidgets(
     'leaving Settings shows the Trajectory keys outside a comparison',
     (tester) async {

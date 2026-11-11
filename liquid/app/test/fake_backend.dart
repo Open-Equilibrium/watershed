@@ -190,12 +190,19 @@ class FakeBackend implements SessionBackend {
   Future<BridgeHistory> history(List<String> leaves) async {
     final key = leaves.join(' ');
     calls.add('history $key'.trim());
+    // What a read held at the gate answers when it began before a session switch.
+    final early = answerAsAtStart ? histories[key] ?? stored : null;
     await gate?.future;
+    if (early != null) return early;
     if (historyError case final error?) throw error;
     return histories[key] ?? stored;
   }
 
   Object? historyError;
+
+  /// Whether a held history read answers what was stored when it began, even when later reads
+  /// fail.
+  bool answerAsAtStart = false;
 
   /// Holds history reads until it completes.
   Completer<void>? gate;
