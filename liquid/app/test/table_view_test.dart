@@ -10,7 +10,9 @@ import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/theme/icons.dart';
 import 'package:liquid/src/workspace/table_block.dart';
 import 'package:liquid/src/workspace/text_block.dart';
+import 'package:liquid/src/workspace/workspace_state.dart';
 
+import 'focus_kit.dart';
 import 'table_kit.dart';
 
 void main() {
@@ -176,6 +178,41 @@ void main() {
       lessThan(tester.getRect(kit.inTable(find.text('Groceries'))).top),
     );
   });
+
+  testWidgets(
+    '⌘Z in a Table name after a rename elsewhere does not bring back what was typed',
+    (tester) async {
+      await kit.show(tester, [TablePart(expenses)]);
+      final name = kit.inTable(find.byType(TextField));
+      await tester.tap(name);
+      await tester.pump();
+      tester.testTextInput.updateEditingValue(
+        const TextEditingValue(
+          text: 'Expenses x',
+          selection: TextSelection.collapsed(offset: 10),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 600));
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
+      final table = kit.fake.views[kit.page]!.single.block;
+      await kit.workspace.apply(
+        mutation(
+          BridgeMutationKind.renameDatabase,
+          page: kit.page,
+          block: table,
+          text: 'Trips',
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.tap(name);
+      await undo(tester);
+      expect(tester.widget<TextField>(name).controller?.text, 'Trips');
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+  );
 
   testWidgets('a Table follows its rows as they change', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);

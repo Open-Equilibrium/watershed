@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../controls.dart';
 import '../rust/api/database.dart';
 import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
@@ -119,7 +120,7 @@ class _TableBlockState extends State<TableBlock> {
   StreamSubscription<BridgeChange>? _followed;
 
   /// The name as typed; a name changed elsewhere shows unless the person is typing one.
-  final _name = TextEditingController();
+  var _name = TextEditingController();
   final _nameFocus = FocusNode(debugLabel: 'Table name');
 
   /// Renames asked for, so only the latest refusal puts the stored name back.
@@ -624,9 +625,17 @@ class _TableBlockState extends State<TableBlock> {
     _show(_database?.name ?? '');
   }
 
+  /// Shows `name` as the stored one. The field takes a fresh controller, so ⌘Z cannot bring back
+  /// the name it replaced.
   void _show(String name) {
     _named = name;
-    if (_name.text != name) _name.text = name;
+    if (_name.text == name) return;
+    _name = renewController(
+      _name,
+      TextEditingValue(text: name),
+      listener: _typed,
+    );
+    if (mounted) setState(() {});
   }
 
   /// Reads the name and fields, then the rows read so far.

@@ -96,12 +96,6 @@ void main() {
         'previous.value = value;',
         'renewController itself: the old history records the new text, which the fresh one starts from.',
       ),
-      // Pending until their fix commits land.
-      (
-        'lib/src/workspace/table_block.dart',
-        'if (_name.text != name) _name.text = name;',
-        'Pending: a name changed elsewhere.',
-      ),
     ];
     final listed = {for (final (file, line, _) in allowed) '$file: $line'};
     expect(
