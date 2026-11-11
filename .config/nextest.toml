@@ -1,0 +1,5 @@
+# The process-death matrix copies whole store images for minutes; run alone, its disk load cannot
+# push other tests past their Git deadlines.
+[[profile.default.overrides]]
+filter = 'test(crash_matrix)'
+threads-required = 'num-test-threads'
