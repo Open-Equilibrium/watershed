@@ -2293,3 +2293,132 @@ fn a_reviewed_worktree_is_removed_as_the_user_saw_it() {
     assert!(call(session.shutdown()));
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[test]
+fn exports_a_sessions_record_as_a_new_folder_in_downloads_and_never_overwrites() {
+    isolate_user_home();
+    let repo = repository("export");
+    let sessions = repo.join(".git/pi-sessions");
+    std::fs::create_dir_all(&sessions).expect("sessions");
+    let header = |id: &str| {
+        format!(
+            r#"{{"type":"session","version":3,"id":"{id}","cwd":"{}"}}"#,
+            repo.display()
+        )
+    };
+    let current = sessions.join("current.jsonl");
+    std::fs::write(&current, header("s1") + "\n").expect("current");
+    let old = sessions.join("old.jsonl");
+    std::fs::write(
+        &old,
+        header("s9")
+            + "\n"
+            + r#"{"type":"custom","id":"c1","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z","customType":"watershed.checkpoint","data":{"session":"s9","turn":"T1","phase":"start"}}"#
+            + "\n"
+            + r#"{"type":"message","id":"u1","parentId":"c1","timestamp":"2026-11-01T10:00:00.100Z","message":{"role":"user","content":"edit"}}"#
+            + "\n"
+            + r#"{"type":"custom","id":"c2","parentId":"u1","timestamp":"2026-11-01T10:00:05.000Z","customType":"watershed.checkpoint","data":{"session":"s9","turn":"T1","phase":"end","files":1,"added":1,"removed":1}}"#
+            + "\n",
+    )
+    .expect("old");
+    let checkpoints = meta_harness_core::Checkpoints::new(&repo);
+    call(checkpoints.capture(&meta_harness_core::Checkpoint {
+        session: "s9".to_owned(),
+        turn: "T1".to_owned(),
+        phase: meta_harness_core::Phase::Start,
+    }))
+    .expect("start captured");
+    std::fs::write(repo.join("a.txt"), "new\n").expect("edit");
+    call(checkpoints.capture(&meta_harness_core::Checkpoint {
+        session: "s9".to_owned(),
+        turn: "T1".to_owned(),
+        phase: meta_harness_core::Phase::End,
+    }))
+    .expect("end captured");
+    call(checkpoints.close());
+    let script = [
+        (2..=4).map(|id| state_with(id, &current)).collect(),
+        "IFS= read -r line || exit 0".to_owned(),
+    ]
+    .concat();
+    let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
+    let downloads =
+        std::env::temp_dir().join(format!("liquid-bridge-downloads-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&downloads);
+    std::fs::create_dir_all(&downloads).expect("downloads");
+    let export = |session: &AgentSession| {
+        session.export_into(
+            &downloads,
+            &old.display().to_string(),
+            "Rate limit for /login",
+            "test-host",
+            "2026-11-11",
+        )
+    };
+    let folder = export(&session).expect("exported");
+    assert_eq!(
+        folder,
+        downloads.join("Rate limit for login – record 2026-11-11")
+    );
+    assert_eq!(
+        std::fs::read(folder.join("session.jsonl")).expect("session copy"),
+        std::fs::read(&old).expect("session file"),
+        "pi's file is copied byte for byte"
+    );
+    let record = std::fs::read_to_string(folder.join("record.json")).expect("record");
+    assert!(record.contains("\"turn\": \"T1\"") && record.contains("\"path\": \"a.txt\""));
+    assert!(folder.join("README.txt").is_file());
+    // Another export never takes an existing folder's name.
+    assert_eq!(
+        export(&session).expect("second export"),
+        downloads.join("Rate limit for login – record 2026-11-11 2")
+    );
+    assert_eq!(
+        export(&session).expect("third export"),
+        downloads.join("Rate limit for login – record 2026-11-11 3")
+    );
+    let names = std::fs::read_dir(&downloads).expect("listed").count();
+    assert_eq!(names, 3, "nothing but the three folders");
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(&downloads);
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn a_failed_export_leaves_no_folder_behind() {
+    let downloads =
+        std::env::temp_dir().join(format!("liquid-bridge-failed-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&downloads);
+    std::fs::create_dir_all(&downloads).expect("downloads");
+    let failed = crate::api::record::write_folder(&downloads, "Broken", |folder| {
+        std::fs::write(folder.join("session.jsonl"), "partial").expect("partial copy");
+        Err("disk full".to_owned())
+    });
+    assert_eq!(failed, Err("disk full".to_owned()));
+    assert_eq!(
+        std::fs::read_dir(&downloads).expect("listed").count(),
+        0,
+        "neither the folder nor its temporary copy stays"
+    );
+    let _ = std::fs::remove_dir_all(&downloads);
+}
+
+#[test]
+fn downloads_go_to_the_folder_the_system_names_or_to_downloads() {
+    let home = std::path::Path::new("/home/ana");
+    assert_eq!(
+        crate::api::record::download_dir_in(home, None),
+        home.join("Downloads")
+    );
+    assert_eq!(
+        crate::api::record::download_dir_in(
+            home,
+            Some("XDG_DESKTOP_DIR=\"$HOME/Desk\"\nXDG_DOWNLOAD_DIR=\"$HOME/Transfers\"\n")
+        ),
+        home.join("Transfers")
+    );
+    assert_eq!(
+        crate::api::record::download_dir_in(home, Some("XDG_DOWNLOAD_DIR=\"/srv/incoming\"")),
+        std::path::PathBuf::from("/srv/incoming")
+    );
+}

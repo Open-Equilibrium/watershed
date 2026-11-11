@@ -12,7 +12,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 import 'worktrees.dart';
 
-// These functions are ignored because they are not marked as `pub`: `answer`, `branch_turns`, `checkpoint_ids`, `checkpoint`, `checkpoints_of`, `left_unreverted`, `open`, `session_dir`, `shown`, `stored_session`, `turn_of`, `unread`, `whitespace`
+// These functions are ignored because they are not marked as `pub`: `answer`, `branch_turns`, `checkpoint_ids`, `checkpoint`, `checkpoints_of`, `export_into`, `left_unreverted`, `open`, `session_dir`, `shown`, `stored_session`, `turn_of`, `unread`, `whitespace`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Open`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `forward`, `launch`
@@ -81,6 +81,16 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// Streams the session's events; a session has one subscriber.
   Stream<BridgeEvent> events();
+
+  /// Writes the record of the session stored in `path` as a new folder in Downloads and returns
+  /// its path. `title` is the name Liquid shows, `host` the machine's name and `day` the local
+  /// date as `YYYY-MM-DD`. A failure writes nothing and says why.
+  Future<String> exportRecord({
+    required String path,
+    required String title,
+    required String host,
+    required String day,
+  });
 
   /// Fetches the upstream remote, origin or the sole remote through checked destinations.
   Future<bool> fetch();

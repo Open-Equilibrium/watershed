@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use meta_harness_core::{
     AgentCommand, Answer, Checkpoint, Checkpoints, CommandError, Delivery, DiffError, Phase,
     RequestId, Session, SessionEvent, TurnCheckpoints, Whitespace, recent_sessions, session_id,
-    session_title, session_title_of, session_titles, visible_lines, visible_name,
+    session_record, session_title, session_title_of, session_titles, visible_lines, visible_name,
 };
 use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
@@ -18,6 +18,7 @@ use crate::api::history::{
     BridgeChangesState, BridgeContextDetail, BridgeHistory, BridgeRevertConfirmation,
     BridgeRevertPlan, BridgeRunningAgent, BridgeTranscript, BridgeTurn, BridgeTurnChanges,
 };
+use crate::api::record::{README, SESSION_FILE, download_dir, record_name, write_folder};
 use crate::convert::describe;
 use crate::frb_generated::StreamSink;
 use crate::ready::{SHUTDOWN_GRACE, error_output, ready};
@@ -477,6 +478,57 @@ impl AgentSession {
                 .delete_session(&id, Path::new(&path))
                 .await
                 .map_err(shown)
+        })
+    }
+
+    /// Writes the record of the session stored in `path` as a new folder in Downloads and returns
+    /// its path. `title` is the name Liquid shows, `host` the machine's name and `day` the local
+    /// date as `YYYY-MM-DD`. A failure writes nothing and says why.
+    pub fn export_record(
+        &self,
+        path: String,
+        title: String,
+        host: String,
+        day: String,
+    ) -> Result<String, String> {
+        let downloads = download_dir().ok_or("no home folder, so no Downloads folder")?;
+        self.export_into(&downloads, &path, &title, &host, &day)
+            .map(|folder| folder.display().to_string())
+    }
+
+    /// [`AgentSession::export_record`] into `downloads`.
+    pub(crate) fn export_into(
+        &self,
+        downloads: &Path,
+        path: &str,
+        title: &str,
+        host: &str,
+        day: &str,
+    ) -> Result<PathBuf, String> {
+        let id = RUNTIME
+            .block_on(async {
+                let mut session = self.session.lock().await;
+                self.stored_session(&mut session, path, Open::Counts).await
+            })?
+            .ok_or_else(|| "pi has not stored this session yet, so it has no record".to_owned())?;
+        write_folder(downloads, &record_name(title, day), |folder| {
+            let copy = folder.join(SESSION_FILE);
+            std::fs::copy(path, &copy)
+                .map_err(|error| format!("could not copy pi's session file: {error}"))?;
+            let record = RUNTIME
+                .block_on(session_record(
+                    &self.checkpoints,
+                    &copy,
+                    &self.cwd,
+                    host,
+                    &id,
+                    title,
+                ))
+                .map_err(shown)?;
+            std::fs::write(folder.join("record.json"), record)
+                .map_err(|error| format!("could not write record.json: {error}"))?;
+            std::fs::write(folder.join("README.txt"), README)
+                .map_err(|error| format!("could not write README.txt: {error}"))
         })
     }
 
