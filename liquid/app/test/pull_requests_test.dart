@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -62,6 +63,53 @@ void main() {
       expect(await reloaded.baseOf('/other/.git', 'fix/typo'), isNull);
       await pulls.plan();
       expect(backend.calls.last, 'plan - main');
+    },
+  );
+
+  test(
+    'base records name this computer by a random id kept in the file',
+    () async {
+      await BranchBases(file: SettingsFile(basesFile()))
+          .record('/work/api/.git', 'feature', 'main');
+      final stored = jsonDecode(basesFile().readAsStringSync()) as Map;
+      expect(stored['device'], isA<String>());
+      expect(stored['device'], isNot(Platform.localHostname));
+      // A later start finds the record under the same id.
+      expect(
+        await BranchBases(file: SettingsFile(basesFile()))
+            .baseOf('/work/api/.git', 'feature'),
+        'main',
+      );
+      expect(
+        (jsonDecode(basesFile().readAsStringSync()) as Map)['device'],
+        stored['device'],
+      );
+    },
+  );
+
+  test(
+    'records that named the host name move to the device id on first start',
+    () async {
+      basesFile().writeAsStringSync(
+        jsonEncode({
+          'bases': [
+            {
+              'device': Platform.localHostname,
+              'repository': '/work/api/.git',
+              'branch': 'feature',
+              'base': 'main',
+            },
+          ],
+        }),
+      );
+      final migrated = BranchBases(file: SettingsFile(basesFile()));
+      expect(await migrated.baseOf('/work/api/.git', 'feature'), 'main');
+      final stored = jsonDecode(basesFile().readAsStringSync()) as Map;
+      expect(stored['device'], isNot(Platform.localHostname));
+      expect(
+        (stored['bases'] as List).single,
+        containsPair('device', stored['device']),
+      );
     },
   );
 
