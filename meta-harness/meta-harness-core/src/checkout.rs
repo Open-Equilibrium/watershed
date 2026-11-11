@@ -67,15 +67,16 @@ pub(crate) struct Alone {
 }
 
 impl Checkout {
-    /// A shared namespace outside the project, also before it has a Git directory.
+    /// A shared namespace outside the project, also before it has a Git directory, in the user's
+    /// lock folder rather than the temporary folder, which programs may see differently.
     pub(crate) fn folder(project: &Path) -> Result<Self, DiffError> {
         let canonical = std::fs::canonicalize(project).map_err(DiffError::Io)?;
         let mut key = std::hash::DefaultHasher::new();
         canonical.hash(&mut key);
-        let namespace = std::env::temp_dir().join(format!(
-            "watershed-project-locks-{}",
-            rustix::process::geteuid().as_raw()
-        ));
+        let namespace = user_lock_folder()?;
+        if let Some(parent) = namespace.parent() {
+            std::fs::create_dir_all(parent).map_err(DiffError::Io)?;
+        }
         private_namespace(&namespace)?;
         let dir = namespace.join(format!("{:016x}", key.finish()));
         Ok(Self::new(dir.clone(), dir))
@@ -252,6 +253,35 @@ fn names(running: &OwnedFd, name: &CString, file: &OwnedFd) -> bool {
     (named.st_dev, named.st_ino) == (held.st_dev, held.st_ino)
 }
 
+/// The per-user folder of the locks of folders outside Git (ADR-0267). macOS uses Liquid's app
+/// folder under the user's Library, as its settings do; Linux uses the session's runtime folder
+/// and otherwise Liquid's config folder. Only absolute locations count, since a relative one
+/// would differ between working directories.
+fn user_lock_folder() -> Result<PathBuf, DiffError> {
+    let absolute = |name: &str| {
+        std::env::var_os(name)
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+    };
+    let unset = || {
+        DiffError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "The project lock folder needs an absolute HOME or XDG_CONFIG_HOME.",
+        ))
+    };
+    if cfg!(target_os = "macos") {
+        let home = absolute("HOME").ok_or_else(unset)?;
+        return Ok(home.join("Library/Application Support/Liquid/project-locks"));
+    }
+    if let Some(runtime) = absolute("XDG_RUNTIME_DIR") {
+        return Ok(runtime.join("liquid/project-locks"));
+    }
+    let config = absolute("XDG_CONFIG_HOME")
+        .or_else(|| absolute("HOME").map(|home| home.join(".config")))
+        .ok_or_else(unset)?;
+    Ok(config.join("liquid/project-locks"))
+}
+
 /// A namespace owned by this user, with no ancestor another user may replace from within it.
 fn private_namespace(path: &Path) -> Result<(), DiffError> {
     match std::fs::DirBuilder::new().mode(0o700).create(path) {
@@ -324,6 +354,46 @@ mod tests {
                 assert_eq!(metadata.uid(), rustix::process::geteuid().as_raw());
                 assert_eq!(metadata.mode() & 0o077, 0);
             });
+    }
+
+    #[test]
+    fn folder_locks_do_not_depend_on_the_temporary_folder() {
+        let root =
+            std::env::temp_dir().join(format!("watershed-folder-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let project = root.join("project");
+        for dir in [&project, &root.join("tmp-a"), &root.join("tmp-b")] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        // Each test runs in its own process under nextest, so these variables stay its own.
+        unsafe {
+            std::env::set_var("HOME", root.join("home"));
+            std::env::remove_var("XDG_RUNTIME_DIR");
+            std::env::remove_var("XDG_CONFIG_HOME");
+        }
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                // A turn runs under one temporary folder...
+                unsafe { std::env::set_var("TMPDIR", root.join("tmp-a")) };
+                let running = Checkout::folder(&project)
+                    .unwrap()
+                    .run("s1", || {})
+                    .await
+                    .unwrap();
+                // ...and deleting its session under another one must still find it running.
+                unsafe { std::env::set_var("TMPDIR", root.join("tmp-b")) };
+                let Err(DiffError::AgentRunning(named)) =
+                    Checkout::folder(&project).unwrap().alone().await
+                else {
+                    panic!("a turn in another temporary folder must hold the folder lock");
+                };
+                assert_eq!(named, ["s1"]);
+                drop(running);
+            });
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

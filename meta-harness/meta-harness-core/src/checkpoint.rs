@@ -210,7 +210,7 @@ impl Checkpoints {
     /// Takes `checkpoint` of the project as it is now. It can take a while in a large project.
     /// From a turn's start to its end, the session's agent counts as running in the checkout,
     /// even when its snapshot fails; a turn whose checkout guard cannot be acquired must not
-    /// start. Outside Git the guard belongs to the canonical folder in system temporary storage;
+    /// start. Outside Git the guard belongs to the canonical folder in the user's lock folder;
     /// a turn's start waits for a revert or initialization in progress.
     pub async fn capture(&self, checkpoint: &Checkpoint) -> Result<(), DiffError> {
         let reference = checkpoint.reference()?;
