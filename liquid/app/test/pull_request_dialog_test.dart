@@ -11,6 +11,7 @@ import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
+import 'focus_kit.dart';
 
 void main() {
   late FakeBackend backend;
@@ -625,6 +626,28 @@ void main() {
         findsOneWidget,
       );
     });
+
+    testWidgets(
+      '⌘Z after the model writes the title does not bring back the title it replaced',
+      (tester) async {
+        await show(tester);
+        state.model.value = 'anthropic/claude-opus-5-5';
+        backend.writeGate = Completer();
+        await openDialog(tester);
+        await tester.pump(const Duration(milliseconds: 600));
+        backend.writeGate!.complete(backend.written);
+        await tester.pumpAndSettle();
+        await tester.pump(const Duration(milliseconds: 600));
+        final title = find.byKey(const Key('pull-request-title'));
+        await tester.tap(title);
+        await undo(tester);
+        expect(
+          field(tester, 'pull-request-title').controller!.text,
+          'Return 429 when logins are blocked',
+        );
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+    );
 
     testWidgets('keeps what the user typed while it wrote', (tester) async {
       await show(tester);

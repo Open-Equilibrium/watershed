@@ -72,8 +72,9 @@ class _PullRequestDialog extends StatefulWidget {
 }
 
 class _PullRequestDialogState extends State<_PullRequestDialog> {
-  final _title = TextEditingController();
-  final _body = TextEditingController();
+  /// The fields are the writing's, which may replace them with fresh ones.
+  TextEditingController get _title => _writing.titleField;
+  TextEditingController get _body => _writing.bodyField;
   final _titleFocus = FocusNode();
   final _bodyFocus = FocusNode();
   bool _draft = false;
@@ -133,9 +134,8 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
   @override
   void initState() {
     super.initState();
-    _title.addListener(() => setState(() {}));
     _bodyFocus.addListener(() => setState(() {}));
-    _writing = PullRequestWriting(pulls: _pulls, title: _title, body: _body)
+    _writing = PullRequestWriting(pulls: _pulls)
       ..addListener(() => setState(() {}));
     if (_compose && (widget.state.git.status.value?.changed ?? 0) > 0) {
       _files = CommitDraft(widget.state)..addListener(_filesChanged);
@@ -160,8 +160,6 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
   void dispose() {
     _writing.dispose();
     _elapsed?.cancel();
-    _title.dispose();
-    _body.dispose();
     _files?.dispose();
     _titleFocus.dispose();
     _bodyFocus.dispose();

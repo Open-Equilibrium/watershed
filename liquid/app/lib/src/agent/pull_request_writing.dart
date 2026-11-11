@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../controls.dart';
 import '../rust/api/git.dart';
 import '../session/pull_requests.dart';
 
@@ -9,18 +10,20 @@ import '../session/pull_requests.dart';
 enum TextSource { commit, written, failed }
 
 /// The Chat's model writes the pull request's title and description into the fields the user has
-/// not edited, once for each range of commits and, before a commit, selection of files.
+/// not edited, once for each range of commits and, before a commit, selection of files. The
+/// fields are its own, so a write gives each a fresh controller (see [_fill]).
 class PullRequestWriting extends ChangeNotifier {
-  PullRequestWriting({
-    required this.pulls,
-    required TextEditingController title,
-    required TextEditingController body,
-  }) : _titleField = title,
-       _bodyField = body;
+  PullRequestWriting({required this.pulls}) {
+    _titleField.addListener(notifyListeners);
+    _bodyField.addListener(notifyListeners);
+  }
 
   final PullRequests pulls;
-  final TextEditingController _titleField;
-  final TextEditingController _bodyField;
+  var _titleField = TextEditingController();
+  var _bodyField = TextEditingController();
+
+  TextEditingController get titleField => _titleField;
+  TextEditingController get bodyField => _bodyField;
 
   TextSource source = TextSource.commit;
 
@@ -88,15 +91,26 @@ class PullRequestWriting extends ChangeNotifier {
     }());
   }
 
-  /// Puts `title` and `body` in the fields the user has not edited.
+  /// Puts `title` and `body` in the fields the user has not edited. A field takes a fresh
+  /// controller, so ⌘Z cannot bring back the text it replaces.
   void _fill(String title, String body) {
     var changed = false;
     if (_titleField.text == _filledTitle && title != _filledTitle) {
-      _titleField.text = _filledTitle = title;
+      _filledTitle = title;
+      _titleField = renewController(
+        _titleField,
+        TextEditingValue(text: title),
+        listener: notifyListeners,
+      );
       changed = true;
     }
     if (_bodyField.text == _filledBody && body != _filledBody) {
-      _bodyField.text = _filledBody = body;
+      _filledBody = body;
+      _bodyField = renewController(
+        _bodyField,
+        TextEditingValue(text: body),
+        listener: notifyListeners,
+      );
       changed = true;
     }
     if (!changed) return;
@@ -121,6 +135,8 @@ class PullRequestWriting extends ChangeNotifier {
   void dispose() {
     stop();
     _settling?.cancel();
+    _titleField.dispose();
+    _bodyField.dispose();
     super.dispose();
   }
 }
