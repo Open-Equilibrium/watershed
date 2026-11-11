@@ -9,7 +9,6 @@
 
 use std::ffi::{CStr, CString};
 use std::fs::{File, OpenOptions, TryLockError};
-use std::hash::{Hash, Hasher};
 use std::os::unix::ffi::OsStrExt;
 
 use rustix::fd::OwnedFd;
@@ -90,14 +89,12 @@ impl Checkout {
     /// lock folder rather than the temporary folder, which programs may see differently.
     pub(crate) fn folder(project: &Path) -> Result<Self, DiffError> {
         let canonical = std::fs::canonicalize(project).map_err(DiffError::Io)?;
-        let mut key = std::hash::DefaultHasher::new();
-        canonical.hash(&mut key);
         let namespace = user_lock_folder()?;
         if let Some(parent) = namespace.parent() {
             std::fs::create_dir_all(parent).map_err(DiffError::Io)?;
         }
         private_namespace(&namespace)?;
-        let dir = namespace.join(format!("{:016x}", key.finish()));
+        let dir = namespace.join(folder_key(&canonical));
         Ok(Self::new(dir.clone(), dir))
     }
 
@@ -288,6 +285,22 @@ fn names(running: &OwnedFd, name: &CString, file: &OwnedFd) -> bool {
     (named.st_dev, named.st_ino) == (held.st_dev, held.st_ino)
 }
 
+/// The name of a project's folder of locks outside Git: FNV-1a 64 of its canonical path's bytes.
+/// The standard library's hasher may change between Rust releases, so this fixed function keeps
+/// every build on the same folder.
+fn folder_key(canonical: &Path) -> String {
+    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let hash = canonical
+        .as_os_str()
+        .as_bytes()
+        .iter()
+        .fold(OFFSET_BASIS, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(PRIME)
+        });
+    format!("{hash:016x}")
+}
+
 /// The per-user folder of the locks of folders outside Git (ADR-0267). macOS uses Liquid's app
 /// folder under the user's Library, as its settings do; Linux uses the session's runtime folder
 /// and otherwise Liquid's config folder. Only absolute locations count, since a relative one
@@ -423,6 +436,13 @@ mod tests {
                 assert_eq!(metadata.uid(), rustix::process::geteuid().as_raw());
                 assert_eq!(metadata.mode() & 0o077, 0);
             });
+    }
+
+    #[test]
+    fn folder_keys_are_the_same_in_every_build() {
+        // FNV-1a 64 of the path's bytes, computed outside this code: the standard library's
+        // hasher may change between Rust releases, and builds must agree on the folder's name.
+        assert_eq!(folder_key(Path::new("/fixed/project")), "c3823c31d01a6fbe");
     }
 
     #[test]
