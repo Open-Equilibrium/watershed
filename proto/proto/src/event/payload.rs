@@ -169,9 +169,14 @@ impl<'a> PayloadValidator<'a> {
             EventType::SessionFailed => {
                 self.require_string("reason")?;
             }
-            EventType::FlowStarted | EventType::FlowCompleted => {
+            EventType::FlowStarted => {
                 self.require_string("flow_definition_id")?;
                 self.optional_string("flow_name")?;
+            }
+            EventType::FlowCompleted => {
+                self.require_string("flow_definition_id")?;
+                self.optional_string("flow_name")?;
+                self.optional_flow_value("result")?;
             }
             EventType::FlowFailed => {
                 self.require_string("flow_definition_id")?;
@@ -389,6 +394,13 @@ impl<'a> PayloadValidator<'a> {
         } else {
             Err(self.error(field, "must be a bounded flow-value-v0"))
         }
+    }
+
+    fn optional_flow_value(&self, field: &'static str) -> Result<(), EventValidationError> {
+        if self.payload.contains_key(field) {
+            self.require_flow_value(field)?;
+        }
+        Ok(())
     }
 
     fn error(&self, field: &'static str, requirement: &'static str) -> EventValidationError {

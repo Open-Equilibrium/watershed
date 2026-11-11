@@ -737,6 +737,67 @@ fn phase_completed_accepts_the_complete_bounded_flow_value_grammar() {
     }
 }
 
+#[test]
+fn flow_completed_validates_a_present_result() {
+    let payload = |result: Option<Value>| {
+        let mut payload = json!({"flow_definition_id": "flow-1", "flow_name": "Flow"});
+        if let Some(result) = result {
+            payload["result"] = result;
+        }
+        payload
+    };
+    let wire = |payload: Value| {
+        json!({
+            "event_id": "evt-001",
+            "event_type": "flow.completed",
+            "flow_id": "flow-1",
+            "payload": payload,
+            "protocol_version": "0",
+            "sequence": 1,
+            "session_id": "smoke001",
+            "source": "flow-agent-cli",
+            "timestamp": "2026-01-01T00:00:00Z"
+        })
+    };
+
+    for valid in [None, Some(json!({"type": "boolean", "value": true}))] {
+        let event = flow_completed_event(payload(valid.clone()));
+        event
+            .validate_v0()
+            .expect("optional bounded result is valid");
+        serde_json::from_value::<EventEnvelope>(wire(payload(valid)))
+            .expect("optional bounded result deserializes");
+    }
+    for invalid in [
+        json!(true),
+        json!({"type": "integer", "value": "01"}),
+        nested_flow_value(FLOW_VALUE_MAX_DEPTH_V0 + 1),
+    ] {
+        let event = flow_completed_event(payload(Some(invalid.clone())));
+        let error = event
+            .validate_v0()
+            .expect_err("invalid flow.completed result must be rejected");
+        assert_eq!(error.field(), "payload.result");
+        assert_eq!(error.requirement(), "must be a bounded flow-value-v0");
+        serde_json::from_value::<EventEnvelope>(wire(payload(Some(invalid))))
+            .expect_err("invalid flow.completed result must not deserialize");
+    }
+}
+
+fn flow_completed_event(payload: Value) -> EventEnvelope {
+    let mut event = EventEnvelope::new(
+        "evt-001",
+        EventType::FlowCompleted,
+        "smoke001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "flow-agent-cli",
+        payload,
+    );
+    event.flow_id = Some("flow-1".to_owned());
+    event
+}
+
 fn phase_completed_event(result: Value) -> EventEnvelope {
     let mut event = EventEnvelope::new(
         "evt-001",
