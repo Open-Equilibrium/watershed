@@ -50,7 +50,7 @@ fn credential_resolution_refreshes_near_expiry_under_the_store_lock() {
 
     let resolved = store
         .resolve_with_clock(
-            1,
+            || Ok(1),
             |prior| {
                 refreshes.set(refreshes.get() + 1);
                 assert_eq!(prior.expires, 300_000);
@@ -82,7 +82,7 @@ fn protected_credential_store_coordinates_the_end_to_end_lifecycle() {
     assert!(
         store
             .resolve_with_clock(
-                1,
+                || Ok(1),
                 |_| Err(RuntimeError::Protocol("refresh rejected".to_owned())),
                 || Duration::ZERO,
                 |_| {},
@@ -96,7 +96,12 @@ fn protected_credential_store_coordinates_the_end_to_end_lifecycle() {
 
     let replacement = credential(900_000);
     let resolved = store
-        .resolve_with_clock(1, |_| Ok(replacement.clone()), || Duration::ZERO, |_| {})
+        .resolve_with_clock(
+            || Ok(1),
+            |_| Ok(replacement.clone()),
+            || Duration::ZERO,
+            |_| {},
+        )
         .expect("protected credential refreshes");
     assert_eq!(resolved, replacement);
     assert_eq!(
@@ -218,7 +223,7 @@ fn credential_resolution_requires_or_reuses_a_current_credential() {
     let store = CredentialStore::at(workspace.join("private/credentials.json"));
     let error = store
         .resolve_with_clock(
-            1,
+            || Ok(1),
             |_| panic!("an absent credential cannot refresh"),
             || Duration::ZERO,
             |_| {},
@@ -233,7 +238,7 @@ fn credential_resolution_requires_or_reuses_a_current_credential() {
         .expect("current credential stores");
     let resolved = store
         .resolve_with_clock(
-            1,
+            || Ok(1),
             |_| panic!("a current credential must not refresh"),
             || Duration::ZERO,
             |_| {},
@@ -254,7 +259,7 @@ fn credential_refresh_failure_preserves_the_prior_record() {
     assert!(
         store
             .resolve_with_clock(
-                1,
+                || Ok(1),
                 |_| Err(RuntimeError::Protocol("refresh rejected".to_owned())),
                 || Duration::ZERO,
                 |_| {},
@@ -266,7 +271,7 @@ fn credential_refresh_failure_preserves_the_prior_record() {
     assert!(
         store
             .resolve_with_clock(
-                1,
+                || Ok(1),
                 |_| {
                     let mut invalid = credential(900_000);
                     invalid.credential_type = "api-key".to_owned();
@@ -302,7 +307,7 @@ fn credential_refresh_reuses_a_winner_after_lock_contention() {
 
     let resolved = store
         .resolve_with_clock(
-            1,
+            || Ok(1),
             |_| panic!("the losing refresh must reuse the winner's credential"),
             || Duration::ZERO,
             |_| {
@@ -355,7 +360,7 @@ fn credential_resolution_requires_reauthentication_for_an_undecodable_record() {
     let (_workspace, store, _) = store_with_undecodable_record("credential-undecodable-resolve");
     let error = store
         .resolve_with_clock(
-            1,
+            || Ok(1),
             |_| panic!("an undecodable record cannot refresh"),
             || Duration::ZERO,
             |_| {},

@@ -67,7 +67,7 @@ fn published_credential_parent_sync_failure_is_distinct_and_reuses_the_replaceme
 
     let error = store
         .resolve_with_clock(
-            1,
+            || Ok(1),
             |_| {
                 refreshes.set(refreshes.get() + 1);
                 set_directory_sync_error_for_path_for_test(&parent, io::ErrorKind::Other);
@@ -98,7 +98,7 @@ fn published_credential_parent_sync_failure_is_distinct_and_reuses_the_replaceme
 
     let resolved = store
         .resolve_with_clock(
-            1,
+            || Ok(1),
             |_| panic!("the published replacement must prevent another provider refresh"),
             || Duration::ZERO,
             |_| {},
@@ -133,7 +133,7 @@ fn published_credential_protection_failure_is_distinct_and_next_lock_finalizes()
 
     let error = store
         .resolve_with_clock(
-            1,
+            || Ok(1),
             |_| {
                 refreshes.set(refreshes.get() + 1);
                 Ok(replacement.clone())
@@ -243,7 +243,7 @@ fn failed_credential_refresh_removes_its_atomic_staging_file() {
         .expect("near-expiry credential stores");
 
     let result = store.resolve_with_clock(
-        1,
+        || Ok(1),
         |_| {
             fs::remove_file(&path).expect("credential file removes for conflict fixture");
             fs::create_dir(&path).expect("conflicting destination directory creates");

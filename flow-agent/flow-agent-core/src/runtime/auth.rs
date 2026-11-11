@@ -122,10 +122,9 @@ pub fn logout_openai_codex() -> Result<bool, RuntimeError> {
 
 pub(crate) fn resolve_openai_codex_credential() -> Result<CredentialRecord, RuntimeError> {
     let store = CredentialStore::platform_default()?;
-    let now_epoch_milliseconds = protocol::epoch_milliseconds()?;
     let started = Instant::now();
     store.resolve_with_clock(
-        now_epoch_milliseconds,
+        protocol::epoch_milliseconds,
         transport::refresh_credential,
         || started.elapsed(),
         thread::sleep,

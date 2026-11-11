@@ -130,7 +130,7 @@ impl CredentialStore {
 
     pub(crate) fn resolve_with_clock(
         &self,
-        now_epoch_milliseconds: u64,
+        mut now_epoch_milliseconds: impl FnMut() -> Result<u64, RuntimeError>,
         mut refresh: impl FnMut(&CredentialRecord) -> Result<CredentialRecord, RuntimeError>,
         lock_now: impl FnMut() -> Duration,
         wait: impl FnMut(Duration),
@@ -138,6 +138,7 @@ impl CredentialStore {
         let Some(parent) = self.open_protected_parent(false)? else {
             return Err(authentication_required());
         };
+        let now_epoch_milliseconds = now_epoch_milliseconds()?;
         let current = require_record(self.read_anchored(&parent)?)?;
         if !needs_refresh(&current, now_epoch_milliseconds) {
             return Ok(current);
