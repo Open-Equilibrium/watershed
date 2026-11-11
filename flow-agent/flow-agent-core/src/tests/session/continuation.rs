@@ -286,21 +286,27 @@ fn workspace_agent_instructions_refuse_symlinks() {
 
 #[test]
 fn conversation_entry_points_validate_ids_before_workspace_access() {
+    const RUN_ID_USAGE: &str = "invalid conversation or run id";
+    const ENTRY_ID_USAGE: &str = "invalid conversation or entry id";
     let missing = Path::new("this-workspace-must-not-be-opened");
+    let open_error = AnchoredWorkspace::open(missing)
+        .expect_err("missing workspace fails to open")
+        .to_string();
     for (conversation_id, run_id) in [("INVALID", "run"), ("conversation", "INVALID")] {
-        assert!(
-            resume_conversation_run(missing, conversation_id, run_id, EmitMode::Human).is_err()
+        assert_invalid_id_usage(
+            resume_conversation_run(missing, conversation_id, run_id, EmitMode::Human),
+            RUN_ID_USAGE,
         );
-        assert!(
+        assert_invalid_id_usage(
             resume_conversation_run_with_live_events(
                 missing,
                 conversation_id,
                 run_id,
                 live_event_channel().0,
-            )
-            .is_err()
+            ),
+            RUN_ID_USAGE,
         );
-        assert!(
+        assert_invalid_id_usage(
             resume_conversation_run_with_execution_activation(
                 missing,
                 conversation_id,
@@ -308,22 +314,25 @@ fn conversation_entry_points_validate_ids_before_workspace_access() {
                 None,
                 EmitMode::Human,
                 |_| -> Result<(), RuntimeError> { Ok(()) },
-            )
-            .is_err()
+            ),
+            RUN_ID_USAGE,
         );
     }
-    assert!(continue_conversation(missing, "INVALID", None, None, EmitMode::Human).is_err());
-    assert!(
+    assert_invalid_id_usage(
+        continue_conversation(missing, "INVALID", None, None, EmitMode::Human),
+        ENTRY_ID_USAGE,
+    );
+    assert_invalid_id_usage(
         continue_conversation_with_live_events(
             missing,
             "INVALID",
             None,
             None,
             live_event_channel().0,
-        )
-        .is_err()
+        ),
+        ENTRY_ID_USAGE,
     );
-    assert!(
+    assert_invalid_id_usage(
         continue_conversation_with_execution_activation(
             missing,
             "INVALID",
@@ -332,30 +341,30 @@ fn conversation_entry_points_validate_ids_before_workspace_access() {
             None,
             EmitMode::Human,
             |_| -> Result<(), RuntimeError> { Ok(()) },
-        )
-        .is_err()
+        ),
+        ENTRY_ID_USAGE,
     );
-    assert!(
+    assert_invalid_id_usage(
         continue_conversation(
             missing,
             "conversation",
             Some("INVALID"),
             None,
             EmitMode::Human,
-        )
-        .is_err()
+        ),
+        ENTRY_ID_USAGE,
     );
-    assert!(
+    assert_invalid_id_usage(
         continue_conversation_with_live_events(
             missing,
             "conversation",
             Some("INVALID"),
             None,
             live_event_channel().0,
-        )
-        .is_err()
+        ),
+        ENTRY_ID_USAGE,
     );
-    assert!(
+    assert_invalid_id_usage(
         continue_conversation_with_execution_activation(
             missing,
             "conversation",
@@ -364,9 +373,24 @@ fn conversation_entry_points_validate_ids_before_workspace_access() {
             None,
             EmitMode::Human,
             |_| -> Result<(), RuntimeError> { Ok(()) },
-        )
-        .is_err()
+        ),
+        ENTRY_ID_USAGE,
     );
+
+    // A valid identifier reaches the workspace open, so the usage error above is not incidental.
+    let Err(control) = resume_conversation_run(missing, "conversation", "run", EmitMode::Human)
+    else {
+        panic!("missing workspace must not resume");
+    };
+    assert_eq!(control.to_string(), open_error);
+}
+
+fn assert_invalid_id_usage<T>(result: Result<T, RuntimeError>, message: &str) {
+    match result {
+        Err(RuntimeError::Usage(actual)) => assert_eq!(actual, message),
+        Err(error) => panic!("expected an invalid identifier usage error, got: {error}"),
+        Ok(_) => panic!("invalid identifier was accepted"),
+    }
 }
 
 #[test]
