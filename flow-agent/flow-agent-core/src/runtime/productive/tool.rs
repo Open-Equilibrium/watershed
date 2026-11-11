@@ -1,7 +1,7 @@
 use super::attempt_codec::{
-    ExecutorAttemptStage, cancelled_attempt_output, executor_dispatch_failure_output,
-    recovered_executor_dispatch_error, recovered_tool_output, recovered_tool_terminal,
-    recovered_tool_value_bound, tool_attempt_output,
+    ExecutorAttemptStage, cancelled_tool_attempt_output, executor_dispatch_failure_output,
+    recovered_cancelled_tool_stage, recovered_executor_dispatch_error, recovered_tool_output,
+    recovered_tool_terminal, recovered_tool_value_bound, tool_attempt_output,
 };
 #[cfg(test)]
 use super::observe_productive_result_persist;
@@ -203,6 +203,37 @@ where
         }
         return Err(RuntimeError::executor(code, ""));
     }
+    if recovered.outcome == RunAttemptOutcome::Cancelled {
+        let stage = mark_recovery_failure(
+            &mut context.recovery_failed,
+            recovered_cancelled_tool_stage(recovered),
+        )?;
+        mark_recovery_failure(
+            &mut context.recovery_failed,
+            recovered_tool_terminal(recovered),
+        )?;
+        // WHY: a cancellation during preflight committed no tool.started, so none is replayed.
+        if stage == ExecutorAttemptStage::Started {
+            emit_tool_started(
+                builder,
+                invocation,
+                tool,
+                command_policy,
+                &attempt.attempt_id,
+                context.sink,
+                &mut context.event_commit_failed,
+            )?;
+            emit_cancelled_tool(
+                builder,
+                invocation,
+                tool,
+                &attempt.attempt_id,
+                context.sink,
+                &mut context.event_commit_failed,
+            )?;
+        }
+        return Err(RuntimeError::Cancelled);
+    }
     emit_tool_started(
         builder,
         invocation,
@@ -212,21 +243,6 @@ where
         context.sink,
         &mut context.event_commit_failed,
     )?;
-    if recovered.outcome == RunAttemptOutcome::Cancelled {
-        mark_recovery_failure(
-            &mut context.recovery_failed,
-            recovered_tool_terminal(recovered),
-        )?;
-        emit_cancelled_tool(
-            builder,
-            invocation,
-            tool,
-            &attempt.attempt_id,
-            context.sink,
-            &mut context.event_commit_failed,
-        )?;
-        return Err(RuntimeError::Cancelled);
-    }
     Ok(())
 }
 
@@ -370,6 +386,7 @@ where
                 &attempt.attempt_id,
                 &attempt.request_hash,
                 &attempt.timestamp,
+                ExecutorAttemptStage::Preflight,
             )?;
             Err(RuntimeError::Cancelled)
         }
@@ -443,6 +460,7 @@ where
                 &attempt.attempt_id,
                 &attempt.request_hash,
                 &attempt.timestamp,
+                ExecutorAttemptStage::Started,
             )?;
             emit_cancelled_tool(
                 builder,
@@ -567,7 +585,11 @@ where
     )
 }
 
-fn cancelled_tool_result(attempt_id: &str, timestamp: &str) -> RunAttemptResult {
+fn cancelled_tool_result(
+    attempt_id: &str,
+    timestamp: &str,
+    stage: ExecutorAttemptStage,
+) -> RunAttemptResult {
     RunAttemptResult {
         attempt_id: attempt_id.to_owned(),
         attempt_kind: RunAttemptKind::Tool,
@@ -575,7 +597,7 @@ fn cancelled_tool_result(attempt_id: &str, timestamp: &str) -> RunAttemptResult 
         classification: Some(ToolTerminalClassification::Cancelled.as_str().to_owned()),
         exit_code: None,
         timestamp: timestamp.to_owned(),
-        durable_output: Some(cancelled_attempt_output()),
+        durable_output: Some(cancelled_tool_attempt_output(stage)),
     }
 }
 
@@ -625,6 +647,7 @@ fn persist_executor_dispatch_failure<A: ProductiveAttemptLog>(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn persist_cancelled_tool_attempt<A: ProductiveAttemptLog>(
     attempts: &mut A,
     recovery: &mut dyn ProductiveRecovery,
@@ -633,8 +656,9 @@ fn persist_cancelled_tool_attempt<A: ProductiveAttemptLog>(
     attempt_id: &str,
     request_hash: &str,
     timestamp: &str,
+    stage: ExecutorAttemptStage,
 ) -> Result<(), RuntimeError> {
-    let result = cancelled_tool_result(attempt_id, timestamp);
+    let result = cancelled_tool_result(attempt_id, timestamp, stage);
     attempts.terminal(&result)?;
     mark_recovery_failure(
         recovery_failed,

@@ -312,7 +312,7 @@ fn productive_recovery_resumes_a_cancelled_tool_attempt_without_redispatch() {
         classification: Some(CANCELLED_REASON.to_owned()),
         exit_code: None,
         timestamp: "2026-07-30T12:00:00Z".to_owned(),
-        durable_output: None,
+        durable_output: Some(serde_json::json!({"schema": "flow-attempt-cancelled-v0"})),
     });
 
     let execution = execute_productive_flow_with_tool_executor_and_recovery(
@@ -334,6 +334,56 @@ fn productive_recovery_resumes_a_cancelled_tool_attempt_without_redispatch() {
     assert!(tools.invocations.is_empty(), "the Tool must not redispatch");
     assert_eq!(attempts.intents.len(), 1, "only the Provider intent is new");
     assert_controlled_cancellation_lifecycle(&sink.0);
+}
+
+#[test]
+fn productive_recovery_replays_tool_started_only_for_a_started_cancellation() {
+    for (stage, expect_tool_started) in [("preflight", false), ("started", true)] {
+        let (_workspace, fixture) = smoke_productive_execution_fixture();
+        let flow = fixture.smoke_flow();
+        let mut provider = ScriptedProvider {
+            bodies: Vec::new(),
+            turns: VecDeque::from([single_tool_provider_turn("response-tool", "call-1")]),
+        };
+        let mut attempts = MemoryAttempts::default();
+        let mut sink = MemorySink::default();
+        let mut tools = FakeToolExecutor::default();
+        let mut recovery = InjectedAttemptRecovery::ToolResult(RunAttemptResult {
+            attempt_id: "tool-000001".to_owned(),
+            attempt_kind: RunAttemptKind::Tool,
+            outcome: RunAttemptOutcome::Cancelled,
+            classification: Some(CANCELLED_REASON.to_owned()),
+            exit_code: None,
+            timestamp: "2026-07-30T12:00:00Z".to_owned(),
+            durable_output: Some(serde_json::json!({
+                "schema": "flow-attempt-cancelled-v1",
+                "stage": stage,
+            })),
+        });
+
+        let execution = execute_productive_flow_with_tool_executor_and_recovery(
+            fixture.execution(flow, "productive-cancelled-tool-stage"),
+            &mut provider,
+            &mut attempts,
+            &mut sink,
+            &mut tools,
+            &mut recovery,
+        )
+        .expect("recovered Tool cancellation closes the enclosing lifecycle");
+
+        assert!(
+            matches!(execution.terminal_error, Some(RuntimeError::Cancelled)),
+            "{stage}"
+        );
+        assert!(tools.invocations.is_empty(), "{stage}: no redispatch");
+        assert_eq!(
+            sink.0
+                .iter()
+                .any(|event| event.event_type == EventType::ToolStarted),
+            expect_tool_started,
+            "{stage}: tool.started replays only for a started cancellation"
+        );
+    }
 }
 
 #[test]

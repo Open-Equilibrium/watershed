@@ -12,6 +12,7 @@ use serde::Deserialize;
 
 const EXECUTOR_STAGE_ERROR_SCHEMA_V0: &str = "flow-executor-stage-error-v0";
 const ATTEMPT_CANCELLED_SCHEMA_V0: &str = "flow-attempt-cancelled-v0";
+const ATTEMPT_CANCELLED_TOOL_SCHEMA_V1: &str = "flow-attempt-cancelled-v1";
 const TOOL_ATTEMPT_OUTPUT_SCHEMA_V1: &str = "flow-tool-attempt-output-v1";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, serde::Serialize)]
@@ -31,6 +32,45 @@ pub(super) fn cancelled_attempt_output() -> serde_json::Value {
     serde_json::json!({
         "schema": ATTEMPT_CANCELLED_SCHEMA_V0,
     })
+}
+
+pub(super) fn cancelled_tool_attempt_output(stage: ExecutorAttemptStage) -> serde_json::Value {
+    serde_json::json!({
+        "schema": ATTEMPT_CANCELLED_TOOL_SCHEMA_V1,
+        "stage": stage,
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CancelledToolOutput {
+    #[serde(rename = "schema")]
+    _schema: String,
+    stage: ExecutorAttemptStage,
+}
+
+/// Returns the stage of a recovered cancelled Tool attempt. v0 records carry no stage and
+/// were always written after `tool.started`, so they read as `started`.
+pub(super) fn recovered_cancelled_tool_stage(
+    result: &RunAttemptResult,
+) -> Result<ExecutorAttemptStage, RuntimeError> {
+    let durable_output = result.durable_output.as_ref().ok_or_else(|| {
+        RuntimeError::Protocol("recovered cancelled Tool attempt has no durable output".to_owned())
+    })?;
+    match durable_output
+        .get("schema")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some(ATTEMPT_CANCELLED_SCHEMA_V0) => Ok(ExecutorAttemptStage::Started),
+        Some(ATTEMPT_CANCELLED_TOOL_SCHEMA_V1) => {
+            let output: CancelledToolOutput =
+                serde_json::from_value(durable_output.clone()).map_err(RuntimeError::Json)?;
+            Ok(output.stage)
+        }
+        _ => Err(RuntimeError::Protocol(
+            "recovered cancelled Tool attempt has an unsupported schema".to_owned(),
+        )),
+    }
 }
 
 pub(super) fn tool_attempt_output(

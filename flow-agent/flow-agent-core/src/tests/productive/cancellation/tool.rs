@@ -72,9 +72,10 @@ fn cancellation_after_tool_started_settles_without_dispatch() {
     assert_eq!(
         attempts.durable_outputs[1],
         Some(serde_json::json!({
-            "schema": "flow-attempt-cancelled-v0",
+            "schema": "flow-attempt-cancelled-v1",
+            "stage": "started",
         })),
-        "pre-Start cancellation remains reconstructable after a recovery write failure"
+        "a cancellation after tool.started stays reconstructable with its stage"
     );
     assert_controlled_cancellation_lifecycle(&sink.events);
 }
@@ -110,6 +111,13 @@ fn cancellation_during_executor_preflight_settles_the_tool_attempt() {
     assert_eq!(attempts.results.len(), 2);
     assert_eq!(attempts.results[1].0, RunAttemptKind::Tool);
     assert_eq!(attempts.results[1].2, CANCELLED_REASON);
+    assert_eq!(
+        attempts.durable_outputs[1],
+        Some(serde_json::json!({
+            "schema": "flow-attempt-cancelled-v1",
+            "stage": "preflight",
+        })),
+    );
     assert!(
         !sink
             .0
