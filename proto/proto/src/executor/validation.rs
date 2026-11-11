@@ -32,7 +32,12 @@ pub(super) fn validate_request(request: &ExecutorRequestV0) -> Result<(), Execut
     }
     for (name, value) in &policy.environment {
         validate_text(name, "environment name", MAX_NAME_CHARS)?;
+        validate_nfc(name, "environment name")?;
         validate_text(value, "environment value", MAX_PATH_CHARS)?;
+        validate_nfc(value, "environment value")?;
+    }
+    for argument in &policy.argv {
+        validate_nfc(argument, "argv")?;
     }
     if let Err(error) =
         validate_executor_exec_vector_v0(&policy.executable, &policy.argv, &policy.environment)
@@ -320,6 +325,17 @@ pub(super) fn validate_text(
         )))
     } else {
         Ok(())
+    }
+}
+
+// WHY: canonical serialization converts text to NFC, so refusing keeps the bytes Flow reviewed.
+pub(super) fn validate_nfc(value: &str, name: &str) -> Result<(), ExecutorProtocolError> {
+    if is_nfc(value) {
+        Ok(())
+    } else {
+        Err(ExecutorProtocolError::new(format!(
+            "Executor {name} must use NFC text"
+        )))
     }
 }
 

@@ -7,10 +7,7 @@ use super::{
     ExecutorRequestV0, ExecutorResponseV0, ExecutorStartV0, MAX_EXECUTOR_CONTROL_BYTES_V0,
     MAX_EXECUTOR_PROBE_BYTES_V0, MAX_EXECUTOR_REQUEST_BYTES_V0, MAX_EXECUTOR_RESPONSE_BYTES_V0,
 };
-use crate::{
-    canonical::{nfc_json_string_values, nfc_string},
-    canonical_json, parse_unique_json,
-};
+use crate::{canonical::nfc_json_string_values, canonical_json, parse_unique_json};
 use serde::{Serialize, de::DeserializeOwned};
 
 /// Validates active self-protection and the digest of the complete policy Flow requested.
@@ -27,15 +24,7 @@ pub fn canonical_executor_request_v0(
 ) -> Result<Vec<u8>, ExecutorProtocolError> {
     validate_request(request)?;
     let (bytes, value) = canonical_document(request, MAX_EXECUTOR_REQUEST_BYTES_V0, "request")?;
-    let mut normalized: ExecutorRequestV0 =
-        decode_document(nfc_json_string_values(value), "request")?;
-    // Canonical serialization already rejects colliding normalized environment names.
-    normalized.resolved_policy.environment = normalized
-        .resolved_policy
-        .environment
-        .into_iter()
-        .map(|(name, value)| (nfc_string(name), value))
-        .collect();
+    let normalized: ExecutorRequestV0 = decode_document(nfc_json_string_values(value), "request")?;
     validate_request(&normalized)?;
     Ok(bytes)
 }

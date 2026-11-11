@@ -647,6 +647,40 @@ mod tests {
     }
 
     #[test]
+    fn host_environment_that_is_not_nfc_is_refused_before_launch() {
+        if crate::tests::run_isolated_test("WATERSHED_EXECUTOR_NFC_CHILD") {
+            return;
+        }
+        const NAME: &str = "WATERSHED_EXECUTOR_DECOMPOSED_FIXTURE";
+        // This test owns its process; the value is synthetic fixture data.
+        unsafe {
+            std::env::set_var(NAME, "Cafe\u{301}");
+        }
+        let root = crate::tests::empty_workspace();
+        let workspace = AnchoredWorkspace::open(&root).expect("workspace opens");
+        let executor = preparation_fixture(vec![retained_object(&root)]);
+        let mut policy = executor_policy();
+        policy.commands[0].environment.allow = vec![NAME.to_owned()];
+        let invocation = ToolInvocation {
+            executable: "/bin/echo".to_owned(),
+            argv: Vec::new(),
+        };
+        let Err(RuntimeError::Executor(failure)) = executor.prepare_tool(
+            &workspace,
+            &policy,
+            &policy.commands[0],
+            &invocation,
+            "decomposed-environment",
+        ) else {
+            panic!("a host environment value that is not NFC must not be dispatched");
+        };
+        assert_eq!(
+            failure.code(),
+            proto::ExecutorErrorCodeV0::PolicyUnsupported
+        );
+    }
+
+    #[test]
     fn prepared_executor_request_hash_uses_run_log_format() {
         let hash = crate::runtime::digest::prefixed_sha256_hex(b"canonical Executor request");
         let digest = hash

@@ -68,7 +68,7 @@ Watershed combines structured Flows, validated invocations, normalized events, p
 
 ## Principle: scripts define; enforcement must match the claim
 
-Scripts define available Tools, executable/argument contracts, declared parameters and workflow structure. The harness compiles an invocation policy per Flow and validates each request before effects. The Executor adds controller-selected native protection of Flow-owned objects. Fixture evaluation does not establish OS protection, and command allowlisting does not constrain every effect of trusted program code.
+Scripts define available Tools, executable/argument contracts, declared parameters and workflow structure. The harness compiles an invocation policy per Flow and validates each request before effects. Executed and sent text is the reviewed text: non-NFC definition text and Executor argument or environment values are refused, never converted ([PROTOCOL.md](PROTOCOL.md#m11-authoring-cli-grammar)). The Executor adds controller-selected native protection of Flow-owned objects. Fixture evaluation does not establish OS protection, and command allowlisting does not constrain every effect of trusted program code.
 
 This paragraph governs Flow Agent scripts. Liquid Apps use the parallel [target principle](docs/concept/V-Spec_Liquid.html#apps): App manifests declare capabilities, and the App Runtime plus Role and capability checks enforce them.
 

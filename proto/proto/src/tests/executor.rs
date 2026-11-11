@@ -570,34 +570,24 @@ fn executor_request_preserves_literal_argument_strings() {
     assert_eq!(parse_executor_request_v0(&bytes).unwrap(), request);
 }
 
-fn assert_normalized_environment_bound(field: &str, limit: usize) {
+fn assert_environment_bound(field: &str, limit: usize) {
     for suffix in ["", "x"] {
-        let expanding = format!("{}{suffix}", "\u{344}".repeat(limit / 2));
+        let text = format!("{}{suffix}", "x".repeat(limit));
         let mut candidate = request();
         candidate.resolved_policy.environment = BTreeMap::from([if field == "name" {
-            (expanding, "value".to_owned())
+            (text, "value".to_owned())
         } else {
-            ("X".to_owned(), expanding)
+            ("X".to_owned(), text)
         }]);
         refresh_policy_digest(&mut candidate);
         let result = canonical_executor_request_v0(&candidate);
         if suffix.is_empty() {
-            let bytes = result.expect("the exact normalized bound is valid");
+            let bytes = result.expect("the exact environment bound is valid");
             assert_eq!(bytes, canonical_wire(&candidate));
-            let parsed = parse_executor_request_v0(&bytes).expect("generated request is valid");
-            let (name, value) = parsed
-                .resolved_policy
-                .environment
-                .first_key_value()
-                .unwrap();
-            assert_eq!(
-                if field == "name" { name } else { value }.chars().count(),
-                limit
-            );
         } else {
             assert_eq!(
                 result
-                    .expect_err("one normalized scalar over the bound must be rejected")
+                    .expect_err("one scalar over the bound must be rejected")
                     .to_string(),
                 format!("Executor environment {field} is invalid")
             );
@@ -606,13 +596,52 @@ fn assert_normalized_environment_bound(field: &str, limit: usize) {
 }
 
 #[test]
-fn executor_request_enforces_normalized_environment_name_bound() {
-    assert_normalized_environment_bound("name", 256);
+fn executor_request_enforces_environment_name_bound() {
+    assert_environment_bound("name", 256);
 }
 
 #[test]
-fn executor_request_enforces_normalized_environment_value_bound() {
-    assert_normalized_environment_bound("value", 4_096);
+fn executor_request_enforces_environment_value_bound() {
+    assert_environment_bound("value", 4_096);
+}
+
+#[test]
+fn executor_request_refuses_non_nfc_arguments_and_environment_without_converting() {
+    type Mutation = fn(&mut ExecutorResolvedPolicyV0);
+    let cases: &[(&str, Mutation, &str)] = &[
+        (
+            "argument",
+            |policy| policy.argv = vec!["e\u{301}".to_owned()],
+            "Executor argv must use NFC text",
+        ),
+        (
+            "environment name",
+            |policy| {
+                policy
+                    .environment
+                    .insert("e\u{301}".to_owned(), "value".to_owned());
+            },
+            "Executor environment name must use NFC text",
+        ),
+        (
+            "environment value",
+            |policy| {
+                policy
+                    .environment
+                    .insert("LANG".to_owned(), "e\u{301}".to_owned());
+            },
+            "Executor environment value must use NFC text",
+        ),
+    ];
+
+    for &(name, mutate, expected) in cases {
+        let mut candidate = request();
+        mutate(&mut candidate.resolved_policy);
+        refresh_policy_digest(&mut candidate);
+        let error = canonical_executor_request_v0(&candidate)
+            .expect_err(&format!("accepted request with non-NFC {name}"));
+        assert_eq!(error.to_string(), expected, "{name}");
+    }
 }
 
 #[test]

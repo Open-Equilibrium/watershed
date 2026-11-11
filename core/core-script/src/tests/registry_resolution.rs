@@ -5,8 +5,8 @@ use super::super::load::{
 use super::super::model::{
     AllowedParameter, BlockIdentity, FlowBlock, FlowValue, InstructionBlock, MAX_BLOCK_NAME_CHARS,
     MAX_FLOW_FANOUT, MAX_FLOW_NESTING_DEPTH, MAX_PHASE_FANOUT, MAX_PHASE_NESTING_DEPTH,
-    ParameterValueType, PhaseBlock, PhaseTransition, RegistryBlock, ResolvedRegistry,
-    ValuePredicate,
+    ParameterValueType, PhaseBlock, PhaseTransition, RegistryBlock, ResolvedRegistry, ToolBlock,
+    ToolCommand, ToolKind, ValuePredicate,
 };
 use super::{
     duplicated_subflow_tail_blocks, flow_chain_blocks, own_script_tool, phase_chain_block,
@@ -269,7 +269,66 @@ fn registry_rejects_normalized_duplicate_names() {
 }
 
 #[test]
-fn resolved_registry_canonicalizes_runtime_strings_and_parameter_order() {
+fn registry_refuses_non_nfc_definition_text_instead_of_converting_it() {
+    let decomposed = "Cafe\u{301}";
+    let predefined = |argv: Vec<String>, allowed_values: Vec<String>| {
+        RegistryBlock::Tool(ToolBlock {
+            allowed_parameters: vec![AllowedParameter {
+                name: "--mode".to_owned(),
+                value_type: ParameterValueType::Enum,
+                required: false,
+                allowed_values,
+                value_pattern: None,
+                max_length: None,
+                min: None,
+                max: None,
+            }],
+            command: ToolCommand::Predefined {
+                command_id: "agent-echo".to_owned(),
+                argv,
+            },
+            identity: BlockIdentity {
+                id: "echo".to_owned(),
+                name: "Echo".to_owned(),
+            },
+            script_body: None,
+            script_runtime: None,
+            tool_kind: ToolKind::PredefinedCommand,
+        })
+    };
+    let mut body = own_script_tool("decomposed-body", "script:decomposed-body");
+    body.script_body = Some(format!("printf '{decomposed}\\n'"));
+    let prompt = RegistryBlock::Instruction(InstructionBlock {
+        identity: BlockIdentity {
+            id: "prompt".to_owned(),
+            name: "Prompt".to_owned(),
+        },
+        prompt: decomposed.to_owned(),
+        parameters: Vec::new(),
+    });
+
+    for (field, block) in [
+        ("script_body", RegistryBlock::Tool(body)),
+        ("argv", predefined(vec![decomposed.to_owned()], Vec::new())),
+        (
+            "allowed_values",
+            predefined(Vec::new(), vec![decomposed.to_owned()]),
+        ),
+        ("prompt", prompt),
+    ] {
+        let error = ResolvedRegistry::from_blocks([block])
+            .expect_err("non-NFC definition text is refused, not converted");
+        assert!(
+            error
+                .to_string()
+                .ends_with(&format!("{field} must use NFC text")),
+            "{field}: {error}"
+        );
+    }
+}
+
+#[test]
+fn resolved_registry_canonicalizes_names_and_parameter_order() {
     let parameter = |name: &str| AllowedParameter {
         name: name.to_owned(),
         value_type: ParameterValueType::None,
@@ -282,7 +341,6 @@ fn resolved_registry_canonicalizes_runtime_strings_and_parameter_order() {
     };
     let mut tool = own_script_tool("canonical-tool", "script:canonical-tool");
     tool.identity.name = "Cafe\u{301}Tool".to_owned();
-    tool.script_body = Some("printf 'Cafe\u{301}\\n'".to_owned());
     tool.allowed_parameters = vec![parameter("--z-last"), parameter("--a-first")];
 
     let registry = ResolvedRegistry::from_blocks([RegistryBlock::Tool(tool)])
@@ -292,7 +350,6 @@ fn resolved_registry_canonicalizes_runtime_strings_and_parameter_order() {
         .expect("canonical tool remains available");
 
     assert_eq!(tool.identity.name, "CaféTool");
-    assert_eq!(tool.script_body.as_deref(), Some("printf 'Café\\n'"));
     assert_eq!(
         tool.allowed_parameters
             .iter()
