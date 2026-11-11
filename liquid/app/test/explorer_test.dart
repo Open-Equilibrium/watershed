@@ -91,6 +91,33 @@ void main() {
     expect(find.text('the replica is read-only'), findsOneWidget);
   });
 
+  testWidgets(
+    '⌘Z after Liquid assigns a title does not bring back the title it replaced',
+    (tester) async {
+      await show(tester);
+      await tester.enterText(title(), 'Trip');
+      await tester.pumpAndSettle();
+      await tester.pumpAndSettle();
+
+      // A title Liquid assigns while the person is not typing in the field.
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
+      await workspace.rename(fake.pages.values.single.single.id, 'Porto');
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(title()).controller!.text, 'Porto');
+
+      await tester.tap(title());
+      await tester.pumpAndSettle();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(title()).controller!.text, 'Porto');
+      expect(fake.pages.values.single.single.title, 'Porto');
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+  );
+
   testWidgets('the area’s + and ⇧⌘N add Pages, and Pages nest', (tester) async {
     await show(tester);
     await tester.enterText(title(), 'Trip');
