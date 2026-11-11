@@ -11,7 +11,56 @@ use crate::runtime::{
     },
     types::RuntimeError,
 };
-use std::{cell::Cell, fs, io, time::Duration};
+use std::{
+    cell::{Cell, RefCell},
+    fs, io,
+    time::Duration,
+};
+
+#[test]
+fn refresh_recheck_uses_the_time_after_the_store_lock_is_acquired() {
+    const NEAR_EXPIRY: u64 = 1_000_000 + 240_000;
+    let workspace = empty_workspace("credential-refresh-after-lock");
+    let store = CredentialStore::at(workspace.join("private/credentials.json"));
+    store
+        .replace(&credential(NEAR_EXPIRY))
+        .expect("near-expiry credential stores");
+    let held = RefCell::new(Some(
+        store
+            .acquire_lock_for_test(|| Duration::ZERO, |_| {})
+            .expect("test holds the credential lock"),
+    ));
+    let now = Cell::new(1_000_000u64);
+    let refreshes = Cell::new(0usize);
+    let replacement = credential(3_600_000 + 1_000_000);
+
+    let resolved = store
+        .resolve_with_clock(
+            || Ok(now.get()),
+            |_| {
+                refreshes.set(refreshes.get() + 1);
+                Ok(replacement.clone())
+            },
+            || Duration::ZERO,
+            |_| {
+                // The other owner refreshes to a record that is fresh at the first check but
+                // near expiry once the lock is acquired two minutes later.
+                drop(held.borrow_mut().take());
+                now.set(1_000_000 + 120_000);
+                store
+                    .replace(&credential(1_000_000 + 360_000))
+                    .expect("other owner publishes its refresh");
+            },
+        )
+        .expect("resolution completes");
+
+    assert_eq!(
+        refreshes.get(),
+        1,
+        "a record near expiry after the lock must refresh"
+    );
+    assert_eq!(resolved, replacement);
+}
 
 #[test]
 fn credential_lock_deadline() {

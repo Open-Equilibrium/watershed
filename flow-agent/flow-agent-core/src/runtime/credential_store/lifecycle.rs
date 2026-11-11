@@ -138,9 +138,8 @@ impl CredentialStore {
         let Some(parent) = self.open_protected_parent(false)? else {
             return Err(authentication_required());
         };
-        let now_epoch_milliseconds = now_epoch_milliseconds()?;
         let current = require_record(self.read_anchored(&parent)?)?;
-        if !needs_refresh(&current, now_epoch_milliseconds) {
+        if !needs_refresh(&current, now_epoch_milliseconds()?) {
             return Ok(current);
         }
         let parent = self
@@ -149,7 +148,8 @@ impl CredentialStore {
         let lock_path = parent.file(self.lock_leaf()?);
         let _lock = StoreLock::acquire_anchored(&lock_path, lock_now, wait)?;
         let current = require_record(self.read_anchored_and_finalize(&parent)?)?;
-        if !needs_refresh(&current, now_epoch_milliseconds) {
+        // Waiting for the lock may have consumed the refresh window, so expiry is judged now.
+        if !needs_refresh(&current, now_epoch_milliseconds()?) {
             return Ok(current);
         }
         let replacement = refresh(&current)?;
