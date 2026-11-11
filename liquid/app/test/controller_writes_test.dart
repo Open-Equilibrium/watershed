@@ -98,11 +98,6 @@ void main() {
       ),
       // Pending until their fix commits land.
       (
-        'lib/src/agent/action_area.dart',
-        'controller.clear();',
-        'Pending: the composer clears after a send.',
-      ),
-      (
         'lib/src/agent/shell.dart',
         '_composer.value = TextEditingValue(',
         'Pending: text handed back to the composer.',

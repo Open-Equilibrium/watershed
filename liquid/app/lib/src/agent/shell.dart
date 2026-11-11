@@ -76,7 +76,8 @@ class AgentShell extends StatefulWidget {
 }
 
 class _AgentShellState extends State<AgentShell> {
-  final _composer = TextEditingController();
+  /// The composer's controller, which a send replaces with a fresh one (see [_sent]).
+  var _composer = TextEditingController();
   final _composerFocus = FocusNode(debugLabel: 'composer');
 
   /// Keeps the input area's state while it moves into the open tab.
@@ -169,6 +170,11 @@ class _AgentShellState extends State<AgentShell> {
       unawaited(_askProfile());
     }
   }
+
+  /// Clears the composer after a send, from a fresh controller so ⌘Z cannot bring the message back.
+  void _sent() => setState(() {
+    _composer = renewController(_composer, TextEditingValue.empty);
+  });
 
   /// Text handed back to the input area goes before what the user typed meanwhile, which stays.
   void _applyDraft() {
@@ -452,6 +458,7 @@ class _AgentShellState extends State<AgentShell> {
                       project: info.project,
                       composer: _composer,
                       composerFocus: _composerFocus,
+                      onSent: _sent,
                     ),
                   ],
                 ),

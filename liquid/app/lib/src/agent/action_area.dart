@@ -21,6 +21,7 @@ class ActionArea extends StatefulWidget {
     required this.state,
     required this.composer,
     required this.project,
+    required this.onSent,
     this.composerFocus,
   });
 
@@ -30,6 +31,9 @@ class ActionArea extends StatefulWidget {
 
   /// The project's name, as a new session's chips show it.
   final String project;
+
+  /// Runs when the composer's text is sent, which clears it.
+  final VoidCallback onSent;
 
   @override
   State<ActionArea> createState() => _ActionAreaState();
@@ -80,6 +84,7 @@ class _ActionAreaState extends State<ActionArea> {
                 controller: widget.composer,
                 focusNode: widget.composerFocus,
                 project: widget.project,
+                onSent: widget.onSent,
               ),
       ),
     );
@@ -95,6 +100,7 @@ class Composer extends StatelessWidget {
     required this.state,
     required this.controller,
     required this.project,
+    required this.onSent,
     this.focusNode,
   });
 
@@ -102,11 +108,12 @@ class Composer extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode? focusNode;
   final String project;
+  final VoidCallback onSent;
 
   void _send({required bool followUp}) {
     final text = controller.text.trim();
     if (text.isEmpty) return;
-    controller.clear();
+    onSent();
     state.send(text, followUp: followUp);
   }
 

@@ -25,6 +25,7 @@ import 'package:liquid/src/theme/theme.dart';
 import 'package:liquid/src/theme/tokens.g.dart';
 
 import 'fake_backend.dart';
+import 'focus_kit.dart';
 
 const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
 
@@ -508,6 +509,22 @@ void main() {
       await tester.enterText(composer, '');
     }
   });
+
+  testWidgets(
+    '⌘Z after a sent message does not bring the message back',
+    (tester) async {
+      await show(tester);
+      final composer = find.byKey(const Key('composer'));
+      await tester.enterText(composer, 'Say hi');
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.tap(composer);
+      await undo(tester);
+      expect(tester.widget<TextField>(composer).controller?.text, '');
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+  );
 
   testWidgets('marks the branch in the rebuilt chat and reads earlier items', (
     tester,
