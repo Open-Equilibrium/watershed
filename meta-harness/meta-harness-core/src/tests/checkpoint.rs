@@ -717,6 +717,19 @@ fn a_configuration_error_quoting_the_discovery_message_is_not_outside_git() {
 }
 
 #[test]
+fn a_configuration_error_quoting_the_discovery_line_is_not_outside_git() {
+    run(async {
+        let repo = Repo::new("config-quoting-discovery-line");
+        repo.git(&["config", "core.abbrev", "x\nfatal: not a git repository"]);
+        let opened = Checkpoints::new(repo.path()).in_repository().await;
+        assert!(
+            matches!(&opened, Err(error) if error.to_string().contains("core.abbrev")),
+            "{opened:?}"
+        );
+    });
+}
+
+#[test]
 fn a_project_that_could_not_be_captured_is_reported_instead_of_unchanged() {
     use std::os::unix::fs::PermissionsExt;
     run(async {

@@ -13,12 +13,13 @@ pub(super) async fn git_path(dir: &Path, args: &[&str]) -> Result<String, DiffEr
     let output = git_path_output(dir, &[], args)
         .await
         .map_err(|error| match error {
-            // Git's discovery diagnostic starts its own line; a configuration error may quote
-            // the phrase.
+            // Git's discovery diagnostic is its first fatal line; a configuration error may quote
+            // the phrase, even on a line of its own, but only after its own fatal line.
             DiffError::Git(reason)
                 if reason
                     .lines()
-                    .any(|line| line.starts_with("fatal: not a git repository")) =>
+                    .find(|line| line.starts_with("fatal:"))
+                    .is_some_and(|line| line.starts_with("fatal: not a git repository")) =>
             {
                 DiffError::NotARepository
             }
