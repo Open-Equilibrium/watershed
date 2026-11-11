@@ -135,11 +135,6 @@ fn conversation_replay_rejects_inactive_and_malformed_event_boundaries() {
             Vec::new(),
             "is empty without active session ownership",
         ),
-        (
-            "partial",
-            b"{}".to_vec(),
-            "incomplete final JSONL line without active session ownership",
-        ),
         ("invalid-utf8", vec![0xff, b'\n'], "is not valid UTF-8"),
     ] {
         let workspace = empty_workspace(&format!("conversation-replay-{label}"));
@@ -155,6 +150,17 @@ fn conversation_replay_rejects_inactive_and_malformed_event_boundaries() {
             .expect_err("malformed conversation replay must fail closed");
         assert!(error.to_string().contains(expected), "{label}: {error}");
     }
+
+    let workspace = empty_workspace("conversation-replay-incomplete-final-line");
+    create_review_run(&workspace);
+    fs::write(
+        crate::tests::helpers::workspace_session_dir(&workspace)
+            .join("review/runs/review-1/events.jsonl"),
+        b"{}",
+    )
+    .expect("uncommitted incomplete final line writes");
+    replay_conversation_run(&workspace, "review", "review-1", EmitMode::Jsonl)
+        .expect("replay ignores an uncommitted incomplete final line");
 
     let workspace = empty_workspace("conversation-replay-non-final-partial");
     create_review_run(&workspace);

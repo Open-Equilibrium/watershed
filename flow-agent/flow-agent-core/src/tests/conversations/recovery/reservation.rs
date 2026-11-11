@@ -189,6 +189,25 @@ fn productive_recovery_reserves_a_durable_header_before_the_first_event() {
 }
 
 #[test]
+fn productive_recovery_reservation_drops_an_incomplete_final_event_line() {
+    let (workspace, run, _) =
+        published_productive_recovery_fixture("productive-recovery-cut-off-event");
+    fs::write(run.join("events.jsonl"), b"{\"event_id\":").expect("cut-off event line writes");
+
+    let reservation = reserve_conversation_run_recovery(&workspace, "review", "review")
+        .expect("the reservation drops the uncommitted cut-off line under its lease");
+    reservation
+        .release()
+        .expect("recovery reservation releases");
+    assert_eq!(
+        fs::metadata(run.join("events.jsonl"))
+            .expect("event stream metadata reads")
+            .len(),
+        0
+    );
+}
+
+#[test]
 fn run_recovery_reservation_accepts_a_multi_segment_event_prefix() {
     let (workspace, _, _) =
         published_productive_recovery_fixture("productive-recovery-bounded-prefix");

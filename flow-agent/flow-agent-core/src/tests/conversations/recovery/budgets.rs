@@ -387,7 +387,9 @@ fn productive_recovery_prefix_rejects_bounded_stream_corruption() {
 
     let (workspace, _, _) = productive_recovery_header_fixture("recovery-prefix-unterminated");
     fs::write(run_path(&workspace).join("events.jsonl"), b"{}").expect("event prefix writes");
-    assert_conversation_recovery_prefix_open_fails(&workspace, "event prefix must end with LF");
+    fs::write(run_path(&workspace).join("events.000002.jsonl"), b"{}\n")
+        .expect("complete final event segment writes");
+    assert_conversation_recovery_prefix_rejects(&workspace, "prefix must end with LF");
 
     let (workspace, _, _) = productive_recovery_header_fixture("recovery-prefix-record-size");
     fs::write(

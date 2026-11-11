@@ -5,7 +5,8 @@ use super::{
 use crate::runtime::{
     fs_guards::{
         AnchoredDir, AnchoredFile, AnchoredFileIdentity, anchored_file_identity,
-        open_anchored_file_for_read, path_io_error, segmented_jsonl_files,
+        open_anchored_file_for_read, open_anchored_file_for_update, path_io_error,
+        segmented_jsonl_files,
     },
     types::{MAX_SESSION_SEGMENT_BYTES, RuntimeError, SessionStreamLimits},
 };
@@ -32,6 +33,41 @@ pub(super) fn canonical_jsonl_record(line: &str, label: &str) -> Result<String, 
         )));
     }
     Ok(canonical)
+}
+
+/// Drops the uncommitted incomplete final line of a Run's last prefix segment.
+///
+/// Exact recovery callers hold the Run lease, so no writer can append while it is removed.
+fn drop_incomplete_final_line(
+    path: &AnchoredFile,
+    file: &mut File,
+    bytes: u64,
+) -> Result<u64, RuntimeError> {
+    let committed = committed_prefix_len(file, bytes)
+        .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
+    let (writable, _) = open_anchored_file_for_update(path)?;
+    writable
+        .set_len(committed)
+        .and_then(|()| writable.sync_all())
+        .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
+    Ok(committed)
+}
+
+/// Returns the length through the last LF among the first `bytes` bytes, scanning backwards.
+fn committed_prefix_len(file: &mut File, bytes: u64) -> std::io::Result<u64> {
+    const CHUNK_BYTES: u64 = 64 * 1024;
+    let mut end = bytes;
+    while end > 0 {
+        let start = end.saturating_sub(CHUNK_BYTES);
+        let mut chunk = vec![0u8; (end - start) as usize];
+        file.seek(SeekFrom::Start(start))?;
+        file.read_exact(&mut chunk)?;
+        if let Some(index) = chunk.iter().rposition(|byte| *byte == b'\n') {
+            return Ok(start + index as u64 + 1);
+        }
+        end = start;
+    }
+    Ok(0)
 }
 
 pub(super) struct RecoveryPrefixReader {
@@ -78,7 +114,7 @@ impl RecoveryPrefixReader {
         for (index, path) in segments.iter().enumerate() {
             let (mut file, metadata) = open_anchored_file_for_read(path)?;
             let identity = anchored_file_identity(path.diagnostic_path(), &file)?;
-            let bytes = metadata.len();
+            let mut bytes = metadata.len();
             if bytes > MAX_SESSION_SEGMENT_BYTES {
                 return Err(protocol(format!(
                     "productive recovery {stem} prefix segment exceeds its byte limit"
@@ -107,9 +143,12 @@ impl RecoveryPrefixReader {
                 file.read_exact(&mut last)
                     .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
                 if last[0] != b'\n' {
-                    return Err(protocol(format!(
-                        "productive recovery {stem} prefix must end with LF"
-                    )));
+                    if index + 1 != segment_count {
+                        return Err(protocol(format!(
+                            "productive recovery {stem} prefix must end with LF"
+                        )));
+                    }
+                    bytes = drop_incomplete_final_line(path, &mut file, bytes)?;
                 }
             }
             segment_identities.push(identity);

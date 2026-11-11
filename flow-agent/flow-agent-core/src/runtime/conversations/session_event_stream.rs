@@ -42,8 +42,8 @@ pub(crate) fn ensure_in_memory_replay_output_limit(
 /// Validated, append-only reader for one authoritative session log.
 ///
 /// Each read is bounded by the per-segment and per-session event-data limits. The reader
-/// tolerates an incomplete final JSONL line while session ownership is active, rejects
-/// mutation of an already observed event, and leaves cursor advancement to the caller.
+/// ignores an incomplete final JSONL line as an uncommitted append, rejects mutation of an
+/// already observed event, and leaves cursor advancement to the caller.
 pub struct SessionEventReader {
     observed_current_segment_bytes: u64,
     observed_segment_count: usize,
@@ -227,16 +227,10 @@ impl SessionEventReader {
                     .as_ref()
                     .expect("final segment snapshot is present")
                     .is_empty;
-            let ownership_inactive =
-                (has_partial_line || is_empty) && !self.session_ownership_active()?;
-            let inactive_partial = has_partial_line && ownership_inactive;
-            let inactive_empty = is_empty && ownership_inactive;
-            if (inactive_partial || inactive_empty) && !retried_inactive_final {
+            let inactive_empty = is_empty && !self.session_ownership_active()?;
+            if inactive_empty && !retried_inactive_final {
                 retried_inactive_final = true;
                 continue;
-            }
-            if inactive_partial && !defer_inactive_error_until_validated {
-                return Err(self.inactive_partial());
             }
             if inactive_empty && !defer_inactive_error_until_validated {
                 return Err(self.inactive_empty());
@@ -296,9 +290,6 @@ impl SessionEventReader {
                     "{} contains a partial line after a terminal event",
                     self.path.diagnostic_path().display()
                 )));
-            }
-            if inactive_partial {
-                return Err(self.inactive_partial());
             }
             if inactive_empty {
                 return Err(self.inactive_empty());
@@ -387,95 +378,52 @@ impl SessionEventReader {
         if self.validation.previous_sequence >= target_sequence {
             return self.ensure_cursor(cursor, self.validation.previous_sequence);
         }
-        let mut retried_inactive_partial = false;
-        loop {
-            let segments = self.incremental_segments()?;
-            if segments.len() < self.observed_segment_count || self.observed_segment_count == 0 {
-                return Err(self.changed_outside_append_only());
-            }
-            let prior_final_index = self.observed_segment_count - 1;
-            let final_index = segments.len() - 1;
-            let final_offset = if final_index == prior_final_index {
+        let segments = self.incremental_segments()?;
+        if segments.len() < self.observed_segment_count || self.observed_segment_count == 0 {
+            return Err(self.changed_outside_append_only());
+        }
+        let prior_final_index = self.observed_segment_count - 1;
+        let final_index = segments.len() - 1;
+        let final_offset = if final_index == prior_final_index {
+            self.observed_current_segment_bytes
+        } else {
+            0
+        };
+        let (final_suffix, _) =
+            self.read_incremental_segment(&segments[final_index], final_offset, 0)?;
+        let final_complete_len = complete_jsonl_prefix_len(&final_suffix);
+        let has_partial_line = final_complete_len != final_suffix.len();
+        after_read();
+        let empty_validation = SessionAppendValidationState::empty(
+            self.validation
+                .expected_session_id
+                .as_deref()
+                .expect("session readers always validate one session"),
+        );
+        // Errors and unwinds leave an empty cache for the next verified replay.
+        let mut validation = std::mem::replace(&mut self.validation, empty_validation);
+        let mut signature = self.observed_signature.clone();
+        let mut discovered_bytes = 0u64;
+        let mut current_segment_count = self.observed_segment_count;
+        let mut current_segment_bytes = self.observed_current_segment_bytes;
+        for (index, segment) in segments.iter().enumerate().skip(prior_final_index) {
+            let offset = if index == prior_final_index {
                 self.observed_current_segment_bytes
             } else {
                 0
             };
-            let (final_suffix, _) =
-                self.read_incremental_segment(&segments[final_index], final_offset, 0)?;
-            let final_complete_len = complete_jsonl_prefix_len(&final_suffix);
-            let has_partial_line = final_complete_len != final_suffix.len();
-            let inactive_partial = has_partial_line && !self.session_ownership_active()?;
-            if inactive_partial && !retried_inactive_partial {
-                retried_inactive_partial = true;
-                continue;
-            }
-            after_read();
-            let empty_validation = SessionAppendValidationState::empty(
-                self.validation
-                    .expected_session_id
-                    .as_deref()
-                    .expect("session readers always validate one session"),
-            );
-            // Errors and unwinds leave an empty cache for the next verified replay.
-            let mut validation = std::mem::replace(&mut self.validation, empty_validation);
-            let mut signature = self.observed_signature.clone();
-            let mut discovered_bytes = 0u64;
-            let mut current_segment_count = self.observed_segment_count;
-            let mut current_segment_bytes = self.observed_current_segment_bytes;
-            for (index, segment) in segments.iter().enumerate().skip(prior_final_index) {
-                let offset = if index == prior_final_index {
-                    self.observed_current_segment_bytes
-                } else {
-                    0
-                };
-                let (segment_suffix, metadata_len) = if index == final_index {
-                    (
-                        final_suffix.as_slice(),
-                        final_offset
-                            .saturating_add(u64::try_from(final_suffix.len()).unwrap_or(u64::MAX)),
-                    )
-                } else {
-                    let (bytes, metadata_len) =
-                        self.read_incremental_segment(segment, offset, discovered_bytes)?;
-                    discovered_bytes = discovered_bytes
-                        .saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
-                    if metadata_len == 0 || complete_jsonl_prefix_len(&bytes) != bytes.len() {
-                        return Err(RuntimeError::Protocol(format!(
-                            "{} non-final segment must end with LF",
-                            segment.diagnostic_path().display()
-                        )));
-                    }
-                    let consumed = self.visit_incremental_records(
-                        &mut validation,
-                        &mut signature,
-                        &bytes,
-                        cursor,
-                        through_sequence,
-                        target_sequence,
-                        &mut visit,
-                    )?;
-                    current_segment_count = index + 1;
-                    current_segment_bytes =
-                        offset.saturating_add(u64::try_from(consumed).unwrap_or(u64::MAX));
-                    if validation.previous_sequence >= target_sequence {
-                        break;
-                    }
-                    continue;
-                };
-                discovered_bytes = discovered_bytes
-                    .saturating_add(u64::try_from(segment_suffix.len()).unwrap_or(u64::MAX));
-                let observed_event_bytes =
-                    u64::try_from(self.observed_signature.byte_count).unwrap_or(u64::MAX);
-                if observed_event_bytes.saturating_add(discovered_bytes) > MAX_SESSION_EVENT_BYTES {
-                    return Err(RuntimeError::Protocol(format!(
-                        "{} session event data exceeds max {MAX_SESSION_EVENT_BYTES}",
-                        self.path.diagnostic_path().display()
-                    )));
-                }
-                let complete_len = complete_jsonl_prefix_len(segment_suffix);
-                if index != final_index
-                    && (metadata_len == 0 || complete_len != segment_suffix.len())
-                {
+            let (segment_suffix, metadata_len) = if index == final_index {
+                (
+                    final_suffix.as_slice(),
+                    final_offset
+                        .saturating_add(u64::try_from(final_suffix.len()).unwrap_or(u64::MAX)),
+                )
+            } else {
+                let (bytes, metadata_len) =
+                    self.read_incremental_segment(segment, offset, discovered_bytes)?;
+                discovered_bytes =
+                    discovered_bytes.saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+                if metadata_len == 0 || complete_jsonl_prefix_len(&bytes) != bytes.len() {
                     return Err(RuntimeError::Protocol(format!(
                         "{} non-final segment must end with LF",
                         segment.diagnostic_path().display()
@@ -484,7 +432,7 @@ impl SessionEventReader {
                 let consumed = self.visit_incremental_records(
                     &mut validation,
                     &mut signature,
-                    &segment_suffix[..complete_len],
+                    &bytes,
                     cursor,
                     through_sequence,
                     target_sequence,
@@ -496,23 +444,53 @@ impl SessionEventReader {
                 if validation.previous_sequence >= target_sequence {
                     break;
                 }
-            }
-            if has_partial_line && validation.terminal_line.is_some() {
+                continue;
+            };
+            discovered_bytes = discovered_bytes
+                .saturating_add(u64::try_from(segment_suffix.len()).unwrap_or(u64::MAX));
+            let observed_event_bytes =
+                u64::try_from(self.observed_signature.byte_count).unwrap_or(u64::MAX);
+            if observed_event_bytes.saturating_add(discovered_bytes) > MAX_SESSION_EVENT_BYTES {
                 return Err(RuntimeError::Protocol(format!(
-                    "{} contains a partial line after a terminal event",
+                    "{} session event data exceeds max {MAX_SESSION_EVENT_BYTES}",
                     self.path.diagnostic_path().display()
                 )));
             }
-            if inactive_partial {
-                return Err(self.inactive_partial());
+            let complete_len = complete_jsonl_prefix_len(segment_suffix);
+            if index != final_index && (metadata_len == 0 || complete_len != segment_suffix.len()) {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} non-final segment must end with LF",
+                    segment.diagnostic_path().display()
+                )));
             }
-            self.ensure_cursor(cursor, validation.previous_sequence)?;
-            self.observed_current_segment_bytes = current_segment_bytes;
-            self.observed_segment_count = current_segment_count;
-            self.observed_signature = signature;
-            self.validation = validation;
-            return Ok(());
+            let consumed = self.visit_incremental_records(
+                &mut validation,
+                &mut signature,
+                &segment_suffix[..complete_len],
+                cursor,
+                through_sequence,
+                target_sequence,
+                &mut visit,
+            )?;
+            current_segment_count = index + 1;
+            current_segment_bytes =
+                offset.saturating_add(u64::try_from(consumed).unwrap_or(u64::MAX));
+            if validation.previous_sequence >= target_sequence {
+                break;
+            }
         }
+        if has_partial_line && validation.terminal_line.is_some() {
+            return Err(RuntimeError::Protocol(format!(
+                "{} contains a partial line after a terminal event",
+                self.path.diagnostic_path().display()
+            )));
+        }
+        self.ensure_cursor(cursor, validation.previous_sequence)?;
+        self.observed_current_segment_bytes = current_segment_bytes;
+        self.observed_segment_count = current_segment_count;
+        self.observed_signature = signature;
+        self.validation = validation;
+        Ok(())
     }
 
     fn read_incremental_segment(
@@ -635,13 +613,6 @@ impl SessionEventReader {
             Err(error) => return Err(error),
         };
         Ok(current.identity() == self.workspace_identity)
-    }
-
-    fn inactive_partial(&self) -> RuntimeError {
-        RuntimeError::Protocol(format!(
-            "{} contains an incomplete final JSONL line without active session ownership",
-            self.path.diagnostic_path().display()
-        ))
     }
 
     fn inactive_empty(&self) -> RuntimeError {
