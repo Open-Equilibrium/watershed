@@ -64,7 +64,7 @@ Report suspected vulnerabilities privately to **b-weber@gmx.at** — please do n
 
 Flow Agent's [contract above](#flow-agent-security-contract) governs its invocation and native self-protection boundary. Other products retain their own capability and mutation contracts.
 
-Watershed combines structured Flows, validated invocations, normalized events, policy gates and metric feedback with Liquid's permissioned workspace mutations and action history, and Meta-Harness's audited configuration control. Flow Agent trusts its admitted Tool code; Liquid and Meta-Harness retain their distinct boundaries below. AGPL/free-software transparency lets users inspect, self-host, fork and verify core behavior; it is not a substitute for enforcement.
+Watershed combines structured Flows, validated invocations, normalized events, policy gates and metric feedback with Liquid's permissioned workspace mutations and action history. Meta-Harness enforces nothing for a harness (ADR-0252); it records sessions and per-turn checkpoints without claiming completeness (ADR-0257). Flow Agent trusts its admitted Tool code; Liquid and Meta-Harness retain their distinct boundaries below. AGPL/free-software transparency lets users inspect, self-host, fork and verify core behavior; it is not a substitute for enforcement.
 
 ## Principle: scripts define; enforcement must match the claim
 
