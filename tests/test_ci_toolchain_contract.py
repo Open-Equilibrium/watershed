@@ -653,6 +653,7 @@ class CiWorkflowContractTest(unittest.TestCase):
     def assert_liquid_gates(self, workflow: str) -> None:
         assert_step_state(self, workflow, "Install pinned Flutter", job="liquid")
         for name, condition in (("Check the Liquid app", UBUNTU),
+                                ("Check the Liquid app on macOS", MAC),
                                 ("Check the generated Liquid bridge", UBUNTU),
                                 ("Check the Liquid key helper", MAC)):
             assert_step_state(self, workflow, name, job="liquid", condition=condition)
@@ -665,6 +666,10 @@ class CiWorkflowContractTest(unittest.TestCase):
         )
         self.assertIn("        working-directory: liquid/app",
                       step_lines(workflow, "Check the Liquid app", "liquid"))
+        self.assertEqual(
+            step_run(workflow, "Check the Liquid app on macOS").splitlines(),
+            ["flutter pub get --enforce-lockfile", "flutter analyze", "flutter test"],
+        )
         bridge = step_run(workflow, "Check the generated Liquid bridge")
         self.assertIn("flutter_rust_bridge_codegen generate", bridge)
         self.assertIn("git diff --exit-code -- liquid", bridge)
