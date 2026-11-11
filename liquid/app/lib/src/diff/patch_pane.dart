@@ -46,11 +46,8 @@ class PatchPane extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ws = context.ws;
     final change = this.change;
-    final note = this.note;
     if (change == null) return const SizedBox.shrink();
-    final split = settings.layout == DiffLayout.split;
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         WsMetrics.space7,
@@ -61,98 +58,102 @@ class PatchPane extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: header ?? const SizedBox.shrink()),
-              _Toggle(
-                label: 'Hide whitespace',
-                on: settings.hideWhitespace,
-                onTap: onWhitespace,
-              ),
-              const SizedBox(width: WsMetrics.space3),
-              Segments(
-                options: const [
-                  (DiffLayout.unified, 'Unified'),
-                  (DiffLayout.split, 'Split'),
-                ],
-                selected: settings.layout,
-                onSelect: onLayout,
-              ),
-            ],
-          ),
+          _toolbar(),
           const SizedBox(height: WsMetrics.space4),
-          Container(
-            height: 36,
-            padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
-            decoration: BoxDecoration(
-              color: ws.subtle,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(WsMetrics.radiusLg),
-              ),
-            ),
-            alignment: Alignment.centerLeft,
-            child: Text(change.shown, style: monoStyle(context)),
-          ),
-          Expanded(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border.all(color: ws.border),
-                borderRadius: const BorderRadius.vertical(
-                  bottom: Radius.circular(WsMetrics.radiusLg),
-                ),
-              ),
-              // Long lines scroll sideways together, so no change is out of reach.
-              child: note != null
-                  ? Center(
-                      child: Text(
-                        note,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    )
-                  : LayoutBuilder(
-                      builder: (context, constraints) {
-                        final style = monoStyle(context);
-                        // Split shows each side as wide as the unified view's code.
-                        final code =
-                            widest.fold(
-                              0.0,
-                              (wide, text) => math.max(
-                                wide,
-                                measureText(text, style).width,
-                              ),
-                            ) +
-                            WsMetrics.space6;
-                        final rows = split
-                            ? splitRows(lines)
-                            : const <SplitRow>[];
-                        return SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: SizedBox(
-                            width: math.max(
-                              constraints.maxWidth,
-                              split
-                                  ? 2 * (UnifiedLineRow.side + code)
-                                  : UnifiedLineRow.gutter + code,
-                            ),
-                            height: constraints.maxHeight,
-                            child: ListView.builder(
-                              controller: scroll,
-                              padding: EdgeInsets.only(bottom: bottom),
-                              itemExtent: UnifiedLineRow.height,
-                              itemCount: split ? rows.length : lines.length,
-                              itemBuilder: (context, index) => split
-                                  ? SplitLineRow(row: rows[index])
-                                  : UnifiedLineRow(line: lines[index]),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-            ),
-          ),
+          _fileName(context, change.shown),
+          Expanded(child: _body(context)),
           const SizedBox(height: WsMetrics.space4),
         ],
+      ),
+    );
+  }
+
+  /// The turn header with the whitespace and layout switches.
+  Widget _toolbar() => Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Expanded(child: header ?? const SizedBox.shrink()),
+      _Toggle(
+        label: 'Hide whitespace',
+        on: settings.hideWhitespace,
+        onTap: onWhitespace,
+      ),
+      const SizedBox(width: WsMetrics.space3),
+      Segments(
+        options: const [
+          (DiffLayout.unified, 'Unified'),
+          (DiffLayout.split, 'Split'),
+        ],
+        selected: settings.layout,
+        onSelect: onLayout,
+      ),
+    ],
+  );
+
+  /// The shown file's path, above its lines.
+  Widget _fileName(BuildContext context, String path) => Container(
+    height: 36,
+    padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
+    decoration: BoxDecoration(
+      color: context.ws.subtle,
+      borderRadius: const BorderRadius.vertical(
+        top: Radius.circular(WsMetrics.radiusLg),
+      ),
+    ),
+    alignment: Alignment.centerLeft,
+    child: Text(path, style: monoStyle(context)),
+  );
+
+  /// The lines in their frame, or why the file shows none.
+  Widget _body(BuildContext context) {
+    final note = this.note;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: context.ws.border),
+        borderRadius: const BorderRadius.vertical(
+          bottom: Radius.circular(WsMetrics.radiusLg),
+        ),
+      ),
+      // Long lines scroll sideways together, so no change is out of reach.
+      child: note != null
+          ? Center(
+              child: Text(note, style: Theme.of(context).textTheme.bodySmall),
+            )
+          : LayoutBuilder(builder: _lineList),
+    );
+  }
+
+  /// The lines, unified or split, as wide as the widest of them.
+  Widget _lineList(BuildContext context, BoxConstraints constraints) {
+    final style = monoStyle(context);
+    final split = settings.layout == DiffLayout.split;
+    // Split shows each side as wide as the unified view's code.
+    final code =
+        widest.fold(
+          0.0,
+          (wide, text) => math.max(wide, measureText(text, style).width),
+        ) +
+        WsMetrics.space6;
+    final rows = split ? splitRows(lines) : const <SplitRow>[];
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SizedBox(
+        width: math.max(
+          constraints.maxWidth,
+          split
+              ? 2 * (UnifiedLineRow.side + code)
+              : UnifiedLineRow.gutter + code,
+        ),
+        height: constraints.maxHeight,
+        child: ListView.builder(
+          controller: scroll,
+          padding: EdgeInsets.only(bottom: bottom),
+          itemExtent: UnifiedLineRow.height,
+          itemCount: split ? rows.length : lines.length,
+          itemBuilder: (context, index) => split
+              ? SplitLineRow(row: rows[index])
+              : UnifiedLineRow(line: lines[index]),
+        ),
       ),
     );
   }
