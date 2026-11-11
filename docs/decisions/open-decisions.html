@@ -110,6 +110,18 @@
         <p><strong>Recommendation:</strong> A now; it costs little and makes B or C a safe swap later.</p>
         <p><strong>Acceptance criterion:</strong> the corpus runs in CI against the chosen parser, and the dependency's version policy is stated where dependencies are reviewed.</p>
       </details>
+      <details id="d-092" class="decision">
+        <summary><h3>D-092 - A Name That Does Not Promise A Sandbox</h3></summary>
+        <p><strong>Status:</strong> Open before the first Flow Agent release. Flow Agent blocks Tools and their new children from writing, deleting, replacing or hardlinking this installation's own files (configuration, registry, runtime and credential stores, installed programs). Otherwise Tools run with the person's own rights, and nothing stops them reading. The docs and CLI call this by nine names: "self-protection", "native self-protection", "native protection", "Flow-file protection", "own-file protection", "Flow-owned write protection", "native boundary", "Executor boundary" and "OS isolation" (PLAN.md's M1.2 heading). Several read as if Tools were contained: 44 places a person reads, plus internal names such as the receipt field <code>self_protection_active</code> and the error code <code>sandbox_setup_failed</code>.</p>
+        <p><strong>Question:</strong> Which single name should the docs, CLI and errors use?</p>
+        <ul>
+          <li><strong>A: "Flow-owned write protection".</strong> Pro: says what is protected and that only writes are blocked; already the wire value and SECURITY.md's wording. Con: three words; "write" must be defined once to include delete, replace and hardlink.</li>
+          <li><strong>B: "Flow file protection".</strong> Pro: short and already used in README and VISION. Con: reads like the Workspace's <code>.flow/</code> definitions, which are not protected, and does not say "write".</li>
+          <li><strong>C: "Tamper protection"</strong>, the term security products use. Pro: established. Con: those products also resist administrators, which Flow Agent explicitly does not, so it promises too much.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> A. Keep "Executor", since a process runner is not a container; drop "Executor boundary" and "OS isolation"; rename the PLAN.md heading and the misleading CLI and error texts in one docs-and-text change, and the wire names <code>self_protection_active</code> and <code>sandbox_setup_failed</code> in a separate schema change. Examples: <code>flow executor check</code> prints "Executor ready … (Flow-owned write protection active; Tools otherwise run with your permissions)"; GLOSSARY drops "OS isolation" and says under Sandbox that Flow Agent provides no Tool sandbox.</p>
+        <p><strong>Acceptance criterion:</strong> GLOSSARY.md defines the one term; a search for the other eight names finds them only in the changelog's history.</p>
+      </details>
       <details id="d-082" class="decision">
         <summary><h3>D-082 - Replaying A Tool Cancelled Before It Started</h3></summary>
         <p><strong>Status:</strong> Open before the first Flow Agent release. When a Tool call is cancelled before the Executor started it, the live Run records no "Tool started" event. After a crash, recovery replays the call from its durable record, which <a href="../../PROTOCOL.md#local-run-storage-and-m11-conversation-trees">PROTOCOL.md</a> fixes as exactly <code>{"schema":"flow-attempt-cancelled-v0"}</code> for every stage, so recovery cannot tell when the cancellation happened and always replays a "Tool started" event first. The replayed history then shows a start that never happened.</p>
