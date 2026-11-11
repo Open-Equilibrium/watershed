@@ -6,7 +6,7 @@
 <title>Watershed - Open Decisions</title>
 <style>
 :root{--bg:#101317;--panel:#171b21;--panel2:#20262e;--text:#eef1f5;--muted:#a8b1bd;--line:#303844;--accent:#6db7ff;--warn:#ffd37a;--good:#8ce8aa;--r:8px;--font:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 var(--font)}a{color:var(--accent)}main{max-width:1180px;margin:0 auto;padding:28px}.hero{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:20px}h1{font-size:40px;line-height:1.05;margin:0 0 10px}h2{font-size:22px;margin:28px 0 12px}h3{font-size:18px;margin:0 0 8px}.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start}.decision{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px}.decision p{margin:8px 0}.decision ul{margin:8px 0 0 20px;padding:0}.tag{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:2px 8px;margin:0 4px 8px 0;color:var(--muted);font-size:12px}.m1{color:var(--good)}.m2{color:var(--warn)}nav{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}nav a{border:1px solid var(--line);border-radius:999px;padding:5px 10px;text-decoration:none;color:var(--muted)}nav a:hover{background:var(--panel2);color:var(--text)}.decision code{overflow-wrap:anywhere}@media(max-width:820px){main{padding:18px}.grid{grid-template-columns:minmax(0,1fr)}h1{font-size:32px}}
-summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{outline:2px solid var(--accent);outline-offset:5px}details[open]>summary{margin-bottom:12px}
+.decision table{border-collapse:collapse;width:100%;font-size:14px;margin:8px 0}.decision th,.decision td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}.decision th{color:var(--muted);font-weight:500}summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{outline:2px solid var(--accent);outline-offset:5px}details[open]>summary{margin-bottom:12px}
 </style>
 </head>
 <body>
@@ -193,6 +193,30 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         </ul>
         <p><strong>Recommendation:</strong> B, worded as a record, never as control. Together with it, the easy path for everyday users: Liquid offers one harness out of the box, set up from Settings without environment variables, with Flow Agent added as an adapter once it exists.</p>
         <p><strong>Acceptance criterion:</strong> the Meta-Harness V-Spec states what the record holds and its limits; SECURITY.md's trust model and GLOSSARY.md's Meta-Agent entry say nothing that no code does.</p>
+      </details>
+      <details id="d-091" class="decision">
+        <summary><h3>D-091 - Build Meta-Harness Or Reuse T3 Code</h3></summary>
+        <p><strong>Status:</strong> Open before M2. T3 Code (MIT) already ships much of what PLAN.md's M2 lists. Compared on 2026-11-11 with T3 Code at <code>871b0090</code>:</p>
+        <table>
+          <tr><th>M2 area</th><th>Watershed today</th><th>T3 Code today</th></tr>
+          <tr><td>CLI and background service</td><td>Planned; the core runs inside Liquid</td><td><code>t3</code> CLI and a launchd/systemd service</td></tr>
+          <tr><td>Harness adapters</td><td>pi only</td><td>About ten (Codex, Claude, Cursor, pi, ACP …); no Flow Agent</td></tr>
+          <tr><td>Agents steering agents (MCP tools), handoff between harnesses</td><td>Planned (ADR-0231, ADR-0253 copy T3)</td><td>Shipped</td></tr>
+          <tr><td>Scheduled tasks</td><td>Planned</td><td>Shipped (interval, time, webhook)</td></tr>
+          <tr><td>Linked hosts, mobile and web access</td><td>Planned; Liquid ships native apps only (ADR-0228)</td><td>Linked environments in beta; web, mobile and desktop clients; internet reach through T3's hosted relay</td></tr>
+          <tr><td>Durability: attach, crash resume, continue on another host</td><td>Planned (ADR-0229)</td><td>Attach and resume shipped; no replay-safe tool rule; no continuing on another host</td></tr>
+          <tr><td>Central harness configurations with approval and audit</td><td>Planned (ADR-0225, ADR-0227)</td><td>Per machine only; admin locks, no proposal or audit flow</td></tr>
+          <tr><td>Git: checkpoints, revert, commit, PRs, worktrees</td><td>Shipped, except creating worktrees</td><td>Shipped, more forges; but models write commit messages, which the V-Spec rules out</td></tr>
+          <tr><td>Runtime</td><td>Rust, about 29k lines with tests</td><td>TypeScript on Node, about 570k lines</td></tr>
+        </table>
+        <p><strong>Question:</strong> Should Watershed keep building its own Meta-Harness core, or reuse T3 Code?</p>
+        <ul>
+          <li><strong>A: Keep building the Rust core, copying T3's designs as specifications</strong>, as ADR-0229, ADR-0231 and ADR-0253 already do. Pro: no accepted ADR changes; the shipped Git integration, pi adapter and Trajectory stay; no Node in the product. Con: most of M2 is still to build, and every new harness is new adapter work.</li>
+          <li><strong>B: Embed or fork T3's server.</strong> MIT code may be included in an AGPL project if its notice is kept. Pro: drivers, MCP tools, schedules, service and clients at once. Con: ships a Node runtime against ADR-0001 and ADR-0219; Liquid's Rust bridge needs a client for a Node service; a fast-moving upstream to follow; ADR-0184, ADR-0215, ADR-0225, ADR-0227 and ADR-0189 change, and T3's relay must be removed for self-hosting.</li>
+          <li><strong>C: Use a running T3 Code as a peer through its MCP server</strong>, as one more harness behind a Meta-Harness adapter. Pro: Watershed ships no T3 code; T3's harnesses and clients become reachable with little code. Con: T3-run threads have no Watershed checkpoints, so Diff, Trajectory, revert and attribution do not work for them; Watershed depends on T3's evolving tool contract; two control planes for the person.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> A for the core. Keep C open as a later adapter if people ask for T3's harnesses, since it fits the adapter boundary without changing any ADR.</p>
+        <p><strong>Acceptance criterion:</strong> the ADR log records the choice; for B or C, the conflicting ADRs are amended through the decision flow before code changes.</p>
       </details>
       <details id="d-083" class="decision">
         <summary><h3>D-083 - Where The Lock For Folders Outside Git Lives</h3></summary>
