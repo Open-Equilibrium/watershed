@@ -61,8 +61,7 @@ pub(crate) use durability::{sync_directory, sync_retained_directory as sync_anch
 mod durable_steps;
 #[cfg(test)]
 pub(crate) use durable_steps::{
-    StoreImage, capture_store_image, durable_step, finish_durable_trace, restore_store_image,
-    start_durable_trace,
+    CRASH_EXIT_CODE, CrashPoint, durable_step, finish_durable_trace, start_durable_trace,
 };
 
 #[cfg(test)]
