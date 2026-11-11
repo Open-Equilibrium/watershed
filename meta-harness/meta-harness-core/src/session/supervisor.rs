@@ -15,7 +15,6 @@ use tokio::time::Instant;
 
 use super::{CommandError, MAX_RECORD_BYTES, SessionEvent, State, Write, switched, ui_response};
 use crate::framing::keep_end;
-use crate::pi::checkpoint_request;
 use crate::{
     AgentEvent, Checkpoint, Checkpoints, Frame, LineFramer, NotificationLevel, PiAdapter, RequestId,
 };
@@ -220,7 +219,7 @@ impl Supervisor {
             return true;
         }
         // The core answers checkpoint requests itself; the user never sees them.
-        if let Some(request) = checkpoint_request(&record) {
+        if let Some(request) = self.adapter.checkpoint_request(&record) {
             let captures = self.captures.clone();
             return self.unless_killed(captures.send(request)).await.is_some();
         }
