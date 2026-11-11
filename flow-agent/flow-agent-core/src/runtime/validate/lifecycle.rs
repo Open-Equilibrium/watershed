@@ -170,167 +170,17 @@ impl SessionLifecycleState {
                 require_lifecycle_flow_id(path, line_number, event)?;
             }
             EventType::FlowCompleted | EventType::FlowFailed => {
-                let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
-                let flow_definition_id = lifecycle_payload_string(event, "flow_definition_id");
-                if self.flow_definition_ids.get(&flow_id) != Some(&flow_definition_id) {
-                    return Err(RuntimeError::Protocol(format!(
-                        "{} line {line_number} {} flow_definition_id must match flow.started for flow_id {flow_id:?}",
-                        path.display(),
-                        event.event_type.as_str()
-                    )));
-                }
-                if let Some(phase) = self
-                    .active_phases
-                    .get(&flow_id)
-                    .and_then(|phases| phases.last())
-                {
-                    return Err(open_child_lifecycle_error(
-                        path,
-                        line_number,
-                        event,
-                        "phase",
-                        &phase.phase_execution_id,
-                    ));
-                }
-                if let Some(child) = self.flows.active_keys().find(|child| {
-                    self.flow_parents.get(*child).and_then(Option::as_deref)
-                        == Some(flow_id.as_str())
-                }) {
-                    return Err(open_child_lifecycle_error(
-                        path,
-                        line_number,
-                        event,
-                        "child flow",
-                        child,
-                    ));
-                }
+                self.validate_flow_terminal(path, line_number, event)?;
             }
-            EventType::PhaseEntered => {
-                let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
-                let phase = lifecycle_phase_key(event);
-                if let Some(terminal_line) =
-                    self.terminal_phases.get(&phase.phase_execution_id).copied()
-                {
-                    return Err(terminal_lifecycle_error(
-                        path,
-                        line_number,
-                        event,
-                        "phase",
-                        &phase.phase_execution_id,
-                        terminal_line,
-                    ));
-                }
-                if self
-                    .active_phases
-                    .values()
-                    .flatten()
-                    .any(|active| active.phase_execution_id == phase.phase_execution_id)
-                {
-                    return Err(RuntimeError::Protocol(format!(
-                        "{} line {line_number} duplicate active phase.entered for phase_execution_id {:?}",
-                        path.display(),
-                        phase.phase_execution_id
-                    )));
-                }
-                if self
-                    .active_phases
-                    .get(&flow_id)
-                    .and_then(|phases| phases.last())
-                    .is_some_and(|active| active.phase_kind == proto::PhaseKind::Leaf)
-                {
-                    return Err(RuntimeError::Protocol(format!(
-                        "{} line {line_number} phase.entered cannot nest below an active leaf Phase",
-                        path.display()
-                    )));
-                }
-            }
+            EventType::PhaseEntered => self.validate_phase_entered(path, line_number, event)?,
             EventType::PhaseCompleted | EventType::PhaseFailed => {
-                let phase_execution_id = lifecycle_payload_string(event, "phase_execution_id");
-                if let Some(terminal_line) = self.terminal_phases.get(&phase_execution_id).copied()
-                {
-                    return Err(terminal_lifecycle_error(
-                        path,
-                        line_number,
-                        event,
-                        "phase",
-                        &phase_execution_id,
-                        terminal_line,
-                    ));
-                }
-                let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
-                let active = self
-                    .active_phases
-                    .get(&flow_id)
-                    .and_then(|phases| phases.last());
-                if !active.is_some_and(|phase| terminal_phase_matches(event, phase)) {
-                    return Err(RuntimeError::Protocol(format!(
-                        "{} line {line_number} {} must close active phase_execution_id {:?}",
-                        path.display(),
-                        event.event_type.as_str(),
-                        phase_execution_id
-                    )));
-                }
-                if let Some(tool) = self.tools.active_keys().find(|tool| {
-                    tool.phase_execution_id.as_deref() == Some(phase_execution_id.as_str())
-                }) {
-                    return Err(open_child_lifecycle_error(
-                        path,
-                        line_number,
-                        event,
-                        "tool",
-                        &tool.tool_id,
-                    ));
-                }
-                if let Some(message) = self
-                    .active_message_roles
-                    .keys()
-                    .find(|message| message.flow_id == flow_id)
-                {
-                    return Err(open_child_lifecycle_error(
-                        path,
-                        line_number,
-                        event,
-                        "message",
-                        &message.message_id,
-                    ));
-                }
+                self.validate_phase_terminal(path, line_number, event)?;
             }
-            EventType::ToolStarted => {
-                require_active_leaf_phase(path, line_number, event, &self.active_phases)?;
-                let tool = lifecycle_tool_key(event, &self.active_phases);
-                self.reject_terminal_tool_event(path, line_number, event, &tool)?;
-                if self.tools.is_started(&tool) {
-                    return Err(RuntimeError::Protocol(format!(
-                        "{} line {line_number} duplicate active tool.started for tool_id {:?}",
-                        path.display(),
-                        tool.tool_id
-                    )));
-                }
-            }
+            EventType::ToolStarted => self.validate_tool_started(path, line_number, event)?,
             EventType::ToolProgress | EventType::ToolCompleted | EventType::ToolTimedOut => {
-                let tool = self.lifecycle_tool_key(event);
-                self.reject_terminal_tool_event(path, line_number, event, &tool)?;
-                if !self.tools.is_started(&tool) {
-                    return Err(RuntimeError::Protocol(format!(
-                        "{} line {line_number} {} must follow tool.started for tool_id {:?}",
-                        path.display(),
-                        event.event_type.as_str(),
-                        tool.tool_id
-                    )));
-                }
+                self.validate_tool_update(path, line_number, event)?;
             }
-            EventType::ToolFailed => {
-                let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
-                let tool = self.lifecycle_tool_key(event);
-                self.reject_terminal_tool_event(path, line_number, event, &tool)?;
-                let after_phase_entered = self.active_phases.contains_key(&flow_id);
-                if !self.tools.is_started(&tool) && after_phase_entered {
-                    return Err(RuntimeError::Protocol(format!(
-                        "{} line {line_number} tool.failed must follow tool.started after phase.entered for flow_id {flow_id:?}",
-                        path.display()
-                    )));
-                }
-            }
+            EventType::ToolFailed => self.validate_tool_failed(path, line_number, event)?,
             EventType::MessageDelta => {
                 self.require_active_work(path, line_number, event)?;
                 validate_message_delta(self, path, line_number, event)?;
@@ -348,6 +198,214 @@ impl SessionLifecycleState {
             | EventType::AttentionRequested
             | EventType::MetricSample
             | EventType::Error => {}
+        }
+        Ok(())
+    }
+
+    /// Validates a flow.completed or flow.failed event: same definition, no open Phase or child Flow.
+    fn validate_flow_terminal(
+        &self,
+        path: &Path,
+        line_number: usize,
+        event: &EventEnvelope,
+    ) -> Result<(), RuntimeError> {
+        let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
+        let flow_definition_id = lifecycle_payload_string(event, "flow_definition_id");
+        if self.flow_definition_ids.get(&flow_id) != Some(&flow_definition_id) {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} {} flow_definition_id must match flow.started for flow_id {flow_id:?}",
+                path.display(),
+                event.event_type.as_str()
+            )));
+        }
+        if let Some(phase) = self
+            .active_phases
+            .get(&flow_id)
+            .and_then(|phases| phases.last())
+        {
+            return Err(open_child_lifecycle_error(
+                path,
+                line_number,
+                event,
+                "phase",
+                &phase.phase_execution_id,
+            ));
+        }
+        if let Some(child) = self.flows.active_keys().find(|child| {
+            self.flow_parents.get(*child).and_then(Option::as_deref) == Some(flow_id.as_str())
+        }) {
+            return Err(open_child_lifecycle_error(
+                path,
+                line_number,
+                event,
+                "child flow",
+                child,
+            ));
+        }
+        Ok(())
+    }
+
+    /// Validates a phase.entered event: the Phase is new, unique among active Phases, and not below a leaf.
+    fn validate_phase_entered(
+        &self,
+        path: &Path,
+        line_number: usize,
+        event: &EventEnvelope,
+    ) -> Result<(), RuntimeError> {
+        let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
+        let phase = lifecycle_phase_key(event);
+        if let Some(terminal_line) = self.terminal_phases.get(&phase.phase_execution_id).copied() {
+            return Err(terminal_lifecycle_error(
+                path,
+                line_number,
+                event,
+                "phase",
+                &phase.phase_execution_id,
+                terminal_line,
+            ));
+        }
+        if self
+            .active_phases
+            .values()
+            .flatten()
+            .any(|active| active.phase_execution_id == phase.phase_execution_id)
+        {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} duplicate active phase.entered for phase_execution_id {:?}",
+                path.display(),
+                phase.phase_execution_id
+            )));
+        }
+        if self
+            .active_phases
+            .get(&flow_id)
+            .and_then(|phases| phases.last())
+            .is_some_and(|active| active.phase_kind == proto::PhaseKind::Leaf)
+        {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} phase.entered cannot nest below an active leaf Phase",
+                path.display()
+            )));
+        }
+        Ok(())
+    }
+
+    /// Validates a phase.completed or phase.failed event against the innermost active Phase.
+    fn validate_phase_terminal(
+        &self,
+        path: &Path,
+        line_number: usize,
+        event: &EventEnvelope,
+    ) -> Result<(), RuntimeError> {
+        let phase_execution_id = lifecycle_payload_string(event, "phase_execution_id");
+        if let Some(terminal_line) = self.terminal_phases.get(&phase_execution_id).copied() {
+            return Err(terminal_lifecycle_error(
+                path,
+                line_number,
+                event,
+                "phase",
+                &phase_execution_id,
+                terminal_line,
+            ));
+        }
+        let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
+        let active = self
+            .active_phases
+            .get(&flow_id)
+            .and_then(|phases| phases.last());
+        if !active.is_some_and(|phase| terminal_phase_matches(event, phase)) {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} {} must close active phase_execution_id {:?}",
+                path.display(),
+                event.event_type.as_str(),
+                phase_execution_id
+            )));
+        }
+        if let Some(tool) = self
+            .tools
+            .active_keys()
+            .find(|tool| tool.phase_execution_id.as_deref() == Some(phase_execution_id.as_str()))
+        {
+            return Err(open_child_lifecycle_error(
+                path,
+                line_number,
+                event,
+                "tool",
+                &tool.tool_id,
+            ));
+        }
+        if let Some(message) = self
+            .active_message_roles
+            .keys()
+            .find(|message| message.flow_id == flow_id)
+        {
+            return Err(open_child_lifecycle_error(
+                path,
+                line_number,
+                event,
+                "message",
+                &message.message_id,
+            ));
+        }
+        Ok(())
+    }
+
+    /// Validates a tool.started event: it needs an active leaf Phase and a fresh, non-terminal tool.
+    fn validate_tool_started(
+        &self,
+        path: &Path,
+        line_number: usize,
+        event: &EventEnvelope,
+    ) -> Result<(), RuntimeError> {
+        require_active_leaf_phase(path, line_number, event, &self.active_phases)?;
+        let tool = lifecycle_tool_key(event, &self.active_phases);
+        self.reject_terminal_tool_event(path, line_number, event, &tool)?;
+        if self.tools.is_started(&tool) {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} duplicate active tool.started for tool_id {:?}",
+                path.display(),
+                tool.tool_id
+            )));
+        }
+        Ok(())
+    }
+
+    /// Validates a tool.progress, tool.completed or tool.timed_out event against its started tool.
+    fn validate_tool_update(
+        &self,
+        path: &Path,
+        line_number: usize,
+        event: &EventEnvelope,
+    ) -> Result<(), RuntimeError> {
+        let tool = self.lifecycle_tool_key(event);
+        self.reject_terminal_tool_event(path, line_number, event, &tool)?;
+        if !self.tools.is_started(&tool) {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} {} must follow tool.started for tool_id {:?}",
+                path.display(),
+                event.event_type.as_str(),
+                tool.tool_id
+            )));
+        }
+        Ok(())
+    }
+
+    /// Validates a tool.failed event; a tool that never started may fail only before its Phase.
+    fn validate_tool_failed(
+        &self,
+        path: &Path,
+        line_number: usize,
+        event: &EventEnvelope,
+    ) -> Result<(), RuntimeError> {
+        let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
+        let tool = self.lifecycle_tool_key(event);
+        self.reject_terminal_tool_event(path, line_number, event, &tool)?;
+        let after_phase_entered = self.active_phases.contains_key(&flow_id);
+        if !self.tools.is_started(&tool) && after_phase_entered {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} tool.failed must follow tool.started after phase.entered for flow_id {flow_id:?}",
+                path.display()
+            )));
         }
         Ok(())
     }
