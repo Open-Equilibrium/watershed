@@ -17,9 +17,9 @@ use crate::model::{
 use crate::order::Order;
 use crate::store::{Commit, Store, Write};
 use crate::{
-    Action, ActionId, Actor, Applied, Area, AreaId, BlockId, BlockKind, Changed, Created, Document,
-    Error, Mutation, Operation, Origin, PageEntry, PageId, Permission, PersonId, Request,
-    TextStyle, View, ViewId,
+    Action, ActionId, Actor, Applied, Area, AreaId, BlockId, BlockKind, Cell, Changed, Created,
+    Document, Error, FieldId, FieldKind, Mutation, Operation, Origin, PageEntry, PageId,
+    Permission, PersonId, Place, Request, RowId, TextStyle, View, ViewId,
 };
 
 /// A document is stored again as one snapshot once it has this many chunks, so loading it
@@ -290,79 +290,19 @@ impl<S: Store> Workspace<S> {
         }
     }
 
+    /// Applies a mutation to the documents it touches, in memory; `apply` commits or discards
+    /// them.
     fn write(&mut self, mutation: &Mutation) -> Result<Written, Error> {
         match mutation {
-            Mutation::CreateArea { name } => {
-                let id = AreaId::new()?;
-                let mut doc = model::document(&self.device);
-                model::create_maps(&mut doc, &[PAGES])?;
-                let workspace = self.doc(&Document::Workspace)?;
-                let siblings = model::sorted(workspace, AREAS);
-                let last = siblings.last().map(|entry| entry.id.as_str());
-                let sort = model::sort_after(&siblings, last)?;
-                model::insert(
-                    workspace,
-                    AREAS,
-                    id.as_str(),
-                    &[(NAME, name), (SORT, &sort)],
-                )?;
-                let mut written = Written::new(Document::Workspace, Changed::Areas);
-                written.touched.push(Document::Area(id.clone()));
-                written.created = Some(Created::Area(id.clone()));
-                written.new.push((Document::Area(id), doc));
-                Ok(written)
-            }
+            Mutation::CreateArea { name } => self.write_create_area(name),
             Mutation::CreatePage {
                 area,
                 parent,
                 title,
-            } => {
-                let area_doc = self.doc(&Document::Area(area.clone()))?;
-                if let Some(parent) = parent {
-                    model::live(area_doc, PAGES, parent.as_str()).ok_or(Error::NotFound)?;
-                }
-                let siblings: Vec<_> = model::sorted(area_doc, PAGES)
-                    .into_iter()
-                    .filter(|entry| entry.get(PARENT) == parent.as_ref().map(PageId::as_str))
-                    .collect();
-                let last = siblings.last().map(|entry| entry.id.as_str());
-                let sort = model::sort_after(&siblings, last)?;
-                let id = PageId::new()?;
-                let mut fields = vec![(TITLE, title.as_str()), (SORT, &sort)];
-                if let Some(parent) = parent {
-                    fields.push((PARENT, parent.as_str()));
-                }
-                model::insert(area_doc, PAGES, id.as_str(), &fields)?;
-                let mut doc = model::document(&self.device);
-                model::create_maps(&mut doc, &[BLOCKS, VIEWS])?;
-                let mut written =
-                    Written::new(Document::Area(area.clone()), Changed::Pages(area.clone()));
-                written.touched.push(Document::Page(id.clone()));
-                written.created = Some(Created::Page(id.clone()));
-                written.new.push((Document::Page(id), doc));
-                Ok(written)
-            }
-            Mutation::RenamePage { page, title } => {
-                for area in model::areas(self.doc(&Document::Workspace)?) {
-                    let area_doc = self.doc(&Document::Area(area.id.clone()))?;
-                    if let Some(entry) = model::live(area_doc, PAGES, page.as_str()) {
-                        area_doc.put(&entry, TITLE, title.as_str())?;
-                        return Ok(Written::new(
-                            Document::Area(area.id.clone()),
-                            Changed::Pages(area.id),
-                        ));
-                    }
-                }
-                Err(Error::NotFound)
-            }
+            } => self.write_create_page(area, parent.as_ref(), title),
+            Mutation::RenamePage { page, title } => self.write_rename_page(page, title),
             Mutation::AddTextBlock { page, after, text } => {
-                let (doc, order) = self.page(page)?;
-                let (block, view) =
-                    add_text_block(doc, order, after.as_ref(), text, TextStyle::Paragraph)?;
-                let mut written =
-                    Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
-                written.created = Some(Created::Block { block, view });
-                Ok(written)
+                self.write_add_text_block(page, after.as_ref(), text)
             }
             Mutation::SplitTextBlock {
                 page,
@@ -370,131 +310,28 @@ impl<S: Store> Workspace<S> {
                 view,
                 at,
                 style,
-            } => {
-                let (doc, order) = self.page(page)?;
-                if order.view(view).is_none_or(|shown| &shown.block != block) {
-                    return Err(Error::NotFound);
-                }
-                let content = text_of(doc, block)?;
-                if !model::on_boundary(doc, &content, *at) {
-                    return Err(Error::OutOfRange);
-                }
-                let text = doc.text(&content)?;
-                let tail = text[utf8_offset(&text, *at)..].to_string();
-                let (new_block, new_view) = if *at == 0 {
-                    let above = order.above(view).map(|above| above.id.clone());
-                    let starts_section = order.view(view).is_some_and(|shown| shown.boundary);
-                    let added = add_text_block(doc, order, above.as_ref(), "", *style)?;
-                    // A Section that started here now starts at the new Text Block above.
-                    if starts_section {
-                        move_boundary(doc, order, view, &added.1)?;
-                    }
-                    added
-                } else {
-                    let length = isize::try_from(doc.length(&content) - at)
-                        .map_err(|_| Error::OutOfRange)?;
-                    doc.splice_text(&content, *at, length, "")?;
-                    add_text_block(doc, order, Some(view), &tail, *style)?
-                };
-                let mut written =
-                    Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
-                written
-                    .changed
-                    .push(Changed::Block(page.clone(), block.clone()));
-                written.created = Some(Created::Block {
-                    block: new_block,
-                    view: new_view,
-                });
-                Ok(written)
-            }
-            Mutation::JoinTextBlock { page, view } => {
-                let (doc, order) = self.page(page)?;
-                let joining = order.view(view).ok_or(Error::NotFound)?.clone();
-                if joining.boundary {
-                    return Err(Error::SectionBoundary);
-                }
-                let above = order.above(view).ok_or(Error::NotFound)?.clone();
-                let text = model::text(doc, joining.block.as_str()).ok_or(Error::NotFound)?;
-                let target = text_of(doc, &above.block)?;
-                let end = doc.length(&target);
-                doc.splice_text(&target, end, 0, &text)?;
-                let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
-                model::mark_deleted(doc, &entry)?;
-                let mut written =
-                    Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
-                written
-                    .changed
-                    .push(Changed::Block(page.clone(), above.block.clone()));
-                if !order.shows(&joining.block, view) {
-                    if let Some(block_entry) = model::live(doc, BLOCKS, joining.block.as_str()) {
-                        model::mark_deleted(doc, &block_entry)?;
-                    }
-                    written
-                        .changed
-                        .push(Changed::Block(page.clone(), joining.block));
-                }
-                order.remove(view);
-                Ok(written)
-            }
+            } => self.write_split_text_block(page, block, view, *at, *style),
+            Mutation::JoinTextBlock { page, view } => self.write_join_text_block(page, view),
             Mutation::SetTextStyle { page, block, style } => {
-                let name = model::style_name(*style)?;
-                let (doc, _) = self.page(page)?;
-                let entry = text_block(doc, block).ok_or(Error::NotFound)?;
-                doc.put(&entry, STYLE, name)?;
-                Ok(Written::new(
-                    Document::Page(page.clone()),
-                    Changed::Block(page.clone(), block.clone()),
-                ))
+                self.write_set_text_style(page, block, *style)
             }
             Mutation::SetSectionBoundary {
                 page,
                 view,
                 boundary,
-            } => {
-                let (doc, order) = self.page(page)?;
-                let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
-                doc.put(&entry, BOUNDARY, *boundary)?;
-                order.set_boundary(view, *boundary);
-                Ok(Written::new(
-                    Document::Page(page.clone()),
-                    Changed::Views(page.clone()),
-                ))
-            }
+            } => self.write_set_section_boundary(page, view, *boundary),
             Mutation::EditText {
                 page,
                 block,
                 at,
                 delete,
                 insert,
-            } => {
-                let doc = self.doc(&Document::Page(page.clone()))?;
-                let content = text_of(doc, block)?;
-                let end = at.checked_add(*delete).ok_or(Error::OutOfRange)?;
-                if !model::on_boundary(doc, &content, *at)
-                    || !model::on_boundary(doc, &content, end)
-                {
-                    return Err(Error::OutOfRange);
-                }
-                let delete = isize::try_from(*delete).map_err(|_| Error::OutOfRange)?;
-                doc.splice_text(&content, *at, delete, insert)?;
-                Ok(Written::new(
-                    Document::Page(page.clone()),
-                    Changed::Block(page.clone(), block.clone()),
-                ))
-            }
+            } => self.write_edit_text(page, block, *at, *delete, insert),
             Mutation::AddDatabaseBlock { page, after, name } => {
-                let (doc, order) = self.page(page)?;
-                let block = BlockId::new()?;
-                database::create(doc, &block, name)?;
-                let view = add_view(doc, order, after.as_ref(), &block, BlockKind::Database)?;
-                let mut written =
-                    Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
-                written.created = Some(Created::Block { block, view });
-                Ok(written)
+                self.write_add_database_block(page, after.as_ref(), name)
             }
             Mutation::RenameDatabase { page, block, name } => {
-                database::rename(self.doc(&Document::Page(page.clone()))?, block, name)?;
-                Ok(database_changed(page, block, None))
+                self.write_rename_database(page, block, name)
             }
             Mutation::AddField {
                 page,
@@ -502,28 +339,15 @@ impl<S: Store> Workspace<S> {
                 place,
                 name,
                 kind,
-            } => {
-                let doc = self.doc(&Document::Page(page.clone()))?;
-                let field = database::add_field(doc, block, place.as_ref(), name, *kind)?;
-                Ok(database_changed(page, block, Some(Created::Field(field))))
-            }
+            } => self.write_add_field(page, block, place, name, *kind),
             Mutation::RenameField {
                 page,
                 block,
                 field,
                 name,
-            } => {
-                database::rename_field(
-                    self.doc(&Document::Page(page.clone()))?,
-                    block,
-                    field,
-                    name,
-                )?;
-                Ok(database_changed(page, block, None))
-            }
+            } => self.write_rename_field(page, block, field, name),
             Mutation::RemoveField { page, block, field } => {
-                database::remove_field(self.doc(&Document::Page(page.clone()))?, block, field)?;
-                Ok(database_changed(page, block, None))
+                self.write_remove_field(page, block, field)
             }
             Mutation::AddOption {
                 page,
@@ -531,50 +355,347 @@ impl<S: Store> Workspace<S> {
                 field,
                 name,
                 color,
-            } => {
-                let doc = self.doc(&Document::Page(page.clone()))?;
-                let option = database::add_option(doc, block, field, name, *color)?;
-                Ok(database_changed(page, block, Some(Created::Option(option))))
-            }
-            Mutation::AddRow { page, block, place } => {
-                let (doc, index) = self.database_index(page, block)?;
-                let row = database::add_row(doc, index, block, place.as_ref())?;
-                Ok(database_changed(page, block, Some(Created::Row(row))))
-            }
-            Mutation::RemoveRow { page, block, row } => {
-                let (doc, index) = self.database_index(page, block)?;
-                database::remove_row(doc, index, block, row)?;
-                Ok(database_changed(page, block, None))
-            }
+            } => self.write_add_option(page, block, field, name, *color),
+            Mutation::AddRow { page, block, place } => self.write_add_row(page, block, place),
+            Mutation::RemoveRow { page, block, row } => self.write_remove_row(page, block, row),
             Mutation::SetCell {
                 page,
                 block,
                 row,
                 field,
                 value,
-            } => {
-                let (doc, index) = self.database_index(page, block)?;
-                database::set_cell(doc, index, block, row, field, value)?;
-                Ok(database_changed(page, block, None))
-            }
-            Mutation::RemoveView { page, view } => {
-                let (doc, order) = self.page(page)?;
-                let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
-                let block =
-                    BlockId::stored(&model::string(doc, &entry, BLOCK).ok_or(Error::NotFound)?);
-                model::mark_deleted(doc, &entry)?;
-                let mut written =
-                    Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
-                if !order.shows(&block, view) {
-                    if let Some(block_entry) = model::live(doc, BLOCKS, block.as_str()) {
-                        model::mark_deleted(doc, &block_entry)?;
-                    }
-                    written.changed.push(Changed::Block(page.clone(), block));
-                }
-                order.remove(view);
-                Ok(written)
+            } => self.write_set_cell(page, block, row, field, value),
+            Mutation::RemoveView { page, view } => self.write_remove_view(page, view),
+        }
+    }
+
+    fn write_create_area(&mut self, name: &str) -> Result<Written, Error> {
+        let id = AreaId::new()?;
+        let mut doc = model::document(&self.device);
+        model::create_maps(&mut doc, &[PAGES])?;
+        let workspace = self.doc(&Document::Workspace)?;
+        let siblings = model::sorted(workspace, AREAS);
+        let last = siblings.last().map(|entry| entry.id.as_str());
+        let sort = model::sort_after(&siblings, last)?;
+        model::insert(
+            workspace,
+            AREAS,
+            id.as_str(),
+            &[(NAME, name), (SORT, &sort)],
+        )?;
+        let mut written = Written::new(Document::Workspace, Changed::Areas);
+        written.touched.push(Document::Area(id.clone()));
+        written.created = Some(Created::Area(id.clone()));
+        written.new.push((Document::Area(id), doc));
+        Ok(written)
+    }
+
+    fn write_create_page(
+        &mut self,
+        area: &AreaId,
+        parent: Option<&PageId>,
+        title: &str,
+    ) -> Result<Written, Error> {
+        let area_doc = self.doc(&Document::Area(area.clone()))?;
+        if let Some(parent) = parent {
+            model::live(area_doc, PAGES, parent.as_str()).ok_or(Error::NotFound)?;
+        }
+        let siblings: Vec<_> = model::sorted(area_doc, PAGES)
+            .into_iter()
+            .filter(|entry| entry.get(PARENT) == parent.map(PageId::as_str))
+            .collect();
+        let last = siblings.last().map(|entry| entry.id.as_str());
+        let sort = model::sort_after(&siblings, last)?;
+        let id = PageId::new()?;
+        let mut fields = vec![(TITLE, title), (SORT, &sort)];
+        if let Some(parent) = parent {
+            fields.push((PARENT, parent.as_str()));
+        }
+        model::insert(area_doc, PAGES, id.as_str(), &fields)?;
+        let mut doc = model::document(&self.device);
+        model::create_maps(&mut doc, &[BLOCKS, VIEWS])?;
+        let mut written = Written::new(Document::Area(area.clone()), Changed::Pages(area.clone()));
+        written.touched.push(Document::Page(id.clone()));
+        written.created = Some(Created::Page(id.clone()));
+        written.new.push((Document::Page(id), doc));
+        Ok(written)
+    }
+
+    fn write_rename_page(&mut self, page: &PageId, title: &str) -> Result<Written, Error> {
+        for area in model::areas(self.doc(&Document::Workspace)?) {
+            let area_doc = self.doc(&Document::Area(area.id.clone()))?;
+            if let Some(entry) = model::live(area_doc, PAGES, page.as_str()) {
+                area_doc.put(&entry, TITLE, title)?;
+                return Ok(Written::new(
+                    Document::Area(area.id.clone()),
+                    Changed::Pages(area.id),
+                ));
             }
         }
+        Err(Error::NotFound)
+    }
+
+    fn write_add_text_block(
+        &mut self,
+        page: &PageId,
+        after: Option<&ViewId>,
+        text: &str,
+    ) -> Result<Written, Error> {
+        let (doc, order) = self.page(page)?;
+        let (block, view) = add_text_block(doc, order, after, text, TextStyle::Paragraph)?;
+        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+        written.created = Some(Created::Block { block, view });
+        Ok(written)
+    }
+
+    fn write_split_text_block(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+        view: &ViewId,
+        at: usize,
+        style: TextStyle,
+    ) -> Result<Written, Error> {
+        let (doc, order) = self.page(page)?;
+        if order.view(view).is_none_or(|shown| &shown.block != block) {
+            return Err(Error::NotFound);
+        }
+        let content = text_of(doc, block)?;
+        if !model::on_boundary(doc, &content, at) {
+            return Err(Error::OutOfRange);
+        }
+        let text = doc.text(&content)?;
+        let tail = text[utf8_offset(&text, at)..].to_string();
+        let (new_block, new_view) = if at == 0 {
+            let above = order.above(view).map(|above| above.id.clone());
+            let starts_section = order.view(view).is_some_and(|shown| shown.boundary);
+            let added = add_text_block(doc, order, above.as_ref(), "", style)?;
+            // A Section that started here now starts at the new Text Block above.
+            if starts_section {
+                move_boundary(doc, order, view, &added.1)?;
+            }
+            added
+        } else {
+            let length =
+                isize::try_from(doc.length(&content) - at).map_err(|_| Error::OutOfRange)?;
+            doc.splice_text(&content, at, length, "")?;
+            add_text_block(doc, order, Some(view), &tail, style)?
+        };
+        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+        written
+            .changed
+            .push(Changed::Block(page.clone(), block.clone()));
+        written.created = Some(Created::Block {
+            block: new_block,
+            view: new_view,
+        });
+        Ok(written)
+    }
+
+    fn write_join_text_block(&mut self, page: &PageId, view: &ViewId) -> Result<Written, Error> {
+        let (doc, order) = self.page(page)?;
+        let joining = order.view(view).ok_or(Error::NotFound)?.clone();
+        if joining.boundary {
+            return Err(Error::SectionBoundary);
+        }
+        let above = order.above(view).ok_or(Error::NotFound)?.clone();
+        let text = model::text(doc, joining.block.as_str()).ok_or(Error::NotFound)?;
+        let target = text_of(doc, &above.block)?;
+        let end = doc.length(&target);
+        doc.splice_text(&target, end, 0, &text)?;
+        let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
+        model::mark_deleted(doc, &entry)?;
+        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+        written
+            .changed
+            .push(Changed::Block(page.clone(), above.block.clone()));
+        if !order.shows(&joining.block, view) {
+            if let Some(block_entry) = model::live(doc, BLOCKS, joining.block.as_str()) {
+                model::mark_deleted(doc, &block_entry)?;
+            }
+            written
+                .changed
+                .push(Changed::Block(page.clone(), joining.block));
+        }
+        order.remove(view);
+        Ok(written)
+    }
+
+    fn write_set_text_style(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+        style: TextStyle,
+    ) -> Result<Written, Error> {
+        let name = model::style_name(style)?;
+        let (doc, _) = self.page(page)?;
+        let entry = text_block(doc, block).ok_or(Error::NotFound)?;
+        doc.put(&entry, STYLE, name)?;
+        Ok(Written::new(
+            Document::Page(page.clone()),
+            Changed::Block(page.clone(), block.clone()),
+        ))
+    }
+
+    fn write_set_section_boundary(
+        &mut self,
+        page: &PageId,
+        view: &ViewId,
+        boundary: bool,
+    ) -> Result<Written, Error> {
+        let (doc, order) = self.page(page)?;
+        let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
+        doc.put(&entry, BOUNDARY, boundary)?;
+        order.set_boundary(view, boundary);
+        Ok(Written::new(
+            Document::Page(page.clone()),
+            Changed::Views(page.clone()),
+        ))
+    }
+
+    fn write_edit_text(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+        at: usize,
+        delete: usize,
+        insert: &str,
+    ) -> Result<Written, Error> {
+        let doc = self.doc(&Document::Page(page.clone()))?;
+        let content = text_of(doc, block)?;
+        let end = at.checked_add(delete).ok_or(Error::OutOfRange)?;
+        if !model::on_boundary(doc, &content, at) || !model::on_boundary(doc, &content, end) {
+            return Err(Error::OutOfRange);
+        }
+        let delete = isize::try_from(delete).map_err(|_| Error::OutOfRange)?;
+        doc.splice_text(&content, at, delete, insert)?;
+        Ok(Written::new(
+            Document::Page(page.clone()),
+            Changed::Block(page.clone(), block.clone()),
+        ))
+    }
+
+    fn write_add_database_block(
+        &mut self,
+        page: &PageId,
+        after: Option<&ViewId>,
+        name: &str,
+    ) -> Result<Written, Error> {
+        let (doc, order) = self.page(page)?;
+        let block = BlockId::new()?;
+        database::create(doc, &block, name)?;
+        let view = add_view(doc, order, after, &block, BlockKind::Database)?;
+        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+        written.created = Some(Created::Block { block, view });
+        Ok(written)
+    }
+
+    fn write_rename_database(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+        name: &str,
+    ) -> Result<Written, Error> {
+        database::rename(self.doc(&Document::Page(page.clone()))?, block, name)?;
+        Ok(database_changed(page, block, None))
+    }
+
+    fn write_add_field(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+        place: &Place<FieldId>,
+        name: &str,
+        kind: FieldKind,
+    ) -> Result<Written, Error> {
+        let doc = self.doc(&Document::Page(page.clone()))?;
+        let field = database::add_field(doc, block, place.as_ref(), name, kind)?;
+        Ok(database_changed(page, block, Some(Created::Field(field))))
+    }
+
+    fn write_rename_field(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+        field: &FieldId,
+        name: &str,
+    ) -> Result<Written, Error> {
+        database::rename_field(self.doc(&Document::Page(page.clone()))?, block, field, name)?;
+        Ok(database_changed(page, block, None))
+    }
+
+    fn write_remove_field(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+        field: &FieldId,
+    ) -> Result<Written, Error> {
+        database::remove_field(self.doc(&Document::Page(page.clone()))?, block, field)?;
+        Ok(database_changed(page, block, None))
+    }
+
+    fn write_add_option(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+        field: &FieldId,
+        name: &str,
+        color: u8,
+    ) -> Result<Written, Error> {
+        let doc = self.doc(&Document::Page(page.clone()))?;
+        let option = database::add_option(doc, block, field, name, color)?;
+        Ok(database_changed(page, block, Some(Created::Option(option))))
+    }
+
+    fn write_add_row(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+        place: &Place<RowId>,
+    ) -> Result<Written, Error> {
+        let (doc, index) = self.database_index(page, block)?;
+        let row = database::add_row(doc, index, block, place.as_ref())?;
+        Ok(database_changed(page, block, Some(Created::Row(row))))
+    }
+
+    fn write_remove_row(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+        row: &RowId,
+    ) -> Result<Written, Error> {
+        let (doc, index) = self.database_index(page, block)?;
+        database::remove_row(doc, index, block, row)?;
+        Ok(database_changed(page, block, None))
+    }
+
+    fn write_set_cell(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+        row: &RowId,
+        field: &FieldId,
+        value: &Cell,
+    ) -> Result<Written, Error> {
+        let (doc, index) = self.database_index(page, block)?;
+        database::set_cell(doc, index, block, row, field, value)?;
+        Ok(database_changed(page, block, None))
+    }
+
+    fn write_remove_view(&mut self, page: &PageId, view: &ViewId) -> Result<Written, Error> {
+        let (doc, order) = self.page(page)?;
+        let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
+        let block = BlockId::stored(&model::string(doc, &entry, BLOCK).ok_or(Error::NotFound)?);
+        model::mark_deleted(doc, &entry)?;
+        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+        if !order.shows(&block, view) {
+            if let Some(block_entry) = model::live(doc, BLOCKS, block.as_str()) {
+                model::mark_deleted(doc, &block_entry)?;
+            }
+            written.changed.push(Changed::Block(page.clone(), block));
+        }
+        order.remove(view);
+        Ok(written)
     }
 
     /// Discards every uncommitted write, so a refused mutation leaves no trace.
