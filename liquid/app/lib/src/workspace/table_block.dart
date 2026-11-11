@@ -123,6 +123,9 @@ class _TableBlockState extends State<TableBlock> {
   var _name = TextEditingController();
   final _nameFocus = FocusNode(debugLabel: 'Table name');
 
+  /// Whether a name Liquid wrote is waiting for the name field to take a fresh controller.
+  bool _replaced = false;
+
   /// Renames asked for, so only the latest refusal puts the stored name back.
   int _renames = 0;
 
@@ -625,17 +628,19 @@ class _TableBlockState extends State<TableBlock> {
     _show(_database?.name ?? '');
   }
 
-  /// Shows `name` as the stored one. The field takes a fresh controller, so ⌘Z cannot bring back
-  /// the name it replaced.
+  /// Shows `name` as the stored one.
   void _show(String name) {
     _named = name;
     if (_name.text == name) return;
-    _name = renewController(
-      _name,
-      TextEditingValue(text: name),
-      listener: _typed,
-    );
-    if (mounted) setState(() {});
+    writeText(_name, TextEditingValue(text: name));
+    if (mounted) setState(() => _replaced = true);
+  }
+
+  /// The name field takes a fresh controller when it builds, so ⌘Z cannot bring back the name
+  /// Liquid replaced (see [_show]).
+  void _adopt() {
+    _replaced = false;
+    _name = adoptController(_name, listener: _typed);
   }
 
   /// Reads the name and fields, then the rows read so far.
@@ -685,6 +690,7 @@ class _TableBlockState extends State<TableBlock> {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
+    if (_replaced) _adopt();
     final database = _database;
     final locale = Localizations.localeOf(context);
     final numbers = intlLocale(locale, NumberFormat.localeExists);

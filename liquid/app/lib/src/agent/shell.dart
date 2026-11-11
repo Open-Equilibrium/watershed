@@ -76,8 +76,10 @@ class AgentShell extends StatefulWidget {
 }
 
 class _AgentShellState extends State<AgentShell> {
-  /// The composer's controller, which a send replaces with a fresh one (see [_sent]).
+  /// The composer's controller, which Liquid's writes to the composer replace with a fresh one
+  /// when the input area builds (see [_writeComposer]).
   var _composer = TextEditingController();
+  bool _composerReplaced = false;
   final _composerFocus = FocusNode(debugLabel: 'composer');
 
   /// Keeps the input area's state while it moves into the open tab.
@@ -171,10 +173,15 @@ class _AgentShellState extends State<AgentShell> {
     }
   }
 
-  /// Clears the composer after a send, from a fresh controller so ⌘Z cannot bring the message back.
-  void _sent() => setState(() {
-    _composer = renewController(_composer, TextEditingValue.empty);
-  });
+  /// Shows `value` in the composer as Liquid's text; its field takes a fresh controller when the
+  /// input area builds, so ⌘Z cannot bring back what it replaced.
+  void _writeComposer(TextEditingValue value) {
+    writeText(_composer, value);
+    setState(() => _composerReplaced = true);
+  }
+
+  /// Clears the composer after a send, so ⌘Z cannot bring the message back.
+  void _sent() => _writeComposer(TextEditingValue.empty);
 
   /// Text handed back to the input area goes before what the user typed meanwhile, which stays.
   void _applyDraft() {
@@ -190,15 +197,12 @@ class _AgentShellState extends State<AgentShell> {
         : bare == draft.trim()
         ? typed
         : '$draft\n\n$typed';
-    setState(() {
-      _composer = renewController(
-        _composer,
-        TextEditingValue(
-          text: text,
-          selection: TextSelection.collapsed(offset: text.length),
-        ),
-      );
-    });
+    _writeComposer(
+      TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: text.length),
+      ),
+    );
     // Taken, so the same text handed back again arrives again.
     state.draft.value = null;
   }
@@ -350,6 +354,10 @@ class _AgentShellState extends State<AgentShell> {
 
   Widget _build(BuildContext context, ShortcutSettings keys) {
     final ws = context.ws;
+    if (_composerReplaced) {
+      _composerReplaced = false;
+      _composer = adoptController(_composer);
+    }
     return _menus(
       keys,
       ShortcutReveal(

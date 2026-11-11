@@ -217,6 +217,31 @@ void main() {
     expect(fake.textsOf(page), ['Hello world']);
   }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
+  testWidgets('typing before the next frame after a shortcut keeps what is typed', (
+    tester,
+  ) async {
+    await show(tester, ['']);
+    await caret(tester, 0, 0);
+    // The shortcut takes its marker out, which is a write Liquid makes; the next keys follow it
+    // before any frame is drawn.
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: '- ',
+        selection: TextSelection.collapsed(offset: 2),
+      ),
+    );
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'P',
+        selection: TextSelection.collapsed(offset: 1),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(styleOf(0), BridgeTextStyle.bullet);
+    expect(fake.textsOf(page), ['P']);
+    expect(field(tester, 0).controller!.text, 'P');
+  });
+
   testWidgets('⌘Z still undoes typing with no replacement in between', (
     tester,
   ) async {

@@ -507,6 +507,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
 
   @override
   Widget build(BuildContext context) {
+    _writing.adoptFields();
     final text = DangerDialog.text(context);
     if (_existing case final pull?) {
       return ActionDialog(

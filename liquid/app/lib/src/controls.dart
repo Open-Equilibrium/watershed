@@ -530,19 +530,23 @@ class InputCard extends StatelessWidget {
   );
 }
 
-/// Gives a field a fresh controller holding `value`, for text Liquid assigned to it. Flutter keeps a
-/// field's undo history with its controller, so ⌘Z after a replaced text would bring it back.
-/// `listener` moves to the fresh controller. The old one stays attached until the frame that builds
-/// the field with the fresh one, so it is disposed after that frame; the caller rebuilds the field.
-TextEditingController renewController(
-  TextEditingController previous,
-  TextEditingValue value, {
+/// Shows `value` in a field's controller as text Liquid assigned to it. The field keeps this
+/// controller until it builds again, so typing and reads agree at once; the owner then adopts a
+/// fresh controller (see [adoptController]), because ⌘Z would otherwise bring back the text this
+/// replaced.
+void writeText(TextEditingController controller, TextEditingValue value) {
+  controller.value = value;
+}
+
+/// Gives a field its fresh controller when it builds after [writeText], holding what the old one
+/// holds then, so keys typed since the write are kept. `listener` moves to the fresh controller. The
+/// old one is disposed after that frame.
+TextEditingController adoptController(
+  TextEditingController previous, {
   VoidCallback? listener,
 }) {
   if (listener != null) previous.removeListener(listener);
-  // The old history records the new text, which the fresh one's history starts from.
-  previous.value = value;
-  final fresh = TextEditingController.fromValue(value);
+  final fresh = TextEditingController.fromValue(previous.value);
   if (listener != null) fresh.addListener(listener);
   WidgetsBinding.instance.addPostFrameCallback((_) => previous.dispose());
   return fresh;

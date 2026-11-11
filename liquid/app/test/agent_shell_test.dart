@@ -549,6 +549,28 @@ void main() {
     variant: TargetPlatformVariant.only(TargetPlatform.macOS),
   );
 
+  testWidgets(
+    'typing before the next frame after text is handed back keeps the typed text',
+    (tester) async {
+      await show(tester);
+      final composer = find.byKey(const Key('composer'));
+      await tester.enterText(composer, 'Plan');
+      await tester.tap(composer);
+      state.draft.value = 'Retry';
+      tester.testTextInput.updateEditingValue(
+        const TextEditingValue(
+          text: 'Retry\n\nPlanx',
+          selection: TextSelection.collapsed(offset: 12),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(composer).controller?.text,
+        'Retry\n\nPlanx',
+      );
+    },
+  );
+
   testWidgets('marks the branch in the rebuilt chat and reads earlier items', (
     tester,
   ) async {

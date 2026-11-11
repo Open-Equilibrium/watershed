@@ -22,6 +22,10 @@ class PullRequestWriting extends ChangeNotifier {
   var _titleField = TextEditingController();
   var _bodyField = TextEditingController();
 
+  /// Whether the model wrote into a field since the dialog last built it.
+  bool _titleReplaced = false;
+  bool _bodyReplaced = false;
+
   TextEditingController get titleField => _titleField;
   TextEditingController get bodyField => _bodyField;
 
@@ -91,26 +95,32 @@ class PullRequestWriting extends ChangeNotifier {
     }());
   }
 
-  /// Puts `title` and `body` in the fields the user has not edited. A field takes a fresh
-  /// controller, so ⌘Z cannot bring back the text it replaces.
+  /// Gives the fields fresh controllers where the model wrote into them, as the dialog builds them
+  /// (see [adoptController]).
+  void adoptFields() {
+    if (_titleReplaced) {
+      _titleReplaced = false;
+      _titleField = adoptController(_titleField, listener: notifyListeners);
+    }
+    if (_bodyReplaced) {
+      _bodyReplaced = false;
+      _bodyField = adoptController(_bodyField, listener: notifyListeners);
+    }
+  }
+
+  /// Puts `title` and `body` in the fields the user has not edited.
   void _fill(String title, String body) {
     var changed = false;
     if (_titleField.text == _filledTitle && title != _filledTitle) {
       _filledTitle = title;
-      _titleField = renewController(
-        _titleField,
-        TextEditingValue(text: title),
-        listener: notifyListeners,
-      );
+      writeText(_titleField, TextEditingValue(text: title));
+      _titleReplaced = true;
       changed = true;
     }
     if (_bodyField.text == _filledBody && body != _filledBody) {
       _filledBody = body;
-      _bodyField = renewController(
-        _bodyField,
-        TextEditingValue(text: body),
-        listener: notifyListeners,
-      );
+      writeText(_bodyField, TextEditingValue(text: body));
+      _bodyReplaced = true;
       changed = true;
     }
     if (!changed) return;

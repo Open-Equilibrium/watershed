@@ -42,7 +42,7 @@ class TextBlock extends StatefulWidget {
 }
 
 class _TextBlockState extends State<TextBlock> implements EditorSource {
-  /// The field's controller, which a text Liquid replaced swaps for a fresh one (see [_set]).
+  /// The field's controller, which a text Liquid replaced swaps for a fresh one (see [_adopt]).
   var _text = TextEditingController();
 
   /// Keeps the field, its text input included, when a new style wraps it differently.
@@ -58,6 +58,9 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
 
   /// While the text changes from the core or a key, not from typing.
   bool _quiet = false;
+
+  /// Whether Liquid replaced the text since the field last took its controller.
+  bool _replaced = false;
 
   /// Reads asked for, so only the latest shows.
   int _reads = 0;
@@ -437,18 +440,25 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
 
   bool get _composing => !_text.value.composing.isCollapsed;
 
-  /// Shows `text` as the stored one. Its field takes a fresh controller, so ⌘Z cannot bring back
-  /// the text it replaced (rule 7).
   void _set(String text, int offset) {
-    _text = renewController(
+    _quiet = true;
+    writeText(
       _text,
       TextEditingValue(
         text: text,
         selection: TextSelection.collapsed(offset: offset),
       ),
-      listener: _typed,
     );
-    if (mounted) setState(() {});
+    _quiet = false;
+    if (mounted) setState(() => _replaced = true);
+  }
+
+  /// Flutter keeps a field's undo history with its controller, so ⌘Z after a text Liquid
+  /// replaced would bring back the text before it (rule 7). The field takes a fresh controller
+  /// when it builds, which keeps what is typed before that frame.
+  void _adopt() {
+    _replaced = false;
+    _text = adoptController(_text, listener: _typed);
   }
 
   @override
@@ -710,6 +720,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
+    if (_replaced) _adopt();
     final (size, line, weight, top) = switch (_style) {
       BridgeTextStyle.heading1 => (
         WsMetrics.fsH1,

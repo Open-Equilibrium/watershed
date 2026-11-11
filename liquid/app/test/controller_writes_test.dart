@@ -2,9 +2,10 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-/// Text Liquid assigns to an editable field goes through `renewController` (controls.dart), so ⌘Z
-/// cannot bring back the text it replaced. Other writes to a text controller are a person's own
-/// or a field's first text, and each one is listed here with its reason.
+/// Text Liquid assigns to an editable field goes through `writeText` (controls.dart), and the field
+/// then adopts a fresh controller, so ⌘Z cannot bring back the text it replaced. Other writes to a
+/// text controller are a person's own or a field's first text, and each one is listed here with
+/// its reason.
 ///
 /// A regex over source lines, not a parser: it finds `x.text =`, `x.value =` and `x.clear()` where
 /// `x` is declared in the same file as a TextEditingController (a field, parameter or getter). A
@@ -93,15 +94,15 @@ void main() {
       ),
       (
         'lib/src/controls.dart',
-        'previous.value = value;',
-        'renewController itself: the old history records the new text, which the fresh one starts from.',
+        'controller.value = value;',
+        'writeText itself: the one place Liquid writes text into a field.',
       ),
     ];
     final listed = {for (final (file, line, _) in allowed) '$file: $line'};
     expect(
       found.difference(listed),
       isEmpty,
-      reason: 'renew these writes or list them with a reason',
+      reason: 'route these writes through writeText or list them with a reason',
     );
     expect(
       listed.difference(found),
