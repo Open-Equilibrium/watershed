@@ -2,12 +2,14 @@
 
 import importlib.util
 import os
+import sys
 import tempfile
 import threading
 import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 def load(name, file):
@@ -19,6 +21,25 @@ def load(name, file):
 
 CASES = load("native_cases", "macos-self-protection-cases.py")
 PROBE = load("native_probe", "probe-macos-self-protection.py")
+
+
+class LinkCreationIsNotProtection(unittest.TestCase):
+    def test_link_created_then_write_denied_is_a_violation(self):
+        real_fixture, real_invoke = PROBE.fixture, PROBE.invoke
+
+        def read_only_fixture(root, name):
+            data = real_fixture(root, name)
+            data["file"].chmod(0o400)
+            return data
+
+        def unsandboxed(command, *args, **kwargs):
+            # The real helper runs without the sandbox wrapper: its link succeeds and its write is denied.
+            return real_invoke(command[command.index(sys.executable):], *args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(PROBE, "fixture", read_only_fixture), patch.object(PROBE, "invoke", unsandboxed):
+            case = PROBE.run_case("profile", Path(temporary), "new_hardlink_alias", "link")
+        self.assertEqual(case["outcome"], "violation", case)
 
 
 class ProtectedInventory(unittest.TestCase):

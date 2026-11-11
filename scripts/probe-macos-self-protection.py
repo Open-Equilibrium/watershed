@@ -195,6 +195,8 @@ def run_case(mode: str, root: Path, name: str, kind: str) -> dict:
             outcome = "red_control" if not intact else "failure"
         else:
             outcome = "pass" if permitted else "failure"
+    elif kind == "link" and auxiliary.exists():  # the alias was created: link creation itself was allowed
+        outcome = "violation"
     elif not denied:
         outcome = "pass" if succeeded and permitted else "violation" if explicit_denial else "failure"
     elif explicit_denial or closed_handle:
