@@ -6,6 +6,7 @@ import '../format.dart';
 import '../rust/api/history.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'overview.dart';
 import 'step_parts.dart';
 import 'trajectory_model.dart';
 import 'tree_view.dart';
@@ -146,6 +147,56 @@ class CompareView extends StatelessWidget {
     BridgeRecordKind.message => 'message',
     BridgeRecordKind.tool => record.label,
   };
+}
+
+/// The compared branches and where they part, for the toolbar.
+String compareSummary(Comparison comparison, Branch branchA, Branch branchB) {
+  final shared = comparison.shared;
+  return [
+    '${branchA.ref} ↔ ${branchB.ref} on one time axis',
+    if (shared > 0) '◆ branch point after step $shared',
+  ].join(' · ');
+}
+
+/// The two compared branches on one time axis, with the step where they part marked.
+Widget compareOverview({
+  required BridgeHistory history,
+  required Comparison comparison,
+  required Branch branchA,
+  required Branch branchB,
+  required bool equalWidth,
+  required (double, double)? window,
+  required ValueChanged<(double, double)?> onWindow,
+}) {
+  final a = history.trajectories[0].records;
+  final b = history.trajectories[1].records;
+  final shared = comparison.shared;
+  final branchPoint = equalWidth
+      ? (shared == 0 ? null : shared.toDouble())
+      : comparison.branchPoint?.toDouble();
+  List<Segment> own(List<BridgeRecord> records, int idle) => comparedSegments(
+    records,
+    shared: shared,
+    idle: idle,
+    equalWidth: equalWidth,
+  );
+  return Overview(
+    tracks: [
+      OverviewTrack(branchA.ref, own(a, comparison.idleA)),
+      OverviewTrack(branchB.ref, own(b, comparison.idleB)),
+    ],
+    span: equalWidth
+        ? math.max(a.length, b.length).toDouble()
+        : math.max(
+            span(a, equalWidth: false) - comparison.idleA,
+            span(b, equalWidth: false) - comparison.idleB,
+          ),
+    equalWidth: equalWidth,
+    window: window,
+    onWindow: onWindow,
+    mark: branchPoint,
+    legend: true,
+  );
 }
 
 class _Header extends StatelessWidget {

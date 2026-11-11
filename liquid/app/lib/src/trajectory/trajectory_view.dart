@@ -725,7 +725,13 @@ class _TrajectoryViewState extends State<TrajectoryView> {
         TrajectoryToolbar(
           equalWidth: _equalWidth,
           comparing: _comparing,
-          summary: comparing ? _compareSummary(compared) : _summary(),
+          summary: comparing
+              ? compareSummary(
+                  _comparison(compared),
+                  _branchFor(_loaded[0]),
+                  _branchFor(_loaded[1]),
+                )
+              : _summary(),
           range: comparing || _range == null ? null : _axisLabel(_range!),
           onClearRange: () => setState(() => _range = null),
           filters: _filter.count,
@@ -791,7 +797,18 @@ class _TrajectoryViewState extends State<TrajectoryView> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (comparing) _compareOverview(compared) else _overview(),
+                  if (comparing)
+                    compareOverview(
+                      history: compared,
+                      comparison: _comparison(compared),
+                      branchA: _branchFor(_loaded[0]),
+                      branchB: _branchFor(_loaded[1]),
+                      equalWidth: _equalWidth,
+                      window: _window,
+                      onWindow: (window) => setState(() => _window = window),
+                    )
+                  else
+                    _overview(),
                   Expanded(
                     child: LayoutBuilder(
                       builder: (context, constraints) => Row(
@@ -895,48 +912,6 @@ class _TrajectoryViewState extends State<TrajectoryView> {
         history.trajectories[0].records,
         history.trajectories[1].records,
       );
-
-  /// The compared branches and where they part.
-  String _compareSummary(BridgeHistory history) {
-    final shared = _comparison(history).shared;
-    return [
-      '${_branchFor(_loaded[0]).ref} ↔ ${_branchFor(_loaded[1]).ref} on one time axis',
-      if (shared > 0) '◆ branch point after step $shared',
-    ].join(' · ');
-  }
-
-  Widget _compareOverview(BridgeHistory history) {
-    final a = history.trajectories[0].records;
-    final b = history.trajectories[1].records;
-    final comparison = _comparison(history);
-    final shared = comparison.shared;
-    final branchPoint = _equalWidth
-        ? (shared == 0 ? null : shared.toDouble())
-        : comparison.branchPoint?.toDouble();
-    List<Segment> own(List<BridgeRecord> records, int idle) => comparedSegments(
-      records,
-      shared: shared,
-      idle: idle,
-      equalWidth: _equalWidth,
-    );
-    return Overview(
-      tracks: [
-        OverviewTrack(_branchFor(_loaded[0]).ref, own(a, comparison.idleA)),
-        OverviewTrack(_branchFor(_loaded[1]).ref, own(b, comparison.idleB)),
-      ],
-      span: _equalWidth
-          ? math.max(a.length, b.length).toDouble()
-          : math.max(
-              span(a, equalWidth: false) - comparison.idleA,
-              span(b, equalWidth: false) - comparison.idleB,
-            ),
-      equalWidth: _equalWidth,
-      window: _window,
-      onWindow: (window) => setState(() => _window = window),
-      mark: branchPoint,
-      legend: true,
-    );
-  }
 
   /// A range of the axis in steps or seconds, whole seconds once it spans ten.
   String _axisLabel((double, double) range) {
