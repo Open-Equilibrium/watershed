@@ -54,9 +54,26 @@ fn write_session(file: &Path) -> (String, String) {
     (leaf, fork_leaf)
 }
 
+/// A new folder in the temporary directory, created exclusively with owner-only permissions, so
+/// a link or folder another user put at its name makes the attempt fail rather than receive writes.
+fn private_folder() -> std::path::PathBuf {
+    use std::os::unix::fs::DirBuilderExt;
+    for attempt in 0..8 {
+        let dir = std::env::temp_dir().join(format!(
+            "trajectory-observe-{}-{attempt}",
+            std::process::id()
+        ));
+        match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
+            Ok(()) => return dir,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => panic!("the observation folder: {error}"),
+        }
+    }
+    panic!("no free observation folder")
+}
+
 async fn observe() {
-    let dir = std::env::temp_dir().join(format!("trajectory-observe-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("temporary directory");
+    let dir = private_folder();
     let file = dir.join("session.jsonl");
     let written = std::process::Command::new(std::env::current_exe().expect("this example"))
         .arg("--write")
