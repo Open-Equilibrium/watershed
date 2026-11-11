@@ -533,6 +533,12 @@ fn a_remote_gh_has_no_github_login_for_is_never_asked_about() {
             checkpoints.pull_request_bases("gitlab.com", "bw/api").await,
             Err(PullRequestError::SignIn { host }) if host == "gitlab.com"
         ));
+        assert!(matches!(
+            checkpoints
+                .pull_request_base_search("gitlab.com", "bw/api", "rel")
+                .await,
+            Err(PullRequestError::SignIn { host }) if host == "gitlab.com"
+        ));
         assert!(
             pushed
                 .read("log")
@@ -564,6 +570,48 @@ fn bases_are_read_page_by_page_up_to_a_bound() {
             .await
             .unwrap();
         assert_eq!((names.len(), more), (500, true));
+    });
+}
+
+#[test]
+fn a_base_search_asks_github_for_matching_branches_up_to_a_bound() {
+    run(async {
+        let pushed = Pushed::new("search", "https://github.com/bw/api.git");
+        let checkpoints = pushed.checkpoints(
+            "'api --hostname github.com graphql '*'-f owner=acme -f name=api -f search=release/2019 -F first=100 --jq .data.repository.refs.nodes[].name') printf 'release/2019-q3\\nrelease/2019-q4\\n' ;;\n\
+             'api --hostname github.com graphql '*'-f owner=acme -f name=api -f search=none -F first=100 --jq .data.repository.refs.nodes[].name') ;;\n\
+             'api --hostname github.com graphql '*'-f owner=acme -f name=api -f search=many -F first=100 --jq .data.repository.refs.nodes[].name') seq -f 'b%g' 1 150 ;;\n\
+             'api --hostname github.com graphql '*'-f owner=acme -f name=api -f search=broken -F first=100 --jq .data.repository.refs.nodes[].name') echo 'gh: Bad Gateway (HTTP 502)' >&2; exit 1 ;;",
+        );
+        assert_eq!(
+            checkpoints
+                .pull_request_base_search("github.com", "acme/api", "release/2019")
+                .await
+                .unwrap(),
+            ["release/2019-q3", "release/2019-q4"]
+        );
+        assert!(
+            checkpoints
+                .pull_request_base_search("github.com", "acme/api", "none")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        // GitHub's maximum per request bounds what a search returns, even if more came back.
+        assert_eq!(
+            checkpoints
+                .pull_request_base_search("github.com", "acme/api", "many")
+                .await
+                .unwrap()
+                .len(),
+            100
+        );
+        assert!(matches!(
+            checkpoints
+                .pull_request_base_search("github.com", "acme/api", "broken")
+                .await,
+            Err(PullRequestError::Unreachable { host, .. }) if host == "github.com"
+        ));
     });
 }
 

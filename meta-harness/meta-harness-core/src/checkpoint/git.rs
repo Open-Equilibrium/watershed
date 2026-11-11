@@ -198,6 +198,22 @@ impl Checkpoints {
             .await?
     }
 
+    /// The branches of `target` on `host` whose names contain `query`, as GitHub finds them.
+    pub async fn pull_request_base_search(
+        &self,
+        host: &str,
+        target: &str,
+        query: &str,
+    ) -> Result<Vec<String>, PullRequestError> {
+        let tree = self.tree().await?;
+        self.bounded(async {
+            Ok(tree
+                .pull_request_base_search(&self.gh, host, target, query)
+                .await)
+        })
+        .await?
+    }
+
     /// Fetch without holding the checkout; acquire it again only for the local fast-forward.
     pub async fn pull(&self) -> Result<crate::GitTransfer, DiffError> {
         let tree = self.tree().await?;

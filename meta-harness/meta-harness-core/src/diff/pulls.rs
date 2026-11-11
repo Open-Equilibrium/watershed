@@ -21,6 +21,12 @@ const BRANCHES_PER_PAGE: usize = 100;
 /// Pages of branches read to choose a base from.
 const MAX_BRANCH_PAGES: usize = 5;
 
+/// Branches a base search returns at most, GitHub's maximum per request.
+const MAX_SEARCHED_BRANCHES: usize = 100;
+
+/// The GraphQL query of a base search; the target and text are variables, never document text.
+const BRANCH_SEARCH: &str = "query($owner: String!, $name: String!, $search: String!, $first: Int!) { repository(owner: $owner, name: $name) { refs(refPrefix: \"refs/heads/\", query: $search, first: $first) { nodes { name } } } }";
+
 /// Files GitHub's comparison lists at most; past them Git counts the files itself.
 const MAX_COMPARED_FILES: u64 = 300;
 
@@ -586,14 +592,13 @@ impl WorkingTree {
         }
     }
 
-    /// The target's branches, up to [`MAX_BRANCH_PAGES`] pages, to choose a base from; `true`
-    /// when GitHub may list more.
-    pub(crate) async fn pull_request_bases(
+    /// A target repository on a host gh may ask, which gh must be logged in to.
+    async fn github_target(
         &self,
         program: &OsStr,
         host: &str,
         target: &str,
-    ) -> Result<(Vec<String>, bool), PullRequestError> {
+    ) -> Result<(), PullRequestError> {
         valid_full(target)?;
         if valid_host(host).as_deref() != Some(host) {
             return Err(PullRequestError::Failed(format!(
@@ -605,6 +610,59 @@ impl WorkingTree {
                 host: host.to_owned(),
             });
         }
+        Ok(())
+    }
+
+    /// The branches of `target` whose names contain `query`, as GitHub searches them, up to
+    /// [`MAX_SEARCHED_BRANCHES`].
+    pub(crate) async fn pull_request_base_search(
+        &self,
+        program: &OsStr,
+        host: &str,
+        target: &str,
+        query: &str,
+    ) -> Result<Vec<String>, PullRequestError> {
+        self.github_target(program, host, target).await?;
+        let (owner, name) = target.split_once('/').unwrap_or_default();
+        let listed = self
+            .gh_api(
+                program,
+                host,
+                target,
+                &[
+                    "graphql",
+                    "-f",
+                    BRANCH_SEARCH,
+                    "-f",
+                    &format!("owner={owner}"),
+                    "-f",
+                    &format!("name={name}"),
+                    "-f",
+                    &format!("search={query}"),
+                    "-F",
+                    &format!("first={MAX_SEARCHED_BRANCHES}"),
+                    "--jq",
+                    ".data.repository.refs.nodes[].name",
+                ],
+                None,
+            )
+            .await?;
+        Ok(listed
+            .lines()
+            .take(MAX_SEARCHED_BRANCHES)
+            .map(str::to_owned)
+            .collect())
+    }
+
+    /// The target's branches, up to [`MAX_BRANCH_PAGES`] pages, to choose a base from; `true`
+    /// when GitHub may list more.
+    pub(crate) async fn pull_request_bases(
+        &self,
+        program: &OsStr,
+        host: &str,
+        target: &str,
+    ) -> Result<(Vec<String>, bool), PullRequestError> {
+        self.github_target(program, host, target).await?;
         let mut names = Vec::new();
         for page in 1..=MAX_BRANCH_PAGES {
             let listed = self
