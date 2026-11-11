@@ -216,7 +216,11 @@ fn oauth_loopback_callback_respects_an_absolute_deadline() {
     let client = thread::spawn(move || {
         let mut stream = TcpStream::connect(address).expect("loopback connects");
         stream.write_all(b"G").expect("partial callback writes");
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(200));
+        // A complete callback after the 25 ms cutoff must be refused, so only the absolute
+        // deadline (not EOF or the 5 s budget) can explain the rejection. A late write may fail.
+        let _ = stream
+            .write_all(b"ET /auth/callback?state=s&code=c HTTP/1.1\r\nHost: localhost\r\n\r\n");
     });
     let (mut stream, _) = listener.accept().expect("callback accepts");
 

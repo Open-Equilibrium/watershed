@@ -402,6 +402,7 @@ fn oauth_refresh_uses_returned_access_expiry_and_id_token_routing() {
     assert!(refreshed.is_fedramp);
 
     let changed_account = serde_json::to_vec(&serde_json::json!({
+        "access_token": access,
         "id_token": super::jwt_with_account("other-account")
     }))
     .expect("changed-account JSON");
