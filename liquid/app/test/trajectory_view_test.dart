@@ -1288,7 +1288,7 @@ void main() {
   });
 
   /// Shows branch B of a session with two branches, ready to compare them.
-  Future<void> showBranches(WidgetTester tester) async {
+  Future<void> showBranches(WidgetTester tester, {Size size = shortest}) async {
     final branchB = [
       ...branchA.take(3),
       record('b1', 2, BridgeRecordKind.user, 'Use a token bucket', 60000),
@@ -1321,7 +1321,7 @@ void main() {
     await show(
       tester,
       historyOf(branchB, tree: tree, leaf: 'b2'),
-      size: shortest,
+      size: size,
     );
     backend.histories['e6 b2'] = historyOf(
       branchA,
@@ -1608,6 +1608,23 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('tree-e6')));
     await tester.pumpAndSettle();
     expect(backend.calls.last, 'history e6');
+  });
+
+  testWidgets('a short window shows the first compared steps above the input', (
+    tester,
+  ) async {
+    await showBranches(tester, size: const Size(1050, 640));
+    await press(tester, LogicalKeyboardKey.keyC);
+    expect(
+      find
+          .descendant(
+            of: find.byType(CompareView),
+            matching: find.text('Use a token bucket'),
+          )
+          .hitTestable(),
+      findsOneWidget,
+      reason: 'the first step row is not covered by the input area',
+    );
   });
 
   testWidgets('a comparison keeps its labels with the records shown', (

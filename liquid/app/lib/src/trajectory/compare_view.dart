@@ -324,6 +324,10 @@ class _Cell extends StatelessWidget {
   }
 }
 
+/// Windows shorter than this show the headline numbers in one line, so the first steps stay above
+/// the input area.
+const _compactHeight = 760.0;
+
 /// Headline numbers of both branches.
 class _Metrics extends StatelessWidget {
   const _Metrics({
@@ -356,36 +360,102 @@ class _Metrics extends StatelessWidget {
     }
 
     Color tone(int from, int to) => to < from ? ws.success : ws.textMuted;
+    final metrics = [
+      (
+        'Duration',
+        '${formatDuration(durationA)} → ${formatDuration(durationB)}',
+        change(durationA, durationB),
+        tone(durationA, durationB),
+      ),
+      (
+        'Tokens in / out',
+        '${formatCompact(totalsA.input)} → ${formatCompact(totalsB.input)}',
+        '${formatCompact(totalsA.output)} → ${formatCompact(totalsB.output)} out',
+        ws.textMuted,
+      ),
+      _files(
+        ws,
+        branchA.ref,
+        branchB.ref,
+        changedFiles(a.records),
+        changedFiles(b.records),
+      ),
+      _tests(
+        ws,
+        branchA.ref,
+        branchB.ref,
+        lastTests(a.records),
+        lastTests(b.records),
+      ),
+    ];
+    if (MediaQuery.sizeOf(context).height < _compactHeight) {
+      return Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: WsMetrics.space4,
+          vertical: WsMetrics.space2,
+        ),
+        decoration: BoxDecoration(
+          color: ws.subtle,
+          borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+        ),
+        child: Row(
+          children: [
+            for (final (index, (label, value, note, color))
+                in metrics.indexed) ...[
+              if (index > 0) const SizedBox(width: WsMetrics.space5),
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: ws.textMuted,
+                          fontSize: WsMetrics.fsCompact,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: WsMetrics.space2),
+                    const SizedBox(width: WsMetrics.space2),
+                    Flexible(
+                      child: Text(
+                        value,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: WsMetrics.fsCompact,
+                          fontWeight: WsMetrics.fwSemibold,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                    if (note.isNotEmpty) ...[
+                      const SizedBox(width: WsMetrics.space2),
+                      Flexible(
+                        child: Text(
+                          note,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: color,
+                            fontSize: WsMetrics.fsCompact,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    }
     return Row(
       children: [
-        for (final (index, (label, value, note, color)) in [
-          (
-            'Duration',
-            '${formatDuration(durationA)} → ${formatDuration(durationB)}',
-            change(durationA, durationB),
-            tone(durationA, durationB),
-          ),
-          (
-            'Tokens in / out',
-            '${formatCompact(totalsA.input)} → ${formatCompact(totalsB.input)}',
-            '${formatCompact(totalsA.output)} → ${formatCompact(totalsB.output)} out',
-            ws.textMuted,
-          ),
-          _files(
-            ws,
-            branchA.ref,
-            branchB.ref,
-            changedFiles(a.records),
-            changedFiles(b.records),
-          ),
-          _tests(
-            ws,
-            branchA.ref,
-            branchB.ref,
-            lastTests(a.records),
-            lastTests(b.records),
-          ),
-        ].indexed) ...[
+        for (final (index, (label, value, note, color)) in metrics.indexed) ...[
           if (index > 0) const SizedBox(width: 10),
           Expanded(
             child: Container(
