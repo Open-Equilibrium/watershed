@@ -5,9 +5,9 @@ use tokio::sync::mpsc::Receiver;
 use tokio::time::timeout;
 
 use crate::{
-    AgentCommand, AgentEvent, Answer, CommandError, Delivery, EntryKind, ItemDetail, ItemId,
-    ItemKind, ItemStatus, Model, NotificationLevel, Pending, Queue, RecordKind, RequestId, Session,
-    SessionEvent, SessionState, SessionTree, TreeNode, TurnId, UserInput,
+    AgentCommand, AgentEvent, Answer, CommandError, Delivery, EntryKind, History, ItemDetail,
+    ItemId, ItemKind, ItemStatus, Model, NotificationLevel, Pending, Queue, RecordKind, RequestId,
+    Session, SessionEvent, SessionState, SessionTree, TreeNode, TurnId, UserInput,
 };
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -254,16 +254,20 @@ fn reads_history_incrementally_and_rereads_when_the_cursor_is_gone() {
             expect_response(&[r#""type":"get_entries""#, r#""id":"2""#]),
             without_cursor.to_owned(),
             respond(2, entry("e1", "null"), "e1"),
-            expect_response(&[r#""id":"3""#, r#""since":"e1""#]),
-            respond(3, entry("e2", r#""e1""#), "e2"),
-            expect_response(&[r#""id":"4""#, r#""since":"e2""#]),
-            r#"printf '%s\n' '{"id":"4","type":"response","command":"get_entries","success":false,"error":"unknown entry"}'
+            no_session_file(3),
+            no_session_file(4),
+            expect_response(&[r#""id":"5""#, r#""since":"e1""#]),
+            respond(5, entry("e2", r#""e1""#), "e2"),
+            no_session_file(6),
+            no_session_file(7),
+            expect_response(&[r#""id":"8""#, r#""since":"e2""#]),
+            r#"printf '%s\n' '{"id":"8","type":"response","command":"get_entries","success":false,"error":"unknown entry"}'
 "#
             .to_owned(),
-            no_session_file(5),
-            expect_response(&[r#""type":"get_entries""#, r#""id":"6""#]),
+            expect_response(&[r#""type":"get_entries""#, r#""id":"9""#]),
             without_cursor.to_owned(),
-            respond(6, entry("x1", "null"), "x1"),
+            respond(9, entry("x1", "null"), "x1"),
+            no_session_file(10),
         ]
         .concat();
         let (mut session, _events) = fake_agent(&script);
@@ -307,15 +311,17 @@ fn reads_the_history_anew_after_a_session_switch() {
             no_session_file(1),
             expect_response(&[r#""type":"get_entries""#, r#""id":"2""#]),
             entries(2, e1),
-            expect_response(&[r#""type":"new_session""#, r#""id":"3""#]),
-            r#"printf '%s\n' '{"id":"3","type":"response","command":"new_session","success":true,"data":{"cancelled":false}}'
+            no_session_file(3),
+            expect_response(&[r#""type":"new_session""#, r#""id":"4""#]),
+            r#"printf '%s\n' '{"id":"4","type":"response","command":"new_session","success":true,"data":{"cancelled":false}}'
 "#
             .to_owned(),
             // The new session shares the entry id, yet its history is read whole again.
-            no_session_file(4),
-            expect_response(&[r#""type":"get_entries""#, r#""id":"5""#]),
+            no_session_file(5),
+            expect_response(&[r#""type":"get_entries""#, r#""id":"6""#]),
             "case \"$line\" in *'\"since\"'*) exit 9 ;; esac\n".to_owned(),
-            entries(5, e1),
+            entries(6, e1),
+            no_session_file(7),
             "IFS= read -r line || exit 0\n".to_owned(),
         ]
         .concat();
@@ -334,6 +340,99 @@ fn reads_the_history_anew_after_a_session_switch() {
                 .await
                 .map(|history| history.tree().nodes.len()),
             Ok(1)
+        );
+    });
+}
+
+/// A stand-in agent whose session turns from A into B once the request matching `flip` is
+/// answered. A holds `e1` alone; B holds `x1`, its own `e1` and `e2`, so B shares `e1`'s id with A
+/// and a read continuing after `e1` would mix the two sessions.
+fn agent_switching_to_b(flip: &str) -> String {
+    const SCRIPT: &str = r#"state=A
+a1='{"type":"message","id":"e1","parentId":null,"message":{"role":"user","content":"A1","usage":{"input":1}}}'
+x1='{"type":"message","id":"x1","parentId":null,"message":{"role":"user","content":"B0","usage":{"input":10}}}'
+b1='{"type":"message","id":"e1","parentId":"x1","message":{"role":"user","content":"B1","usage":{"input":100}}}'
+b2='{"type":"message","id":"e2","parentId":"e1","message":{"role":"user","content":"B2","usage":{"input":1000}}}'
+while IFS= read -r line; do
+  id=${line#*'"id":"'}
+  id=${id%%'"'*}
+  case "$line" in
+    *'"type":"get_state"'*)
+      printf '{"id":"%s","type":"response","command":"get_state","success":true,"data":{"sessionId":"%s","isStreaming":false}}\n' "$id" "$state" ;;
+    *'"since"'*)
+      printf '{"id":"%s","type":"response","command":"get_entries","success":true,"data":{"entries":[%s],"leafId":"e2"}}\n' "$id" "$b2" ;;
+    *'"type":"get_entries"'*)
+      if [ "$state" = A ]; then
+        printf '{"id":"%s","type":"response","command":"get_entries","success":true,"data":{"entries":[%s],"leafId":"e1"}}\n' "$id" "$a1"
+      else
+        printf '{"id":"%s","type":"response","command":"get_entries","success":true,"data":{"entries":[%s,%s,%s],"leafId":"e2"}}\n' "$id" "$x1" "$b1" "$b2"
+      fi ;;
+    *) exit 9 ;;
+  esac
+  case "$line" in
+    FLIP) state=B ;;
+  esac
+done
+"#;
+    SCRIPT.replace("FLIP", flip)
+}
+
+/// Asserts that a history holds session B of [`agent_switching_to_b`] and nothing of A.
+fn assert_session_b(history: &History) {
+    let tree = history.tree();
+    assert_eq!(
+        tree.nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node.parent.as_deref()))
+            .collect::<Vec<_>>(),
+        [("x1", None), ("e1", Some("x1")), ("e2", Some("e1"))]
+    );
+    assert_eq!(tree.leaf.as_deref(), Some("e2"));
+    assert_eq!(history.usage().input, 1110);
+}
+
+#[test]
+fn a_history_read_never_mixes_two_sessions() {
+    run(async {
+        // The switch lands while the read continues after e1, so the continuation is B's.
+        let (mut session, _events) = fake_agent(&agent_switching_to_b(r#"*'"since"'*"#));
+        session.history().await.expect("history");
+        assert_session_b(session.history().await.expect("history"));
+    });
+}
+
+#[test]
+fn a_switch_between_history_reads_makes_the_next_read_start_over() {
+    run(async {
+        // The switch lands after the first read's closing state read, before the next read.
+        let (mut session, _events) = fake_agent(&agent_switching_to_b(r#"*'"id":"3"'*"#));
+        session.history().await.expect("history");
+        assert_session_b(session.history().await.expect("history"));
+    });
+}
+
+#[test]
+fn a_history_read_gives_up_while_the_session_keeps_changing() {
+    run(async {
+        // Every state read names the other session, so no read sees the same one before and after.
+        let (mut session, _events) = fake_agent(
+            r#"n=0
+while IFS= read -r line; do
+  id=${line#*'"id":"'}
+  id=${id%%'"'*}
+  case "$line" in
+    *'"type":"get_state"'*)
+      n=$((n + 1))
+      printf '{"id":"%s","type":"response","command":"get_state","success":true,"data":{"sessionId":"s%s","isStreaming":false}}\n' "$id" "$((n % 2))" ;;
+    *'"type":"get_entries"'*)
+      printf '{"id":"%s","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":null}}\n' "$id" ;;
+    *) exit 9 ;;
+  esac
+done"#,
+        );
+        assert_eq!(
+            session.history().await.map(drop),
+            Err(CommandError::SessionChanged)
         );
     });
 }
@@ -367,6 +466,8 @@ fn reopens_a_session_larger_than_one_record_from_its_file() {
             r#"printf '%s\n' '{"id":"2","type":"response","command":"get_entries","success":true,"data":{"entries":[{"type":"message","id":"e2000","parentId":"e1999","message":{"role":"user","content":"last"}}],"leafId":"e2000"}}'
 "#
             .to_owned(),
+            expect_response(&[r#""type":"get_state""#, r#""id":"3""#]),
+            session_file(3, &file),
         ]
         .concat();
         let (mut session, _events) = fake_agent(&script);
@@ -401,19 +502,24 @@ fn rereads_the_session_file_when_new_entries_exceed_one_record() {
             r#"printf '%s\n' '{"id":"2","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":"e1"}}'
 "#
             .to_owned(),
+            expect_response(&[r#""type":"get_state""#, r#""id":"3""#]),
+            session_file(3, &file),
             // A long run added more than one record holds before the next read.
-            expect_response(&[r#""id":"3""#, r#""since":"e1""#]),
+            expect_response(&[r#""type":"get_state""#, r#""id":"4""#]),
+            session_file(4, &file),
+            expect_response(&[r#""id":"5""#, r#""since":"e1""#]),
             format!(
-                r#"printf '%s' '{{"id":"3","type":"response","command":"get_entries","success":true,"data":"'
+                r#"printf '%s' '{{"id":"5","type":"response","command":"get_entries","success":true,"data":"'
 {huge}printf '"}}\n'
 "#
             ),
-            expect_response(&[r#""type":"get_state""#, r#""id":"4""#]),
-            session_file(4, &file),
-            expect_response(&[r#""id":"5""#, r#""since":"e2""#]),
-            r#"printf '%s\n' '{"id":"5","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":"e2"}}'
+            // The session file holds the entries since the last one read.
+            expect_response(&[r#""id":"6""#, r#""since":"e2""#]),
+            r#"printf '%s\n' '{"id":"6","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":"e2"}}'
 "#
             .to_owned(),
+            expect_response(&[r#""type":"get_state""#, r#""id":"7""#]),
+            session_file(7, &file),
         ]
         .concat();
         let (mut session, _events) = fake_agent(&script);
@@ -1353,9 +1459,10 @@ fn reads_state_and_tree_and_branches_through_the_extension() {
             r#"printf '%s\n' '{"id":"3","type":"response","command":"get_entries","success":true,"data":{"entries":[{"type":"message","id":"e1","parentId":null,"message":{"role":"user","content":"hi"}}],"leafId":"e1"}}'
 "#
             .to_owned(),
-            gate(4),
-            expect_response(&[r#""type":"prompt""#, r#""id":"5""#, r#""message":"/watershed-branch e1 B""#]),
-            r#"printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
+            no_session_file(4),
+            gate(5),
+            expect_response(&[r#""type":"prompt""#, r#""id":"6""#, r#""message":"/watershed-branch e1 B""#]),
+            r#"printf '%s\n' '{"id":"6","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
 "#
             .to_owned(),
         ]
@@ -1366,6 +1473,7 @@ fn reads_state_and_tree_and_branches_through_the_extension() {
             Ok(SessionState {
                 session_file: Some("/tmp/s.jsonl".into()),
                 model: Some("faux/faux-1".to_owned()),
+                session_id: Some("abc".to_owned()),
             })
         );
         let history = session.history().await.expect("history");
@@ -1981,10 +2089,12 @@ fn reads_the_history_before_pi_wrote_the_session_file() {
         let missing =
             std::env::temp_dir().join(format!("watershed-unwritten-{}.jsonl", std::process::id()));
         let script = format!(
-            "{}{}{}printf '%s\\n' '{{\"id\":\"2\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[{{\"type\":\"message\",\"id\":\"u1\",\"parentId\":null,\"message\":{{\"role\":\"user\",\"content\":\"Hi\"}}}}],\"leafId\":\"u1\"}}}}'\nIFS= read -r line || exit 0\n",
+            "{}{}{}printf '%s\\n' '{{\"id\":\"2\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[{{\"type\":\"message\",\"id\":\"u1\",\"parentId\":null,\"message\":{{\"role\":\"user\",\"content\":\"Hi\"}}}}],\"leafId\":\"u1\"}}}}'\n{}{}IFS= read -r line || exit 0\n",
             expect_response(&[r#""type":"get_state""#]),
             session_file(1, &missing),
             expect_response(&[r#""type":"get_entries""#]),
+            expect_response(&[r#""type":"get_state""#, r#""id":"3""#]),
+            session_file(3, &missing),
         );
         let (mut session, _events) = fake_agent(&script);
         let history = session.history().await.expect("history");

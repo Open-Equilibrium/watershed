@@ -77,7 +77,7 @@ async fn observe() {
         "data": {"sessionId": "observe", "isStreaming": false, "sessionFile": file.display().to_string()},
     });
     let script = format!(
-        "IFS= read -r line\nprintf '%s\\n' \"$1\"\ni=2\nwhile IFS= read -r line; do\nprintf '%s\\n' '{{\"id\":\"'$i'\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[],\"leafId\":\"{leaf}\"}}}}'\ni=$((i+1))\ndone"
+        "IFS= read -r line\nprintf '%s\\n' \"$1\"\ni=2\nwhile IFS= read -r line; do\ncase \"$line\" in *'\"type\":\"get_state\"'*) printf '{{\"id\":\"%s\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"observe\",\"isStreaming\":false,\"sessionFile\":%s}}}}\\n' \"$i\" \"$2\" ;; *) printf '{{\"id\":\"%s\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[],\"leafId\":\"{leaf}\"}}}}\\n' \"$i\" ;; esac\ni=$((i+1))\ndone"
     );
     let command = AgentCommand {
         program: "/bin/sh".into(),
@@ -86,6 +86,7 @@ async fn observe() {
             script.into(),
             "sh".into(),
             state.to_string().into(),
+            json!(file.display().to_string()).to_string().into(),
         ],
         extension: "/watershed.ts".into(),
         session: None,

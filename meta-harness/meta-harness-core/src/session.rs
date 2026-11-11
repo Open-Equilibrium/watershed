@@ -28,6 +28,8 @@ pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
 const EVENT_BUFFER: usize = 256;
 /// Records buffered for the agent's input.
 const WRITE_BUFFER: usize = 64;
+/// Attempts at reading the history while the session keeps changing before a read gives up.
+const HISTORY_READS: usize = 3;
 
 /// Checkpoint requests waiting for their capture; pi waits for each, so few ever wait.
 const CAPTURE_BUFFER: usize = 8;
@@ -111,6 +113,8 @@ pub enum CommandError {
     TooLarge,
     /// Watershed's pi extension is not loaded, so a turn would run without its checkpoints.
     ExtensionMissing,
+    /// The session kept changing while its history was read, so no read matched one session.
+    SessionChanged,
 }
 
 type Reply = oneshot::Sender<Result<Value, CommandError>>;
@@ -171,6 +175,8 @@ pub struct SessionState {
     pub session_file: Option<PathBuf>,
     /// The selected model as `provider/id`.
     pub model: Option<String>,
+    /// pi's id of the session, which tells sessions apart even when they share entry ids.
+    pub session_id: Option<String>,
 }
 
 enum Write {
@@ -354,6 +360,8 @@ pub struct Session {
     stopper: Option<Stopper>,
     /// The stored entries read so far; later reads continue after the last one.
     history: History,
+    /// The session the entries in `history` belong to.
+    history_session: Option<String>,
     /// The directory the agent works in; a relative path it reports starts there.
     cwd: PathBuf,
     /// The extension file pi was told to load.
@@ -442,6 +450,7 @@ impl Session {
                 exited,
             }),
             history: History::default(),
+            history_session: None,
             cwd: command.cwd.clone(),
             extension: by_name(&command.extension),
             checkpoints,
@@ -580,20 +589,40 @@ impl Session {
         Ok(SessionState {
             session_file: text("sessionFile").map(|file| self.cwd.join(file)),
             model,
+            session_id: text("sessionId").map(str::to_owned),
         })
     }
 
     /// Reads the session's stored entries, including abandoned branches. The first read takes
     /// them from pi's session file line by line, so no single answer has to hold the whole
     /// session; later reads ask the agent only for entries added since. When the agent no
-    /// longer knows the last one, everything is read again. The entries stay with the session,
-    /// so callers read them while they hold it.
+    /// longer knows the last one, everything is read again. A read starts over unless the
+    /// session is the same before and after it: sessions can share entry ids, and a switch can
+    /// land during a read. The entries stay with the session, so callers read them while they
+    /// hold it.
     pub async fn history(&mut self) -> Result<&History, CommandError> {
         if std::mem::take(&mut self.responder.state.lock().switched) {
             self.history = History::default();
         }
+        for _ in 0..HISTORY_READS {
+            let before = self.state().await?;
+            if before.session_id != self.history_session {
+                self.history = History::default();
+                self.history_session = before.session_id.clone();
+            }
+            self.read_entries(before.session_file.as_deref()).await?;
+            if self.state().await?.session_id == before.session_id {
+                return Ok(&self.history);
+            }
+            self.history = History::default();
+        }
+        Err(CommandError::SessionChanged)
+    }
+
+    /// Adds the entries stored since the last one read, from `file` when nothing was read yet.
+    async fn read_entries(&mut self, file: Option<&Path>) -> Result<(), CommandError> {
         if self.history.last_id().is_none() {
-            self.read_stored().await?;
+            self.read_stored(file).await;
         }
         match self.read_newer().await {
             // The agent no longer knows the last entry read, or what it added since does not fit
@@ -602,26 +631,24 @@ impl Session {
                 if self.history.last_id().is_some() =>
             {
                 self.history = History::default();
-                self.read_stored().await?;
-                self.read_newer().await?;
+                self.read_stored(file).await;
+                self.read_newer().await
             }
-            result => result?,
+            result => result,
         }
-        Ok(&self.history)
     }
 
     /// Reads the entries pi stored in its session file; without a file yet, the agent's answer
     /// holds them all.
-    async fn read_stored(&mut self) -> Result<(), CommandError> {
-        let Some(file) = self.state().await?.session_file else {
-            return Ok(());
+    async fn read_stored(&mut self, file: Option<&Path>) {
+        let Some(file) = file.map(Path::to_owned) else {
+            return;
         };
         let stored =
             tokio::task::spawn_blocking(move || History::from_file(&file, MAX_RECORD_BYTES)).await;
         if let Ok(Ok(stored)) = stored {
             self.history = stored;
         }
-        Ok(())
     }
 
     /// Asks the agent for the entries after the last one read and for its current leaf.

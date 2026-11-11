@@ -37,6 +37,9 @@ pub(crate) fn describe(error: CommandError) -> String {
             "Watershed's pi extension is not loaded, so turns would run without checkpoints"
                 .to_owned()
         }
+        CommandError::SessionChanged => {
+            "the session changed while its history was read; try again".to_owned()
+        }
     }
 }
 

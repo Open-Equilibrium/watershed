@@ -778,9 +778,16 @@ fn diffs_each_turn_between_its_checkpoints() {
         "touch .git/checkpointed\n".to_owned(),
         no_session_file(2),
         entries(3, TURN),
-        entries(4, ""),
-        entries(5, ""),
+        no_session_file(4),
+        no_session_file(5),
         entries(6, ""),
+        no_session_file(7),
+        no_session_file(8),
+        entries(9, ""),
+        no_session_file(10),
+        no_session_file(11),
+        entries(12, ""),
+        no_session_file(13),
         "IFS= read -r line || exit 0".to_owned(),
     ]
     .concat();
@@ -850,18 +857,25 @@ fn reverts_a_turns_files_and_continues_from_before_its_prompt() {
         "touch .git/checkpointed\n".to_owned(),
         no_session_file(2),
         entries(3, TURN),
-        // The plan looks for pi's session directory to name the other agent's session.
         no_session_file(4),
-        entries(5, ""),
-        entries(6, ""),
-        gate(7),
+        // The plan looks for pi's session directory to name the other agent's session.
+        no_session_file(5),
+        no_session_file(6),
+        entries(7, ""),
+        no_session_file(8),
+        no_session_file(9),
+        entries(10, ""),
+        no_session_file(11),
+        gate(12),
         r#"IFS= read -r line
 case "$line" in *'"message":"/watershed-branch u1"'*) ;; *) exit 9 ;; esac
-printf '%s\n' '{"id":"8","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
+printf '%s\n' '{"id":"13","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
 "#
         .to_owned(),
         // pi now continues before the turn's prompt.
-        entries_at(9, "", "c1"),
+        no_session_file(14),
+        entries_at(15, "", "c1"),
+        no_session_file(16),
         "IFS= read -r line || exit 0".to_owned(),
     ]
     .concat();
@@ -932,13 +946,16 @@ fn says_when_pi_handled_the_branch_but_stayed_on_the_turn() {
         "touch .git/checkpointed\n".to_owned(),
         no_session_file(2),
         entries(3, TURN),
-        gate(4),
+        no_session_file(4),
+        gate(5),
         // An extension cancelled the navigation; pi still reports the command handled.
         r#"IFS= read -r line
-printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
+printf '%s\n' '{"id":"6","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
 "#
         .to_owned(),
-        entries(6, ""),
+        no_session_file(7),
+        entries(8, ""),
+        no_session_file(9),
         "IFS= read -r line || exit 0".to_owned(),
     ]
     .concat();
@@ -967,6 +984,7 @@ fn refuses_a_revert_once_the_files_left_the_confirmed_plan() {
         "touch .git/checkpointed\n".to_owned(),
         no_session_file(2),
         entries(3, TURN),
+        no_session_file(4),
         "IFS= read -r line || exit 0".to_owned(),
     ]
     .concat();
@@ -1002,7 +1020,8 @@ fn a_prompt_waits_until_the_revert_moved_the_session() {
         "touch .git/checkpointed\n".to_owned(),
         no_session_file(2),
         entries(3, TURN),
-        gate(4),
+        no_session_file(4),
+        gate(5),
         // An extension asks before the move; the next line must be its answer, not a prompt.
         r#"IFS= read -r line
 case "$line" in *'"type":"prompt"'*) ;; *) exit 9 ;; esac
@@ -1010,14 +1029,16 @@ printf '%s\n' '{"type":"extension_ui_request","id":"x1","method":"confirm","titl
 touch .git/asked
 IFS= read -r line
 case "$line" in *'"id":"x1"'*) ;; *) exit 9 ;; esac
-printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":true}'
+printf '%s\n' '{"id":"6","type":"response","command":"prompt","success":true}'
 "#
         .to_owned(),
-        entries_at(6, "", "c1"),
-        gate(7),
+        no_session_file(7),
+        entries_at(8, "", "c1"),
+        no_session_file(9),
+        gate(10),
         r#"IFS= read -r line
 case "$line" in *'"message":"next"'*) ;; *) exit 9 ;; esac
-printf '%s\n' '{"id":"8","type":"response","command":"prompt","success":true}'
+printf '%s\n' '{"id":"11","type":"response","command":"prompt","success":true}'
 IFS= read -r line || exit 0"#
             .to_owned(),
     ]
@@ -1055,9 +1076,10 @@ fn says_when_the_files_were_reverted_but_the_session_did_not_branch() {
         "touch .git/checkpointed\n".to_owned(),
         no_session_file(2),
         entries(3, TURN),
-        gate(4),
+        no_session_file(4),
+        gate(5),
         r#"IFS= read -r line
-printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":false,"error":"Agent is busy"}'
+printf '%s\n' '{"id":"6","type":"response","command":"prompt","success":false,"error":"Agent is busy"}'
 IFS= read -r line || exit 0"#
             .to_owned(),
     ]
@@ -1258,7 +1280,10 @@ fn a_project_outside_git_has_no_checkpoints_and_says_so() {
         "touch checkpointed\n".to_owned(),
         no_session_file(2),
         entries(3, TURN),
-        entries(4, ""),
+        no_session_file(4),
+        no_session_file(5),
+        entries(6, ""),
+        no_session_file(7),
         "IFS= read -r line || exit 0".to_owned(),
     ]
     .concat();
@@ -1312,16 +1337,19 @@ fn reads_the_history_of_each_branch_and_branches_from_a_step() {
     let script = [
         no_session_file(2),
         respond("3"),
+        no_session_file(4),
+        no_session_file(5),
         // The second read continues after the last entry; nothing was added.
         r#"IFS= read -r line
 case "$line" in *'"since":"b1"'*) ;; *) exit 9 ;; esac
-printf '%s\n' '{"id":"4","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":"b1"}}'
+printf '%s\n' '{"id":"6","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":"b1"}}'
 "#
         .to_owned(),
-        gate(5),
+        no_session_file(7),
+        gate(8),
         r#"IFS= read -r line
 case "$line" in *'"message":"/watershed-branch e1"'*) ;; *) exit 9 ;; esac
-printf '%s\n' '{"id":"6","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
+printf '%s\n' '{"id":"9","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
 IFS= read -r line || exit 0"#
             .to_owned(),
     ]
@@ -1419,8 +1447,13 @@ fn reads_tool_outcomes_and_what_the_model_saw() {
     let entries = r#"{"entries":[{"type":"message","id":"s1","parentId":null,"message":{"role":"system","content":"","sections":{"preamble":"You are pi."},"toolsAdded":[{"name":"write"}]}},{"type":"message","id":"u1","parentId":"s1","message":{"role":"user","content":"Write it"}},{"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"write","arguments":{"path":"a.ts","content":"x\ny\n"}}]}},{"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"c1","toolName":"write","content":[{"type":"text","text":"ok"}]}},{"type":"message","id":"a2","parentId":"r1","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}],"leafId":"a2"}"#;
     let script = no_session_file(2)
         + &format!(
-            "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"3\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{entries}}}'\nIFS= read -r line\nprintf '%s\\n' '{{\"id\":\"4\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[],\"leafId\":\"a2\"}}}}'\nIFS= read -r line || exit 0"
-        );
+            "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"3\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{entries}}}'\n"
+        )
+        + &no_session_file(4)
+        + &no_session_file(5)
+        + "IFS= read -r line\nprintf '%s\\n' '{\"id\":\"6\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{\"entries\":[],\"leafId\":\"a2\"}}'\n"
+        + &no_session_file(7)
+        + "IFS= read -r line || exit 0";
     let session =
         launch(gated(&script), std::env::temp_dir().display().to_string()).expect("agent starts");
     let history = session.history(Vec::new()).expect("history");
@@ -1476,8 +1509,10 @@ fn rebuilds_the_chat_of_the_current_branch() {
     let entries = r#"{"entries":[{"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Fix it"}},{"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"text","text":"Editing."},{"type":"toolCall","id":"c1","name":"edit","arguments":{"path":"a.ts"}}]}},{"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"c1","toolName":"edit","content":[]}}],"leafId":"r1"}"#;
     let script = no_session_file(2)
         + &format!(
-            "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"3\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{entries}}}'\nIFS= read -r line || exit 0"
-        );
+            "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"3\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{entries}}}'\n"
+        )
+        + &no_session_file(4)
+        + "IFS= read -r line || exit 0";
     let session =
         launch(gated(&script), std::env::temp_dir().display().to_string()).expect("agent starts");
     let transcript = session.transcript(None, 50).expect("transcript");
@@ -1637,8 +1672,13 @@ fn commit_bridge_exposes_attribution_whole_files_and_safe_notices() {
         "touch .git/ready\n".to_owned(),
         no_session_file(2),
         entries(3, TURN),
-        entries(4, TURN),
-        entries(5, TURN),
+        no_session_file(4),
+        no_session_file(5),
+        entries(6, TURN),
+        no_session_file(7),
+        no_session_file(8),
+        entries(9, TURN),
+        no_session_file(10),
         "IFS= read -r line || exit 0".to_owned(),
     ]
     .concat();
@@ -1946,6 +1986,7 @@ fn commit_bridge_names_the_created_branch_when_either_hook_refuses() {
         let script = [
             no_session_file(2),
             entries(3, ""),
+            no_session_file(4),
             "IFS= read -r line || exit 0".to_owned(),
         ]
         .concat();
@@ -1993,6 +2034,7 @@ fn a_committed_bridge_outcome_survives_failed_inspection() {
     let script = [
         no_session_file(2),
         entries(3, TURN),
+        no_session_file(4),
         "IFS= read -r line || exit 0".into(),
     ]
     .concat();
