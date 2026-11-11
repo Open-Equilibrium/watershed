@@ -51,6 +51,8 @@ fn collect_registry_files(root: &Path) -> Result<(RegistryRoot, Vec<RegistryFile
 
 #[path = "tests/block_semantics.rs"]
 mod block_semantics;
+#[path = "tests/hostile_yaml.rs"]
+mod hostile_yaml;
 #[path = "tests/instruction_values.rs"]
 mod instruction_values;
 #[path = "tests/loading.rs"]

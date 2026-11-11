@@ -8,3 +8,6 @@
 
 # Shell scripts must stay LF
 *.sh  text eol=lf
+
+# Hostile-definition corpus case whose bytes are CRLF by design (core/core-script)
+core/core-script/fixtures/hostile-yaml/crlf-line-endings.yaml -text

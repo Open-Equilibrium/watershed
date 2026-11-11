@@ -1,0 +1,1 @@
+{"tool":{"allowed_parameters":[],"command":"script:write-summary","id":"write-summary","name":"WriteSummary","script_body":"printf \"%s\" \"café\" > out/summary.txt\n","script_runtime":"posix-sh","tool_kind":"own-script"}}

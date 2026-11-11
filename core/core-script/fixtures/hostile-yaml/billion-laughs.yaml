@@ -1,0 +1,5 @@
+instruction:
+  id: &l0 inspect
+  name: &l1 Inspect
+  prompt: Inspect input
+  parameters: [*l0, *l0, *l0, *l0, *l0, *l0, *l0, *l0, *l0]

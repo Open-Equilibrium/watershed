@@ -1,0 +1,4 @@
+instruction:
+  id: inspect
+  name: Inspect
+  prompt: !!python/object/apply:os.system [echo inspect]
