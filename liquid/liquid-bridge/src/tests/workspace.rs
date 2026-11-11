@@ -1,6 +1,7 @@
 //! The Workspace calls as Dart makes them: the replica's key comes from the keychain, writes
 //! reach their subscribers, and reads stay bounded.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -8,19 +9,66 @@ use crate::api::workspace::{
     BridgeChange, BridgeMutation, BridgeMutationKind, BridgeQuery, BridgeQueryKind, BridgeResource,
     BridgeResourceKind, BridgeTextStyle, LiquidWorkspace, MAX_WINDOW,
 };
-use crate::keys::Keys;
+use crate::keys::{KEY_NAME_FILE, Keys, path_name};
 
-/// A keychain in memory.
+/// A keychain in memory, with one entry per name.
 #[derive(Default)]
-pub(super) struct Memory(Mutex<Option<[u8; 32]>>);
+pub(super) struct Memory(Mutex<HashMap<String, [u8; 32]>>);
 
-impl Keys for Memory {
-    fn read(&self) -> Result<Option<[u8; 32]>, String> {
-        Ok(*self.0.lock().unwrap())
+impl Memory {
+    /// The key it holds, if it holds exactly one.
+    pub(super) fn only(&self) -> Option<[u8; 32]> {
+        let keys = self.0.lock().unwrap();
+        (keys.len() == 1).then(|| *keys.values().next().unwrap())
+    }
+}
+
+/// A keychain that answers every name with the same key.
+struct Any([u8; 32]);
+
+impl Keys for Any {
+    fn read(&self, _: &str) -> Result<Option<[u8; 32]>, String> {
+        Ok(Some(self.0))
     }
 
-    fn write(&self, key: &[u8; 32]) -> Result<(), String> {
-        *self.0.lock().unwrap() = Some(*key);
+    fn write(&self, _: &str, _: &[u8; 32]) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn delete(&self, _: &str) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// A keychain whose writes are refused.
+struct Refusing<'a>(&'a Memory);
+
+impl Keys for Refusing<'_> {
+    fn read(&self, name: &str) -> Result<Option<[u8; 32]>, String> {
+        self.0.read(name)
+    }
+
+    fn write(&self, _: &str, _: &[u8; 32]) -> Result<(), String> {
+        Err("the keychain refused the write".into())
+    }
+
+    fn delete(&self, name: &str) -> Result<(), String> {
+        self.0.delete(name)
+    }
+}
+
+impl Keys for Memory {
+    fn read(&self, name: &str) -> Result<Option<[u8; 32]>, String> {
+        Ok(self.0.lock().unwrap().get(name).copied())
+    }
+
+    fn write(&self, name: &str, key: &[u8; 32]) -> Result<(), String> {
+        self.0.lock().unwrap().insert(name.into(), *key);
+        Ok(())
+    }
+
+    fn delete(&self, name: &str) -> Result<(), String> {
+        self.0.lock().unwrap().remove(name);
         Ok(())
     }
 }
@@ -160,8 +208,81 @@ fn a_replica_without_its_key_is_refused() {
         missing.err().unwrap(),
         "the replica's key is missing from the keychain"
     );
-    let wrong = Memory(Mutex::new(Some([9; 32])));
-    assert!(LiquidWorkspace::open_with(&folder.0, &wrong).is_err());
+    assert!(LiquidWorkspace::open_with(&folder.0, &Any([9; 32])).is_err());
+}
+
+#[test]
+fn a_moved_replica_opens_with_its_key() {
+    let folder = Folder::new("moved");
+    let keys = Memory::default();
+    lisbon(&LiquidWorkspace::open_with(&folder.0, &keys).unwrap());
+    let moved = Folder::new("moved-to");
+    std::fs::rename(&folder.0, &moved.0).unwrap();
+
+    let workspace = LiquidWorkspace::open_with(&moved.0, &keys).unwrap();
+    assert_eq!(
+        workspace
+            .query(query(BridgeQueryKind::Areas))
+            .unwrap()
+            .count,
+        1
+    );
+    assert!(moved.0.join(KEY_NAME_FILE).is_file());
+}
+
+/// A replica as Liquid kept it before key names: its key filed under the folder's path and no
+/// key name file.
+fn filed_under_path(folder: &Folder) -> Memory {
+    let keys = Memory::default();
+    lisbon(&LiquidWorkspace::open_with(&folder.0, &keys).unwrap());
+    let key = keys.only().unwrap();
+    let _ = std::fs::remove_file(folder.0.join(KEY_NAME_FILE));
+    let filed = Memory::default();
+    filed.write(&path_name(&folder.0).unwrap(), &key).unwrap();
+    filed
+}
+
+#[test]
+fn a_key_filed_under_the_folder_path_moves_to_a_key_name_once() {
+    let folder = Folder::new("migrate");
+    let keys = filed_under_path(&folder);
+    let path = path_name(&folder.0).unwrap();
+
+    let workspace = LiquidWorkspace::open_with(&folder.0, &keys).unwrap();
+    assert_eq!(
+        workspace
+            .query(query(BridgeQueryKind::Areas))
+            .unwrap()
+            .count,
+        1
+    );
+    drop(workspace);
+    assert_eq!(keys.read(&path).unwrap(), None);
+    assert!(folder.0.join(KEY_NAME_FILE).is_file());
+    assert!(LiquidWorkspace::open_with(&folder.0, &keys).is_ok());
+}
+
+#[test]
+fn a_failed_key_migration_keeps_the_old_key_for_a_retry() {
+    let folder = Folder::new("retry");
+    let keys = filed_under_path(&folder);
+    let path = path_name(&folder.0).unwrap();
+
+    assert!(LiquidWorkspace::open_with(&folder.0, &Refusing(&keys)).is_err());
+    assert!(keys.read(&path).unwrap().is_some());
+    assert!(LiquidWorkspace::open_with(&folder.0, &keys).is_ok());
+    assert_eq!(keys.read(&path).unwrap(), None);
+}
+
+#[test]
+fn a_malformed_key_name_file_is_refused() {
+    let folder = Folder::new("malformed");
+    let keys = Memory::default();
+    lisbon(&LiquidWorkspace::open_with(&folder.0, &keys).unwrap());
+    std::fs::write(folder.0.join(KEY_NAME_FILE), "not a key name").unwrap();
+
+    let error = LiquidWorkspace::open_with(&folder.0, &keys).err().unwrap();
+    assert!(error.contains("malformed"), "{error}");
 }
 
 #[test]
@@ -347,27 +468,32 @@ fn a_window_never_exceeds_its_cap() {
 #[test]
 #[ignore = "needs the operating system's keychain"]
 fn the_keychain_keeps_a_replica_key() {
+    let keychain = crate::keys::Keychain;
+    let name = "liquid-bridge-test";
+    keychain.delete(name).unwrap();
+    assert_eq!(keychain.read(name).unwrap(), None);
+    keychain.write(name, &[5; 32]).unwrap();
+    assert_eq!(keychain.read(name).unwrap(), Some([5; 32]));
+    keychain.delete(name).unwrap();
+    assert_eq!(keychain.read(name).unwrap(), None);
+
     let folder = Folder::new("keychain");
-    std::fs::create_dir_all(&folder.0).unwrap();
-    let keychain = crate::keys::Keychain::for_replica(&folder.0).unwrap();
-    assert_eq!(keychain.read().unwrap(), None);
-    keychain.write(&[5; 32]).unwrap();
-    assert_eq!(keychain.read().unwrap(), Some([5; 32]));
     lisbon(&LiquidWorkspace::open(folder.0.display().to_string()).unwrap());
     let reopened = LiquidWorkspace::open(folder.0.display().to_string()).unwrap();
     assert_eq!(
         reopened.query(query(BridgeQueryKind::Areas)).unwrap().count,
         1
     );
-    keychain.delete().unwrap();
+    let key_name = std::fs::read_to_string(folder.0.join(KEY_NAME_FILE)).unwrap();
+    keychain.delete(&key_name).unwrap();
 }
 
 #[cfg(unix)]
 #[test]
-fn a_folder_whose_path_is_not_utf8_gets_no_keychain_entry() {
+fn a_folder_whose_path_is_not_utf8_has_no_key_name() {
     use std::os::unix::ffi::OsStrExt;
     let folder = std::ffi::OsStr::from_bytes(b"/nonexistent/replica-\x80");
-    assert!(crate::keys::Keychain::for_replica(std::path::Path::new(folder)).is_err());
+    assert!(path_name(std::path::Path::new(folder)).is_err());
 }
 
 #[test]
@@ -375,14 +501,14 @@ fn one_session_at_a_time_opens_a_replica_folder() {
     let folder = Folder::new("exclusive");
     let keys = Memory::default();
     let first = LiquidWorkspace::open_with(&folder.0, &keys).unwrap();
-    let key = keys.read().unwrap();
+    let key = keys.only();
 
     let second = LiquidWorkspace::open_with(&folder.0, &Memory::default());
     assert_eq!(
         second.err().unwrap(),
         "another Liquid session holds this replica"
     );
-    assert_eq!(keys.read().unwrap(), key);
+    assert_eq!(keys.only(), key);
     drop(first);
     assert!(LiquidWorkspace::open_with(&folder.0, &keys).is_ok());
 }

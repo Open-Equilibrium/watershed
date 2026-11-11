@@ -24,7 +24,7 @@ use super::database::{
 };
 
 use crate::frb_generated::StreamSink;
-use crate::keys::{Keychain, Keys};
+use crate::keys::{Keychain, Keys, random_hex, replica_key};
 
 /// The most items one query answers, so no answer carries an unbounded list.
 pub const MAX_WINDOW: i64 = 500;
@@ -380,12 +380,6 @@ fn message(error: Error) -> String {
     }
 }
 
-fn random_hex() -> Result<String, String> {
-    let mut bytes = [0u8; 16];
-    getrandom::fill(&mut bytes).map_err(|error| error.to_string())?;
-    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
-}
-
 pub(crate) fn id<T>(
     text: &Option<String>,
     parse: fn(&str) -> Option<T>,
@@ -661,9 +655,9 @@ impl LiquidWorkspace {
     /// use. The replica's key lives in the operating system's keychain (ADR-0237).
     pub fn open(dir: String) -> Result<LiquidWorkspace, String> {
         let dir = Path::new(&dir);
-        // Created first, so the keychain names the folder by its canonical path every time.
+        // Created first, so the folder's canonical path is known when an older key is looked up.
         std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
-        Self::open_with(dir, &Keychain::for_replica(dir)?)
+        Self::open_with(dir, &Keychain)
     }
 
     /// Opens with `keys` in place of the keychain, for tests.
@@ -675,18 +669,7 @@ impl LiquidWorkspace {
         let lock = open_lock(&dir.join("replica.lock"))?;
         take_lock(&lock)?;
         let path = dir.join("replica.db");
-        let key = match keys.read()? {
-            Some(key) => key,
-            None if path.exists() => {
-                return Err("the replica's key is missing from the keychain".into());
-            }
-            None => {
-                let mut key = [0u8; 32];
-                getrandom::fill(&mut key).map_err(|error| error.to_string())?;
-                keys.write(&key)?;
-                key
-            }
-        };
+        let key = replica_key(dir, keys, path.exists())?;
         let workspace = match Workspace::open(Sqlite::open(&path, &key).map_err(message)?) {
             Ok(workspace) => workspace,
             // A new replica: until accounts exist, the device's person creates and owns it.

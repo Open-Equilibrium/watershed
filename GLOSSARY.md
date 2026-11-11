@@ -152,6 +152,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **CRDT** — Conflict-free replicated data type: a data structure whose independently edited copies merge deterministically to the same state. Liquid sync uses an established CRDT library (ADR-0182): Automerge 3 (ADR-0238).
 - **Rust–Flutter bridge** — The asynchronous call and stream boundary between Liquid's Flutter UI and its Rust core. It carries bounded deltas, never whole Pages or Databases (ADR-0182); it uses flutter_rust_bridge v2 (ADR-0186).
 - **Liquid replica** — A complete local working copy of an authorized Workspace. Interactive reads and writes never require a remote round trip.
+- **Replica key name** — The random name, kept in a small file in the replica's folder, under which the operating system's keychain files the replica's database key, so the key follows a moved folder (ADR-0275).
 - **Sync Server** — Central service in the replica star topology. It stores and exchanges committed Workspace changes resumably; it does not execute App Blocks or control agents.
 - **Harness handoff** — Continuing a conversation in another harness as a new session that receives the earlier conversation as bounded text, without native tool or reasoning state (ADR-0231).
 - **Area** — A part of a Workspace that Roles, replication and encryption treat as one unit. Its area key is wrapped for every device and headless replica allowed in it (ADR-0224, ADR-0228).
