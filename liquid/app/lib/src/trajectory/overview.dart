@@ -108,20 +108,8 @@ class _OverviewState extends State<Overview> {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    final Overview(
-      :tracks,
-      :span,
-      :equalWidth,
-      :window,
-      :onWindow,
-      :brush,
-      :onJump,
-      :matches,
-      :mark,
-      :legend,
-    ) = widget;
     final small = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
-    final visible = window ?? (0, math.max(span, 1));
+    final visible = widget.window ?? (0, math.max(widget.span, 1));
     return Container(
       padding: const EdgeInsets.fromLTRB(
         WsMetrics.space5,
@@ -146,133 +134,11 @@ class _OverviewState extends State<Overview> {
               double at(double x) =>
                   visible.$1 +
                   (x.clamp(0, width) / width) * (visible.$2 - visible.$1);
-              // Zooms around `x`; positive `delta` zooms out.
-              void zoom(double x, double delta, {double? scale}) {
-                if (scale != null) _lastScale = scale;
-                final pivot = at(x);
-                final factor = math.exp(delta / 500);
-                final length = ((visible.$2 - visible.$1) * factor).clamp(
-                  span / 1000,
-                  span,
-                );
-                final fraction =
-                    (pivot - visible.$1) / (visible.$2 - visible.$1);
-                final start = (pivot - fraction * length).clamp(
-                  0.0,
-                  span - length,
-                );
-                onWindow(length >= span ? null : (start, start + length));
-              }
-
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SizedBox(
-                    width: _labelWidth,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const SizedBox(height: _axisHeight),
-                        for (final track in tracks)
-                          Padding(
-                            padding: const EdgeInsets.only(
-                              top: WsMetrics.space2,
-                            ),
-                            child: SizedBox(
-                              height: _trackHeight,
-                              child: Text(
-                                track.label,
-                                style: small.copyWith(height: 1),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: Listener(
-                      // A mouse wheel scrolls; a trackpad pans and pinches.
-                      onPointerSignal: (signal) {
-                        if (signal is PointerScrollEvent) {
-                          zoom(signal.localPosition.dx, signal.scrollDelta.dy);
-                        }
-                      },
-                      onPointerPanZoomUpdate: (update) => zoom(
-                        update.localPosition.dx,
-                        update.localPanDelta.dy -
-                            500 * math.log(update.scale / _lastScale),
-                        scale: update.scale,
-                      ),
-                      onPointerPanZoomEnd: (_) => _lastScale = 1,
-                      child: Stack(
-                        children: [
-                          GestureDetector(
-                            key: const Key('overview-tracks'),
-                            behavior: HitTestBehavior.opaque,
-                            onTapUp: onJump == null
-                                ? null
-                                : (details) =>
-                                      onJump(at(details.localPosition.dx)),
-                            child: Column(
-                              children: [
-                                SizedBox(
-                                  height: _axisHeight,
-                                  width: double.infinity,
-                                  child: CustomPaint(
-                                    painter: _AxisPainter(
-                                      visible: visible,
-                                      equalWidth: equalWidth,
-                                      mark: mark,
-                                      palette: ws,
-                                    ),
-                                  ),
-                                ),
-                                for (final track in tracks)
-                                  Padding(
-                                    padding: const EdgeInsets.only(
-                                      top: WsMetrics.space2,
-                                    ),
-                                    child: SizedBox(
-                                      height: _trackHeight,
-                                      width: double.infinity,
-                                      child: CustomPaint(
-                                        painter: _TrackPainter(
-                                          segments: track.segments,
-                                          visible: visible,
-                                          matches: matches,
-                                          palette: ws,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                          // The brush moves with every scroll of the list; its own layer
-                          // keeps the tracks from being painted again each time.
-                          if (brush != null)
-                            Positioned.fill(
-                              child: RepaintBoundary(
-                                child: ValueListenableBuilder(
-                                  valueListenable: brush,
-                                  builder: (context, brush, _) => brush == null
-                                      ? const SizedBox.shrink()
-                                      : _BrushView(
-                                          brush: brush,
-                                          width: width,
-                                          visible: visible,
-                                          at: at,
-                                          onRange: widget.onRange,
-                                          onPan: widget.onPan,
-                                          onJump: onJump,
-                                        ),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
+                  _labels(small),
+                  Expanded(child: _plot(visible, width, at)),
                   const SizedBox(width: WsMetrics.space2),
                   Tooltip(
                     message:
@@ -288,40 +154,163 @@ class _OverviewState extends State<Overview> {
               );
             },
           ),
-          if (legend)
-            Padding(
-              padding: const EdgeInsets.only(
-                left: _labelWidth,
-                top: WsMetrics.space2,
-              ),
-              child: Row(
-                children: [
-                  for (final (label, kind) in [
-                    ('model', BridgeRecordKind.message),
-                    ('tool', BridgeRecordKind.tool),
-                  ]) ...[
-                    Container(
-                      width: WsMetrics.space3,
-                      height: WsMetrics.space3,
-                      decoration: BoxDecoration(
-                        color: kindColor(ws, kind),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                    const SizedBox(width: WsMetrics.space2),
-                    Text(
-                      label,
-                      style: small.copyWith(fontSize: WsMetrics.fsCaption),
-                    ),
-                    const SizedBox(width: WsMetrics.space5),
-                  ],
-                ],
+          if (widget.legend) _legend(ws, small),
+        ],
+      ),
+    );
+  }
+
+  /// The track labels, beside the tracks and under the empty axis.
+  Widget _labels(TextStyle small) => SizedBox(
+    width: _labelWidth,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: _axisHeight),
+        for (final track in widget.tracks)
+          Padding(
+            padding: const EdgeInsets.only(top: WsMetrics.space2),
+            child: SizedBox(
+              height: _trackHeight,
+              child: Text(track.label, style: small.copyWith(height: 1)),
+            ),
+          ),
+      ],
+    ),
+  );
+
+  /// The axis and tracks, with the brush over them; a wheel or trackpad zooms around the pointer.
+  Widget _plot(
+    (double, double) visible,
+    double width,
+    double Function(double) at,
+  ) {
+    final span = widget.span;
+    // Zooms around `x`; positive `delta` zooms out.
+    void zoom(double x, double delta, {double? scale}) {
+      if (scale != null) _lastScale = scale;
+      final pivot = at(x);
+      final factor = math.exp(delta / 500);
+      final length = ((visible.$2 - visible.$1) * factor).clamp(
+        span / 1000,
+        span,
+      );
+      final fraction = (pivot - visible.$1) / (visible.$2 - visible.$1);
+      final start = (pivot - fraction * length).clamp(0.0, span - length);
+      widget.onWindow(length >= span ? null : (start, start + length));
+    }
+
+    return Listener(
+      // A mouse wheel scrolls; a trackpad pans and pinches.
+      onPointerSignal: (signal) {
+        if (signal is PointerScrollEvent) {
+          zoom(signal.localPosition.dx, signal.scrollDelta.dy);
+        }
+      },
+      onPointerPanZoomUpdate: (update) => zoom(
+        update.localPosition.dx,
+        update.localPanDelta.dy - 500 * math.log(update.scale / _lastScale),
+        scale: update.scale,
+      ),
+      onPointerPanZoomEnd: (_) => _lastScale = 1,
+      child: Stack(
+        children: [
+          _paths(visible, at),
+          // The brush moves with every scroll of the list; its own layer
+          // keeps the tracks from being painted again each time.
+          if (widget.brush case final brush?)
+            Positioned.fill(
+              child: RepaintBoundary(
+                child: ValueListenableBuilder(
+                  valueListenable: brush,
+                  builder: (context, brush, _) => brush == null
+                      ? const SizedBox.shrink()
+                      : _BrushView(
+                          brush: brush,
+                          width: width,
+                          visible: visible,
+                          at: at,
+                          onRange: widget.onRange,
+                          onPan: widget.onPan,
+                          onJump: widget.onJump,
+                        ),
+                ),
               ),
             ),
         ],
       ),
     );
   }
+
+  /// The axis and each track painted over the time axis; a click on them jumps to that point.
+  Widget _paths((double, double) visible, double Function(double) at) {
+    final ws = context.ws;
+    final Overview(:tracks, :equalWidth, :onJump, :matches, :mark) = widget;
+    return GestureDetector(
+      key: const Key('overview-tracks'),
+      behavior: HitTestBehavior.opaque,
+      onTapUp: onJump == null
+          ? null
+          : (details) => onJump(at(details.localPosition.dx)),
+      child: Column(
+        children: [
+          SizedBox(
+            height: _axisHeight,
+            width: double.infinity,
+            child: CustomPaint(
+              painter: _AxisPainter(
+                visible: visible,
+                equalWidth: equalWidth,
+                mark: mark,
+                palette: ws,
+              ),
+            ),
+          ),
+          for (final track in tracks)
+            Padding(
+              padding: const EdgeInsets.only(top: WsMetrics.space2),
+              child: SizedBox(
+                height: _trackHeight,
+                width: double.infinity,
+                child: CustomPaint(
+                  painter: _TrackPainter(
+                    segments: track.segments,
+                    visible: visible,
+                    matches: matches,
+                    palette: ws,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Explains the two colors of the tracks below them.
+  Widget _legend(WsPalette ws, TextStyle small) => Padding(
+    padding: const EdgeInsets.only(left: _labelWidth, top: WsMetrics.space2),
+    child: Row(
+      children: [
+        for (final (label, kind) in [
+          ('model', BridgeRecordKind.message),
+          ('tool', BridgeRecordKind.tool),
+        ]) ...[
+          Container(
+            width: WsMetrics.space3,
+            height: WsMetrics.space3,
+            decoration: BoxDecoration(
+              color: kindColor(ws, kind),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: WsMetrics.space2),
+          Text(label, style: small.copyWith(fontSize: WsMetrics.fsCaption)),
+          const SizedBox(width: WsMetrics.space5),
+        ],
+      ],
+    ),
+  );
 }
 
 /// The track labels' column, as the approved mockup draws it; no token is this wide.
