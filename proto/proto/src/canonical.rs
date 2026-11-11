@@ -100,7 +100,8 @@ pub fn parse_unique_json(source: &str) -> Result<Value, serde_json::Error> {
     serde_json::from_str::<UniqueJsonValue>(source).map(UniqueJsonValue::into_json)
 }
 
-pub(crate) fn is_nfc(value: &str) -> bool {
+/// Whether `value` is already in Unicode NFC form.
+pub fn is_nfc(value: &str) -> bool {
     value.nfc().eq(value.chars())
 }
 

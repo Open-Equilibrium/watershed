@@ -20,7 +20,6 @@ pub fn parameter_pattern_matches(pattern: &str, value: &str) -> Result<bool, Str
         .map_err(|error| error.to_string())
 }
 use std::{collections::BTreeMap, fmt};
-use unicode_normalization::UnicodeNormalization;
 
 /// Failure to validate, compare, or render an M1.1 runtime value.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -439,7 +438,7 @@ fn validate_key(value: &str, path: &str) -> Result<(), FlowValueError> {
 }
 
 fn validate_nfc(value: &str, path: &str) -> Result<(), FlowValueError> {
-    if value.nfc().ne(value.chars()) {
+    if !proto::is_nfc(value) {
         return Err(FlowValueError::new(format!("{path} must use NFC text")));
     }
     Ok(())

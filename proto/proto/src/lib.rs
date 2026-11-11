@@ -10,7 +10,7 @@ mod flow_value;
 mod metadata;
 mod session_object;
 
-pub use canonical::{canonical_json, parse_unique_json};
+pub use canonical::{canonical_json, is_nfc, parse_unique_json};
 pub use error::{CanonicalJsonError, EventValidationError};
 pub use event::{
     EventEnvelope, EventStateIdentifierKind, MAX_EVENT_PAYLOAD_STATE_IDENTIFIERS_V0,
