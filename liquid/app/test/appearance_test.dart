@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/theme/tokens.g.dart';
@@ -113,8 +114,8 @@ void main() {
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(1600, 900));
-    final appearance = AppearanceController(const Appearance(), _Full());
-    final diff = DiffSettingsController(const DiffSettings(), _Full());
+    final appearance = AppearanceController(const Appearance(), _Disk());
+    final diff = DiffSettingsController(const DiffSettings(), _Disk());
     final state = SessionState(FakeBackend());
     await tester.pumpWidget(
       LiquidApp(
@@ -136,13 +137,93 @@ void main() {
     );
     expect(appearance.value.theme, ThemeChoice.dark, reason: 'still applies');
   });
+
+  /// Opens Settings in a session with `appearance` and `diff` kept as they are.
+  Future<void> openSettings(
+    WidgetTester tester,
+    AppearanceController appearance, [
+    DiffSettingsController? diff,
+  ]) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    await tester.pumpWidget(
+      LiquidApp(
+        launch: Launch.session(SessionState(FakeBackend()), info),
+        appearance: appearance,
+        diffSettings: diff,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('a failed save shows one notice at the top of Settings until ✕', (
+    tester,
+  ) async {
+    final appearance = AppearanceController(const Appearance(), _Disk());
+    await openSettings(tester, appearance);
+    await tester.tap(find.text('Dark'));
+    await tester.pumpAndSettle();
+
+    final notice = find.text('Could not save the appearance: disk full');
+    expect(notice, findsOneWidget);
+    expect(appearance.value.theme, ThemeChoice.dark, reason: 'still applies');
+    await tester.tap(find.text('Shortcuts'));
+    await tester.pumpAndSettle();
+    expect(notice, findsOneWidget, reason: 'whichever section is open');
+
+    await tester.tap(find.byTooltip('Dismiss'));
+    await tester.pumpAndSettle();
+    expect(notice, findsNothing);
+  });
+
+  testWidgets('esc dismisses the notice and keeps Settings open', (
+    tester,
+  ) async {
+    final appearance = AppearanceController(const Appearance(), _Disk());
+    await openSettings(tester, appearance);
+    await tester.tap(find.text('Dark'));
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.text('Could not save the appearance: disk full'), findsNothing);
+    expect(find.text('Appearance'), findsWidgets, reason: 'Settings stay open');
+  });
+
+  testWidgets('the next save of the same settings clears the notice', (
+    tester,
+  ) async {
+    final disk = _Disk();
+    final appearance = AppearanceController(const Appearance(), disk);
+    final diff = DiffSettingsController(
+      const DiffSettings(),
+      _Disk(failing: false),
+    );
+    await openSettings(tester, appearance, diff);
+    await tester.tap(find.text('Dark'));
+    await tester.pumpAndSettle();
+
+    final notice = find.text('Could not save the appearance: disk full');
+    await diff.change(const DiffSettings(layout: DiffLayout.split));
+    await tester.pumpAndSettle();
+    expect(notice, findsOneWidget, reason: 'another settings saved');
+
+    disk.failing = false;
+    await tester.tap(find.text('Light'));
+    await tester.pumpAndSettle();
+    expect(notice, findsNothing);
+  });
 }
 
-/// A settings file on a full disk.
-class _Full extends SettingsFile {
-  _Full() : super(File('unused'));
+/// A settings file on a full disk, which saves again once `failing` is cleared.
+class _Disk extends SettingsFile {
+  _Disk({this.failing = true}) : super(File('unused'));
+
+  bool failing;
 
   @override
-  Future<void> save(Map<String, Object?> json) async =>
-      throw const FileSystemException('disk full');
+  Future<void> save(Map<String, Object?> json) async {
+    if (failing) throw const FileSystemException('disk full');
+  }
 }

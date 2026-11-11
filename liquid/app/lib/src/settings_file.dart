@@ -76,6 +76,9 @@ class SettingsFile {
   }
 }
 
+/// A failed save of `settings` and the message that says so, as Settings show it.
+typedef SaveFailure = ({SavedSettings<Object?> settings, String text});
+
 /// Settings in use that a [SettingsFile] keeps: each change applies at once and is saved after
 /// the saves before it, so the last change is the one kept. A failed save goes to [report].
 class SavedSettings<T> extends ValueNotifier<T> {
@@ -88,6 +91,9 @@ class SavedSettings<T> extends ValueNotifier<T> {
   final String _name;
 
   Future<void> _saving = Future.value();
+
+  /// Receives each save's failure, or null once a save wrote the settings again.
+  void Function(String? failure)? saveOutcome;
 
   /// Uses `next` at once and saves it.
   Future<void> change(T next) {
@@ -104,8 +110,11 @@ class SavedSettings<T> extends ValueNotifier<T> {
     return _saving = _saving.then((_) async {
       try {
         await write(settings);
+        saveOutcome?.call(null);
       } on FileSystemException catch (error) {
-        problem('Could not save $_name: ${error.message}');
+        final failure = 'Could not save $_name: ${error.message}';
+        saveOutcome?.call(failure);
+        problem(failure);
       }
     });
   }

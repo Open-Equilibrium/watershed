@@ -336,6 +336,11 @@ void main() {
         find.descendant(of: find.byType(SettingsPage), matching: reason),
         findsOneWidget,
       );
+      expect(
+        find.byTooltip('Dismiss'),
+        findsNothing,
+        reason: 'the Liquid key keeps its own notice, not the save notice',
+      );
 
       host.failure = null;
       await tester.tap(find.text('Custom'));

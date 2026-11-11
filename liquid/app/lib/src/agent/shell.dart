@@ -98,6 +98,10 @@ class _AgentShellState extends State<AgentShell> {
     widget.appearance,
   ];
 
+  /// The latest failed save, which Settings show at their top until ✕ or esc, or until the same
+  /// settings save again.
+  final _saveFailure = ValueNotifier<SaveFailure?>(null);
+
   /// Stops the agent before the app exits, so no pi process outlives Liquid.
   late final _lifecycle = AppLifecycleListener(
     // The pull request summary is read again when the window regains focus.
@@ -127,10 +131,11 @@ class _AgentShellState extends State<AgentShell> {
     widget.workspace?.open.addListener(_pageOpened);
     // A reopened Trajectory tab starts outside the comparison.
     _tab.addListener(() => _comparing.value = false);
-    for (final settings in _saved) {
-      settings?.report = (problem) => widget.state != null
+    for (final settings in _saved.nonNulls) {
+      settings.report = (problem) => widget.state != null
           ? widget.state!.notify(BridgeLevel.error, problem)
           : widget.workspace?.problem.value = problem;
+      settings.saveOutcome = (failure) => _saveOutcome(settings, failure);
     }
     if (_shortcuts.firstStart) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _askProfile());
@@ -152,6 +157,15 @@ class _AgentShellState extends State<AgentShell> {
     // A question closed it before a choice; it asks again once it is answered.
     if (profile == null) return;
     await _shortcuts.change(_shortcuts.value.choose(profile));
+  }
+
+  /// Shows a failed save at the top of Settings, or clears the notice once the same settings save.
+  void _saveOutcome(SavedSettings<Object?> settings, String? failure) {
+    if (failure != null) {
+      _saveFailure.value = (settings: settings, text: failure);
+    } else if (_saveFailure.value?.settings == settings) {
+      _saveFailure.value = null;
+    }
   }
 
   /// Settings replace the main area; closing them gives the keys back to the shell.
@@ -223,9 +237,11 @@ class _AgentShellState extends State<AgentShell> {
     _comparing.dispose();
     _settings.dispose();
     _focus.dispose();
-    for (final settings in _saved) {
-      settings?.report = null;
+    for (final settings in _saved.nonNulls) {
+      settings.report = null;
+      settings.saveOutcome = null;
     }
+    _saveFailure.dispose();
     if (widget.shortcuts == null) _shortcuts.dispose();
     _diffSettings.removeListener(_hideWhitespace);
     if (widget.diffSettings == null) _diffSettings.dispose();
@@ -394,6 +410,9 @@ class _AgentShellState extends State<AgentShell> {
                             shortcuts: _shortcuts,
                             appearance: widget.appearance,
                             onClose: _toggleSettings,
+                            saveFailure: _saveFailure,
+                            onDismissSaveFailure: () =>
+                                _saveFailure.value = null,
                             worktrees: widget.state == null
                                 ? null
                                 : WorktreesPane(
