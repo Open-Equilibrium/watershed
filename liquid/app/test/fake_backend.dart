@@ -785,6 +785,23 @@ class FakeBackend implements SessionBackend {
     return turnCounts[path] ?? 0;
   }
 
+  /// The folder an export returns, or the error it throws.
+  String exportFolder =
+      '/Users/ana/Downloads/Rate limit for login – record 2026-11-11';
+  Object? exportError;
+
+  @override
+  Future<String> exportRecord({
+    required String path,
+    required String title,
+    required String host,
+    required String day,
+  }) async {
+    calls.add('export $path');
+    if (exportError case final error?) throw error;
+    return exportFolder;
+  }
+
   @override
   Future<void> deleteSession(String path) async {
     calls.add('delete $path');

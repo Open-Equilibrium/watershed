@@ -84,8 +84,12 @@ class Sidebar extends StatelessWidget {
   /// Shows the session in place of the open Page.
   final VoidCallback? onShowSession;
 
-  /// Asks before deleting the open session, which a new session then replaces.
-  Future<void> _deleteOpen(BuildContext context, SessionState state) async {
+  /// Runs `action` on the open session's file and title; a session pi keeps in memory has none.
+  Future<void> _openSessionFile(
+    BuildContext context,
+    SessionState state,
+    Future<void> Function(String path, String title) action,
+  ) async {
     final generation = state.generation;
     final String? path;
     try {
@@ -103,12 +107,7 @@ class Sidebar extends StatelessWidget {
       );
       return;
     }
-    await confirmDeleteSession(
-      context,
-      state,
-      path: path,
-      title: state.sessionTitle.value ?? 'New session',
-    );
+    await action(path, state.sessionTitle.value ?? 'New session');
   }
 
   /// The project and the session's card, which shows the session when tapped.
@@ -163,8 +162,27 @@ class Sidebar extends StatelessWidget {
       RowMenu(
         actions: [
           RowAction(
+            'Export record',
+            () => _openSessionFile(
+              context,
+              state,
+              (path, title) =>
+                  exportSessionRecord(state, path: path, title: title),
+            ),
+          ),
+          null,
+          RowAction(
             'Delete session…',
-            () => _deleteOpen(context, state),
+            () => _openSessionFile(
+              context,
+              state,
+              (path, title) => confirmDeleteSession(
+                context,
+                state,
+                path: path,
+                title: title,
+              ),
+            ),
             danger: true,
           ),
         ],

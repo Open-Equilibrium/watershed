@@ -718,6 +718,29 @@ class SessionState {
     return true;
   }
 
+  /// Writes the record of the session stored at `path` into Downloads and returns its folder;
+  /// returns none and says why when nothing was written.
+  Future<String?> exportRecord({
+    required String path,
+    required String title,
+    required String host,
+    required String day,
+  }) async {
+    try {
+      final folder = await _backend.exportRecord(
+        path: path,
+        title: title,
+        host: host,
+        day: day,
+      );
+      notify(BridgeLevel.info, 'Exported the record of “$title” to Downloads.');
+      return folder;
+    } on Object catch (error) {
+      notify(BridgeLevel.error, 'Nothing was exported: $error');
+      return null;
+    }
+  }
+
   /// Waits, up to a few seconds, until the stopped agent no longer runs.
   Future<void> _settled() async {
     bool busy() => switch (status.value) {

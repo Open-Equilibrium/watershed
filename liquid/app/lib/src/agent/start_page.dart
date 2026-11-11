@@ -90,6 +90,15 @@ class _RecentRow extends StatelessWidget {
     return RowMenu(
       actions: [
         RowAction(
+          'Export record',
+          () => exportSessionRecord(
+            state,
+            path: session.path,
+            title: session.title,
+          ),
+        ),
+        null,
+        RowAction(
           'Delete session…',
           () => confirmDeleteSession(
             context,

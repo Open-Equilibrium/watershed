@@ -263,6 +263,33 @@ Future<void> confirmRemoveCheckpoints(
   if (confirmed == true) await state.removeAllCheckpoints();
 }
 
+/// Writes the record of the session stored at `path`, named `title`, into Downloads and shows the
+/// new folder in the system's file manager; when nothing was written, nothing is shown.
+Future<void> exportSessionRecord(
+  SessionState state, {
+  required String path,
+  required String title,
+}) async {
+  final folder = await state.exportRecord(
+    path: path,
+    title: title,
+    host: Platform.localHostname,
+    day: _localDay(DateTime.now()),
+  );
+  if (folder != null) await openInFileManager(state, folder);
+}
+
+/// The local date as `YYYY-MM-DD`, which names a record's folder.
+String _localDay(DateTime now) =>
+    '${now.year.toString().padLeft(4, '0')}-'
+    '${now.month.toString().padLeft(2, '0')}-'
+    '${now.day.toString().padLeft(2, '0')}';
+
+/// Starts the system's opener, `open` on macOS and `xdg-open` elsewhere. Tests replace it.
+@visibleForTesting
+Future<ProcessResult> Function(String program, List<String> arguments)
+runOpener = Process.run;
+
 /// Shows the folder at `path` in the system's file manager; a failure is reported.
 Future<void> openInFileManager(SessionState state, String path) =>
     _openWithSystem(state, path);
@@ -279,7 +306,7 @@ Future<void> openInBrowser(SessionState state, String url) async {
 /// Opens `target` with the system's default application; a failure is reported.
 Future<void> _openWithSystem(SessionState state, String target) async {
   try {
-    final result = await Process.run(Platform.isMacOS ? 'open' : 'xdg-open', [
+    final result = await runOpener(Platform.isMacOS ? 'open' : 'xdg-open', [
       target,
     ]);
     if (result.exitCode != 0) {

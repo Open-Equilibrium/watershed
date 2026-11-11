@@ -69,6 +69,14 @@ abstract interface class SessionBackend {
   /// Deletes the stored session at `path`, not the open one, with its checkpoints.
   Future<void> deleteSession(String path);
 
+  /// Writes the record of the session stored at `path` into Downloads; returns the folder.
+  Future<String> exportRecord({
+    required String path,
+    required String title,
+    required String host,
+    required String day,
+  });
+
   /// The project's recent stored sessions, newest first, without the current one.
   Future<List<BridgeStoredSession>> recentSessions();
 
@@ -291,6 +299,13 @@ class RustSessionBackend implements SessionBackend {
       (await _session.storedTurns(path: path)).toInt();
   @override
   Future<void> deleteSession(String path) => _session.deleteSession(path: path);
+  @override
+  Future<String> exportRecord({
+    required String path,
+    required String title,
+    required String host,
+    required String day,
+  }) => _session.exportRecord(path: path, title: title, host: host, day: day);
   @override
   Future<List<BridgeStoredSession>> recentSessions() =>
       _session.recentSessions(limit: recentLimit);
