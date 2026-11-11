@@ -52,12 +52,48 @@ class TurnHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ws = context.ws;
+    final stash = this.stash;
+    final stashed = scope is StashedChanges && stash != null;
+    final (:label, :about) = _names();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            _menu(context, label),
+            // A narrow tab shortens the label rather than the menu.
+            if (stashed)
+              Expanded(child: _stashActions(stash))
+            else if (onRevert case final revert?)
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: SecondaryButton(
+                    label: 'Revert files to before this turn…',
+                    icon: LucideIcons.undo2,
+                    onPressed: revert,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: WsMetrics.space1),
+        Text(
+          about,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
+    );
+  }
+
+  /// The menu's label and what the shown turns are, in words.
+  ({String label, String about}) _names() {
     final shown = this.shown;
     final stash = this.stash;
     final stashed = scope is StashedChanges && stash != null;
     final all = scope is AllTurns;
-    final ended = finished(turns);
     final String about;
     final String label;
     if (scope is UncommittedChanges) {
@@ -85,6 +121,14 @@ class TurnHeader extends StatelessWidget {
           ? 'Compare uncommitted changes.'
           : 'Compare uncommitted changes or the branch’s stashed changes.';
     }
+    return (label: label, about: about);
+  }
+
+  /// The menu button, labelled `label`, that chooses the turns and the changes to compare.
+  Widget _menu(BuildContext context, String label) {
+    final ws = context.ws;
+    final stash = this.stash;
+    final ended = finished(turns);
     final small = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
     String counts(BridgeTurn turn) => [
       if (turn.endedMs case final at?) formatClockMs(at),
@@ -108,7 +152,7 @@ class TurnHeader extends StatelessWidget {
         ],
       ),
     );
-    final menu = PopupMenuButton<DiffScope>(
+    return PopupMenuButton<DiffScope>(
       key: menuKey,
       tooltip: 'Choose the turn',
       initialValue: scope,
@@ -173,67 +217,35 @@ class TurnHeader extends StatelessWidget {
         ),
       ),
     );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            menu,
-            // A narrow tab shortens the label rather than the menu.
-            if (stashed)
-              Expanded(
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  spacing: WsMetrics.space3,
-                  children: [
-                    // As GitHub Desktop, only into a checkout without changes, and only on
-                    // the tree the changes were left on, where Git applies them unmerged.
-                    ValueListenableBuilder(
-                      valueListenable: git,
-                      builder: (context, status, _) {
-                        final why = !stash.current
-                            ? 'The branch has new commits since these changes were left, so '
-                                  'Liquid cannot restore them. Restore them with Git.'
-                            : (status?.changed ?? 0) > 0
-                            ? 'Unable to restore stash when changes are present on your '
-                                  'branch.'
-                            : null;
-                        final button = PrimaryButton(
-                          label: 'Restore',
-                          onPressed: why == null && status?.branch == branch
-                              ? onRestore
-                              : null,
-                        );
-                        return why == null
-                            ? button
-                            : Tooltip(message: why, child: button);
-                      },
-                    ),
-                    SecondaryButton(label: 'Discard…', onPressed: onDiscard),
-                  ],
-                ),
-              )
-            else if (onRevert case final revert?)
-              Expanded(
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: SecondaryButton(
-                    label: 'Revert files to before this turn…',
-                    icon: LucideIcons.undo2,
-                    onPressed: revert,
-                  ),
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: WsMetrics.space1),
-        Text(
-          about,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-      ],
-    );
   }
+
+  /// Restore and Discard for the stashed changes.
+  Widget _stashActions(BridgeStash stash) => Row(
+    mainAxisAlignment: MainAxisAlignment.end,
+    spacing: WsMetrics.space3,
+    children: [
+      // As GitHub Desktop, only into a checkout without changes, and only on
+      // the tree the changes were left on, where Git applies them unmerged.
+      ValueListenableBuilder(
+        valueListenable: git,
+        builder: (context, status, _) {
+          final why = !stash.current
+              ? 'The branch has new commits since these changes were left, so '
+                    'Liquid cannot restore them. Restore them with Git.'
+              : (status?.changed ?? 0) > 0
+              ? 'Unable to restore stash when changes are present on your '
+                    'branch.'
+              : null;
+          final button = PrimaryButton(
+            label: 'Restore',
+            onPressed: why == null && status?.branch == branch
+                ? onRestore
+                : null,
+          );
+          return why == null ? button : Tooltip(message: why, child: button);
+        },
+      ),
+      SecondaryButton(label: 'Discard…', onPressed: onDiscard),
+    ],
+  );
 }
