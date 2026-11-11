@@ -114,6 +114,29 @@ pub(super) fn executor_image_path(
     }
 }
 
+pub(super) struct BoundedRead {
+    pub(super) bytes: Vec<u8>,
+    pub(super) limit: usize,
+    pub(super) overflowed: bool,
+}
+
+impl BoundedRead {
+    pub(super) fn new(limit: usize) -> Self {
+        Self {
+            bytes: Vec::with_capacity(limit.min(8 * 1024)),
+            limit,
+            overflowed: false,
+        }
+    }
+}
+
+pub(super) fn set_nonblocking(
+    descriptor: &impl std::os::fd::AsFd,
+) -> Result<(), rustix::io::Errno> {
+    let flags = rustix::fs::fcntl_getfl(descriptor)?;
+    rustix::fs::fcntl_setfl(descriptor, flags | rustix::fs::OFlags::NONBLOCK)
+}
+
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod tests {
     use super::{configure_executor_child, terminate_child_bounded};

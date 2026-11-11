@@ -1,6 +1,6 @@
 use super::super::process::{
-    child_exited_without_reaping, configure_executor_child, duplicate_executor_descriptor,
-    terminate_child_or_fail_stop,
+    BoundedRead, child_exited_without_reaping, configure_executor_child,
+    duplicate_executor_descriptor, set_nonblocking, terminate_child_or_fail_stop,
 };
 use super::{invalid_response, runtime_open_error};
 use crate::runtime::types::RuntimeError;
@@ -20,12 +20,6 @@ use std::{
 pub(super) enum ExecutorPreflightProcess {
     Ready(WaitingExecutor),
     Rejected(proto::ExecutorErrorCodeV0),
-}
-
-fn set_nonblocking(descriptor: &impl std::os::fd::AsFd) -> Result<(), RuntimeError> {
-    let flags = rustix::fs::fcntl_getfl(descriptor).map_err(runtime_open_error)?;
-    rustix::fs::fcntl_setfl(descriptor, flags | rustix::fs::OFlags::NONBLOCK)
-        .map_err(runtime_open_error)
 }
 
 fn retain_remap_destination(target: i32, minimum: i32) -> std::io::Result<Option<OwnedFd>> {
@@ -235,9 +229,9 @@ pub(super) fn preflight_one_shot_with_deadline(
         .stderr
         .take()
         .ok_or_else(|| invalid_response("Executor stderr is unavailable"))?;
-    set_nonblocking(&stdin)?;
-    set_nonblocking(&stdout)?;
-    set_nonblocking(&stderr)?;
+    set_nonblocking(&stdin).map_err(runtime_open_error)?;
+    set_nonblocking(&stdout).map_err(runtime_open_error)?;
+    set_nonblocking(&stderr).map_err(runtime_open_error)?;
     let mut request_offset = 0_usize;
     let mut after_request = Some(after_request);
     #[cfg(test)]
@@ -590,22 +584,6 @@ pub(super) fn start_one_shot_at_deadlines(
         terminal_deadline_after_start,
         &now,
     )
-}
-
-struct BoundedRead {
-    bytes: Vec<u8>,
-    limit: usize,
-    overflowed: bool,
-}
-
-impl BoundedRead {
-    fn new(limit: usize) -> Self {
-        Self {
-            bytes: Vec::with_capacity(limit.min(8 * 1024)),
-            limit,
-            overflowed: false,
-        }
-    }
 }
 
 fn read_available(reader: &mut impl Read, output: &mut BoundedRead) -> std::io::Result<bool> {

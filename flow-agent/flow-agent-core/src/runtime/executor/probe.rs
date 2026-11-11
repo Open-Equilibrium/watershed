@@ -1,8 +1,8 @@
 use super::ExecutorSelection;
 use super::ExecutorSelectionSource;
 use super::process::{
-    child_exited_without_reaping, configure_executor_child, duplicate_executor_descriptor,
-    terminate_child_or_fail_stop,
+    BoundedRead, child_exited_without_reaping, configure_executor_child,
+    duplicate_executor_descriptor, set_nonblocking, terminate_child_or_fail_stop,
 };
 use crate::runtime::fs_guards::AnchoredDir;
 use crate::runtime::types::RuntimeError;
@@ -291,29 +291,6 @@ fn host_identity() -> (&'static str, &'static str) {
     {
         ("macos-27-aarch64", "seatbelt")
     }
-}
-
-struct BoundedRead {
-    bytes: Vec<u8>,
-    limit: usize,
-    overflowed: bool,
-}
-
-impl BoundedRead {
-    fn new(limit: usize) -> Self {
-        Self {
-            bytes: Vec::with_capacity(limit.min(8 * 1024)),
-            limit,
-            overflowed: false,
-        }
-    }
-}
-
-fn set_nonblocking(descriptor: &impl std::os::fd::AsFd) -> io::Result<()> {
-    let flags = rustix::fs::fcntl_getfl(descriptor)
-        .map_err(|error| io::Error::from_raw_os_error(error.raw_os_error()))?;
-    rustix::fs::fcntl_setfl(descriptor, flags | rustix::fs::OFlags::NONBLOCK)
-        .map_err(|error| io::Error::from_raw_os_error(error.raw_os_error()))
 }
 
 fn read_bounded_available(
