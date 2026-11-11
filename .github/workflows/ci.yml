@@ -494,7 +494,8 @@ jobs:
         run: |
           flutter pub get --enforce-lockfile
           flutter analyze
-          flutter test
+          flutter test --coverage
+          node ../../scripts/check-dart-coverage.mjs
 
       - name: Check the generated Liquid bridge
         if: matrix.os == 'ubuntu-24.04'

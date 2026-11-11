@@ -391,6 +391,8 @@ class CiWorkflowContractTest(unittest.TestCase):
         mutations = (
             workflow.replace("cargo fmt --all --check", "true", 1),
             workflow.replace("report --fail-under-lines 88", "report --fail-under-lines 87", 1),
+            workflow.replace("flutter test --coverage", "flutter test", 1),
+            workflow.replace("node ../../scripts/check-dart-coverage.mjs", "true", 1),
             workflow.replace("cargo audit", "true", 1),
             workflow.replace("node scripts/check-html-render.mjs", "true", 1),
             *(workflow.replace(f"      - name: {name}\n",
@@ -658,8 +660,11 @@ class CiWorkflowContractTest(unittest.TestCase):
                           condition=MAC, continue_on_error=True)
         self.assertEqual(
             step_run(workflow, "Check the Liquid app").splitlines(),
-            ["flutter pub get --enforce-lockfile", "flutter analyze", "flutter test"],
+            ["flutter pub get --enforce-lockfile", "flutter analyze", "flutter test --coverage",
+             "node ../../scripts/check-dart-coverage.mjs"],
         )
+        self.assertIn("        working-directory: liquid/app",
+                      step_lines(workflow, "Check the Liquid app", "liquid"))
         bridge = step_run(workflow, "Check the generated Liquid bridge")
         self.assertIn("flutter_rust_bridge_codegen generate", bridge)
         self.assertIn("git diff --exit-code -- liquid", bridge)
