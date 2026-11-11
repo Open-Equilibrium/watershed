@@ -78,7 +78,7 @@ sequenceDiagram
 
 macOS support is 27 ARM64 only. CI uses GitHub's preview `xcode-27` ARM64 label: the [tested image](https://github.com/actions/runner-images/releases/tag/xcode-27-arm64%2F20260928.0222) runs macOS 27.0, build `26A428`. Older images under that label ran 26; the early native-host check rejects other releases or architectures.
 
-The complete [push workflow, run 36908028880](https://github.com/Open-Equilibrium/watershed/actions/runs/36908028880), tested [`2b59f10`](https://github.com/Open-Equilibrium/watershed/commit/2b59f10209dbc5e6a7f81c7bab5a6e6d1bdbe413), tree `e0a51276c57a3da2750568f0751069ddfd49dcb4`. Both native jobs succeeded. This proves that tree; subsequent changes, remaining closeout gates and public release are unverified.
+The complete [push workflow, run 36908028880](https://github.com/Open-Equilibrium/watershed/actions/runs/36908028880), tested [`2b59f10`](https://github.com/Open-Equilibrium/watershed/commit/2b59f10209dbc5e6a7f81c7bab5a6e6d1bdbe413), tree `e0a51276c57a3da2750568f0751069ddfd49dcb4`, the last commit of [PR #7](https://github.com/Open-Equilibrium/watershed/pull/7) before it was squashed into `51718971` on `main`, whose tree differs. Both native jobs succeeded. This proves that tree; subsequent changes, remaining closeout gates and public release are unverified.
 
 | Target / job | Established result |
 |---|---|

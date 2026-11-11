@@ -62,7 +62,7 @@ flowchart TD
   end
 ```
 
-The Sync Server and a headless replica are separate logical roles, though one hosted deployment may co-locate them. In the M3 MVP, user devices sync each authorized Workspace in full. Resource-scoped Roles govern Liquid surfaces but do not hide replicated bytes from the authorized device owner. Stable resource identity and versioned sync keep selective replication possible in a later protocol. A headless replica receives a Workspace only after workspace-level opt-in because it adds a separate execution boundary.
+The Sync Server and a headless replica are separate logical roles, though one hosted deployment may co-locate them. In the M3 MVP, each authorized device holds the whole Workspace, so Roles do not hide content from its owner ([Liquid V-Spec](docs/concept/V-Spec_Liquid.html#sync)). Stable resource identity and versioned sync keep selective replication possible in a later protocol. A headless replica receives a Workspace only after workspace-level opt-in because it adds a separate execution boundary.
 
 Workspace sync and live agent control are separate planes. Offline replicas keep working locally. Cached agent state is visibly stale and cannot imply that a live command succeeded. Meta-Harness may start or observe Flow Agent but does not select or manage its Executor or Tool protection.
 

@@ -37,7 +37,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Meta-Agent** — The agent that _operates_ the Meta-Harness; either Liquid-native or BYOA. May reconfigure underlying agents under policy + audit control.
 - **BYOA** — "Bring Your Own Agent"; plugging an external agent in as the Meta-Agent.
 - **AgentPulse** — Meta-Harness subsystem measuring rework ratio, first-attempt success rate, and cost-per-productive-outcome. Meta-Harness computes/stores the metrics; Liquid only renders them.
-- **Adapter** — A Meta-Harness subsystem that translates an external agent (Codex CLI, Claude Code or a future agent) into normalized protocol events/commands. Native agent shapes do not leak past the adapter.
+- **Adapter** — A Meta-Harness subsystem that translates an external agent's harness (today only pi) into normalized protocol events/commands. Native agent shapes do not leak past the adapter.
 - **Agent event** — One event of the in-process session model the embedded Meta-Harness core gives Liquid's agent surface until its service mode (ADR-0195): turns, items, content deltas, requests and usage. Not a Flow Agent runtime event.
 
 ## Flow Agent primitives

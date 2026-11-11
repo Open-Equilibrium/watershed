@@ -166,7 +166,7 @@ Liquid        = local-first workspace and App platform</code></pre>
         <li>Workspace CLI/API access requires an authenticated identity and an assigned allow-only Role. Anything not allowed is denied by default. Explicit deny/blacklist rules are deferred until real policy conflicts require them.</li>
         <li>Effective authority is the intersection above: no layer can grant a capability another boundary denies.</li>
         <li>Capabilities distinguish discovery/read, propose, execute/apply, approve and manage where the resource supports them.</li>
-        <li>In the M3 MVP, resource-scoped discovery/read permissions govern Liquid surfaces but do not hide bytes in a complete plaintext replica from its authorized device owner or same-identity local processes. This does not grant write, execution or administrative authority.</li>
+        <li>Discovery and read permissions govern Liquid surfaces but do not hide replica bytes (<a href="#sync">§7</a>); that grants no write, execution or administrative authority.</li>
         <li>Agents may receive narrower per-session authority than their reusable agent profile.</li>
         <li>Every Workspace write, from the UI, Liquid AI, the CLI/API or an external agent, uses the same mutation pipeline and records actor, origin, permission result and reversible change in History; no hidden write bypasses it.</li>
         <li>External-agent writes are attributed (actor/origin) and revertible; sensitive changes require approval, and a proposed diff can be reviewed before apply.</li>
@@ -234,7 +234,7 @@ Headless replica ┘</code></pre>
         <li>Every authorized M3 MVP client reads and writes a complete local Workspace replica; network loss never switches Liquid into a remote-only mode.</li>
         <li>Replicas connect to the central Sync Server, not directly to one another. The server persists and exchanges committed changes resumably.</li>
         <li>Sync applies received actions through the same mutation pipeline. Sync credentials authorize Workspace exchange only, not Meta-Harness control. Interrupted or untrusted sync never disables access to the local replica.</li>
-        <li>Authorized user devices sync the full plaintext Workspace. The Workspace is therefore the local confidentiality boundary, while Liquid still enforces resource-scoped action and API checks.</li>
+        <li>Authorized user devices sync the full plaintext Workspace. The Workspace is therefore the local confidentiality boundary: Roles do not hide replica bytes from the device's owner or from processes running as that user, while Liquid still enforces resource-scoped action and API checks.</li>
         <li>Workspace admission and resource authorization remain separate. Resources keep stable identities, committed changes remain resource-addressed and sync is versioned so a later protocol can add a finite authorized-resource closure. Selective replication is not part of the MVP.</li>
         <li>A headless replica is an optional normal replica without UI, on a server for Automations and schedules or on a separate agent host. It requires workspace-level opt-in because it introduces a separate execution boundary: it receives only Workspaces explicitly enabled for it, then enforces the same Roles and mutation pipeline as a UI replica.</li>
         <li>Agents and Automations on its host use its normal CLI/API, Roles and mutation pipeline even while user devices are offline.</li>
