@@ -4,7 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../agent/input_lane.dart';
 import '../rust/api/history.dart';
+import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
@@ -20,10 +22,44 @@ class OverviewTrack {
   final List<Segment> segments;
 }
 
+/// The record a range handle sits on: its index, how many records there are and its time.
+@immutable
+class HandleStep {
+  const HandleStep(this.index, this.count, this.time);
+
+  /// Zero-based.
+  final int index;
+  final int count;
+  final String time;
+
+  /// The tip while the handle has the focus, such as `Step 31 of 48 · 51.2 s`.
+  String get tip => 'Step ${index + 1} of $count · $time';
+
+  /// What assistive technology reads as the handle's value, such as `step 31 of 48, 51.2 s`.
+  String get spoken => 'step ${index + 1} of $count, $time';
+
+  @override
+  bool operator ==(Object other) =>
+      other is HandleStep &&
+      other.index == index &&
+      other.count == count &&
+      other.time == time;
+
+  @override
+  int get hashCode => Object.hash(index, count, time);
+}
+
 /// The part of the axis the list shows, or the range it is limited to, and how to read it.
 @immutable
 class Brush {
-  const Brush(this.start, this.end, this.label, {this.range = false});
+  const Brush(
+    this.start,
+    this.end,
+    this.label, {
+    this.range = false,
+    required this.startStep,
+    required this.endStep,
+  });
 
   final double start;
   final double end;
@@ -34,16 +70,22 @@ class Brush {
   /// Whether it is a range that limits the list rather than what the list shows.
   final bool range;
 
+  /// The records the start and the end handle sit on.
+  final HandleStep startStep;
+  final HandleStep endStep;
+
   @override
   bool operator ==(Object other) =>
       other is Brush &&
       other.start == start &&
       other.end == end &&
       other.label == label &&
-      other.range == range;
+      other.range == range &&
+      other.startStep == startStep &&
+      other.endStep == endStep;
 
   @override
-  int get hashCode => Object.hash(start, end, label, range);
+  int get hashCode => Object.hash(start, end, label, range, startStep, endStep);
 }
 
 /// The Trajectory's single top section: every step on one time axis. A brush marks what the list
@@ -61,6 +103,8 @@ class Overview extends StatefulWidget {
     this.onRange,
     this.onPan,
     this.onJump,
+    this.onHandleStep,
+    this.onLeave,
     this.matches,
     this.mark,
     this.legend = false,
@@ -87,6 +131,12 @@ class Overview extends StatefulWidget {
 
   /// A click at this point of the axis.
   final ValueChanged<double>? onJump;
+
+  /// A range handle moved to the start (`true`) or the end of record `step`.
+  final void Function(bool start, int step)? onHandleStep;
+
+  /// Esc on a focused range handle, which hands the keyboard back to the list.
+  final VoidCallback? onLeave;
 
   /// Which records match the filters; the others draw faint.
   final List<bool>? matches;
@@ -213,7 +263,9 @@ class _OverviewState extends State<Overview> {
         scale: update.scale,
       ),
       onPointerPanZoomEnd: (_) => _lastScale = 1,
+      // A focused handle's tip hangs over the axis, past the plot's edges at the ends.
       child: Stack(
+        clipBehavior: Clip.none,
         children: [
           _paths(visible, at),
           // The brush moves with every scroll of the list; its own layer
@@ -233,6 +285,8 @@ class _OverviewState extends State<Overview> {
                           onRange: widget.onRange,
                           onPan: widget.onPan,
                           onJump: widget.onJump,
+                          onHandleStep: widget.onHandleStep,
+                          onLeave: widget.onLeave,
                         ),
                 ),
               ),
@@ -336,6 +390,8 @@ class _BrushView extends StatefulWidget {
     required this.onRange,
     required this.onPan,
     required this.onJump,
+    required this.onHandleStep,
+    required this.onLeave,
   });
 
   final Brush brush;
@@ -349,6 +405,8 @@ class _BrushView extends StatefulWidget {
 
   /// A click on the brush jumps as one on the tracks beneath it does.
   final ValueChanged<double>? onJump;
+  final void Function(bool start, int step)? onHandleStep;
+  final VoidCallback? onLeave;
 
   @override
   State<_BrushView> createState() => _BrushViewState();
@@ -359,8 +417,85 @@ class _BrushViewState extends State<_BrushView> {
   /// small moves add up instead of snapping back to the same step.
   (double, double)? _drag;
 
+  /// The keyboard focus of each handle, in the order Tab takes them.
+  final _startFocus = FocusNode(debugLabel: 'range start');
+  final _endFocus = FocusNode(debugLabel: 'range end');
+
+  @override
+  void initState() {
+    super.initState();
+    _startFocus.addListener(_focusChanged);
+    _endFocus.addListener(_focusChanged);
+  }
+
+  @override
+  void dispose() {
+    _startFocus.removeListener(_focusChanged);
+    _endFocus.removeListener(_focusChanged);
+    _startFocus.dispose();
+    _endFocus.dispose();
+    super.dispose();
+  }
+
+  void _focusChanged() => setState(() {});
+
   double _pointer(Offset global) =>
       (context.findRenderObject()! as RenderBox).globalToLocal(global).dx;
+
+  /// Moves a handle `delta` records, never past the other handle or the first and last record;
+  /// a handle at its limit stays where it is.
+  void _shift(bool start, int delta) {
+    final brush = widget.brush;
+    final own = (start ? brush.startStep : brush.endStep).index;
+    final other = (start ? brush.endStep : brush.startStep).index;
+    final low = start ? 0 : other;
+    final high = start ? other : brush.startStep.count - 1;
+    final step = math.max(low, math.min(high, own + delta));
+    if (step != own) widget.onHandleStep?.call(start, step);
+  }
+
+  /// The keys of one handle: those of [Fixed.rangeHandle], and esc, which leaves the handle.
+  Map<ShortcutActivator, VoidCallback> _keys(bool start) {
+    final count = widget.brush.startStep.count;
+    return {
+      ...Fixed.rangeHandle.bind([
+        () => _shift(start, -1),
+        () => _shift(start, 1),
+        () => _shift(start, -10),
+        () => _shift(start, 10),
+        () => _shift(start, -count),
+        () => _shift(start, count),
+        () => widget.onRange?.call(null),
+      ]),
+      escapeKey: () => widget.onLeave?.call(),
+    };
+  }
+
+  /// The tip above a focused handle, centered on it.
+  Widget _tip(double x, HandleStep step) {
+    final ws = context.ws;
+    return Positioned(
+      top: 0,
+      left: x,
+      child: FractionalTranslation(
+        translation: const Offset(-0.5, 0),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: ws.text,
+            borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space2),
+            child: Text(
+              step.tip,
+              maxLines: 1,
+              style: TextStyle(color: ws.canvas, fontSize: WsMetrics.fsSmall),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -376,7 +511,12 @@ class _BrushViewState extends State<_BrushView> {
     final right = math.max(x(brush.end), left + 2);
     // At least a hundredth of the shown axis, so the handles never cross.
     final gap = (visible.$2 - visible.$1) / 100;
-    Widget handle(Key key, double center, bool start) => Positioned(
+    Widget handle(
+      bool start,
+      double center,
+      FocusNode focus,
+      HandleStep step,
+    ) => Positioned(
       left: (center - _handleWidth / 2).clamp(
         0.0,
         math.max(0.0, width - _handleWidth),
@@ -384,36 +524,52 @@ class _BrushViewState extends State<_BrushView> {
       top: _axisHeight + WsMetrics.space2,
       bottom: 0,
       width: _handleWidth,
-      child: GestureDetector(
-        key: key,
-        behavior: HitTestBehavior.opaque,
-        dragStartBehavior: DragStartBehavior.down,
-        onDoubleTap: onRange == null ? null : () => onRange(null),
-        onHorizontalDragUpdate: onRange == null
-            ? null
-            : (details) {
-                // The brush's own box, not the moving handle's, places the pointer.
-                final value = at(_pointer(details.globalPosition));
-                onRange(
-                  start
-                      ? (math.min(value, brush.end - gap), brush.end)
-                      : (brush.start, math.max(value, brush.start + gap)),
-                );
-              },
-        child: Center(
-          child: Container(
-            width: 7,
-            height: 18,
-            decoration: BoxDecoration(
-              color: ws.surface,
-              border: Border.all(color: ws.accent),
-              borderRadius: BorderRadius.circular(3),
+      child: ViewShortcuts(
+        bindings: _keys(start),
+        child: Focus(
+          focusNode: focus,
+          child: Semantics(
+            key: Key(start ? 'range-start' : 'range-end'),
+            slider: true,
+            label: start ? 'Range start' : 'Range end',
+            value: step.spoken,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              dragStartBehavior: DragStartBehavior.down,
+              onDoubleTap: onRange == null ? null : () => onRange(null),
+              onHorizontalDragUpdate: onRange == null
+                  ? null
+                  : (details) {
+                      // The brush's own box, not the moving handle's, places the pointer.
+                      final value = at(_pointer(details.globalPosition));
+                      onRange(
+                        start
+                            ? (math.min(value, brush.end - gap), brush.end)
+                            : (brush.start, math.max(value, brush.start + gap)),
+                      );
+                    },
+              child: Center(
+                child: Container(
+                  width: 7,
+                  height: 18,
+                  decoration: BoxDecoration(
+                    color: ws.surface,
+                    border: Border.all(color: ws.accent),
+                    borderRadius: BorderRadius.circular(3),
+                    // The focus ring, as the design tokens draw it.
+                    boxShadow: focus.hasFocus
+                        ? [BoxShadow(color: ws.accent, spreadRadius: 2)]
+                        : null,
+                  ),
+                ),
+              ),
             ),
           ),
         ),
       ),
     );
     return Stack(
+      clipBehavior: Clip.none,
       children: [
         Positioned(
           left: left,
@@ -453,8 +609,10 @@ class _BrushViewState extends State<_BrushView> {
             ),
           ),
         ),
-        handle(const Key('range-start'), left, true),
-        handle(const Key('range-end'), right, false),
+        handle(true, left, _startFocus, brush.startStep),
+        handle(false, right, _endFocus, brush.endStep),
+        if (_startFocus.hasFocus) _tip(left, brush.startStep),
+        if (_endFocus.hasFocus) _tip(right, brush.endStep),
       ],
     );
   }

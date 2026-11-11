@@ -313,23 +313,47 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     ];
   }
 
+  /// The step a range handle sits on, for its keys and what it says.
+  HandleStep _handleStep(int index) => HandleStep(
+    index,
+    _records.length,
+    formatDuration(_records[index].startMs),
+  );
+
+  /// Moves a range handle to the start or the end of step `step`; the other handle stays.
+  void _moveHandle(bool start, int step) {
+    final brush = _brush.value;
+    if (brush == null) return;
+    final (from, to) = stepExtent(_records, step, equalWidth: _equalWidth);
+    setState(() => _range = start ? (from, brush.end) : (brush.start, to));
+  }
+
   /// Marks the steps the list shows on the overview, or the range limiting it.
   void _updateBrush() {
     final records = _records;
     final range = _range;
+    if (records.isEmpty) {
+      _brush.value = null;
+      return;
+    }
     if (range != null) {
       final mask = _inRange()!;
-      final inside = [
-        for (var index = 0; index < records.length; index++)
-          if (mask[index]) index,
-      ];
+      final first = mask.indexOf(true);
+      final last = mask.lastIndexOf(true);
+      // A range that covers no step has its handles on the nearest steps.
+      final (from, to) = first < 0
+          ? (
+              stepAt(records, range.$1, equalWidth: _equalWidth)!,
+              stepAt(records, range.$2, equalWidth: _equalWidth)!,
+            )
+          : (first, last);
       _brush.value = Brush(
         range.$1,
         range.$2,
-        inside.isEmpty
-            ? 'Range: no steps'
-            : 'Range: steps ${inside.first + 1}–${inside.last + 1}',
+        first < 0 ? 'Range: no steps' : 'Range: steps ${first + 1}–${last + 1}',
         range: true,
+        startStep: _handleStep(from),
+        endStep: _handleStep(to),
       );
       return;
     }
@@ -362,6 +386,8 @@ class _TrajectoryViewState extends State<TrajectoryView> {
       stepExtent(records, first, equalWidth: _equalWidth).$1,
       stepExtent(records, last, equalWidth: _equalWidth).$2,
       'Showing steps ${first + 1}–${last + 1}',
+      startStep: _handleStep(first),
+      endStep: _handleStep(last),
     );
   }
 
@@ -895,6 +921,8 @@ class _TrajectoryViewState extends State<TrajectoryView> {
       onWindow: (window) => setState(() => _window = window),
       brush: _brush,
       onRange: (range) => setState(() => _range = range),
+      onHandleStep: _moveHandle,
+      onLeave: _focus.requestFocus,
       onPan: _scrollTo,
       onJump: _jumpTo,
       matches: _matches(),

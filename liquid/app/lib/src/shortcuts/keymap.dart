@@ -225,6 +225,16 @@ enum Fixed {
     Keys(LogicalKeyboardKey.arrowLeft),
     Keys(LogicalKeyboardKey.arrowRight),
   ]),
+  // Only while a range handle of the timeline has the focus, which takes them before the list.
+  rangeHandle('Move a range handle', Area.trajectory, '←→ ⇧←→ Home End ⌫', [
+    Keys(LogicalKeyboardKey.arrowLeft),
+    Keys(LogicalKeyboardKey.arrowRight),
+    Keys(LogicalKeyboardKey.arrowLeft, shift: true),
+    Keys(LogicalKeyboardKey.arrowRight, shift: true),
+    Keys(LogicalKeyboardKey.home),
+    Keys(LogicalKeyboardKey.end),
+    Keys(LogicalKeyboardKey.backspace),
+  ]),
   moveInTree('Move in the session tree', Area.trajectory, '⌥↑↓', [
     Keys(LogicalKeyboardKey.arrowUp, alt: true),
     Keys(LogicalKeyboardKey.arrowDown, alt: true),

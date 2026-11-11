@@ -134,6 +134,12 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Future<void> pressShifted(WidgetTester tester, LogicalKeyboardKey key) async {
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await press(tester, key);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+  }
+
   double opacity(WidgetTester tester, String entry) => tester
       .widget<Opacity>(
         find
@@ -995,6 +1001,91 @@ void main() {
       shown(),
       isNot(startsWith('Showing steps 1–')),
       reason: 'small moves add up instead of snapping back to the same step',
+    );
+  });
+
+  testWidgets('Tab focuses the range handles in turn and names their step', (
+    tester,
+  ) async {
+    await show(tester, historyOf(long));
+    await press(tester, LogicalKeyboardKey.tab);
+    expect(
+      tester.getSemantics(find.byKey(const Key('range-start'))),
+      isSemantics(
+        label: 'Range start',
+        value: 'step 1 of 60, 0 ms',
+        isSlider: true,
+      ),
+    );
+    expect(find.text('Step 1 of 60 · 0 ms'), findsOneWidget);
+    await press(tester, LogicalKeyboardKey.tab);
+    expect(find.text('Step 1 of 60 · 0 ms'), findsNothing);
+    expect(
+      find.textContaining(RegExp(r'^Step \d+ of 60 · ')),
+      findsOneWidget,
+      reason: 'the end handle has the focus now',
+    );
+  });
+
+  testWidgets('keys move a range handle by record and never cross', (
+    tester,
+  ) async {
+    await show(tester, historyOf(long));
+    // The end handle first reaches the last record, so the start handle has room to move.
+    await press(tester, LogicalKeyboardKey.tab);
+    await press(tester, LogicalKeyboardKey.tab);
+    await press(tester, LogicalKeyboardKey.end);
+    expect(find.text('Step 60 of 60 · 59.0 s'), findsOneWidget);
+
+    await pressShifted(tester, LogicalKeyboardKey.tab);
+    await press(tester, LogicalKeyboardKey.arrowRight);
+    expect(
+      find.text('Step 2 of 60 · 1.0 s'),
+      findsOneWidget,
+      reason: 'one record later, though the axis shows time',
+    );
+    expect(
+      tester.getSemantics(find.byKey(const Key('range-start'))),
+      isSemantics(
+        label: 'Range start',
+        value: 'step 2 of 60, 1.0 s',
+        isSlider: true,
+      ),
+    );
+    expect(
+      tester.getSemantics(find.byKey(const Key('range-brush'))).label,
+      startsWith('Range: steps 2–'),
+      reason: 'the brush names the range after the move',
+    );
+    await pressShifted(tester, LogicalKeyboardKey.arrowRight);
+    expect(
+      find.text('Step 12 of 60 · 11.0 s'),
+      findsOneWidget,
+      reason: 'ten records',
+    );
+    await pressShifted(tester, LogicalKeyboardKey.arrowLeft);
+    await pressShifted(tester, LogicalKeyboardKey.arrowRight);
+
+    // The end handle cannot go before the start handle, and the start cannot pass the end.
+    await press(tester, LogicalKeyboardKey.tab);
+    await press(tester, LogicalKeyboardKey.home);
+    expect(find.text('Step 12 of 60 · 11.0 s'), findsOneWidget);
+    await press(tester, LogicalKeyboardKey.arrowLeft);
+    expect(find.text('Step 12 of 60 · 11.0 s'), findsOneWidget);
+    await pressShifted(tester, LogicalKeyboardKey.tab);
+    await pressShifted(tester, LogicalKeyboardKey.arrowRight);
+    expect(find.text('Step 12 of 60 · 11.0 s'), findsOneWidget);
+
+    // Esc leaves the handle and keeps the range; the next Tab starts again at the start.
+    await press(tester, LogicalKeyboardKey.escape);
+    expect(find.byKey(const Key('range')), findsOneWidget);
+    expect(find.text('Step 12 of 60 · 11.0 s'), findsNothing);
+    await press(tester, LogicalKeyboardKey.tab);
+    await press(tester, LogicalKeyboardKey.backspace);
+    expect(
+      find.byKey(const Key('range')),
+      findsNothing,
+      reason: 'backspace clears the range',
     );
   });
 
