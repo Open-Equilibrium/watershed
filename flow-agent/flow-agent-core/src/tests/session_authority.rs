@@ -12,6 +12,7 @@ use crate::runtime::{
 };
 use std::{
     fs,
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     thread,
     time::{Duration, Instant},
@@ -268,23 +269,54 @@ fn session_authority_keys_preserve_native_unix_path_bytes() {
     assert_eq!(stable_native_path_bytes(&path), [b'a', 0xff, b'z']);
 }
 
-fn spawn_session_ownership_child(workspace: &Path, session_id: &str) -> std::process::Child {
-    session_ownership_child_command(workspace, session_id)
-        .spawn()
-        .expect("ownership child starts")
+/// Kills and reaps a helper that is still running when its test unwinds, so a failed
+/// assertion cannot leave a process holding ownership. Explicit waits leave nothing to kill.
+struct OwnershipChild(std::process::Child);
+
+impl Drop for OwnershipChild {
+    fn drop(&mut self) {
+        if matches!(self.0.try_wait(), Ok(None)) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+}
+
+impl Deref for OwnershipChild {
+    type Target = std::process::Child;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for OwnershipChild {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+fn spawn_session_ownership_child(workspace: &Path, session_id: &str) -> OwnershipChild {
+    OwnershipChild(
+        session_ownership_child_command(workspace, session_id)
+            .spawn()
+            .expect("ownership child starts"),
+    )
 }
 
 fn spawn_session_ownership_child_with_temp(
     workspace: &Path,
     session_id: &str,
     temp: &Path,
-) -> std::process::Child {
-    session_ownership_child_command(workspace, session_id)
-        .env("TMPDIR", temp)
-        .env("TMP", temp)
-        .env("TEMP", temp)
-        .spawn()
-        .expect("ownership child starts")
+) -> OwnershipChild {
+    OwnershipChild(
+        session_ownership_child_command(workspace, session_id)
+            .env("TMPDIR", temp)
+            .env("TMP", temp)
+            .env("TEMP", temp)
+            .spawn()
+            .expect("ownership child starts"),
+    )
 }
 
 fn session_ownership_child_command(workspace: &Path, session_id: &str) -> std::process::Command {
