@@ -10,6 +10,7 @@ import 'package:liquid/src/workspace/text_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'fake_workspace.dart';
+import 'focus_kit.dart';
 
 void main() {
   late FakeWorkspace fake;
@@ -71,14 +72,6 @@ void main() {
 
   Future<void> key(WidgetTester tester, LogicalKeyboardKey key) async {
     await tester.sendKeyEvent(key);
-    await tester.pumpAndSettle();
-  }
-
-  /// ⌘Z, as the macOS keyboard sends it.
-  Future<void> undo(WidgetTester tester) async {
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
   }
 

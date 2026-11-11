@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
+import '../controls.dart';
 import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
@@ -41,7 +42,7 @@ class TextBlock extends StatefulWidget {
 }
 
 class _TextBlockState extends State<TextBlock> implements EditorSource {
-  /// The field's controller, which a text Liquid replaced swaps for a fresh one (see [_adopt]).
+  /// The field's controller, which a text Liquid replaced swaps for a fresh one (see [_set]).
   var _text = TextEditingController();
 
   /// Keeps the field, its text input included, when a new style wraps it differently.
@@ -57,9 +58,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
 
   /// While the text changes from the core or a key, not from typing.
   bool _quiet = false;
-
-  /// Whether Liquid replaced the text since the field last took its controller.
-  bool _replaced = false;
 
   /// Reads asked for, so only the latest shows.
   int _reads = 0;
@@ -439,28 +437,18 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
 
   bool get _composing => !_text.value.composing.isCollapsed;
 
+  /// Shows `text` as the stored one. Its field takes a fresh controller, so ⌘Z cannot bring back
+  /// the text it replaced (rule 7).
   void _set(String text, int offset) {
-    _quiet = true;
-    final replaced = _text.text != text;
-    _text.value = TextEditingValue(
-      text: text,
-      selection: TextSelection.collapsed(offset: offset),
+    _text = renewController(
+      _text,
+      TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: offset),
+      ),
+      listener: _typed,
     );
-    _quiet = false;
-    if (replaced && mounted) setState(() => _replaced = true);
-  }
-
-  /// Flutter keeps a field's undo history with its controller, so ⌘Z after a text Liquid
-  /// replaced would bring back the text before it (rule 7). The field takes a fresh controller
-  /// holding the same text while it builds; the old one still holds it until then, so what is
-  /// typed before that frame is carried over.
-  void _adopt() {
-    _replaced = false;
-    final previous = _text;
-    _text = TextEditingController.fromValue(previous.value)
-      ..addListener(_typed);
-    previous.removeListener(_typed);
-    WidgetsBinding.instance.addPostFrameCallback((_) => previous.dispose());
+    if (mounted) setState(() {});
   }
 
   @override
@@ -722,7 +710,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    if (_replaced) _adopt();
     final (size, line, weight, top) = switch (_style) {
       BridgeTextStyle.heading1 => (
         WsMetrics.fsH1,

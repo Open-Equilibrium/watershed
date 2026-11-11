@@ -530,6 +530,24 @@ class InputCard extends StatelessWidget {
   );
 }
 
+/// Gives a field a fresh controller holding `value`, for text Liquid assigned to it. Flutter keeps a
+/// field's undo history with its controller, so ⌘Z after a replaced text would bring it back.
+/// `listener` moves to the fresh controller. The old one stays attached until the frame that builds
+/// the field with the fresh one, so it is disposed after that frame; the caller rebuilds the field.
+TextEditingController renewController(
+  TextEditingController previous,
+  TextEditingValue value, {
+  VoidCallback? listener,
+}) {
+  if (listener != null) previous.removeListener(listener);
+  // The old history records the new text, which the fresh one's history starts from.
+  previous.value = value;
+  final fresh = TextEditingController.fromValue(value);
+  if (listener != null) fresh.addListener(listener);
+  WidgetsBinding.instance.addPostFrameCallback((_) => previous.dispose());
+  return fresh;
+}
+
 /// The size `text` takes in `style`; the measuring painter is released at once.
 Size measureText(String text, TextStyle style) {
   final painter = TextPainter(

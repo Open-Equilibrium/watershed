@@ -14,6 +14,14 @@ PaintPattern paintsAbove(Color bottom, Color top) {
     ..something((method, arguments) => box(method) && fills(arguments[1], top));
 }
 
+/// ⌘Z, as the macOS keyboard sends it.
+Future<void> undo(WidgetTester tester) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+  await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+  await tester.pumpAndSettle();
+}
+
 /// Presses Tab until the keyboard is on something inside [target].
 Future<void> tabTo(WidgetTester tester, Finder target) async {
   final inside = find.descendant(of: target, matching: find.byType(Focus));

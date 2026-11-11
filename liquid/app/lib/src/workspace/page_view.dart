@@ -30,11 +30,8 @@ class WorkspacePage extends StatefulWidget {
 }
 
 class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
-  /// The title's controller, which a title Liquid assigned swaps for a fresh one (see [_adopt]).
+  /// The title's controller, which a title Liquid assigned swaps for a fresh one (see [_show]).
   var _title = TextEditingController();
-
-  /// Whether Liquid assigned the title since the field last took its controller.
-  bool _replaced = false;
   late final _titleFocus = FocusNode(
     debugLabel: 'Page title',
     onKeyEvent: (_, event) => _titleKey(event),
@@ -122,25 +119,17 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     if (_title.text != title) _show(title);
   }
 
-  /// Shows `title` as the stored one, which is no rename.
+  /// Shows `title` as the stored one, which is no rename. The field takes a fresh controller, so
+  /// ⌘Z cannot bring back the title it replaced.
   void _show(String title) {
     _named = title;
     if (_title.text == title) return;
-    _title.text = title;
-    _replaced = true;
+    _title = renewController(
+      _title,
+      TextEditingValue(text: title),
+      listener: _typedTitle,
+    );
     if (mounted) setState(() {});
-  }
-
-  /// Flutter keeps a field's undo history with its controller, so ⌘Z after a title Liquid
-  /// assigned would bring back the title it replaced. The field takes a fresh controller
-  /// holding the same text while it builds, as text_block.dart does.
-  void _adopt() {
-    _replaced = false;
-    final previous = _title;
-    _title = TextEditingController.fromValue(previous.value)
-      ..addListener(_typedTitle);
-    previous.removeListener(_typedTitle);
-    WidgetsBinding.instance.addPostFrameCallback((_) => previous.dispose());
   }
 
   /// Each change of the title, once any composition ends, is one rename (architecture rule 7).
@@ -263,7 +252,6 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    if (_replaced) _adopt();
     final firstLine = KeyedSubtree(
       key: _firstLineKey,
       child: TextField(
