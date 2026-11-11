@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:isolate';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -26,15 +25,6 @@ String diffKeys() =>
     '${Fixed.turnMenu.display} turn · ${Fixed.previousOrNextFile.display} file · '
     '${Fixed.foldFolder.display} folder · ${Fixed.previousOrNextHunk.display} hunk · '
     '${Fixed.unifiedOrSplit.display} unified/split · ${Fixed.hideWhitespace.display} whitespace';
-
-/// Reads a patch into lines. The window passes [parsePatchInBackground]; tests pass
-/// [parsePatch] itself, as fake time does not run isolates.
-typedef PatchParser = FutureOr<List<DiffLine>> Function(String patch);
-
-/// Parses [patch] on a background isolate, so a large patch (up to 4 MiB) does not stall the
-/// window.
-Future<List<DiffLine>> parsePatchInBackground(String patch) =>
-    Isolate.run(() => parsePatch(patch));
 
 /// What a turn changed between its checkpoints, or all turns of the branch: a folder tree of
 /// changed files and the selected file's diff, unified or split. Up and Down select files, Left and

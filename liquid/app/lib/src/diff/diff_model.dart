@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:isolate';
 import 'dart:math' as math;
 
 import '../rust/api/events.dart';
@@ -158,6 +160,15 @@ List<DiffLine> parsePatch(String patch) {
   }
   return lines;
 }
+
+/// Reads a patch into lines. The window passes [parsePatchInBackground]; tests pass
+/// [parsePatch] itself, as fake time does not run isolates.
+typedef PatchParser = FutureOr<List<DiffLine>> Function(String patch);
+
+/// Parses [patch] on a background isolate, so a large patch (up to 4 MiB) does not stall the
+/// window.
+Future<List<DiffLine>> parsePatchInBackground(String patch) =>
+    Isolate.run(() => parsePatch(patch));
 
 /// One row of the split view: a hunk header across both sides, or a line of the file before
 /// the run beside its line after it.

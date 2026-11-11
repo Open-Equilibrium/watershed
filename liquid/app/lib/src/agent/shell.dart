@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../appearance.dart';
 import '../controls.dart';
+import '../diff/diff_model.dart';
 import '../diff/diff_settings.dart';
 import '../diff/diff_view.dart';
 import '../diff/turn_scope.dart';
