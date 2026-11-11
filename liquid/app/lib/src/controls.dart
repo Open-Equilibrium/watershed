@@ -530,12 +530,17 @@ class InputCard extends StatelessWidget {
   );
 }
 
-/// Shows `value` in a field's controller as text Liquid assigned to it. The field keeps this
-/// controller until it builds again, so typing and reads agree at once; the owner then adopts a
-/// fresh controller (see [adoptController]), because ⌘Z would otherwise bring back the text this
-/// replaced.
-void writeText(TextEditingController controller, TextEditingValue value) {
-  controller.value = value;
+/// Shows `value` in a field's controller as text Liquid assigned to it, and returns whether the
+/// text changed. The field keeps this controller until it builds again, so typing and reads agree
+/// at once; a changed text then gets a fresh controller (see [adoptController]), because ⌘Z would
+/// otherwise bring back the text this replaced. Unchanged text only moves the selection.
+bool writeText(TextEditingController controller, TextEditingValue value) {
+  if (controller.text != value.text) {
+    controller.value = value;
+    return true;
+  }
+  if (value.selection.isValid) controller.selection = value.selection;
+  return false;
 }
 
 /// Gives a field its fresh controller when it builds after [writeText], holding what the old one

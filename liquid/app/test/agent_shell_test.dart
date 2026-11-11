@@ -571,6 +571,24 @@ void main() {
     },
   );
 
+  testWidgets(
+    'a hand-back that changes no text keeps the undo history',
+    (tester) async {
+      await show(tester);
+      final composer = find.byKey(const Key('composer'));
+      await tester.enterText(composer, 'Hello');
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.enterText(composer, 'Hello there');
+      await tester.pump(const Duration(milliseconds: 600));
+      state.draft.value = 'Hello there';
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.tap(composer);
+      await undo(tester);
+      expect(tester.widget<TextField>(composer).controller?.text, 'Hello');
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+  );
+
   testWidgets('marks the branch in the rebuilt chat and reads earlier items', (
     tester,
   ) async {

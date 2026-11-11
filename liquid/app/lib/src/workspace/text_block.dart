@@ -442,7 +442,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
 
   void _set(String text, int offset) {
     _quiet = true;
-    writeText(
+    final changed = writeText(
       _text,
       TextEditingValue(
         text: text,
@@ -450,7 +450,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       ),
     );
     _quiet = false;
-    if (mounted) setState(() => _replaced = true);
+    if (changed && mounted) setState(() => _replaced = true);
   }
 
   /// Flutter keeps a field's undo history with its controller, so ⌘Z after a text Liquid

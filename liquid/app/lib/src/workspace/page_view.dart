@@ -125,8 +125,7 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
   /// Shows `title` as the stored one, which is no rename.
   void _show(String title) {
     _named = title;
-    if (_title.text == title) return;
-    writeText(_title, TextEditingValue(text: title));
+    if (!writeText(_title, TextEditingValue(text: title))) return;
     if (mounted) setState(() => _replaced = true);
   }
 

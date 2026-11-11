@@ -631,8 +631,7 @@ class _TableBlockState extends State<TableBlock> {
   /// Shows `name` as the stored one.
   void _show(String name) {
     _named = name;
-    if (_name.text == name) return;
-    writeText(_name, TextEditingValue(text: name));
+    if (!writeText(_name, TextEditingValue(text: name))) return;
     if (mounted) setState(() => _replaced = true);
   }
 

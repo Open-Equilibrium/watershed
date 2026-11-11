@@ -176,8 +176,7 @@ class _AgentShellState extends State<AgentShell> {
   /// Shows `value` in the composer as Liquid's text; its field takes a fresh controller when the
   /// input area builds, so ⌘Z cannot bring back what it replaced.
   void _writeComposer(TextEditingValue value) {
-    writeText(_composer, value);
-    setState(() => _composerReplaced = true);
+    if (writeText(_composer, value)) setState(() => _composerReplaced = true);
   }
 
   /// Clears the composer after a send, so ⌘Z cannot bring the message back.
