@@ -118,6 +118,24 @@ void main() {
         );
       },
     );
+
+    test(
+      'a duration starts at the time just before an untimed first prompt',
+      () {
+        final graph = sessionGraph([
+          node('e1', null, BridgeEntryKind.system, at: 1000),
+          node('e2', 'e1', BridgeEntryKind.system, at: 2000),
+          node('u1', 'e2', BridgeEntryKind.user, preview: 'Read it'),
+          node('a1', 'u1', BridgeEntryKind.assistant, at: 3000),
+        ], 'a1');
+        expect(
+          graph.branches.single.durationMs,
+          1000,
+          reason:
+              'the core takes the latest time before the prompt as its base',
+        );
+      },
+    );
   });
 
   test('marks where the current branch leaves the others', () {

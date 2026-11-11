@@ -104,7 +104,7 @@ SessionGraph sessionGraph(List<BridgeTreeNode> nodes, String? leaf) {
   // An explicit stack instead of recursion: long sessions have deep trees.
   final stack = <_Visit>[
     for (final root in roots.reversed)
-      _Visit(root, null, null, 0, 0, null, null),
+      _Visit(root, null, null, 0, 0, null, null, null),
   ];
   while (stack.isNotEmpty) {
     final visit = stack.removeLast();
@@ -116,10 +116,11 @@ SessionGraph sessionGraph(List<BridgeTreeNode> nodes, String? leaf) {
     final turn = visit.turn + (isUser ? 1 : 0);
     final step = visit.step + (isStep ? 1 : 0);
     final prompt = isUser ? node.preview : visit.prompt;
-    // Durations count from the first prompt, or from the first timestamp on the path when that
-    // prompt has none, as the Trajectory does.
-    final startAt = isUser && visit.turn == 0 && node.atMs != null
-        ? node.atMs
+    // Durations count from the first prompt, as the Trajectory does: an untimed one takes the
+    // latest time before it, and without any, the first time on the path.
+    final lastAt = node.atMs ?? visit.lastAt;
+    final startAt = isUser && visit.turn == 0
+        ? lastAt
         : visit.startAt ?? node.atMs;
     var parentRow = visit.parentRow;
     // Forks outside steps keep a row, so their branches stay connected.
@@ -158,6 +159,7 @@ SessionGraph sessionGraph(List<BridgeTreeNode> nodes, String? leaf) {
           step,
           prompt,
           startAt,
+          lastAt,
         ),
       );
     }
@@ -183,6 +185,7 @@ class _Visit {
     this.step,
     this.prompt,
     this.startAt,
+    this.lastAt,
   );
 
   final BridgeTreeNode node;
@@ -194,6 +197,9 @@ class _Visit {
   final int step;
   final String? prompt;
   final int? startAt;
+
+  /// The latest time on the path so far.
+  final int? lastAt;
 }
 
 String _ref(int index) =>
