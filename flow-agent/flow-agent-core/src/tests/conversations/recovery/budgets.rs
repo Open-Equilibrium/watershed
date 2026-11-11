@@ -12,7 +12,6 @@ use crate::runtime::{
 };
 use std::{
     fs::{self, OpenOptions},
-    io::{Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
@@ -38,6 +37,36 @@ fn assert_conversation_recovery_prefix_open_fails(workspace: &Path, reason: &str
             .is_err(),
         "{reason}"
     );
+}
+
+fn assert_conversation_recovery_prefix_rejects(workspace: &Path, limit_message: &str) {
+    let Err(error) =
+        ConversationEventWriter::open_for_recovery(workspace, "review", "review-1", false, None)
+    else {
+        panic!("recovery prefix violating `{limit_message}` was accepted");
+    };
+    assert!(error.to_string().contains(limit_message), "{error}");
+}
+
+/// One canonical JSON record of exactly `len` bytes, LF-terminated (`len` >= 9).
+fn canonical_record(len: usize) -> Vec<u8> {
+    let mut record = b"{\"p\":\"".to_vec();
+    record.resize(len - 3, b'x');
+    record.extend_from_slice(b"\"}\n");
+    record
+}
+
+/// LF-terminated canonical JSON records totalling exactly `len` bytes (`len` >= 9).
+fn canonical_records(len: usize) -> Vec<u8> {
+    const RECORD_BYTES: usize = 1024;
+    let mut bytes = Vec::with_capacity(len);
+    let mut remaining = len;
+    while remaining > RECORD_BYTES + 9 {
+        bytes.extend(canonical_record(RECORD_BYTES));
+        remaining -= RECORD_BYTES;
+    }
+    bytes.extend(canonical_record(remaining));
+    bytes
 }
 
 #[test]
@@ -338,13 +367,15 @@ fn productive_recovery_prefix_rejects_bounded_stream_corruption() {
     assert_conversation_recovery_prefix_open_fails(&workspace, "event segment count is bounded");
 
     let (workspace, _, _) = productive_recovery_header_fixture("recovery-prefix-segment-size");
-    OpenOptions::new()
-        .write(true)
-        .open(run_path(&workspace).join("events.jsonl"))
-        .expect("event segment opens")
-        .set_len(MAX_SESSION_SEGMENT_BYTES + 1)
-        .expect("event segment grows beyond its boundary");
-    assert_conversation_recovery_prefix_open_fails(&workspace, "event segment size is bounded");
+    fs::write(
+        run_path(&workspace).join("events.jsonl"),
+        canonical_records(usize::try_from(MAX_SESSION_SEGMENT_BYTES + 1).expect("segment fits")),
+    )
+    .expect("oversized event segment writes");
+    assert_conversation_recovery_prefix_rejects(
+        &workspace,
+        "prefix segment exceeds its byte limit",
+    );
 
     let (workspace, _, _) = productive_recovery_header_fixture("recovery-prefix-empty-segment");
     fs::write(run_path(&workspace).join("events.000002.jsonl"), b"")
@@ -359,11 +390,12 @@ fn productive_recovery_prefix_rejects_bounded_stream_corruption() {
     assert_conversation_recovery_prefix_open_fails(&workspace, "event prefix must end with LF");
 
     let (workspace, _, _) = productive_recovery_header_fixture("recovery-prefix-record-size");
-    let mut oversized_record = vec![b'x'; MAX_CANONICAL_EVENT_BYTES];
-    oversized_record.push(b'\n');
-    fs::write(run_path(&workspace).join("events.jsonl"), oversized_record)
-        .expect("oversized event record writes");
-    assert_conversation_recovery_prefix_open_fails(&workspace, "event records are bounded");
+    fs::write(
+        run_path(&workspace).join("events.jsonl"),
+        canonical_record(MAX_CANONICAL_EVENT_BYTES + 1),
+    )
+    .expect("oversized event record writes");
+    assert_conversation_recovery_prefix_rejects(&workspace, "prefix record exceeds its byte limit");
 
     let (workspace, _, _) = productive_recovery_header_fixture("recovery-prefix-crlf");
     fs::write(run_path(&workspace).join("events.jsonl"), b"{}\r\n")
@@ -372,32 +404,21 @@ fn productive_recovery_prefix_rejects_bounded_stream_corruption() {
 
     let (workspace, _, _) = productive_recovery_header_fixture("recovery-prefix-total-size");
     let run = run_path(&workspace);
+    let full_segment = usize::try_from(MAX_SESSION_SEGMENT_BYTES * 3 / 4).expect("segment fits");
     for ordinal in 1..=CONTEXT_MANIFEST_STREAM_LIMITS.max_segments {
         let path = if ordinal == 1 {
             run.join("contexts.jsonl")
         } else {
             run.join(format!("contexts.{ordinal:06}.jsonl"))
         };
-        let mut file = OpenOptions::new()
-            .create(ordinal != 1)
-            .write(true)
-            .open(path)
-            .expect("context segment opens");
         let bytes = if ordinal == CONTEXT_MANIFEST_STREAM_LIMITS.max_segments {
-            1
+            canonical_record(9)
         } else {
-            MAX_SESSION_SEGMENT_BYTES * 3 / 4
+            canonical_records(full_segment)
         };
-        file.set_len(bytes).expect("context segment grows");
-        file.seek(SeekFrom::End(-1))
-            .expect("context segment seeks to its final byte");
-        file.write_all(b"\n")
-            .expect("context segment receives LF framing");
+        fs::write(path, bytes).expect("context segment writes");
     }
-    assert_conversation_recovery_prefix_open_fails(
-        &workspace,
-        "context prefix total size is bounded",
-    );
+    assert_conversation_recovery_prefix_rejects(&workspace, "prefix exceeds its byte limit");
 }
 
 #[test]
