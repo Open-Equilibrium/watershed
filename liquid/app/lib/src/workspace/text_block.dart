@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import '../controls.dart';
 import '../rust/api/workspace.dart';
+import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
@@ -584,6 +585,14 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         .then<void>((_) {}, onError: (Object _) {}),
   );
 
+  /// Ticks or unticks a to-do, which ⌘⏎ and its box do; other styles stay.
+  void _toggleToDo() {
+    final done = _style == BridgeTextStyle.done;
+    if (done || _style == BridgeTextStyle.todo) {
+      _restyle(done ? BridgeTextStyle.todo : BridgeTextStyle.done);
+    }
+  }
+
   void _restyle(BridgeTextStyle style) {
     setState(() => _style = style);
     widget.views.setStyle(block, style);
@@ -604,11 +613,13 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     // Until the Page's earlier queue is done, the field takes no keys at all.
     if (!widget.views.ready.value) return KeyEventResult.handled;
     final keys = HardwareKeyboard.instance;
+    // A key with the Liquid key held is a Liquid shortcut's, never the plain key's (⇪⏎ is not ⏎).
     final plain =
         !keys.isShiftPressed &&
         !keys.isMetaPressed &&
         !keys.isControlPressed &&
-        !keys.isAltPressed;
+        !keys.isAltPressed &&
+        !keys.logicalKeysPressed.contains(liquidKey);
     if (!plain) return KeyEventResult.ignored;
     if (_editor.isSource(this)) return _editor.queue(this, event);
     if (_menu.isShowing) return _menuKey(event.logicalKey);
@@ -793,9 +804,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
               checked: done,
               label: 'Done',
               child: GestureDetector(
-                onTap: () => _restyle(
-                  done ? BridgeTextStyle.todo : BridgeTextStyle.done,
-                ),
+                onTap: _toggleToDo,
                 child: Container(
                   key: const Key('to-do'),
                   width: 16,
@@ -824,6 +833,11 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       ),
       _ => text,
     };
+    // The field passes ⌘⏎ and ⇪⏎ on, so they reach this Block while it has the caret.
+    text = CallbackShortcuts(
+      bindings: Keymap.of(context).bind({Command.toggleToDo: _toggleToDo}),
+      child: text,
+    );
     // The slash command menu sits above the style's frame, which a restyle rebuilds.
     return CompositedTransformTarget(
       link: _menuAnchor,

@@ -342,6 +342,12 @@ enum Command {
     Area.input,
     Keys(LogicalKeyboardKey.enter, alt: true),
   ),
+  toggleToDo(
+    'Tick or untick a to-do',
+    Area.input,
+    Keys(LogicalKeyboardKey.enter, meta: true),
+    liquid: true,
+  ),
   stop('Stop the run', Area.input, Keys(LogicalKeyboardKey.escape)),
   answer('Answer, or confirm', Area.question, Keys(LogicalKeyboardKey.enter)),
   answerEditor(
