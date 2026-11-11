@@ -93,6 +93,10 @@
 .brow.on{background:var(--ws-hover)}.brow .d{margin-left:auto;font-family:var(--ws-font-ui);font-size:var(--ws-fs-small);color:var(--ws-text-faint)}
 .brow mark{background:none;color:var(--ws-text);font-weight:var(--ws-fw-semibold)}
 .small{font-size:var(--ws-fs-small);line-height:var(--ws-lh-small);color:var(--ws-text-muted)}
+.statusbar{display:flex;align-items:center;gap:var(--ws-space-4);height:26px;padding:0 var(--ws-space-4);background:var(--ws-subtle);box-shadow:inset 0 1px 0 var(--ws-border);border-radius:var(--ws-radius-md);font-size:var(--ws-fs-small);color:var(--ws-text-muted)}
+.statusbar .end{margin-left:auto;color:var(--ws-text-faint)}
+.tree{font-family:var(--ws-font-mono);font-size:var(--ws-fs-small);line-height:var(--ws-lh-small);background:var(--ws-subtle);border-radius:var(--ws-radius-md);padding:var(--ws-space-3) var(--ws-space-4);white-space:pre;color:var(--ws-text-muted)}
+.tree b{color:var(--ws-text);font-weight:var(--ws-fw-medium)}
 </style></head>
 <body class="theme-light chrome">
 <div class="page">
@@ -101,7 +105,7 @@
   </div>
   <section>
     <h1>Review follow-ups: mockups</h1>
-    <p class="sub">Proposals for open items of issues <a href="https://github.com/Open-Equilibrium/watershed/issues/62">#62</a>, <a href="https://github.com/Open-Equilibrium/watershed/issues/64">#64</a> and <a href="https://github.com/Open-Equilibrium/watershed/issues/66">#66</a>, drawn on the shipped app: the sidebar, Settings, the Trajectory tab and the pull request dialog. Each section shows what Liquid draws today and the proposal. <b>Not approved yet.</b> Names, times and numbers are examples.</p>
+    <p class="sub">Proposals for open items of issues <a href="https://github.com/Open-Equilibrium/watershed/issues/62">#62</a>, <a href="https://github.com/Open-Equilibrium/watershed/issues/64">#64</a> and <a href="https://github.com/Open-Equilibrium/watershed/issues/66">#66</a>, drawn on the shipped app: the sidebar, Settings, the Trajectory tab and the pull request dialog. Each section shows what Liquid draws today and the proposal. <b>Approved 2026-11-11</b>, sections 1–6 as drawn. Names, times and numbers are examples.</p>
   </section>
 
   <section id="rows">
@@ -210,14 +214,39 @@
     </div>
   </section>
 
+  <section id="export-record">
+    <h3 class="sec">6 · Export a session's record</h3>
+    <p class="sub">Meta-Harness offers what it already records as an observe-only export (ADR-0257). “Export record” in the session's ··· menu writes one folder to Downloads, then shows it in Finder; the status bar says where it went. No dialog: choosing a place would need a new plugin, and Finder already lets the person move it. The record claims no completeness, and its README says what it leaves out.</p>
+    <div class="gal">
+      <div class="gcell"><h4>Session menu</h4>
+        <div class="sb" style="position:relative"><div class="sh">Agent sessions</div>
+          <div class="proj"><span>acme-api</span></div>
+          <div class="card2 on"><div class="l1"><span class="dot"></span><b>Rate limit for /login</b><span class="more in">···</span></div><div class="l2">pi · feature/retry-after · MacBook</div></div>
+          <div class="pop menu" style="right:-60px;top:118px;width:210px"><div class="it on">Export record</div><hr><div class="it" style="color:var(--ws-danger)">Delete session…</div></div>
+          <div style="height:96px"></div>
+        </div>
+      </div>
+      <div class="gcell"><h4>After export <span>status bar, Finder opens the folder</span></h4>
+        <div class="statusbar"><span>ⓘ Exported the record of “Rate limit for /login” to Downloads.</span><span class="end">12.4k tokens · ≈ $0.21</span></div>
+        <div class="tree"><b>Rate limit for login – record 2026-11-11/</b>
+  session.jsonl      <span>pi's session file, unchanged</span>
+  record.json        <span>host, harness, project, branch; per turn: times,</span>
+                     <span>how it ended, checkpoint commits, files changed</span>
+  README.txt         <span>what the record covers and leaves out</span></div>
+        <span class="cap">README.txt: only turns run through Meta-Harness; changes between checkpoints, not files Git ignores, outside the project or effects beyond files.</span>
+      </div>
+    </div>
+  </section>
+
   <section>
-    <h3 class="sec">Open questions</h3>
+    <h3 class="sec">Decisions</h3>
     <ol class="qs">
-      <li>Section 1: does the ··· inside the row apply to Page rows and the session card alike, and may it hide the status word while shown?</li>
-      <li>Section 2: one Settings-wide notice for failed saves, in the danger colors?</li>
-      <li>Section 3: the keys and the announced text of the range handles.</li>
-      <li>Section 4: the 760 px threshold and the one-line metrics.</li>
-      <li>Section 5: search GitHub as the person types, refuse unknown names, and fall back to today's behavior when the search fails.</li>
+      <li>The ··· sits inside the row for the session card and Page rows alike, and replaces the status word while shown (decided 2026-11-11).</li>
+      <li>A failed save shows as one notice on top of the Settings content, in the danger colors (decided 2026-11-11).</li>
+      <li>The range handles work as a two-thumb slider with the keys and announced text drawn in section 3 (decided 2026-11-11).</li>
+      <li>Below 760 px window height the comparison shows its metrics in one line (decided 2026-11-11).</li>
+      <li>The base dialog searches GitHub as the person types, refuses names GitHub does not know and keeps today's behavior when the search fails (decided 2026-11-11).</li>
+      <li>“Export record” writes the folder to Downloads and shows it in Finder, without a save dialog (decided 2026-11-11).</li>
     </ol>
   </section>
 </div>

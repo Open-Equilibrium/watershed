@@ -39,112 +39,6 @@
         <p><strong>Recommendation:</strong> A, with the smallest useful set. Before choosing it, specify each Tool's input/path/action limits, replacement procedure, dependency/update responsibility and executable-code trust display. A safe file Tool and a build command that executes project code have different responsibilities; neither a description nor a marketplace listing proves safety. Ordinary assigned Tool calls remain prompt-free; first-release configuration administration stays manual under <a href="../../SECURITY.md#configuration-boundary">SECURITY.md</a>.</p>
         <p><strong>Acceptance criterion:</strong> Approve the catalog and user-facing trust explanation, then prove each shipped Tool's promised behavior under adversarial inputs on its declared platforms. Demonstrate replacing a default Tool without widening authority silently. Do not advertise third-party Tool certification or general host isolation.</p>
       </details>
-      <details id="d-077" class="decision">
-        <summary><h3>D-077 - Unicode Form Of Tool Scripts And Arguments</h3></summary>
-        <p><strong>Status:</strong> Open before the first Flow Agent release. The same letter can be stored as different bytes, for example "é" as one character or as "e" plus an accent; Unicode NFC is the form that always uses the single character. <a href="../../PROTOCOL.md#m11-authoring-cli-grammar">PROTOCOL.md</a> says Tool text "is preserved as exact UTF-8", but building the registry converts every own-script body and argument literal to NFC, and a <code>core-script</code> test asserts that conversion. The request Flow Agent sends the Executor also converts each argument and environment value to NFC, and environment values come from the host, where they can be in the other form. The published file keeps the authored bytes, so the bytes that run can differ from the bytes on disk. Host paths in an Executor request are already refused when they are not NFC.</p>
-        <p><strong>Question:</strong> May Flow Agent change the bytes of a Tool's script body, arguments and environment values to NFC before running them?</p>
-        <ul>
-          <li><strong>A: Refuse script bodies, arguments and environment values that are not NFC</strong> when the Tool is created or validated, or, for a value from the host, before the Tool starts. Pro: the stored and the executed bytes always match, and nothing is rewritten silently. Con: an Engineer whose editor or file system produced the other form must convert the text once.</li>
-          <li><strong>B: Keep converting, and say so in PROTOCOL.md.</strong> Pro: no change for existing definitions. Con: a script that names a file whose name uses the other form opens a different or missing file on Linux, and the executed text is not the reviewed text.</li>
-          <li><strong>C: Stop converting these fields</strong> and run the authored bytes. Pro: matches the documented sentence. Con: the canonical hash of a definition then depends on the form, so two definitions that look identical get different hashes.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> A, the rule the Executor request already follows for paths.</p>
-        <p><strong>Acceptance criterion:</strong> PROTOCOL.md states one rule for script bodies, argument literals, patterns, allowed values and the Executor request's arguments and environment values; a test shows a definition in the other form is refused (A), runs converted (B) or runs unchanged (C), and the contradicting test or sentence is gone.</p>
-      </details>
-      <details id="d-078" class="decision">
-        <summary><h3>D-078 - A Cut-Off Last Line In A Run's Event Log</h3></summary>
-        <p><strong>Status:</strong> Open before the first Flow Agent release. A Run appends one line per event to its event and context logs. If the process is killed or the power fails in the middle of an append, the last line is incomplete. Exact Resume then refuses that Run for good ("prefix must end with LF"), as the <a href="../../PROTOCOL.md#local-run-storage-and-m11-conversation-trees">recovery matrix</a> and a test require today. The recovery log already drops such an incomplete last line.</p>
-        <p><strong>Question:</strong> Should exact Resume drop an incomplete last line of the event and context logs?</p>
-        <ul>
-          <li><strong>A: Keep refusing.</strong> Pro: every difference in a log counts as damage, the simplest rule. Con: an ordinary crash at the wrong moment makes the Run impossible to resume.</li>
-          <li><strong>B: Drop the incomplete last line</strong> while holding the Run's lock, as for the recovery log. Pro: a crash during an append no longer blocks Resume; a line that never ended was never announced, so no recorded event is lost. Con: the recovery matrix, that test and the Replay and Tail readers change with it.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> B.</p>
-        <p><strong>Acceptance criterion:</strong> PROTOCOL.md's recovery matrix states the rule; tests show a Run with a cut-off last event line resuming (B) or being refused (A), and Replay and Tail treating the same file the same way.</p>
-      </details>
-      <details id="d-079" class="decision">
-        <summary><h3>D-079 - A Provider Reply That Ends But Breaks The Format</h3></summary>
-        <p><strong>Status:</strong> Open before the first Flow Agent release. <a href="../../PROTOCOL.md#m11-codex-subscription-provider">PROTOCOL.md</a> knows two outcomes for a failed model request: <code>provider_error</code>, carrying the provider's own message, and <em>uncertain</em>, for a reply that stopped early. A reply that ends properly but breaks the format fits neither: a repeated call id, an output item without content, data after the end, or a reply that is not an event stream. Today it is stored as <code>provider_error</code> with Flow Agent's own text in the place of the provider's message.</p>
-        <p><strong>Question:</strong> How is such a reply recorded?</p>
-        <ul>
-          <li><strong>A: As uncertain.</strong> Pro: no new term. Con: an uncertain model request cannot be settled by hand, so the Run cannot continue past it.</li>
-          <li><strong>B: As a third outcome</strong> that closes the attempt and labels the message as Flow Agent's. Pro: truthful, and the Run is not blocked. Con: one more outcome in the event schema, GLOSSARY.md and PROTOCOL.md.</li>
-          <li><strong>C: Keep <code>provider_error</code></strong> and let PROTOCOL.md allow a message Flow Agent wrote. Pro: no code change. Con: a reader can no longer trust that the message came from the provider.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> B.</p>
-        <p><strong>Acceptance criterion:</strong> PROTOCOL.md names the outcome for each such reply, and a test per case shows it recorded that way and never retried.</p>
-      </details>
-      <details id="d-080" class="decision">
-        <summary><h3>D-080 - A Tool Process On macOS That Outlives Its Tool</h3></summary>
-        <p><strong>Status:</strong> Open before the first Flow Agent release. When the Executor exits, Flow Agent ends every process left in the Executor's process group and waits one second. On macOS a Tool's child processes are in that group. If one cannot end in time, such as a process stuck on a hung network drive or one running as root, Flow Agent stops itself at once and discards the Executor's valid answer; the Tool call is then recorded as uncertain and must be settled by hand with <code>flow reconcile-tool</code>. Linux is not affected, because its Tools run in their own process namespace.</p>
-        <p><strong>Question:</strong> What should Flow Agent do when such a process survives the wait?</p>
-        <ul>
-          <li><strong>A: Keep stopping at once</strong> and record it as an accepted risk in SECURITY.md. Pro: Flow Agent never continues while a process it started may still be acting. Con: a valid result is lost and a person must settle the call.</li>
-          <li><strong>B: Keep the Executor's answer</strong> and record that cleanup of the Tool's processes is unknown. Pro: the evidence survives and the Run can continue or stop on a recorded fact. Con: a new recorded state, and a decision on whether the Run may go on.</li>
-          <li><strong>C: Give the Tool its own process group on macOS.</strong> Pro: ending the Executor no longer depends on the Tool's children. Con: Flow Agent would then have to end the Tool's group separately, or leave its children running.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> B, with the Run stopping after it records the answer.</p>
-        <p><strong>Acceptance criterion:</strong> A macOS test with a child that cannot be ended shows the chosen behavior, and SECURITY.md states it under effects and recovery.</p>
-      </details>
-      <details id="d-088" class="decision">
-        <summary><h3>D-088 - A Provider On A Documented API For The First Release</h3></summary>
-        <p><strong>Status:</strong> Open before the first Flow Agent release. Flow Agent's only model provider today logs in with a ChatGPT subscription: it uses Codex's public OAuth client id and sends requests to <code>chatgpt.com/backend-api/codex/responses</code> (<a href="../../PROTOCOL.md#m11-codex-subscription-provider">PROTOCOL.md</a>). Neither is a published API with terms for third-party programs, so OpenAI can change or close it at any time, and a company cannot use its own API keys or contract. PLAN.md names only the long-term provider-neutral local-inference target (ADR-0153, <a href="#d-059">D-059</a>).</p>
-        <p><strong>Question:</strong> Does the first release need a provider on a documented API with an API key?</p>
-        <ul>
-          <li><strong>A: Ship with the subscription login only.</strong> Pro: no further work. Con: the release depends on an endpoint nobody promised to keep, and companies have no supported way in.</li>
-          <li><strong>B: Add OpenAI's documented Responses API with an API key</strong>, keeping the subscription login as an option. Pro: closest to today's request format, so the least work. Con: still one vendor.</li>
-          <li><strong>C: Add one OpenAI-compatible endpoint provider</strong> (base URL plus API key), which OpenAI, Azure OpenAI and local servers such as vLLM or Ollama all offer, keeping the subscription login as an option. Pro: one provider reaches several vendors and is a first step toward the local-inference target. Con: the vendors differ in tool-call and streaming details, so each needs its own tests before it is listed as supported.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> C, listing only the endpoints that pass the provider tests as supported, and marking the subscription login as relying on an unpublished endpoint.</p>
-        <p><strong>Acceptance criterion:</strong> PROTOCOL.md defines the chosen provider and how its key is stored; provider tests run a Flow against each listed endpoint; the README says which logins rely on unpublished endpoints.</p>
-      </details>
-      <details id="d-090" class="decision">
-        <summary><h3>D-090 - The YAML Library Under Flow Definitions</h3></summary>
-        <p><strong>Status:</strong> Open before the first Flow Agent release. Flow and Tool definitions are YAML, parsed by <code>core-script</code> with the pre-1.0 library <code>noyalib</code>, pinned exactly at 0.0.53. Watershed adds its own checks on top: no anchors, no merge keys, no duplicate keys, bounded scalars and no nulls (<code>core/core-script/src/script/parser.rs</code>). The parser sits on a security-relevant path, since a definition decides what a Tool may run. noyalib has one maintainer, publishes 0.0.x releases often and may change its API in any of them; it reports passing the official YAML test suite.</p>
-        <p><strong>Question:</strong> Which parser should read Flow definitions?</p>
-        <ul>
-          <li><strong>A: Keep noyalib pinned, and add a fixed corpus of hostile definitions</strong> (deep nesting, huge scalars, aliases, tags, duplicate keys, odd encodings) that must keep giving the same result. Every version bump is reviewed against it. Pro: no rewrite; the corpus also makes a later switch safe. Con: still depends on one person's 0.0.x crate.</li>
-          <li><strong>B: Switch to <code>saphyr-parser</code></strong>, the maintained successor of <code>yaml-rust</code>, packaged by Debian, and check its event stream ourselves. Pro: wider use. Con: also 0.0.x, and Watershed then owns more of the checking code.</li>
-          <li><strong>C: Define Safe-YAML as a small fixed grammar</strong> (block mappings and sequences, plain and quoted scalars) <strong>and parse it ourselves.</strong> Pro: the smallest trusted code, fully specified by Watershed. Con: a parser to maintain, and Engineers lose YAML features such as flow style.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> A now; it costs little and makes B or C a safe swap later.</p>
-        <p><strong>Acceptance criterion:</strong> the corpus runs in CI against the chosen parser, and the dependency's version policy is stated where dependencies are reviewed.</p>
-      </details>
-      <details id="d-092" class="decision">
-        <summary><h3>D-092 - A Name That Does Not Promise A Sandbox</h3></summary>
-        <p><strong>Status:</strong> Open before the first Flow Agent release. Flow Agent blocks Tools and their new children from writing, deleting, replacing or hardlinking this installation's own files (configuration, registry, runtime and credential stores, installed programs). Otherwise Tools run with the person's own rights, and nothing stops them reading. The docs and CLI call this by nine names: "self-protection", "native self-protection", "native protection", "Flow-file protection", "own-file protection", "Flow-owned write protection", "native boundary", "Executor boundary" and "OS isolation" (PLAN.md's M1.2 heading). Several read as if Tools were contained: 44 places a person reads, plus internal names such as the receipt field <code>self_protection_active</code> and the error code <code>sandbox_setup_failed</code>.</p>
-        <p><strong>Question:</strong> Which single name should the docs, CLI and errors use?</p>
-        <ul>
-          <li><strong>A: "Flow-owned write protection".</strong> Pro: says what is protected and that only writes are blocked; already the wire value and SECURITY.md's wording. Con: three words; "write" must be defined once to include delete, replace and hardlink.</li>
-          <li><strong>B: "Flow file protection".</strong> Pro: short and already used in README and VISION. Con: reads like the Workspace's <code>.flow/</code> definitions, which are not protected, and does not say "write".</li>
-          <li><strong>C: "Tamper protection"</strong>, the term security products use. Pro: established. Con: those products also resist administrators, which Flow Agent explicitly does not, so it promises too much.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> A. Keep "Executor", since a process runner is not a container; drop "Executor boundary" and "OS isolation"; rename the PLAN.md heading and the misleading CLI and error texts in one docs-and-text change, and the wire names <code>self_protection_active</code> and <code>sandbox_setup_failed</code> in a separate schema change. Examples: <code>flow executor check</code> prints "Executor ready … (Flow-owned write protection active; Tools otherwise run with your permissions)"; GLOSSARY drops "OS isolation" and says under Sandbox that Flow Agent provides no Tool sandbox.</p>
-        <p><strong>Acceptance criterion:</strong> GLOSSARY.md defines the one term; a search for the other eight names finds them only in the changelog's history.</p>
-      </details>
-      <details id="d-093" class="decision">
-        <summary><h3>D-093 - Testing Flow Agent Against Power Loss</h3></summary>
-        <p><strong>Status:</strong> Open. Two durability defects in Flow Agent were found only by reading the code: a Run Log line not yet on disk when <code>status.json</code> was published, and a Conversation that stopped resuming after about six Runs. A new test matrix now kills the process after every durable step of a Run and of a chain of continuation Runs, then resumes and checks <a href="../../PROTOCOL.md">PROTOCOL.md</a>'s invariants (<a href="../../TESTING.md">TESTING.md</a>). A power loss is harder: writes not yet synced are lost, and the last write may be cut at any byte. To simulate that, the tests must know which bytes each file had synced. Flow Agent's durable files are written in about seven places and synced in about nine, several through direct file calls, with no single place every write and sync goes through.</p>
-        <p><strong>Question:</strong> How should the tests model a power loss?</p>
-        <ul>
-          <li><strong>A: One write-and-sync helper in production code</strong> that every durable file write uses, with a test-only record of what was synced. Pro: one durability boundary that later code cannot bypass; the tests then cover every step. Con: a production refactor of about 16 call sites, reviewed like any runtime change.</li>
-          <li><strong>B: A test-only hook at each of those places.</strong> Pro: no production change. Con: a new write that forgets its hook goes untested, so coverage drifts.</li>
-          <li><strong>C: Kill a real child process</strong> at each step instead of copying files inside one test process. Pro: faithful to a real crash, including the file identities the in-process copy loses. Con: slower, and it still does not model lost unsynced data.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> C to finish the crash tests, then A for power loss. A is the only option whose coverage cannot silently drift.</p>
-        <p><strong>Acceptance criterion:</strong> TESTING.md describes the chosen layer; for A, a test proves that a durable write outside the helper fails CI.</p>
-      </details>
-      <details id="d-082" class="decision">
-        <summary><h3>D-082 - Replaying A Tool Cancelled Before It Started</h3></summary>
-        <p><strong>Status:</strong> Open before the first Flow Agent release. When a Tool call is cancelled before the Executor started it, the live Run records no "Tool started" event. After a crash, recovery replays the call from its durable record, which <a href="../../PROTOCOL.md#local-run-storage-and-m11-conversation-trees">PROTOCOL.md</a> fixes as exactly <code>{"schema":"flow-attempt-cancelled-v0"}</code> for every stage, so recovery cannot tell when the cancellation happened and always replays a "Tool started" event first. The replayed history then shows a start that never happened.</p>
-        <p><strong>Question:</strong> Should the cancelled record say at which stage the call was cancelled?</p>
-        <ul>
-          <li><strong>A: Add the stage</strong> (before start or after start) in a new version of the record, as the Executor's stage errors already do. Pro: replay matches what happened. Con: one more durable format version to read and test.</li>
-          <li><strong>B: Keep the record and document</strong> that a recovered early cancellation replays with a start event. Pro: no format change. Con: recovered history contains an event that never happened.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> A.</p>
-        <p><strong>Acceptance criterion:</strong> PROTOCOL.md defines the record; a test cancels a call before and after start, recovers both Runs and shows the replayed events match the live ones (A), or PROTOCOL.md states the difference (B).</p>
-      </details>
     </div>
   </section>
 
@@ -231,42 +125,6 @@
         <p><strong>Recommendation:</strong> A for the core. Keep C open as a later adapter if people ask for T3's harnesses, since it fits the adapter boundary without changing any ADR.</p>
         <p><strong>Acceptance criterion:</strong> the ADR log records the choice; for B or C, the conflicting ADRs are amended through the decision flow before code changes.</p>
       </details>
-      <details id="d-083" class="decision">
-        <summary><h3>D-083 - Where The Lock For Folders Outside Git Lives</h3></summary>
-        <p><strong>Status:</strong> Open. In a folder without Git, Meta-Harness stops a session from being deleted or Git from being set up while an agent works there through a lock file in the system's temporary folder (<a href="../../SECURITY.md#mvp-vcs-boundary">SECURITY.md</a>). That folder comes from the <code>TMPDIR</code> setting, which can differ between two programs of the same person, for example on Linux when Liquid is started once from a terminal and once from the desktop. The two then use different lock files and do not see each other's agent.</p>
-        <p><strong>Question:</strong> Where should that lock live?</p>
-        <ul>
-          <li><strong>A: Keep the temporary folder</strong> and record the gap as an accepted risk in SECURITY.md. Pro: no change. Con: the protection depends on how the app was started.</li>
-          <li><strong>B: A fixed per-user folder</strong> that does not depend on <code>TMPDIR</code> (<code>XDG_RUNTIME_DIR</code> on Linux, Liquid's per-user support folder on macOS), with today's owner-only checks. Pro: every program of the person finds the same lock. Con: one more place Watershed owns, and a one-time switch while an old version still runs.</li>
-          <li><strong>C: The operating system's own per-user temporary folder</strong>, ignoring <code>TMPDIR</code>. Pro: no new folder. Con: differs per OS and is less obvious to a reader.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> B.</p>
-        <p><strong>Acceptance criterion:</strong> SECURITY.md names the lock's place; a test starts two processes with different <code>TMPDIR</code> values and shows one refusing to delete a session the other's agent uses (B, C), or SECURITY.md lists the accepted risk (A).</p>
-      </details>
-      <details id="d-084" class="decision">
-        <summary><h3>D-084 - Commit Attribution When A Turn's Start Checkpoint Is Gone</h3></summary>
-        <p><strong>Status:</strong> Open. The commit dialog marks each file as changed by the agent's turns, by the person, or both, by comparing the checkpoints taken at the start and end of each turn. When a turn's start checkpoint is missing, for example after its removal, that turn is skipped and the comparison restarts at the next one. Files changed during the uncovered stretch are then labeled as if attribution were complete, and a test deliberately labels changes before the first available start as the person's.</p>
-        <p><strong>Question:</strong> What should the dialog say about files whose changes fall into a stretch without checkpoints?</p>
-        <ul>
-          <li><strong>A: Attribution unavailable for the whole commit</strong> when any start checkpoint is missing. Pro: simplest and never wrong. Con: one old gap hides every label.</li>
-          <li><strong>B: Unavailable only for the files changed in the uncovered stretch</strong>; the others keep their labels. Pro: precise. Con: the existing test and the dialog's notes change.</li>
-          <li><strong>C: Keep today's labels</strong> and document them. Pro: no change. Con: a label can name the person for an agent's edit.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> B.</p>
-        <p><strong>Acceptance criterion:</strong> The Meta-Harness V-Spec states the rule; a test removes one start checkpoint and shows the chosen labels.</p>
-      </details>
-      <details id="d-085" class="decision">
-        <summary><h3>D-085 - A Byte Limit For Buffered Agent Events</h3></summary>
-        <p><strong>Status:</strong> Open. While a session starts, Meta-Harness keeps up to 4,096 agent events until Liquid listens, and later up to 256; each event may be up to 16 MiB. The limits count events, not bytes, so an agent that sends huge events can make Liquid hold many gigabytes. The agent itself runs with the person's permissions (ADR-0252, ADR-0254), so it could exhaust memory in other ways too.</p>
-        <p><strong>Question:</strong> Should buffered agent events have a byte limit?</p>
-        <ul>
-          <li><strong>A: A byte limit for the startup buffer only.</strong> Pro: small. Con: the later buffer stays unbounded in bytes.</li>
-          <li><strong>B: One byte limit per session</strong> for every buffered event, in the core and the bridge. Pro: complete. Con: more code, and a limit to choose and explain.</li>
-          <li><strong>C: Record agent output volume as an accepted risk</strong> of a trusted agent in SECURITY.md. Pro: no code. Con: a misbehaving extension can still freeze Liquid.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> C now, since the agent is trusted by design; B if agents become untrusted.</p>
-        <p><strong>Acceptance criterion:</strong> SECURITY.md states the bound or the accepted risk; for A or B a test shows the limit refusing the event that crosses it.</p>
-      </details>
     </div>
   </section>
 
@@ -279,42 +137,6 @@
         <p><strong>Question:</strong> Which typed Workspace reads, changes and App actions should remain stable in the MVP?</p>
         <ul><li><strong>A:</strong> A small set of resource-specific commands and action schemas. Pro: compact for agents, easy to test and restrict. Con: new capabilities need explicit additions.</li><li><strong>B:</strong> One broad document interface. Pro: flexible. Con: harder to secure, discover efficiently and change safely.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
-      </details>
-      <details id="d-081" class="decision">
-        <summary><h3>D-081 - How Liquid Finds A Workspace's Key</h3></summary>
-        <p><strong>Status:</strong> Open before Liquid's first release. Liquid encrypts a Workspace's database and keeps the key in the operating system's keystore, filed under the full path of the Workspace folder. If that path changes, for example when a person renames their macOS account and home folder or moves to a new Mac with Migration Assistant, Liquid looks under the new path, finds no key and refuses to open the Workspace, although the key still exists under the old path. ADR-0249 covers only the opposite case, a key without its file.</p>
-        <p><strong>Question:</strong> What identifies a Workspace's key?</p>
-        <ul>
-          <li><strong>A: A random name stored in a small file inside the Workspace folder.</strong> Pro: the key is found wherever the folder moves. Con: one more file that must be kept with the database, and existing Workspaces need a one-time move of their key.</li>
-          <li><strong>B: Keep the path, and search all of Liquid's keys when none matches.</strong> Pro: no new file. Con: with several Workspaces Liquid cannot tell which key belongs to which and would have to try each.</li>
-          <li><strong>C: Keep the path only.</strong> Pro: no change. Con: a renamed home folder locks the Workspace until someone edits the keystore by hand.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> A.</p>
-        <p><strong>Acceptance criterion:</strong> A test opens a Workspace, moves its folder and opens it again; SECURITY.md says what identifies the key.</p>
-      </details>
-      <details id="d-086" class="decision">
-        <summary><h3>D-086 - Restoring A Chat While A Turn Ends</h3></summary>
-        <p><strong>Status:</strong> Open. When Liquid opens or restores a Chat, it reads the conversation, the token usage and the turns in three separate requests. If a turn ends or usage changes between them, Liquid can miss that change until the next restore. Every restore Liquid starts itself runs while the agent is idle, so this happens only when something outside Liquid starts a turn, such as a pi extension.</p>
-        <p><strong>Question:</strong> Should Liquid close this gap?</p>
-        <ul>
-          <li><strong>A: One read that names the last event it covers</strong>, with newer events applied on top. Pro: exact. Con: a new bridge method and more code.</li>
-          <li><strong>B: Hold live events during the restore</strong> and apply them after. Pro: no new bridge method. Con: some events can count twice.</li>
-          <li><strong>C: Record it as an accepted limit</strong> while extensions cannot start turns in the MVP. Pro: no code. Con: totals can be off until the next restore.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> C, unless turns started by extensions are in MVP scope.</p>
-        <p><strong>Acceptance criterion:</strong> The Meta-Harness V-Spec states the limit (C), or a test ends a turn during a restore and shows it counted once (A, B).</p>
-      </details>
-      <details id="d-087" class="decision">
-        <summary><h3>D-087 - The Dark Yellow Tag's Contrast</h3></summary>
-        <p><strong>Status:</strong> Open. The <a href="../design/guidelines.md">design guidelines</a> require WCAG AA text contrast (4.5:1). In dark mode, tag text on the yellow tag color <code>--ws-tag-4</code> reaches 4.18:1; every other tag passes, the lowest at 5.16:1. No test checks tag colors yet.</p>
-        <p><strong>Question:</strong> How should the yellow tag reach AA?</p>
-        <ul>
-          <li><strong>A: Darken the dark yellow</strong> slightly, toward <code>#7d5a26</code>. Pro: smallest change; the other nine tags keep Notion's look. Con: yellow looks a little browner.</li>
-          <li><strong>B: Make dark tag text brighter</strong> for every tag. Pro: one value. Con: every tag changes.</li>
-          <li><strong>C: Keep Notion's color</strong> as a recorded exception. Pro: Notion parity. Con: breaks the guidelines' own rule.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> A.</p>
-        <p><strong>Acceptance criterion:</strong> A design-token test checks every tag pair in both themes and passes.</p>
       </details>
     </div>
   </section>
