@@ -4,6 +4,7 @@ use crate::runtime::{
 };
 
 mod continuation;
+mod crash_matrix;
 mod entrypoints;
 mod productive_resume;
 
