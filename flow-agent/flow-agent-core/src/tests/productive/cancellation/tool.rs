@@ -1,5 +1,7 @@
 use crate::runtime::{
-    fs_guards::AnchoredDir, productive::SystemProductiveToolExecutor, tool_runner::ToolInvocation,
+    fs_guards::AnchoredDir,
+    productive::{ProductiveToolExecutor, ProductiveToolPreflight, SystemProductiveToolExecutor},
+    tool_runner::ToolInvocation,
 };
 use crate::{
     runtime::{
@@ -272,6 +274,60 @@ fn tool_cancellation_persists_cancelled_attempt_and_lifecycle() {
         .expect("cancelled Tool emits ToolFailed");
     assert_eq!(tool_failed.payload["error"], CANCELLED_REASON);
     assert_controlled_cancellation_lifecycle(&sink.0);
+}
+
+#[test]
+fn system_productive_tool_executor_runs_the_command_only_at_start() {
+    let (workspace, fixture) = smoke_productive_execution_fixture();
+    let execution = fixture.execution(fixture.smoke_flow(), "system-tool-lifecycle");
+    let command_policy = execution
+        .policy
+        .commands
+        .first()
+        .expect("smoke command policy");
+    let marker = workspace.as_ref().join("system-tool-marker");
+    let invocation = ToolInvocation {
+        executable: proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0.to_owned(),
+        argv: vec![
+            "-c".to_owned(),
+            format!("touch {}", marker.display()),
+            "flow-tool:marker".to_owned(),
+        ],
+    };
+    let prepare = |executor: &mut SystemProductiveToolExecutor| {
+        executor
+            .prepare(
+                &invocation,
+                execution.workspace,
+                execution.policy,
+                command_policy,
+                "request-system-tool-lifecycle",
+            )
+            .expect("Tool prepares")
+    };
+    let mut executor = SystemProductiveToolExecutor;
+
+    let abandoned = prepare(&mut executor);
+    assert!(!marker.exists(), "prepare must not run the Tool");
+    let ProductiveToolPreflight::Ready(waiting) = executor
+        .preflight(abandoned)
+        .expect("preflight accepts the Tool")
+    else {
+        panic!("preflight rejected the Tool");
+    };
+    assert!(!marker.exists(), "preflight must not run the Tool");
+    drop(waiting);
+    assert!(!marker.exists(), "an abandoned Tool must not run");
+
+    let prepared = prepare(&mut executor);
+    let ProductiveToolPreflight::Ready(waiting) = executor
+        .preflight(prepared)
+        .expect("preflight accepts the Tool")
+    else {
+        panic!("preflight rejected the Tool");
+    };
+    executor.start(waiting).expect("Tool starts");
+    assert!(marker.exists(), "start runs the Tool");
 }
 
 #[test]

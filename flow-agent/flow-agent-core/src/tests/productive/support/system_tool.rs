@@ -13,8 +13,10 @@ pub(crate) struct SystemProductiveToolExecutor;
 
 pub(crate) struct SystemPreparedTool {
     enforcement: proto::EnforcementReceiptV0,
-    outcome: ToolExecutionOutcome,
+    invocation: ToolInvocation,
     request_hash: String,
+    timeout: Duration,
+    workspace: AnchoredDir,
 }
 
 impl ProductiveToolExecutor for SystemProductiveToolExecutor {
@@ -44,15 +46,12 @@ impl ProductiveToolExecutor for SystemProductiveToolExecutor {
         }))?;
         let policy_digest =
             canonical_request_hash(&serde_json::to_value(policy).map_err(RuntimeError::Json)?)?;
-        let outcome = self.execute(
-            invocation,
-            workspace.root(),
-            Duration::from_millis(policy.runtime_limits.timeout_ms),
-        )?;
         Ok(SystemPreparedTool {
             enforcement: test_enforcement_receipt(policy_digest),
-            outcome,
+            invocation: invocation.clone(),
             request_hash,
+            timeout: Duration::from_millis(policy.runtime_limits.timeout_ms),
+            workspace: workspace.root().clone(),
         })
     }
 
@@ -72,10 +71,11 @@ impl ProductiveToolExecutor for SystemProductiveToolExecutor {
     }
 
     fn start(&mut self, prepared: Self::Waiting) -> Result<ExecutorDispatchOutcome, RuntimeError> {
+        let outcome = self.execute(&prepared.invocation, &prepared.workspace, prepared.timeout)?;
         Ok(ExecutorDispatchOutcome::Completed(Box::new(
             ExecutorToolExecution {
                 enforcement: prepared.enforcement,
-                outcome: prepared.outcome,
+                outcome,
                 request_hash: prepared.request_hash,
             },
         )))
