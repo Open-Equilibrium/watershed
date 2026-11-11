@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid/src/diff/diff_model.dart';
 import 'package:liquid/src/diff/diff_settings.dart';
 import 'package:liquid/src/diff/diff_view.dart';
 import 'package:liquid/src/diff/turn_scope.dart';
@@ -34,7 +35,7 @@ void main() {
       MaterialApp(
         theme: liquidTheme(Brightness.light),
         home: Material(
-          child: DiffView(state: state, settings: settings),
+          child: DiffView(state: state, settings: settings, parse: parsePatch),
         ),
       ),
     );

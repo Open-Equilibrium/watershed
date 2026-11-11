@@ -47,6 +47,7 @@ class AgentShell extends StatefulWidget {
     this.shortcuts,
     this.diffSettings,
     this.appearance,
+    this.parseDiff = parsePatchInBackground,
   }) : assert((state == null) == (info == null));
 
   /// The agent session, if one started.
@@ -65,6 +66,9 @@ class AgentShell extends StatefulWidget {
 
   /// How the Diff tab shows changes; the defaults, unsaved, without them.
   final DiffSettingsController? diffSettings;
+
+  /// How the Diff tab reads a patch; tests pass the synchronous parser.
+  final PatchParser parseDiff;
 
   @override
   State<AgentShell> createState() => _AgentShellState();
@@ -465,6 +469,7 @@ class _AgentShellState extends State<AgentShell> {
                   state: state,
                   settings: _diffSettings,
                   input: input,
+                  parse: widget.parseDiff,
                 ),
                 AgentTab.trajectory => TrajectoryView(
                   state: state,

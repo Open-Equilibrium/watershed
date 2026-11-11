@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/action_area.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
+import 'package:liquid/src/diff/diff_model.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/session/session_state.dart';
@@ -51,7 +52,11 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: liquidTheme(Brightness.light),
-        home: AgentShell(state: SessionState(backend), info: info),
+        home: AgentShell(
+          state: SessionState(backend),
+          info: info,
+          parseDiff: parsePatch,
+        ),
       ),
     );
     await tester.pumpAndSettle();
