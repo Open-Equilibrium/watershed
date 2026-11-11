@@ -795,12 +795,12 @@ fn commit_includes_an_untracked_nested_repository() {
 }
 
 #[test]
-fn commit_plan_uses_the_first_available_start_as_its_baseline() {
+fn a_missing_first_start_leaves_its_stretch_unattributed() {
     use crate::TurnCheckpoints;
     run(async {
         let repo = Repo::new("attribution-missing-first");
         let checkpoints = Checkpoints::new(repo.path());
-        repo.write("a.txt", "your edit\n");
+        repo.write("a.txt", "an edit by turn one, whose start is missing\n");
         checkpoints.capture(&at("t2", Phase::Start)).await.unwrap();
         repo.write("a.txt", "turn edit\n");
         checkpoints.capture(&at("t2", Phase::End)).await.unwrap();
@@ -821,10 +821,66 @@ fn commit_plan_uses_the_first_available_start_as_its_baseline() {
             })
             .collect();
         let plan = checkpoints.commit_plan(&turns).await.unwrap();
-        assert_eq!(plan.files[0].turns, [2]);
-        assert!(
-            plan.files[0].edited,
-            "the edit before the first available start is yours"
+        // The edit may be turn one's, which has no checkpoint to tell it apart from the user's.
+        assert!(!plan.files[0].attribution_available);
+        assert!(plan.files[0].turns.is_empty());
+        assert!(!plan.files[0].edited);
+    });
+}
+
+#[test]
+fn a_turn_without_its_start_leaves_only_its_stretch_unattributed() {
+    use crate::TurnCheckpoints;
+    run(async {
+        let repo = Repo::new("attribution-missing-gap");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints.capture(&at("t1", Phase::Start)).await.unwrap();
+        repo.write("a.txt", "turn one\n");
+        checkpoints.capture(&at("t1", Phase::End)).await.unwrap();
+        // Turn two's checkpoints are missing, so its edit lies in no checkpointed stretch.
+        repo.write("b.txt", "turn two\n");
+        checkpoints.capture(&at("t3", Phase::Start)).await.unwrap();
+        repo.write("c.txt", "turn three\n");
+        checkpoints.capture(&at("t3", Phase::End)).await.unwrap();
+        let turns: Vec<_> = (1..=3)
+            .map(|number| TurnCheckpoints {
+                session: "s1".into(),
+                turn: if number == 2 {
+                    "t2".into()
+                } else {
+                    format!("t{number}")
+                },
+                number,
+                start_entry: "start".into(),
+                end_entry: Some("end".into()),
+                prompt_entry: None,
+                prompt: String::new(),
+                started_ms: None,
+                ended_ms: None,
+                ended: true,
+                failure: None,
+                changed: None,
+            })
+            .collect();
+        let plan = checkpoints.commit_plan(&turns).await.unwrap();
+        let attributed: Vec<_> = plan
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.change.path.as_str(),
+                    file.attribution_available,
+                    file.turns.clone(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            attributed,
+            [
+                ("a.txt", true, vec![1]),
+                ("b.txt", false, vec![]),
+                ("c.txt", true, vec![3]),
+            ]
         );
     });
 }

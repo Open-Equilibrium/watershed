@@ -6,7 +6,32 @@ use crate::diff::{
     Commit, PiQuestion, PullRequest, PullRequestDraft, PullRequestError, PullRequestPlan,
     PullRequestText, Snapshot,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+
+/// Who changed the files between two checkpoints.
+enum Owner {
+    /// The turn at this position in the turn list.
+    Turn(usize),
+    /// The user, between two turns.
+    Outside,
+    /// A turn whose checkpoint is missing, so its share cannot be told apart.
+    Unknown,
+}
+
+/// Who changed the files from one checkpoint to the next, `to` being None for the current tree.
+/// A turn's own stretch runs from its start to its end, or to the next turn's start when its end
+/// is missing; the stretch from a turn's end to the next start is the user's. Any other stretch
+/// covers a turn without its checkpoint, so it is unknown.
+fn stretch(from: (usize, Phase), to: Option<(usize, Phase)>, last: usize) -> Owner {
+    match (from, to) {
+        ((turn, Phase::Start), Some((end, Phase::End))) if end == turn => Owner::Turn(turn),
+        ((turn, Phase::Start), Some((next, Phase::Start))) if next == turn + 1 => Owner::Turn(turn),
+        ((turn, Phase::Start), None) if turn == last => Owner::Turn(turn),
+        ((turn, Phase::End), Some((next, Phase::Start))) if next == turn + 1 => Owner::Outside,
+        ((turn, Phase::End), None) if turn == last => Owner::Outside,
+        _ => Owner::Unknown,
+    }
+}
 
 /// One uncommitted whole file with attribution from this session's checkpoints.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -332,52 +357,84 @@ impl Checkpoints {
             REFS.to_owned()
         };
         let resolved = tree.checkpoint_trees(&prefix).await?;
-        // The last checkpoint, and the turn the changes after it belong to, none outside turns.
-        let mut previous: Option<(Snapshot, Option<u64>)> = None;
-        let mut first = true;
+        // The checkpoints that exist, in turn order, with their turn's position and phase.
+        let mut known = Vec::new();
+        for (position, (start_ref, end_ref, _)) in references.iter().enumerate() {
+            for (reference, phase) in [(start_ref, Phase::Start), (end_ref, Phase::End)] {
+                if let Some(snapshot) = resolved.get(reference) {
+                    known.push((position, phase, reference, snapshot.clone()));
+                }
+            }
+        }
+        // Each stretch between neighbouring checkpoints, the first from its parent, the last to
+        // the current tree; a missing checkpoint leaves its stretch unknown (ADR-0268).
+        let last = turns.len() - 1;
         let mut pairs = Vec::new();
-        let mut labels = Vec::new();
-        for (start_ref, end_ref, number) in references {
-            let Some(start) = resolved.get(&start_ref) else {
-                previous = None;
-                continue;
+        let mut owners = Vec::new();
+        let mut from: Option<(usize, Phase, Snapshot)> = None;
+        for (position, phase, reference, snapshot) in known {
+            let (before, owner) = match from.take() {
+                Some((at, at_phase, before)) => (
+                    before,
+                    stretch((at, at_phase), Some((position, phase)), last),
+                ),
+                None => {
+                    let owner = if (position, phase) == (0, Phase::Start) {
+                        Owner::Outside
+                    } else {
+                        Owner::Unknown
+                    };
+                    (tree.committed(&format!("{reference}^")).await?, owner)
+                }
             };
-            if first {
-                previous = Some((tree.committed(&format!("{start_ref}^")).await?, None));
-                first = false;
-            }
-            if let Some((before, turn)) = previous.take() {
-                pairs.push((before, start.clone()));
-                labels.push(turn);
-            }
-            let Some(end) = resolved.get(&end_ref) else {
-                previous = Some((start.clone(), Some(number)));
-                continue;
-            };
-            pairs.push((start.clone(), end.clone()));
-            labels.push(Some(number));
-            previous = Some((end.clone(), None));
+            pairs.push((before, snapshot.clone()));
+            owners.push(owner);
+            from = Some((position, phase, snapshot));
         }
-        if let Some((previous, turn)) = previous {
-            pairs.push((previous, current.clone()));
-            labels.push(turn);
+        match from {
+            Some((at, phase, snapshot)) => {
+                pairs.push((snapshot, current.clone()));
+                owners.push(stretch((at, phase), None, last));
+            }
+            // Without any checkpoint, the last commit is the only baseline.
+            None => {
+                pairs.push((tree.committed("HEAD").await?, current.clone()));
+                owners.push(Owner::Unknown);
+            }
         }
-        for (paths, turn) in tree
+        let mut unknown = BTreeSet::new();
+        for (paths, owner) in tree
             .changed_paths_batch(&pairs)
             .await?
             .into_iter()
-            .zip(labels)
+            .zip(owners)
         {
             for path in paths {
-                if let Some(file) = files.get_mut(&path) {
-                    if let Some(number) = turn {
-                        if !file.turns.contains(&number) {
+                match owner {
+                    Owner::Unknown => {
+                        unknown.insert(path);
+                    }
+                    Owner::Outside => {
+                        if let Some(file) = files.get_mut(&path) {
+                            file.edited = true;
+                        }
+                    }
+                    Owner::Turn(position) => {
+                        let number = references[position].2;
+                        if let Some(file) = files.get_mut(&path)
+                            && !file.turns.contains(&number)
+                        {
                             file.turns.push(number);
                         }
-                    } else {
-                        file.edited = true;
                     }
                 }
+            }
+        }
+        for path in unknown {
+            if let Some(file) = files.get_mut(&path) {
+                file.attribution_available = false;
+                file.turns.clear();
+                file.edited = false;
             }
         }
         Ok(())
