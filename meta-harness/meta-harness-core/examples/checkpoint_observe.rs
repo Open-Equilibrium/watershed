@@ -177,6 +177,8 @@ async fn observe(dir: &Path) {
             ended: true,
             failure: None,
             changed: None,
+            stop_reason: None,
+            stop_error: None,
         });
         let started = Instant::now();
         let files = checkpoints

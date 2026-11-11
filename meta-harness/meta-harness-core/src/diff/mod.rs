@@ -545,6 +545,11 @@ impl WorkingTree {
             .map(Snapshot))
     }
 
+    /// The commit `reference` names, or none when it names nothing.
+    pub async fn checkpoint_commit(&self, reference: &str) -> Result<Option<String>, DiffError> {
+        self.resolve(&format!("{reference}^{{commit}}")).await
+    }
+
     /// The object `name` names, or none when it names nothing.
     async fn resolve(&self, name: &str) -> Result<Option<String>, DiffError> {
         resolve_at(&self.root, name).await

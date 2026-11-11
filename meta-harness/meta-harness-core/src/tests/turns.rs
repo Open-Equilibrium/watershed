@@ -37,6 +37,8 @@ fn a_branch_lists_its_turns_with_their_checkpoints() {
                 ended: false,
                 failure: None,
                 changed: None,
+                stop_reason: None,
+                stop_error: None,
             }
         };
     assert_eq!(

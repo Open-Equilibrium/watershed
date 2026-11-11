@@ -10,6 +10,7 @@ mod event;
 mod framing;
 mod history;
 mod pi;
+mod record;
 mod session;
 mod stored;
 mod visible;
@@ -36,6 +37,7 @@ pub use history::{
     TurnCheckpoints,
 };
 pub(crate) use pi::PiAdapter;
+pub use record::session_record;
 pub use session::{
     AgentCommand, CommandError, MAX_RECORD_BYTES, Model, Pending, Responder, Session, SessionEvent,
     SessionState, Stopper,

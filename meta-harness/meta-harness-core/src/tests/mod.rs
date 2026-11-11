@@ -7,6 +7,7 @@ mod outcome;
 mod pi;
 mod pull_text;
 mod pulls;
+mod record;
 mod session;
 mod stored;
 mod sync;

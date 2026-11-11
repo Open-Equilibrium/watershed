@@ -44,6 +44,8 @@ pub(crate) enum Body {
         calls: Vec<Call>,
         model: String,
         stop_reason: String,
+        /// The message pi stored for a response that failed.
+        error: Option<String>,
         usage: Usage,
         /// Characters of its text and tool calls, as later requests send it.
         chars: usize,
@@ -359,6 +361,10 @@ fn message(message: Option<&Value>) -> Body {
                 calls,
                 model: field("model"),
                 stop_reason: field("stopReason"),
+                error: message
+                    .get("errorMessage")
+                    .and_then(Value::as_str)
+                    .map(|error| bounded(error.to_owned(), ERROR_CHARS)),
                 usage: usage(message.get("usage")),
                 chars: content_chars(message.get("content")),
             }

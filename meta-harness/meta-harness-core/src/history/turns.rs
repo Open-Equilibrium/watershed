@@ -36,6 +36,11 @@ pub struct TurnCheckpoints {
     pub failure: Option<String>,
     /// What it changed, counted when its end checkpoint was taken.
     pub changed: Option<ChangeCount>,
+    /// Why the last response before its end checkpoint stopped, as pi stored it, such as `stop`
+    /// or `aborted`.
+    pub stop_reason: Option<String>,
+    /// The error pi stored for that response, when it failed.
+    pub stop_error: Option<String>,
 }
 
 /// Files and lines a turn changed.
@@ -85,7 +90,17 @@ pub(super) fn turns(entries: &[Entry], leaf: Option<&str>) -> Vec<TurnCheckpoint
                 ended: false,
                 failure: error.clone(),
                 changed: None,
+                stop_reason: None,
+                stop_error: None,
             }),
+            Body::Assistant {
+                stop_reason, error, ..
+            } => {
+                if let Some(turn) = turns.last_mut().filter(|turn| turn.end_entry.is_none()) {
+                    turn.stop_reason = (!stop_reason.is_empty()).then(|| stop_reason.clone());
+                    turn.stop_error = error.clone();
+                }
+            }
             Body::Checkpoint {
                 session,
                 turn,

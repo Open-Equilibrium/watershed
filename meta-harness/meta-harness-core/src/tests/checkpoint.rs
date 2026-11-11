@@ -97,7 +97,7 @@ pub(super) fn at(turn: &str, phase: Phase) -> Checkpoint {
 }
 
 /// Takes turn `turn`'s start checkpoint, lets `work` change the project and takes its end.
-async fn turn(checkpoints: &Checkpoints, turn: &str, work: impl FnOnce()) {
+pub(super) async fn turn(checkpoints: &Checkpoints, turn: &str, work: impl FnOnce()) {
     checkpoints
         .capture(&at(turn, Phase::Start))
         .await

@@ -571,6 +571,8 @@ fn commit_plan_attributes_turns_outside_edits_and_partial_staging() {
                 ended: true,
                 failure: None,
                 changed: None,
+                stop_reason: None,
+                stop_error: None,
             });
         }
         repo.git(&["add", "a.txt"]);
@@ -818,6 +820,8 @@ fn a_missing_first_start_leaves_its_stretch_unattributed() {
                 ended: true,
                 failure: None,
                 changed: None,
+                stop_reason: None,
+                stop_error: None,
             })
             .collect();
         let plan = checkpoints.commit_plan(&turns).await.unwrap();
@@ -909,6 +913,8 @@ fn a_turn_without_its_end_checkpoint_keeps_its_changes() {
                 ended: false,
                 failure: None,
                 changed: None,
+                stop_reason: None,
+                stop_error: None,
             })
             .collect();
         let plan = checkpoints.commit_plan(&turns).await.unwrap();
@@ -1018,6 +1024,8 @@ fn attribution_bounds_keep_files_without_partial_labels() {
             ended: true,
             failure: None,
             changed: None,
+            stop_reason: None,
+            stop_error: None,
         };
         let complete = checkpoints
             .commit_plan(std::slice::from_ref(&turn))
@@ -1076,6 +1084,8 @@ fn malformed_checkpoint_ids_list_files_without_attribution() {
             ended: true,
             failure: None,
             changed: None,
+            stop_reason: None,
+            stop_error: None,
         };
         let plan = Checkpoints::new(repo.path())
             .commit_plan(&[turn])

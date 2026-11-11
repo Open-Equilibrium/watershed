@@ -522,6 +522,20 @@ impl Checkpoints {
         self.bounded(tree.changes(&from, &to, whitespace)).await
     }
 
+    /// The commit `checkpoint` holds, or none when it was not taken or the project is outside
+    /// Git. An id Watershed never writes names no checkpoint.
+    pub async fn commit_of(&self, checkpoint: &Checkpoint) -> Result<Option<String>, DiffError> {
+        let Ok(reference) = checkpoint.reference() else {
+            return Ok(None);
+        };
+        let tree = match self.tree().await {
+            Ok(tree) => tree,
+            Err(DiffError::NotARepository) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        self.bounded(tree.checkpoint_commit(&reference)).await
+    }
+
     /// The unified diff of one file from checkpoint `from` to `to`.
     pub async fn patch(
         &self,
