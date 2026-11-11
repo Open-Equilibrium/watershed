@@ -785,68 +785,73 @@ class _TrajectoryViewState extends State<TrajectoryView> {
             onChanged: (filter) => setState(() => _filter = filter),
             onDone: _focus.requestFocus,
           ),
-        Expanded(
-          child: ViewShortcuts(
-            bindings: _bindings(keys),
-            child: Focus(
-              focusNode: _focus,
-              autofocus: true,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (comparing)
-                    compareOverview(
-                      history: compared,
-                      comparison: _comparison(compared),
-                      branchA: _branchFor(_loaded[0]),
-                      branchB: _branchFor(_loaded[1]),
-                      equalWidth: _equalWidth,
-                      window: _window,
-                      onWindow: (window) => setState(() => _window = window),
-                    )
-                  else
-                    _overview(),
-                  Expanded(
-                    child: LayoutBuilder(
-                      builder: (context, constraints) => Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Expanded(
-                            child: InputLane(
-                              input: widget.input,
-                              child: comparing
-                                  ? CompareView(
-                                      a: compared.trajectories[0],
-                                      b: compared.trajectories[1],
-                                      comparison: _comparison(compared),
-                                      branchA: _branchFor(_loaded[0]),
-                                      branchB: _branchFor(_loaded[1]),
-                                      bottom: _clearance,
-                                    )
-                                  : _ledger(),
-                            ),
-                          ),
-                          SessionTreeView(
-                            graph: _graph,
-                            selected: _comparing ? _cursor : _selected,
-                            onRow: _onRow,
-                            shown: _comparing ? _picked.toSet() : {?_shownTip},
-                            picked: _comparing ? _picked.toSet() : null,
-                            open:
-                                _treeOpen ??
-                                constraints.maxWidth >= _treeOpenWidth,
-                            onOpen: (open) => setState(() => _treeOpen = open),
-                          ),
-                        ],
+        _body(compared, keys),
+      ],
+    );
+  }
+
+  /// The overview over the comparison or the ledger, beside the session tree, with the keys.
+  Expanded _body(BridgeHistory? compared, ShortcutSettings keys) {
+    final comparing = compared != null;
+    return Expanded(
+      child: ViewShortcuts(
+        bindings: _bindings(keys),
+        child: Focus(
+          focusNode: _focus,
+          autofocus: true,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (comparing)
+                compareOverview(
+                  history: compared,
+                  comparison: _comparison(compared),
+                  branchA: _branchFor(_loaded[0]),
+                  branchB: _branchFor(_loaded[1]),
+                  equalWidth: _equalWidth,
+                  window: _window,
+                  onWindow: (window) => setState(() => _window = window),
+                )
+              else
+                _overview(),
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) => Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(
+                        child: InputLane(
+                          input: widget.input,
+                          child: comparing
+                              ? CompareView(
+                                  a: compared.trajectories[0],
+                                  b: compared.trajectories[1],
+                                  comparison: _comparison(compared),
+                                  branchA: _branchFor(_loaded[0]),
+                                  branchB: _branchFor(_loaded[1]),
+                                  bottom: _clearance,
+                                )
+                              : _ledger(),
+                        ),
                       ),
-                    ),
+                      SessionTreeView(
+                        graph: _graph,
+                        selected: _comparing ? _cursor : _selected,
+                        onRow: _onRow,
+                        shown: _comparing ? _picked.toSet() : {?_shownTip},
+                        picked: _comparing ? _picked.toSet() : null,
+                        open:
+                            _treeOpen ?? constraints.maxWidth >= _treeOpenWidth,
+                        onOpen: (open) => setState(() => _treeOpen = open),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
+            ],
           ),
         ),
-      ],
+      ),
     );
   }
 
