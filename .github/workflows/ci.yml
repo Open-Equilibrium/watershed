@@ -12,7 +12,8 @@ on:
   # Topic branches run through their pull request, or on request before one exists, so a commit
   # never starts two runs that compete for the macOS runners.
   push:
-    branches: [main]
+    branches:
+      - main
 
 # A newer push or pull request update cancels its earlier run; every main commit keeps its own.
 concurrency:

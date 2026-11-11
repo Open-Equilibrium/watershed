@@ -26,7 +26,6 @@ ACTION_PINS = {
     "subosito/flutter-action": "1a449444c387b1966244ae4d4f8c696479add0b2",
     "taiki-e/install-action": "83ac0ad63c0167e6f06796fab0fce28db1bf3db0",
 }
-TOPIC_BRANCH_TYPES = ("feat", "fix", "docs", "test", "ci", "chore", "refactor")
 UBUNTU = "matrix.os == 'ubuntu-24.04'"
 MAC = "matrix.os == 'xcode-27'"
 PRODUCT = "needs.scope.outputs.product == 'true'"
@@ -340,11 +339,12 @@ class CiWorkflowContractTest(unittest.TestCase):
             "  cancel-in-progress: true",
         ])
 
-    def test_ci_runs_on_every_permitted_topic_branch(self) -> None:
-        self.assertEqual(
-            ci_push_branches(workflow_text()),
-            ("main", *(f"{kind}/**" for kind in TOPIC_BRANCH_TYPES)),
-        )
+    def test_topic_branches_run_ci_through_their_pull_request_or_on_request(self) -> None:
+        # A push run besides the pull request run would ask for macOS runners twice per commit.
+        workflow = workflow_text()
+        self.assertEqual(ci_push_branches(workflow), ("main",))
+        self.assertIn("\n  pull_request:\n    branches: [main]\n", workflow)
+        self.assertIn("\n  workflow_dispatch:\n", workflow)
 
     def test_ci_branch_parser_ignores_comments_and_other_trigger_keys(self) -> None:
         workflow = """on:
