@@ -122,6 +122,18 @@
         <p><strong>Recommendation:</strong> A. Keep "Executor", since a process runner is not a container; drop "Executor boundary" and "OS isolation"; rename the PLAN.md heading and the misleading CLI and error texts in one docs-and-text change, and the wire names <code>self_protection_active</code> and <code>sandbox_setup_failed</code> in a separate schema change. Examples: <code>flow executor check</code> prints "Executor ready … (Flow-owned write protection active; Tools otherwise run with your permissions)"; GLOSSARY drops "OS isolation" and says under Sandbox that Flow Agent provides no Tool sandbox.</p>
         <p><strong>Acceptance criterion:</strong> GLOSSARY.md defines the one term; a search for the other eight names finds them only in the changelog's history.</p>
       </details>
+      <details id="d-093" class="decision">
+        <summary><h3>D-093 - Testing Flow Agent Against Power Loss</h3></summary>
+        <p><strong>Status:</strong> Open. Two durability defects in Flow Agent were found only by reading the code: a Run Log line not yet on disk when <code>status.json</code> was published, and a Conversation that stopped resuming after about six Runs. A new test matrix now kills the process after every durable step of a Run and of a chain of continuation Runs, then resumes and checks <a href="../../PROTOCOL.md">PROTOCOL.md</a>'s invariants (<a href="../../TESTING.md">TESTING.md</a>). A power loss is harder: writes not yet synced are lost, and the last write may be cut at any byte. To simulate that, the tests must know which bytes each file had synced. Flow Agent syncs in about 20 places across 13 modules, with no single place every write and sync goes through.</p>
+        <p><strong>Question:</strong> How should the tests model a power loss?</p>
+        <ul>
+          <li><strong>A: One write-and-sync helper in production code</strong> that every durable file write uses, with a test-only record of what was synced. Pro: one durability boundary that later code cannot bypass; the tests then cover every step. Con: a production refactor of about 20 call sites, reviewed like any runtime change.</li>
+          <li><strong>B: A test-only hook at each of the 20 places.</strong> Pro: no production change. Con: a new write that forgets its hook goes untested, so coverage drifts.</li>
+          <li><strong>C: Kill a real child process</strong> at each step instead of copying files inside one test process. Pro: faithful to a real crash, including the file identities the in-process copy loses. Con: slower, and it still does not model lost unsynced data.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> C to finish the crash tests, then A for power loss. A is the only option whose coverage cannot silently drift.</p>
+        <p><strong>Acceptance criterion:</strong> TESTING.md describes the chosen layer; for A, a test proves that a durable write outside the helper fails CI.</p>
+      </details>
       <details id="d-082" class="decision">
         <summary><h3>D-082 - Replaying A Tool Cancelled Before It Started</h3></summary>
         <p><strong>Status:</strong> Open before the first Flow Agent release. When a Tool call is cancelled before the Executor started it, the live Run records no "Tool started" event. After a crash, recovery replays the call from its durable record, which <a href="../../PROTOCOL.md#local-run-storage-and-m11-conversation-trees">PROTOCOL.md</a> fixes as exactly <code>{"schema":"flow-attempt-cancelled-v0"}</code> for every stage, so recovery cannot tell when the cancellation happened and always replays a "Tool started" event first. The replayed history then shows a start that never happened.</p>
