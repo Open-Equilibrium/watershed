@@ -355,7 +355,7 @@ fn productive_recovery_resumes_a_cancelled_tool_attempt_without_redispatch() {
         classification: Some(CANCELLED_REASON.to_owned()),
         exit_code: None,
         timestamp: "2026-07-30T12:00:00Z".to_owned(),
-        durable_output: Some(serde_json::json!({"schema": "flow-attempt-cancelled-v0"})),
+        durable_output: None,
     });
 
     let execution = execute_productive_flow_with_tool_executor_and_recovery(

@@ -50,13 +50,14 @@ struct CancelledToolOutput {
 }
 
 /// Returns the stage of a recovered cancelled Tool attempt. v0 records carry no stage and
-/// were always written after `tool.started`, so they read as `started`.
+/// were always written after `tool.started`, so they read as `started`; so does a record
+/// without durable output, as recovery read it before stages existed.
 pub(super) fn recovered_cancelled_tool_stage(
     result: &RunAttemptResult,
 ) -> Result<ExecutorAttemptStage, RuntimeError> {
-    let durable_output = result.durable_output.as_ref().ok_or_else(|| {
-        RuntimeError::Protocol("recovered cancelled Tool attempt has no durable output".to_owned())
-    })?;
+    let Some(durable_output) = result.durable_output.as_ref() else {
+        return Ok(ExecutorAttemptStage::Started);
+    };
     match durable_output
         .get("schema")
         .and_then(serde_json::Value::as_str)
