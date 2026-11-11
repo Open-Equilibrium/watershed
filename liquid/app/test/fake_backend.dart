@@ -596,6 +596,28 @@ class FakeBackend implements SessionBackend {
         pullRequestOutcomeOf(bases: baseBranches, moreBases: moreBases);
   }
 
+  /// What a base search answers, until set otherwise: the branches of [baseBranches] that
+  /// contain its text. [searchOutcome] replaces the answer and [searchGate] holds it.
+  BridgePullRequestOutcome? searchOutcome;
+  Completer<BridgePullRequestOutcome>? searchGate;
+
+  @override
+  Future<BridgePullRequestOutcome> pullRequestBaseSearch(
+    String host,
+    String target,
+    String query,
+  ) async {
+    calls.add('search $target $query');
+    if (searchGate case final gate?) return gate.future;
+    return searchOutcome ??
+        pullRequestOutcomeOf(
+          bases: [
+            for (final name in baseBranches)
+              if (name.shown.contains(query)) name,
+          ],
+        );
+  }
+
   /// What the Chat's model writes for a pull request, until set otherwise; [writeError] fails
   /// it and [writeGate] holds it.
   BridgePullRequestText written = const BridgePullRequestText(

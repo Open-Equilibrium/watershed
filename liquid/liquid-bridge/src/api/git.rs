@@ -1096,6 +1096,30 @@ impl AgentSession {
         })
     }
 
+    /// The branches of `target` on `host` whose names contain `query`, as GitHub finds them.
+    pub fn pull_request_base_search(
+        &self,
+        host: String,
+        target: String,
+        query: String,
+    ) -> Result<BridgePullRequestOutcome, String> {
+        RUNTIME.block_on(async {
+            Ok(
+                match self
+                    .checkpoints
+                    .pull_request_base_search(&host, &target, &query)
+                    .await
+                {
+                    Ok(names) => BridgePullRequestOutcome {
+                        bases: names.into_iter().map(BridgeName::of).collect(),
+                        ..BridgePullRequestOutcome::of(BridgePullRequestOutcomeKind::Done)
+                    },
+                    Err(error) => BridgePullRequestOutcome::failed(error),
+                },
+            )
+        })
+    }
+
     async fn transfer_outcome(
         &self,
         result: Result<meta_harness_core::GitTransfer, DiffError>,

@@ -116,6 +116,13 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// The branch's latest pull request on GitHub, open ones first; none without one.
   Future<BridgePullRequestOutcome> pullRequest();
 
+  /// The branches of `target` on `host` whose names contain `query`, as GitHub finds them.
+  Future<BridgePullRequestOutcome> pullRequestBaseSearch({
+    required String host,
+    required String target,
+    required String query,
+  });
+
   /// The branches of `target` on `host` GitHub lists, to choose a base from.
   Future<BridgePullRequestOutcome> pullRequestBases({
     required String host,
