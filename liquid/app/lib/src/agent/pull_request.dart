@@ -18,6 +18,7 @@ import 'commit_dialog.dart';
 import 'commit_draft.dart';
 import 'git_actions.dart';
 import 'pull_request_choice.dart';
+import 'pull_request_refusal.dart';
 import 'pull_request_writing.dart';
 import 'session_menus.dart';
 
@@ -31,20 +32,20 @@ Future<void> showPullRequestDialog(
   required String device,
   bool compose = false,
 }) async {
-  final next = await showDialog<_Next>(
+  final next = await showDialog<PullRequestNext>(
     context: context,
     builder: (_) =>
         _PullRequestDialog(state: state, device: device, compose: compose),
   );
   if (!context.mounted) return;
   switch (next) {
-    case _Next.push:
+    case PullRequestNext.push:
       await pushBranch(context, state, device: device);
-    case _Next.branch:
+    case PullRequestNext.branch:
       await showBranchMenu(context, state);
-    case _Next.commit:
+    case PullRequestNext.commit:
       await showCommitDialog(context, state);
-    case _Next.compose:
+    case PullRequestNext.compose:
       await showPullRequestDialog(
         context,
         state,
@@ -54,9 +55,6 @@ Future<void> showPullRequestDialog(
     case null:
   }
 }
-
-/// What the dialog hands off to when the branch needs another step first.
-enum _Next { push, branch, commit, compose }
 
 class _PullRequestDialog extends StatefulWidget {
   const _PullRequestDialog({
@@ -532,7 +530,18 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
     }
     final plan = _plan;
     if (plan != null) return _form(context, plan);
-    if (_refused case final refused?) return _refusal(context, refused);
+    if (_refused case final refused?) {
+      return PullRequestRefusal(
+        state: widget.state,
+        device: widget.device,
+        outcome: refused,
+        compose: _compose,
+        beforePush: _beforePush,
+        composeTitle: _dialogTitle,
+        reading: _reading,
+        onCheckAgain: _checkAgain,
+      );
+    }
     return ActionDialog(
       title: _dialogTitle,
       actions: const [],
@@ -585,77 +594,6 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
         "Could not write the text with $_writer. Filled from the latest commit's subject and body instead; edit before creating.",
       ),
     };
-  }
-
-  Widget _refusal(BuildContext context, BridgePullRequestOutcome outcome) {
-    final text = DangerDialog.text(context);
-    final problem = pullRequestProblem(outcome, device: widget.device)!;
-    final uncommitted = widget.state.git.status.value?.changed ?? 0;
-    void next(_Next next) => Navigator.of(context).pop(next);
-    final checkAgain = SecondaryButton(
-      label: 'Check again',
-      onPressed: _reading ? null : _checkAgain,
-    );
-    final (title, actions) = switch (outcome.kind) {
-      BridgePullRequestOutcomeKind.needsPush => (
-        'Push before creating a pull request',
-        [
-          PrimaryButton(label: 'Push…', onPressed: () => next(_Next.push)),
-          SecondaryButton(
-            label: 'Commit, push & create PR…',
-            onPressed: () => next(_Next.compose),
-          ),
-        ],
-      ),
-      BridgePullRequestOutcomeKind.noBranch => (
-        'Detached HEAD',
-        [
-          PrimaryButton(
-            label: 'Create branch…',
-            onPressed: () => next(_Next.branch),
-          ),
-        ],
-      ),
-      BridgePullRequestOutcomeKind.noCommit => (
-        'Nothing committed',
-        [
-          PrimaryButton(
-            label: 'Commit changes…',
-            onPressed: () => next(_Next.commit),
-          ),
-        ],
-      ),
-      BridgePullRequestOutcomeKind.behind => (
-        'Pull before creating a pull request',
-        <Widget>[],
-      ),
-      BridgePullRequestOutcomeKind.notGitHub when outcome.page.isNotEmpty => (
-        'Create pull request',
-        [
-          PrimaryButton(
-            label: 'Open in browser ↗',
-            onPressed: () =>
-                unawaited(openInBrowser(widget.state, outcome.page)),
-          ),
-          checkAgain,
-        ],
-      ),
-      _ => ('Create pull request', [checkAgain]),
-    };
-    return ActionDialog(
-      title: _compose ? _dialogTitle : title,
-      actions: actions,
-      children: [
-        Text(problem, style: text),
-        if (_beforePush) Text('Nothing was committed or pushed.', style: text),
-        if (outcome.kind == BridgePullRequestOutcomeKind.needsPush &&
-            uncommitted > 0)
-          Text(
-            '${plural(uncommitted, 'uncommitted file')} ${uncommitted == 1 ? 'is' : 'are'} not part of the pull request. Commit them first if you want to include them.',
-            style: text,
-          ),
-      ],
-    );
   }
 
   Widget _form(BuildContext context, BridgePullRequestPlan plan) {
