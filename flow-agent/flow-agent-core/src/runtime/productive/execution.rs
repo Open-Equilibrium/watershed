@@ -554,8 +554,8 @@ fn productive_failure(error: &RuntimeError) -> RuntimeFailure {
         return failure;
     }
     match error {
-        RuntimeError::Provider(_) => {
-            failure.reason = ProviderTerminalClassification::ProviderError
+        RuntimeError::Provider(provider) => {
+            failure.reason = ProviderTerminalClassification::for_failure(provider)
                 .as_str()
                 .to_owned();
         }

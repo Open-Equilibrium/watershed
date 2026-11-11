@@ -290,6 +290,36 @@ fn definitive_http_failure_reports_status_and_bounded_provider_message() {
 }
 
 #[test]
+fn reply_that_is_not_an_event_stream_is_reply_invalid() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("fake provider binds");
+    let endpoint = format!("http://{}/responses", listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("one provider request");
+        let mut request = [0_u8; 4096];
+        assert!(stream.read(&mut request).expect("request reads") > 0);
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+        )
+        .expect("provider reply writes");
+    });
+
+    let error = OpenAiCodexProvider::default()
+        .turn_at(&endpoint, &fixture_credential(), &serde_json::json!({}))
+        .expect_err("a JSON reply is not an event stream");
+    let failure = error
+        .provider_failure()
+        .expect("the reply is a provider reply failure");
+    assert!(failure.is_reply_invalid());
+    assert_eq!(failure.http_status(), None);
+    assert_eq!(
+        failure.message(),
+        "Flow Agent rejected the provider reply: Responses reply is not text/event-stream"
+    );
+    server.join().expect("fake provider completes");
+}
+
+#[test]
 fn productive_http_dispatch_rejects_a_missing_terminal_sentinel() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("fake provider binds");
     let endpoint = format!("http://{}/responses", listener.local_addr().unwrap());

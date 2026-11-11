@@ -1,5 +1,7 @@
 use super::OPENAI_CODEX_ORIGINATOR;
-use super::protocol::{ProviderTurn, decode_responses_turn, provider_error_message};
+use super::protocol::{
+    ProviderTurn, decode_responses_turn, provider_error_message, provider_reply_invalid,
+};
 use crate::runtime::{
     deadlines::{AwaitInterruption, HttpDeadlines, await_deadline_or_cancellation},
     responses::SseDecoder,
@@ -81,8 +83,7 @@ pub(crate) async fn request_responses_with_client_async(
         .next()
         .is_some_and(|value| value.trim().eq_ignore_ascii_case("text/event-stream"))
     {
-        return Err(RuntimeError::definitive_provider_error(
-            Some(status.as_u16()),
+        return Err(provider_reply_invalid(
             "Responses reply is not text/event-stream",
         ));
     }

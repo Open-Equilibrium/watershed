@@ -57,6 +57,7 @@ pub(crate) use tool::test_enforcement_receipt;
 pub(crate) use tool_result::{tool_result_value, tool_terminal};
 
 const PROVIDER_ERROR_SCHEMA_V0: &str = "flow-provider-error-v0";
+const PROVIDER_REPLY_INVALID_SCHEMA_V0: &str = "flow-provider-reply-invalid-v0";
 const PROVIDER_OUTPUT_SCHEMA_V2: &str = "flow-provider-output-v2";
 
 #[cfg(test)]

@@ -245,6 +245,55 @@ fn productive_response_rejects_empty_or_duplicate_tool_call_identities() {
 }
 
 #[test]
+fn provider_reply_that_breaks_the_responses_format_is_reply_invalid() {
+    let call = |call_id: &str| {
+        serde_json::json!({
+            "type":"response.output_item.done",
+            "item":{"type":"function_call","call_id":call_id,"name":"inspect","arguments":"{}"}
+        })
+    };
+    let completed = serde_json::json!({"type":"response.completed","response":{"id":"resp_1"}});
+    let cases = [
+        (
+            "repeated call id",
+            vec![call("call_1"), call("call_1"), completed.clone()],
+            "response repeated function call id call_1",
+        ),
+        (
+            "output item without content",
+            vec![
+                serde_json::json!({
+                    "type":"response.output_item.done",
+                    "item":{"type":"message","id":"msg_1","role":"assistant"}
+                }),
+                completed.clone(),
+            ],
+            "output item without content",
+        ),
+        (
+            "data after the end",
+            vec![
+                completed.clone(),
+                serde_json::json!({"type":"response.output_text.delta","delta":"late"}),
+            ],
+            "response contains data after its successful terminal event",
+        ),
+    ];
+    for (case, events, detail) in cases {
+        let error = decode_responses_turn(&events).expect_err(case);
+        let failure = error
+            .provider_failure()
+            .unwrap_or_else(|| panic!("{case} is a provider reply failure: {error}"));
+        assert!(failure.is_reply_invalid(), "{case}");
+        assert_eq!(
+            failure.message(),
+            format!("Flow Agent rejected the provider reply: {detail}"),
+            "{case}"
+        );
+    }
+}
+
+#[test]
 fn productive_response_decodes_optional_bounded_cache_usage() {
     let turn = decode_responses_turn(&[serde_json::json!({
         "type":"response.completed",

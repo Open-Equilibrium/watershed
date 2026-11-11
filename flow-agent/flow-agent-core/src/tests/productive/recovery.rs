@@ -259,6 +259,49 @@ fn productive_recovery_reports_a_committed_provider_failure_without_redispatch()
 }
 
 #[test]
+fn productive_recovery_reports_a_committed_reply_invalid_without_redispatch() {
+    let (_workspace, fixture) = disabled_smoke_productive_execution_fixture();
+    let flow = fixture.smoke_flow();
+    let mut provider = FakeProvider::default();
+    let mut attempts = MemoryAttempts::default();
+    let mut sink = MemorySink::default();
+    let message =
+        "Flow Agent rejected the provider reply: response repeated function call id call-1";
+    let mut recovery = InjectedAttemptRecovery::ProviderResult(RunAttemptResult {
+        attempt_id: "provider-000001".to_owned(),
+        attempt_kind: RunAttemptKind::Provider,
+        outcome: RunAttemptOutcome::Failed,
+        classification: Some("provider_reply_invalid".to_owned()),
+        exit_code: None,
+        timestamp: "2026-07-30T12:00:00Z".to_owned(),
+        durable_output: Some(serde_json::json!({
+            "message": message,
+            "schema": "flow-provider-reply-invalid-v0",
+        })),
+    });
+
+    let execution = execute_productive_flow_with_recovery(
+        fixture.execution(flow, "productive-reply-invalid-recovery"),
+        &mut provider,
+        &mut attempts,
+        &mut sink,
+        &mut recovery,
+    )
+    .expect("recovered reply failure closes the session");
+
+    assert!(execution.failed);
+    assert_eq!(
+        execution
+            .terminal_error
+            .expect("reply failure remains reportable")
+            .to_string(),
+        format!("provider_reply_invalid: {message}")
+    );
+    assert!(provider.bodies.is_empty(), "provider must not rerun");
+    assert!(attempts.intents.is_empty(), "no new attempt is recorded");
+}
+
+#[test]
 fn productive_recovery_resumes_a_cancelled_provider_attempt() {
     let (_workspace, fixture) = disabled_smoke_productive_execution_fixture();
     let flow = fixture.smoke_flow();

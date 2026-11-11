@@ -1,10 +1,11 @@
 use super::super::test_support::workspace_copy;
 use super::support::{
     DefinitiveFailureProvider, FailingRecoveryBoundary, FakeProvider, FakeToolExecutionFault,
-    FakeToolExecutor, MemoryAttempts, MemorySink, ScriptedProvider, UnsupportedToolExecutor,
-    disabled_smoke_productive_execution_fixture, execute_failing_recovery_case,
-    execute_scripted_productive_case, execute_scripted_productive_case_with_tools,
-    load_productive_execution_fixture_for_flow, smoke_productive_execution_fixture,
+    FakeToolExecutor, MemoryAttempts, MemorySink, ReplyInvalidProvider, ScriptedProvider,
+    UnsupportedToolExecutor, disabled_smoke_productive_execution_fixture,
+    execute_failing_recovery_case, execute_scripted_productive_case,
+    execute_scripted_productive_case_with_tools, load_productive_execution_fixture_for_flow,
+    smoke_productive_execution_fixture,
 };
 use crate::runtime::{
     context::{
@@ -947,6 +948,62 @@ fn productive_failed_tool_closes_the_active_execution_without_another_provider_t
             EventType::PhaseCompleted | EventType::FlowCompleted | EventType::SessionCompleted
         )
     }));
+}
+
+#[test]
+fn provider_reply_that_breaks_the_format_is_recorded_as_reply_invalid_and_never_retried() {
+    let (_workspace, fixture) = disabled_smoke_productive_execution_fixture();
+    let flow = fixture.smoke_flow();
+    let call = || {
+        serde_json::json!({
+            "type":"response.output_item.done",
+            "item":{"type":"function_call","call_id":"call-1","name":"inspect","arguments":"{}"}
+        })
+    };
+    let mut provider = ReplyInvalidProvider {
+        bodies: Vec::new(),
+        events: vec![
+            call(),
+            call(),
+            serde_json::json!({"type":"response.completed","response":{"id":"resp-1"}}),
+        ],
+    };
+    let mut attempts = MemoryAttempts::default();
+    let mut sink = MemorySink::default();
+
+    let execution = execute_productive_flow(
+        ProductiveExecution {
+            agent_instructions: "Agent guidance.",
+            ..fixture.execution(flow, "provider-reply-invalid-fixture")
+        },
+        &mut provider,
+        &mut attempts,
+        &mut sink,
+    )
+    .expect("a broken provider reply closes the session");
+
+    assert!(execution.failed);
+    assert_eq!(provider.bodies.len(), 1, "a broken reply is never retried");
+    assert_eq!(attempts.results.len(), 1);
+    assert_eq!(attempts.results[0].0, RunAttemptKind::Provider);
+    assert_eq!(attempts.results[0].2, "failed");
+    assert_eq!(
+        attempts.results[0].3.as_deref(),
+        Some("provider_reply_invalid")
+    );
+    assert_eq!(
+        attempts.durable_outputs,
+        vec![Some(serde_json::json!({
+            "message": "Flow Agent rejected the provider reply: response repeated function call id call-1",
+            "schema": "flow-provider-reply-invalid-v0",
+        }))]
+    );
+    let error_event = sink
+        .0
+        .iter()
+        .find(|event| event.event_type == EventType::Error)
+        .expect("reply failure is durable");
+    assert_eq!(error_event.payload["code"], "provider_reply_invalid");
 }
 
 #[test]

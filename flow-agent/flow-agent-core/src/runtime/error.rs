@@ -2,6 +2,7 @@ use std::{fmt, io, path::PathBuf};
 
 pub(crate) const MAX_PROVIDER_ERROR_MESSAGE_CHARS: usize = 4_000;
 pub(crate) const PROVIDER_ERROR_REASON: &str = "provider_error";
+pub(crate) const PROVIDER_REPLY_INVALID_REASON: &str = "provider_reply_invalid";
 
 /// Stable bounded failure at the private Executor integration boundary.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -30,8 +31,19 @@ impl ExecutorFailure {
 #[derive(Debug)]
 pub struct ProviderFailure {
     http_status: Option<u16>,
+    kind: ProviderFailureKind,
     message: String,
-    definitive: bool,
+}
+
+/// How a provider failure settles its attempt.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ProviderFailureKind {
+    /// The provider rejected the attempt; it is closed and never retried.
+    Definitive,
+    /// The attempt may have reached the provider; it stays uncertain.
+    Uncertain,
+    /// A reply ended but broke the Responses format; Flow Agent labels its own message.
+    ReplyInvalid,
 }
 
 impl ProviderFailure {
@@ -43,8 +55,21 @@ impl ProviderFailure {
         &self.message
     }
 
+    pub(crate) fn kind(&self) -> ProviderFailureKind {
+        self.kind
+    }
+
     pub(crate) fn is_definitive(&self) -> bool {
-        self.definitive
+        self.kind == ProviderFailureKind::Definitive
+    }
+
+    pub(crate) fn is_reply_invalid(&self) -> bool {
+        self.kind == ProviderFailureKind::ReplyInvalid
+    }
+
+    /// Whether the attempt's terminal outcome is known, so it closes instead of staying uncertain.
+    pub(crate) fn is_known_outcome(&self) -> bool {
+        self.kind != ProviderFailureKind::Uncertain
     }
 }
 
@@ -237,16 +262,25 @@ impl RuntimeError {
     ) -> Self {
         Self::Provider(ProviderFailure {
             http_status,
+            kind: ProviderFailureKind::Definitive,
             message: bounded_provider_message(message.into()),
-            definitive: true,
         })
     }
 
     pub(crate) fn uncertain_provider_error(message: impl Into<String>) -> Self {
         Self::Provider(ProviderFailure {
             http_status: None,
+            kind: ProviderFailureKind::Uncertain,
             message: bounded_provider_message(message.into()),
-            definitive: false,
+        })
+    }
+
+    /// Builds a broken-reply failure; `message` is Flow Agent's complete, labelled message.
+    pub(crate) fn provider_reply_invalid(message: impl Into<String>) -> Self {
+        Self::Provider(ProviderFailure {
+            http_status: None,
+            kind: ProviderFailureKind::ReplyInvalid,
+            message: bounded_provider_message(message.into()),
         })
     }
 
@@ -341,7 +375,11 @@ impl fmt::Display for RuntimeError {
                 "execution_backend_unavailable: productive execution is unavailable on this platform",
             ),
             Self::Provider(failure) => {
-                f.write_str(PROVIDER_ERROR_REASON)?;
+                f.write_str(if failure.is_reply_invalid() {
+                    PROVIDER_REPLY_INVALID_REASON
+                } else {
+                    PROVIDER_ERROR_REASON
+                })?;
                 if let Some(status) = failure.http_status {
                     write!(f, " (HTTP {status})")?;
                 }

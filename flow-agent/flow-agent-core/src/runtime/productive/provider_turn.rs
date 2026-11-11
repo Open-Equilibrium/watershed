@@ -39,7 +39,13 @@ fn validate_recovered_provider_terminal(result: &RunAttemptResult) -> Result<(),
         && match result.outcome {
             RunAttemptOutcome::Completed => result.classification.is_none(),
             RunAttemptOutcome::Failed => {
-                classification == Some(ProviderTerminalClassification::ProviderError)
+                matches!(
+                    classification,
+                    Some(
+                        ProviderTerminalClassification::ProviderError
+                            | ProviderTerminalClassification::ProviderReplyInvalid
+                    )
+                )
             }
             RunAttemptOutcome::Cancelled => {
                 classification == Some(ProviderTerminalClassification::Cancelled)
@@ -175,7 +181,7 @@ where
             if matches!(&error, RuntimeError::Cancelled)
                 || (!error
                     .provider_failure()
-                    .is_some_and(|failure| failure.is_definitive())
+                    .is_some_and(|failure| failure.is_known_outcome())
                     && crate::runtime::cancellation::ensure_productive_dispatch_allowed()
                         .is_err()) =>
         {
@@ -190,17 +196,18 @@ where
         Err(error)
             if error
                 .provider_failure()
-                .is_some_and(|failure| failure.is_definitive()) =>
+                .is_some_and(|failure| failure.is_known_outcome()) =>
         {
+            let classification = error
+                .provider_failure()
+                .map_or(ProviderTerminalClassification::ProviderError, |failure| {
+                    ProviderTerminalClassification::for_failure(failure)
+                });
             let result = RunAttemptResult {
                 attempt_id: attempt_id.to_owned(),
                 attempt_kind: RunAttemptKind::Provider,
                 outcome: RunAttemptOutcome::Failed,
-                classification: Some(
-                    ProviderTerminalClassification::ProviderError
-                        .as_str()
-                        .to_owned(),
-                ),
+                classification: Some(classification.as_str().to_owned()),
                 exit_code: None,
                 timestamp: timestamp.to_owned(),
                 durable_output: Some(durable_provider_error(&error)?),

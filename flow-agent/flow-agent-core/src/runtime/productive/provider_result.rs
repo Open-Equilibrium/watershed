@@ -1,4 +1,6 @@
-use super::{PROVIDER_ERROR_SCHEMA_V0, PROVIDER_OUTPUT_SCHEMA_V2};
+use super::{
+    PROVIDER_ERROR_SCHEMA_V0, PROVIDER_OUTPUT_SCHEMA_V2, PROVIDER_REPLY_INVALID_SCHEMA_V0,
+};
 use crate::runtime::{
     context::ContextObject,
     digest::sha256_hex,
@@ -278,9 +280,14 @@ pub(super) fn durable_provider_error(
     let failure = error.provider_failure().ok_or_else(|| {
         RuntimeError::Protocol("provider error durability received a non-provider error".to_owned())
     })?;
+    let schema = if failure.is_reply_invalid() {
+        PROVIDER_REPLY_INVALID_SCHEMA_V0
+    } else {
+        PROVIDER_ERROR_SCHEMA_V0
+    };
     let mut value = serde_json::json!({
         "message": failure.message(),
-        "schema": PROVIDER_ERROR_SCHEMA_V0,
+        "schema": schema,
     });
     if let Some(status) = failure.http_status() {
         value
@@ -302,9 +309,12 @@ pub(super) fn provider_error_from_durable_output(
     } else {
         2
     };
+    let schema = object.get("schema").and_then(serde_json::Value::as_str);
     if object.len() != expected_fields
-        || object.get("schema").and_then(serde_json::Value::as_str)
-            != Some(PROVIDER_ERROR_SCHEMA_V0)
+        || !matches!(
+            schema,
+            Some(PROVIDER_ERROR_SCHEMA_V0 | PROVIDER_REPLY_INVALID_SCHEMA_V0)
+        )
     {
         return Err(RuntimeError::Protocol(
             "recovered provider error has an invalid schema".to_owned(),
@@ -320,6 +330,14 @@ pub(super) fn provider_error_from_durable_output(
         return Err(RuntimeError::Protocol(
             "recovered provider error message exceeds its character budget".to_owned(),
         ));
+    }
+    if schema == Some(PROVIDER_REPLY_INVALID_SCHEMA_V0) {
+        if object.contains_key("http_status") {
+            return Err(RuntimeError::Protocol(
+                "recovered provider reply failure has an HTTP status".to_owned(),
+            ));
+        }
+        return Ok(RuntimeError::provider_reply_invalid(message));
     }
     let http_status = object
         .get("http_status")

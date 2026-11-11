@@ -120,7 +120,7 @@ pub(crate) fn decode_responses_turn(
 
     for event in events {
         if completed != 0 {
-            return Err(provider_protocol(
+            return Err(provider_reply_invalid(
                 "response contains data after its successful terminal event",
             ));
         }
@@ -143,10 +143,15 @@ pub(crate) fn decode_responses_turn(
                     .get("item")
                     .ok_or_else(|| provider_protocol("output_item.done lacks item"))?
                     .clone();
+                if item.get("type").and_then(serde_json::Value::as_str) == Some("message")
+                    && item.get("content").is_none()
+                {
+                    return Err(provider_reply_invalid("output item without content"));
+                }
                 if item.get("type").and_then(serde_json::Value::as_str) == Some("function_call") {
                     let call = decode_tool_call(&item)?;
                     if !tool_call_ids.insert(call.call_id.clone()) {
-                        return Err(provider_protocol(format!(
+                        return Err(provider_reply_invalid(format!(
                             "response repeated function call id {}",
                             call.call_id
                         )));
@@ -482,4 +487,12 @@ fn required_non_empty_string<'a>(
 
 fn provider_protocol(message: impl Into<String>) -> RuntimeError {
     RuntimeError::Protocol(format!("OpenAI Codex provider: {}", message.into()))
+}
+
+/// A reply that ended but broke the Responses format; the message is Flow Agent's own.
+pub(super) fn provider_reply_invalid(detail: impl AsRef<str>) -> RuntimeError {
+    RuntimeError::provider_reply_invalid(format!(
+        "Flow Agent rejected the provider reply: {}",
+        detail.as_ref()
+    ))
 }
