@@ -110,7 +110,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   final _brush = ValueNotifier<Brush?>(null);
 
   /// The lines the list shows, as last built.
-  List<_Line> _shownLines = const [];
+  List<LedgerLine> _shownLines = const [];
   bool _comparing = false;
   List<String> _picked = const [];
 
@@ -344,10 +344,10 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     int? last;
     var y = 0.0;
     for (final line in _shownLines) {
-      final height = line is _InspectorLine
+      final height = line is InspectorLine
           ? inspectorHeight
           : WsMetrics.rowTable;
-      if (line is _StepLine && y + height > top && y < bottom) {
+      if (line is StepLine && y + height > top && y < bottom) {
         first ??= line.index;
         last = line.index;
       }
@@ -369,7 +369,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   double _lineTop(int line) {
     var y = 0.0;
     for (final shown in _shownLines.take(line)) {
-      y += shown is _InspectorLine ? inspectorHeight : WsMetrics.rowTable;
+      y += shown is InspectorLine ? inspectorHeight : WsMetrics.rowTable;
     }
     return y;
   }
@@ -379,7 +379,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     final index = stepAt(_records, at, equalWidth: _equalWidth);
     if (index == null || !_scroll.hasClients) return;
     final line = _shownLines.indexWhere(
-      (line) => line is _StepLine && line.index == index,
+      (line) => line is StepLine && line.index == index,
     );
     if (line < 0) return;
     _scroll.jumpTo(math.min(_lineTop(line), _scroll.position.maxScrollExtent));
@@ -466,7 +466,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scroll.hasClients) return;
       final line = _lines().indexWhere(
-        (line) => line is _StepLine && line.index == _selectedIndex,
+        (line) => line is StepLine && line.index == _selectedIndex,
       );
       if (line < 0) return;
       final top = line * WsMetrics.rowTable;
@@ -703,30 +703,13 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     }
   }
 
-  List<_Line> _lines() {
-    final lines = <_Line>[
-      if (_range == null && _records.any((record) => record.context != null))
-        _StartLine(),
-    ];
-    final inside = _inRange();
-    for (final turn in turnGroups(_records)) {
-      // A range shows only its steps and their turns.
-      final steps = [
-        for (var index = turn.first; index <= turn.last; index++)
-          if (inside?[index] ?? true) index,
-      ];
-      if (steps.isEmpty) continue;
-      lines.add(_TurnLine(turn));
-      if (_folded.contains(turn.turn)) continue;
-      for (final index in steps) {
-        lines.add(_StepLine(index));
-        if (_inspecting && _records[index].entry == _selected) {
-          lines.add(_InspectorLine(index));
-        }
-      }
-    }
-    return lines;
-  }
+  List<LedgerLine> _lines() => ledgerLines(
+    _records,
+    folded: _folded,
+    inside: _inRange(),
+    selected: _selected,
+    inspecting: _inspecting,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -999,11 +982,11 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     int? valueAt(int line) => line < 0 || line >= lines.length
         ? null
         : switch (lines[line]) {
-            _StartLine() => track.start.tokens,
-            _TurnLine(:final turn) =>
+            StartLine() => track.start.tokens,
+            TurnLine(:final turn) =>
               _folded.contains(turn.turn) ? null : track.before(turn).tokens,
-            _StepLine(:final index) => track.levels[index].tokens,
-            _InspectorLine() => null,
+            StepLine(:final index) => track.levels[index].tokens,
+            InspectorLine() => null,
           };
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -1039,7 +1022,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
                 padding: EdgeInsets.only(bottom: _clearance),
                 itemCount: lines.length,
                 itemBuilder: (context, index) => switch (lines[index]) {
-                  _StartLine() => LineRow(
+                  StartLine() => LineRow(
                     key: const ValueKey('start'),
                     title: 'Start',
                     summary: [
@@ -1053,7 +1036,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
                     trackWidth: trackWidth,
                     track: cell(index, track.start, bar: false),
                   ),
-                  _TurnLine(:final turn) => TurnRow(
+                  TurnLine(:final turn) => TurnRow(
                     turn: turn,
                     before: track.before(turn),
                     after: track.levels[turn.last],
@@ -1065,7 +1048,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
                     onToggle: () => _toggleTurn(turn.turn),
                     onOpen: () => _openTurn(turn),
                   ),
-                  _StepLine(index: final step) => Opacity(
+                  StepLine(index: final step) => Opacity(
                     opacity: matches?[step] ?? true ? 1 : 0.35,
                     child: StepRow(
                       key: ValueKey('step-${records[step].entry}'),
@@ -1090,7 +1073,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
                       },
                     ),
                   ),
-                  _InspectorLine(index: final step) => _inspector(step),
+                  InspectorLine(index: final step) => _inspector(step),
                 },
               ),
             ),
@@ -1116,27 +1099,4 @@ class _TrajectoryViewState extends State<TrajectoryView> {
       onBranch: _branch,
     );
   }
-}
-
-sealed class _Line {}
-
-/// What the first request held before any message.
-class _StartLine extends _Line {}
-
-class _TurnLine extends _Line {
-  _TurnLine(this.turn);
-
-  final TurnGroup turn;
-}
-
-class _StepLine extends _Line {
-  _StepLine(this.index);
-
-  final int index;
-}
-
-class _InspectorLine extends _Line {
-  _InspectorLine(this.index);
-
-  final int index;
 }

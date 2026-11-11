@@ -431,3 +431,60 @@ class StepRow extends StatelessWidget {
     return Semantics(selected: selected, child: row);
   }
 }
+
+/// A line of the ledger: the start, a turn, a step, or the inspector under the selected step.
+sealed class LedgerLine {}
+
+/// What the first request held before any message.
+class StartLine extends LedgerLine {}
+
+class TurnLine extends LedgerLine {
+  TurnLine(this.turn);
+
+  final TurnGroup turn;
+}
+
+class StepLine extends LedgerLine {
+  StepLine(this.index);
+
+  final int index;
+}
+
+class InspectorLine extends LedgerLine {
+  InspectorLine(this.index);
+
+  final int index;
+}
+
+/// The lines the ledger shows: the start, then each turn with its steps unless folded, and
+/// the inspector under the selected step. `inside` marks the steps a range keeps; `null` keeps
+/// all of them.
+List<LedgerLine> ledgerLines(
+  List<BridgeRecord> records, {
+  required Set<int> folded,
+  required List<bool>? inside,
+  required String? selected,
+  required bool inspecting,
+}) {
+  final lines = <LedgerLine>[
+    if (inside == null && records.any((record) => record.context != null))
+      StartLine(),
+  ];
+  for (final turn in turnGroups(records)) {
+    // A range shows only its steps and their turns.
+    final steps = [
+      for (var index = turn.first; index <= turn.last; index++)
+        if (inside?[index] ?? true) index,
+    ];
+    if (steps.isEmpty) continue;
+    lines.add(TurnLine(turn));
+    if (folded.contains(turn.turn)) continue;
+    for (final index in steps) {
+      lines.add(StepLine(index));
+      if (inspecting && records[index].entry == selected) {
+        lines.add(InspectorLine(index));
+      }
+    }
+  }
+  return lines;
+}
