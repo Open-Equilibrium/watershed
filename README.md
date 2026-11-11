@@ -121,6 +121,7 @@ Each topic's canonical home; other files link there.
 | Orchestration of agents | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration) |
 | Durability | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#durability) |
 | MVP VCS boundary, Git integration and checkpoints | [SECURITY.md](SECURITY.md#mvp-vcs-boundary); target: [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#git-integration) |
+| Adapter requirements for another agent harness | [meta-harness/README.md](meta-harness/README.md#adapter-requirements) |
 | Liquid sync, replicas and areas | [Liquid V-Spec](docs/concept/V-Spec_Liquid.html#sync) |
 | Roles and grants | [SECURITY.md](SECURITY.md#liquid-workspace-access--external-agent-edits); target: [Liquid V-Spec](docs/concept/V-Spec_Liquid.html#agent-grants) |
 | Liquid Pages, Blocks and Tables | [Liquid V-Spec](docs/concept/V-Spec_Liquid.html#model) |

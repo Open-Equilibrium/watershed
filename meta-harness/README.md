@@ -22,3 +22,13 @@ Test the extension with `node --test meta-harness/pi-extension/watershed.test.ts
 ## Session exit
 
 After pi exits, input delivery ends and stdout drains to EOF for at most two seconds or 16 MiB read after exit, independently of event delivery. Every complete record read is processed in order; a trailing partial record is dropped. At the byte cap, or if the pipe remains open at the deadline, the core closes it and emits one warning through the existing notification path: "Some agent output may be missing." Pending commands without a response resolve as "agent exited" and `Exited` follows all accepted events. Ordinary buffered output below the cap reaches EOF without a warning. This does not terminate descendants.
+
+## Adapter requirements
+
+A future adapter for another harness must provide the following. Field-level detail is in the protocol above and in the pi adapter, `pi.rs`; code paths below are under `meta-harness-core/src/`.
+
+- **Turn start:** a request before the turn's first model request, so before any file write, carrying the session id, a turn id unique within the session and phase `start`. The run starts only when the answer says `canRun` is `true`.
+- **Turn end:** a request after the turn settled, after its last file write, with the same ids and phase `end`. A failed end checkpoint does not stop the agent.
+- **Session entries:** a `start` entry before the turn's first prompt and an `end` entry after its last entry, each with session, turn, phase and any error or counts (`history/turns.rs`); timing entries for each model request and tool call (`history/trajectory.rs`); message entries in pi's session shapes, which `history/entry.rs` reads. Another shape requires changing those readers first.
+- **Revert and commit attribution:** nothing beyond the checkpoint refs and entries above (`checkpoint.rs`, `checkpoint/git.rs`).
+- **Pull request text:** one run per request with the chosen provider and model, the material on stdin, the title and description on stdout, in an empty folder, with nothing loaded that can run tools or steer it (the options in `ALONE`, `diff/pull_text.rs`). A non-zero exit or output past the limit fails the request.
