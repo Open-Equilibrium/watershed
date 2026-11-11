@@ -657,8 +657,7 @@ class CiWorkflowContractTest(unittest.TestCase):
                                 ("Check the generated Liquid bridge", UBUNTU),
                                 ("Check the Liquid key helper", MAC)):
             assert_step_state(self, workflow, name, job="liquid", condition=condition)
-        assert_step_state(self, workflow, "Build the Liquid macOS app", job="liquid",
-                          condition=MAC, continue_on_error=True)
+        assert_step_state(self, workflow, "Build the Liquid macOS app", job="liquid", condition=MAC)
         # The scheme's test action runs RunnerTests, and it needs the build's Flutter configuration.
         assert_step_state(self, workflow, "Run the Liquid macOS app tests", job="liquid", condition=MAC)
         self.assertEqual(

@@ -170,6 +170,6 @@ Every Liquid build, including `flutter test`, also compiles the Rust bridge in a
 - A newer push to a topic branch or update of a pull request cancels its earlier run; every main commit keeps its own. A push whose newest commit message contains `[skip ci]` starts no run, so use it only for intermediate pushes: a pull request's newest commit must run CI, or its required checks never report. Pull request titles and bodies never contain `[skip ci]`, because the squash commit on main takes them over.
 - Flow Agent CI covers the complete workspace on native Linux x86_64 and macOS ARM64. Windows CI and its required check are deferred until Liquid has an implemented Windows consumer; its planned support remains in [PLATFORMS.md](PLATFORMS.md).
 - Mandatory gates and their package selections are canonical in [CI](.github/workflows/ci.yml).
-- The Liquid macOS app build runs in the macOS job without failing it and becomes required once it runs reliably.
+- The Liquid macOS app build is a required step of the macOS Liquid job.
 - A local cross-build or a Windows editor session cannot substitute for the pushed branch's native Flow Agent gates. Verify their actual CI results with `gh`.
 - Block merge on any mandatory gate failure, including performance-evidence integrity and native self-protection, installation and release-artifact acceptance; observed timing, throughput or RSS values do not fail the gate.

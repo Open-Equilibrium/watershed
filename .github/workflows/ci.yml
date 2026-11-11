@@ -520,10 +520,9 @@ jobs:
         if: matrix.os == 'xcode-27'
         run: sh liquid/app/macos/LiquidKey/test.sh
 
-      # Not required until it runs reliably (TESTING.md).
+      # Also generates the Flutter configuration that the RunnerTests step below needs.
       - name: Build the Liquid macOS app
         if: matrix.os == 'xcode-27'
-        continue-on-error: true
         working-directory: liquid/app
         run: |
           flutter pub get --enforce-lockfile
