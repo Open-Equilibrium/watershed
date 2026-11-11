@@ -67,6 +67,13 @@ def inject_linux_fault(fault):
         raise OSError(ctypes.get_errno(), "could not install process-local readiness fault")
 
 
+def signal_process_group(pid, signum):
+    try:
+        os.killpg(pid, signum)
+    except ProcessLookupError:
+        pass  # The group already exited; the timeout diagnostic must still be raised.
+
+
 def run(command, *, env=None, fault=None, timeout=20, capture=True):
     before_exec = None
     if fault and sys.platform == "linux":
@@ -80,12 +87,14 @@ def run(command, *, env=None, fault=None, timeout=20, capture=True):
         try:
             stdout, stderr = child.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
-            os.killpg(child.pid, signal.SIGTERM)
+            signal_process_group(child.pid, signal.SIGTERM)
             try:
                 child.communicate(timeout=2)
             except subprocess.TimeoutExpired:
-                os.killpg(child.pid, signal.SIGKILL)
-                child.communicate(timeout=2)
+                pass
+            # Group members can outlive the direct child and ignore SIGTERM, so always finish the group.
+            signal_process_group(child.pid, signal.SIGKILL)
+            child.wait()
             raise AssertionError(f"native acceptance exceeded {timeout}s: {command[0]}")
         return subprocess.CompletedProcess(command, child.returncode, stdout, stderr)
 
