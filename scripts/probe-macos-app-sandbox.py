@@ -277,6 +277,8 @@ def compare(api, root, binary, mode, host):
         observation = classify_mutation(result, changed, required_starts=2 if nested_start else 1)
         if nested_start and result.get("output", "").splitlines().count("probe_started") < 2:
             observation = "program_not_started"
+        if action == "link" and auxiliary.exists():  # creating the alias itself was allowed
+            observation = "allowed"
         if mode == "profile-guard" and action == "fd" and result.get("returncode") == 11 and "probe_errno=9" in result.get("output", "") and not changed:
             observation = "closed_handle"
         results.append({"case": name, "observation": observation, "changed": changed, "command": result})
@@ -292,19 +294,19 @@ def compare(api, root, binary, mode, host):
     finally:
         os.close(master); os.close(slave)
     source = project / "hello.c"; source.write_text('int main(void) { return 0; }\n', encoding="utf-8")
-    built = project / "built-program"
+    built_xcrun, built_direct = project / "built-program-xcrun", project / "built-program-direct"
     workloads = [
         ("system_shell", ["exec", "/bin/sh", "-c", "printf 'host_shell_ran\\n'"]),
         ("system_git", ["exec", "/usr/bin/git", "--version"]),
         ("host_compiler_version", ["exec", "/usr/bin/xcrun", "clang", "--version"]),
         ("project_program", ["exec", str(external), "write", str(project / "program-output")]),
-        ("host_build", ["exec", "/usr/bin/xcrun", "clang", "-arch", "arm64", str(source), "-o", str(built)]),
-        ("built_program", ["exec", str(built)]),
+        ("host_build", ["exec", "/usr/bin/xcrun", "clang", "-arch", "arm64", str(source), "-o", str(built_xcrun)]),
+        ("built_program", ["exec", str(built_xcrun)]),
         ("direct_git", ["exec", host["git"], "--version"]),
         ("direct_git_project", ["exec", host["git"], "-c", "init.defaultBranch=probe", "init", "--quiet", str(project / "synthetic-repo")]),
         ("direct_host_build", ["exec", host["clang"], "-arch", "arm64", "-isysroot", host["sdk"],
-                               "-B", str(Path(host["ld"]).parent), str(source), "-o", str(built)]),
-        ("direct_built_program", ["exec", str(built)]),
+                               "-B", str(Path(host["ld"]).parent), str(source), "-o", str(built_direct)]),
+        ("direct_built_program", ["exec", str(built_direct)]),
     ]
     if sandboxed: workloads.append(("own_container", ["container", "synthetic-probe.bin"]))
     for name, command in workloads:
@@ -313,7 +315,8 @@ def compare(api, root, binary, mode, host):
         elapsed = time.perf_counter_ns() - started
         results.append({"case": name, "observation": "completed" if result.get("returncode") == 0 and not result.get("timeout") else "not_completed",
                         "command": result, "elapsed_ns": elapsed,
-                        "artifact_exists": built.is_file() if name in {"host_build", "built_program", "direct_host_build", "direct_built_program"}
+                        "artifact_exists": built_xcrun.is_file() if name in {"host_build", "built_program"}
+                            else built_direct.is_file() if name in {"direct_host_build", "direct_built_program"}
                             else (project / "synthetic-repo" / ".git").is_dir() if name == "direct_git_project"
                             else (project / "program-output").is_file() if name == "project_program" else None})
     for kind in ("javascript", "native-xcrun", "native-direct"):

@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -88,6 +89,52 @@ class NativeObservation(unittest.TestCase):
         self.assertEqual(PROBE.classify_mutation(result, False, required_starts=2), "failure")
         result["output"] = "probe_started\nprobe_started\nprobe_errno=1\n"
         self.assertEqual(PROBE.classify_mutation(result, False, required_starts=2), "denied")
+
+
+class CompareWorkloads(unittest.TestCase):
+    """Runs the comparison loop against a stub invoke that fakes each host command."""
+
+    def run_compare(self, base):
+        root, binary = base / "run", base / "probe-binary"
+        binary.write_bytes(b"binary")
+        launcher, helper = root / "launcher", root / "helper"
+        host = {"git": "/usr/bin/git", "clang": "/usr/bin/clang", "sdk": "/sdk", "ld": "/usr/bin/ld",
+                "node": "/usr/bin/node", "npm": "/usr/bin/npm"}
+        api = SimpleNamespace(ORIGINAL=b"original\n", CHANGED=b"changed-by-probe\n",
+                              unchanged=lambda path: path.is_file() and path.read_bytes() == b"original\n",
+                              invoke=self.invoke)
+        with patch.object(PROBE, "bundle", return_value=(launcher, helper)), \
+             patch.object(PROBE, "npm_fixture", return_value=(root, ["true"])):
+            return {case["case"]: case for case in PROBE.compare(api, root, binary, "unprotected", host)["cases"]}
+
+    @staticmethod
+    def invoke(command, cwd, log, *args, **kwargs):
+        if command[1:2] == ["link"]:
+            os.link(command[2], command[3])
+            return {"launched": True, "returncode": 10, "timeout": False,
+                    "output": "probe_started\nprobe_errno=13\n"}
+        if "-o" in command:
+            output = Path(command[command.index("-o") + 1])
+            succeeded = "/usr/bin/xcrun" in command
+            if succeeded:
+                output.write_bytes(b"artifact")
+            return {"launched": True, "returncode": 0 if succeeded else 1, "timeout": False, "output": ""}
+        program = Path(command[-1])
+        ran = command[1:2] == ["exec"] and program.is_file()
+        return {"launched": True, "returncode": 0 if ran else 127, "timeout": False,
+                "output": "probe_started\nprobe_started\n"}
+
+    def test_direct_build_failure_cannot_reuse_xcrun_artifact(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cases = self.run_compare(Path(temporary))
+        self.assertEqual(cases["built_program"]["observation"], "completed")
+        self.assertNotEqual(cases["direct_built_program"]["observation"], "completed")
+        self.assertFalse(cases["direct_built_program"]["artifact_exists"])
+
+    def test_link_created_then_write_denied_is_not_protection(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cases = self.run_compare(Path(temporary))
+        self.assertEqual(cases["new_hardlink_alias"]["observation"], "allowed")
 
 
 if __name__ == "__main__": unittest.main()
