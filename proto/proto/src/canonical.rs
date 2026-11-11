@@ -117,6 +117,26 @@ pub(crate) fn nfc_json_string_values(mut value: Value) -> Value {
     value
 }
 
+/// Location of the first object key that repeats after NFC normalization, at any depth.
+pub(crate) fn normalized_key_collision(value: &Value, location: &str) -> Option<String> {
+    match value {
+        Value::Object(values) => {
+            let mut normalized = HashSet::new();
+            values.iter().find_map(|(key, value)| {
+                let location = format!("{location}.{key}");
+                if !normalized.insert(key.nfc().collect::<String>()) {
+                    return Some(location);
+                }
+                normalized_key_collision(value, &location)
+            })
+        }
+        Value::Array(values) => values.iter().enumerate().find_map(|(index, value)| {
+            normalized_key_collision(value, &format!("{location}[{index}]"))
+        }),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => None,
+    }
+}
+
 fn nfc_json_string_values_in_place(value: &mut Value) {
     match value {
         Value::String(value) => {
