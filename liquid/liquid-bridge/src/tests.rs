@@ -2034,13 +2034,15 @@ fn starts_after_an_agent_says_much_before_it_is_ready() {
         .expect("first subscriber");
     // The consumer confirms each event it applied, as Liquid does; the window waits otherwise.
     let mut applied = 0;
-    let last = std::iter::from_fn(|| receiver.recv_timeout(Duration::from_secs(5)).ok())
+    let statuses = std::iter::from_fn(|| receiver.recv_timeout(Duration::from_secs(5)).ok())
         .inspect(|_| {
             applied += 1;
             session.confirm_applied(applied);
         })
-        .find(|event| event.text.as_deref() == Some("299"));
-    assert!(last.is_some(), "every early event reaches Dart");
+        .take(300)
+        .filter(|event| event.kind == BridgeEventKind::StatusChanged)
+        .count();
+    assert_eq!(statuses, 300, "every early event reaches Dart");
     assert!(call(session.shutdown()));
 }
 
