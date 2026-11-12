@@ -867,6 +867,30 @@ fn endpoint_failures_that_echo_the_key_keep_only_a_redacted_message() {
 }
 
 #[test]
+fn an_echoed_key_cut_by_the_message_bound_leaves_no_part_of_the_key() {
+    let key = "sk-endpoint-fixture";
+    let filler = "x".repeat(crate::runtime::error::MAX_PROVIDER_ERROR_MESSAGE_CHARS - 6);
+    let body = format!("{{\"error\":{{\"message\":\"{filler}{key}\"}}}}");
+    let body: &'static str = Box::leak(body.into_boxed_str());
+    let (base_url, server) = spawn_endpoint("HTTP/1.1 401 Unauthorized", "", body);
+    let error = OpenAiCodexProvider::default()
+        .turn(
+            &endpoint_credential(&base_url, key),
+            &serde_json::json!({"model":"fixture"}),
+        )
+        .expect_err("echoed key is still a definitive rejection");
+    let failure = error
+        .provider_failure()
+        .expect("rejection is a provider outcome");
+    assert!(
+        !failure.message().contains("sk-end"),
+        "a cut key leaves no prefix: {}",
+        &failure.message()[failure.message().len() - 20..]
+    );
+    server.join().expect("fake endpoint completes");
+}
+
+#[test]
 fn endpoint_turn_completes_at_its_terminal_event_while_the_connection_stays_open() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("fake endpoint binds");
     let endpoint = format!(

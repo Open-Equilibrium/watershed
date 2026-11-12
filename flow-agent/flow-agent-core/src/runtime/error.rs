@@ -297,10 +297,20 @@ impl RuntimeError {
     /// Replaces every occurrence of `secret` in a provider failure message, keeping its bound.
     pub(crate) fn without_secret(self, secret: &str) -> Self {
         match self {
-            Self::Provider(failure) => Self::Provider(ProviderFailure {
-                message: bounded_provider_message(failure.message.replace(secret, "<redacted>")),
-                ..failure
-            }),
+            Self::Provider(failure) => {
+                let cut = failure.message.chars().count() >= MAX_PROVIDER_ERROR_MESSAGE_CHARS;
+                let mut message = failure.message.replace(secret, "<redacted>");
+                // The bound may have cut an echoed key; drop the part of it that survived.
+                if let Some(end) = (1..secret.len()).rev().find(|end| {
+                    cut && secret.is_char_boundary(*end) && message.ends_with(&secret[..*end])
+                }) {
+                    message.truncate(message.len() - end);
+                }
+                Self::Provider(ProviderFailure {
+                    message: bounded_provider_message(message),
+                    ..failure
+                })
+            }
             other => other,
         }
     }
