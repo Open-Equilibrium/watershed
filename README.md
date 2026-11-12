@@ -94,7 +94,7 @@ Set `FLOW_AGENT_HOME` to an unused absolute path before exercising local authori
 
 For productive execution, initialize the Global Flow home with `flow init`, configure its provider and model through the V-Spec, inspect authoring grammar with `flow create <tool|instruction|phase|flow> --help`, authenticate through the commands in [PROTOCOL.md](PROTOCOL.md), then run the authored Flow. Engineers configure Tool commands and accepted parameters and trust their complete implementations, helpers and delegation chains. The [security contract](SECURITY.md#m12-tool-execution-trust-boundary) owns the productive boundary.
 
-Two logins exist. `openai-codex` uses the ChatGPT subscription and relies on an unpublished endpoint, so it may change without notice. `openai-compatible` takes a base URL and an API key for an OpenAI-compatible Responses endpoint, which is the one to rely on for a documented API. No endpoint is listed as supported yet; an endpoint is listed only after the provider tests pass against it ([PROTOCOL.md](PROTOCOL.md#m11-openai-compatible-endpoint-provider)).
+Two logins exist, `openai-codex` (ChatGPT subscription) and `openai-compatible` (base URL and API key); [PROTOCOL.md](PROTOCOL.md#m11-openai-compatible-endpoint-provider) states what each relies on and which endpoints are listed as supported.
 
 The Global Flow home and its configuration authority are defined in [PROTOCOL.md](PROTOCOL.md#local-run-storage-and-m11-conversation-trees).
 
