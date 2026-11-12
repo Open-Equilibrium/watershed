@@ -127,7 +127,7 @@ pub(super) fn apply_inner_status(
         ));
     }
     let status: [u8; 4] = record.try_into().map_err(|_| {
-        BackendError::uncertain("native protection did not prove a reaped Tool root")
+        BackendError::uncertain("Flow-owned write protection did not prove a reaped Tool root")
     })?;
     let status = ExitStatus::from_raw(i32::from_ne_bytes(status));
     if matches!(
@@ -258,7 +258,7 @@ pub(super) fn readiness() -> Result<String, BackendError> {
         supervision::run_bounded(command, 2_000, 1024, 1024, Vec::new(), inherited, None)?;
     if outcome.classification.is_some() {
         return Err(BackendError::unavailable(format!(
-            "native protection self-test failed: {}",
+            "Flow-owned write protection self-test failed: {}",
             String::from_utf8_lossy(&outcome.stderr)
         )));
     }

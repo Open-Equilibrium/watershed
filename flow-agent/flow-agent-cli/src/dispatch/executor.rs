@@ -1,6 +1,7 @@
 use crate::output::write_stdout;
 use crate::parsing::ExecutorCommand;
-use flow_agent_core::RuntimeError;
+use flow_agent_core::{ExecutorSelectionSource, RuntimeError};
+use std::path::Path;
 
 pub(super) fn executor_command(command: ExecutorCommand) -> Result<(), RuntimeError> {
     match command {
@@ -24,9 +25,31 @@ pub(super) fn executor_command(command: ExecutorCommand) -> Result<(), RuntimeEr
 }
 
 fn report_ready(selection: flow_agent_core::ExecutorSelection) -> Result<(), RuntimeError> {
-    write_stdout(&format!(
-        "Executor ready: {} {:?}\n",
-        selection.source().as_str(),
-        selection.path()
-    ))
+    write_stdout(&ready_line(selection.source(), selection.path()))
+}
+
+fn ready_line(source: ExecutorSelectionSource, path: &Path) -> String {
+    format!(
+        "Executor ready: {} {:?} (Flow-owned write protection active; Tools otherwise run with your permissions)\n",
+        source.as_str(),
+        path
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ready_line;
+    use flow_agent_core::ExecutorSelectionSource;
+    use std::path::Path;
+
+    #[test]
+    fn ready_line_names_write_protection_and_the_remaining_tool_rights() {
+        assert_eq!(
+            ready_line(
+                ExecutorSelectionSource::Default,
+                Path::new("/opt/flow/flow-executor")
+            ),
+            "Executor ready: default \"/opt/flow/flow-executor\" (Flow-owned write protection active; Tools otherwise run with your permissions)\n"
+        );
+    }
 }

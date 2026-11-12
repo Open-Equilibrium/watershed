@@ -436,7 +436,10 @@ fn executor_response_is_closed_and_bound_to_request_and_policy() {
     let error =
         parse_executor_response_v0(&canonical_wire(&inactive), "run-1-tool-1", &"a".repeat(64))
             .unwrap_err();
-    assert_eq!(error.to_string(), "Executor self-protection was not active");
+    assert_eq!(
+        error.to_string(),
+        "Executor did not confirm Flow-owned write protection"
+    );
 
     let mut unknown = serde_json::to_value(&response).expect("response serializes");
     unknown

@@ -16,7 +16,7 @@ const EXECUTOR_CHECK_HELP: &str = concat!(
     "Usage:\n",
     "  flow executor check\n",
     "\n",
-    "Checks the configured Executor and reports its readiness.\n",
+    "Checks that the configured Executor can block Tool writes to Flow-owned files.\n",
 );
 const EXECUTOR_CONFIGURE_HELP: &str = concat!(
     "Usage:\n",

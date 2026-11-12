@@ -55,7 +55,7 @@ impl ChildMeasurement {
         }
         if !self.self_protection_active {
             return Err(io::Error::other(
-                "fresh measurement child did not confirm active self-protection",
+                "fresh measurement child did not confirm active Flow-owned write protection",
             )
             .into());
         }
@@ -393,7 +393,7 @@ mod tests {
                         .contains(if invalid_schema {
                             "schema"
                         } else {
-                            "self-protection"
+                            "Flow-owned write protection"
                         })
                 );
                 assert_eq!(records.last().unwrap()["kind"], "summary");

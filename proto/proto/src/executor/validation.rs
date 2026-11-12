@@ -239,7 +239,7 @@ pub(super) fn validate_receipt(
     }
     if !receipt.self_protection_active {
         return Err(ExecutorProtocolError::new(
-            "Executor self-protection was not active",
+            "Executor did not confirm Flow-owned write protection",
         ));
     }
     Ok(())

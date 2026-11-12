@@ -368,7 +368,7 @@ class PrefixInstallerTest(unittest.TestCase):
             "\n"
             "Options:\n"
             "  --prefix <absolute-prefix>  Install into <absolute-prefix>/bin.\n"
-            "  --no-default-executor       Install flow without the bundled Default Executor.\n"
+            "  --no-default-executor       Install flow without the bundled Default Executor (no productive Tools until an Executor is configured).\n"
             "  -h, --help                  Show this help.\n"
         )
         with tempfile.TemporaryDirectory() as temporary:
@@ -758,7 +758,7 @@ class PrefixInstallerTest(unittest.TestCase):
             root = pathlib.Path(temporary)
             bundle = self.bundle(root)
             readiness_called = root / "readiness-called"
-            diagnostic = "error: executor_unavailable: native protection self-test failed"
+            diagnostic = "error: executor_unavailable: Flow-owned write protection self-test failed"
             (bundle / "flow").write_text(
                 "#!/bin/sh\n"
                 "test \"$1 $2\" = \"executor check\" || exit 64\n"

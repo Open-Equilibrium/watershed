@@ -14,7 +14,7 @@ usage() {
         '' \
         'Options:' \
         '  --prefix <absolute-prefix>  Install into <absolute-prefix>/bin.' \
-        '  --no-default-executor       Install flow without the bundled Default Executor.' \
+        '  --no-default-executor       Install flow without the bundled Default Executor (no productive Tools until an Executor is configured).' \
         '  -h, --help                  Show this help.'
 }
 
