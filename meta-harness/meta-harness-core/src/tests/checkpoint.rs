@@ -680,6 +680,75 @@ fn outside_git_no_session_is_deleted_while_a_window_shows_it() {
 }
 
 #[test]
+fn a_session_shown_before_git_was_initialized_is_not_deleted() {
+    run(async {
+        let dir = std::env::temp_dir().join(format!(
+            "watershed-checkpoint-shown-before-git-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("directory");
+        let file = dir.join("s1.jsonl");
+        std::fs::write(&file, "{}\n").expect("session file");
+        let window = Checkpoints::new(&dir);
+        window.show_session(Some("s1")).await.expect("shown");
+        // Bound, since a dropped `Repo` removes its folder.
+        let repo = Repo(dir.clone());
+        repo.git(&["init", "-q"]);
+        let mine = Checkpoints::new(&dir);
+        assert!(matches!(
+            mine.delete_session("s1", &file).await,
+            Err(DiffError::SessionShown)
+        ));
+        assert!(file.exists(), "kept");
+        window.show_session(None).await.expect("no longer shown");
+        mine.delete_session("s1", &file).await.expect("deleted");
+        assert!(!file.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    });
+}
+
+#[test]
+fn a_session_is_not_marked_while_a_deletion_holds_the_folder() {
+    run(async {
+        let dir = std::env::temp_dir().join(format!(
+            "watershed-checkpoint-mark-waits-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("directory");
+        let deletion = crate::checkout::Checkout::folder(&dir)
+            .expect("folder")
+            .alone()
+            .await
+            .expect("deletion holds the folder");
+        // The window stays alive: its mark ends with it.
+        let window = std::sync::Arc::new(Checkpoints::new(&dir));
+        let marking = {
+            let window = window.clone();
+            tokio::spawn(async move { window.show_session(Some("s1")).await })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            crate::checkout::Checkout::folder(&dir)
+                .expect("folder")
+                .shown()
+                .is_empty(),
+            "the mark waits for the deletion"
+        );
+        drop(deletion);
+        marking.await.expect("marking ends").expect("marked");
+        assert_eq!(
+            crate::checkout::Checkout::folder(&dir)
+                .expect("folder")
+                .shown(),
+            ["s1"]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    });
+}
+
+#[test]
 fn a_session_shown_in_another_worktree_is_not_deleted() {
     run(async {
         let repo = Repo::new("delete-shown");

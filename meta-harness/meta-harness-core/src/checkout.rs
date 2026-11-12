@@ -185,6 +185,18 @@ impl Checkout {
         hold_alone(lock_file(&self.dir, "checkout.lock")?, || self.running()).await
     }
 
+    /// Holds the checkout shared, which `alone` excludes, until the returned lock drops.
+    pub(crate) async fn shared(&self) -> Result<File, DiffError> {
+        let lock = lock_file(&self.dir, "checkout.lock")?;
+        loop {
+            match lock.try_lock_shared() {
+                Ok(()) => return Ok(lock),
+                Err(TryLockError::WouldBlock) => tokio::time::sleep(RETRY).await,
+                Err(TryLockError::Error(error)) => return Err(DiffError::Io(error)),
+            }
+        }
+    }
+
     /// Holds Git's shared stash list across worktrees. Keep it from the first lookup through
     /// the last mutation, since a push changes the positions used by pop and drop.
     pub(crate) async fn stash_alone(&self) -> Result<Alone, DiffError> {

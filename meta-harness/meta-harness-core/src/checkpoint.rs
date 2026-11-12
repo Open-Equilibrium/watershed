@@ -224,6 +224,9 @@ impl Checkpoints {
             Err(DiffError::NotARepository) => Checkout::folder(&self.dir)?,
             Err(error) => return Err(error),
         };
+        // Under the folder's shared lock, which a deletion holds alone until the file is gone, so
+        // its look for marks sees this one or runs after the deletion.
+        let _folder = Checkout::folder(&self.dir)?.shared().await?;
         let held = checkout.show(session).await?;
         *self.shown.lock().expect("shown lock") = Some((session.to_owned(), held));
         Ok(())
@@ -602,11 +605,13 @@ impl Checkpoints {
             Some(tree) => Some(self.alone_everywhere(tree, false).await?),
             None => None,
         };
-        // Refused while a window shows it, in any worktree of the repository.
-        let checkouts = match &tree {
+        // Refused while a window shows it, in any worktree of the repository, and in the folder,
+        // where a mark taken before Initialize Git stays.
+        let mut checkouts = match &tree {
             Some(tree) => tree.checkouts()?,
-            None => vec![folder],
+            None => Vec::new(),
         };
+        checkouts.push(folder);
         if checkouts
             .iter()
             .any(|checkout| checkout.shown().iter().any(|shown| shown == session))
