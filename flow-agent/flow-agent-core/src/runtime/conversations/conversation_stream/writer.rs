@@ -14,6 +14,7 @@ use crate::runtime::{
 use serde::Serialize;
 #[cfg(any(test, feature = "m11-budget-evidence"))]
 use std::fs::{self, OpenOptions};
+#[cfg(any(test, feature = "m11-budget-evidence"))]
 use std::io::Write;
 use std::path::Path;
 #[cfg(test)]

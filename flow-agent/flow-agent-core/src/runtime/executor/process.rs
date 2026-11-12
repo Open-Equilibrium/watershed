@@ -176,7 +176,7 @@ pub(super) fn set_nonblocking(
 
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod tests {
-    use super::{configure_executor_child, terminate_child_bounded};
+    use super::{ExecutorCleanup, configure_executor_child, terminate_child_bounded};
     use std::{
         fs,
         os::unix::process::CommandExt as _,

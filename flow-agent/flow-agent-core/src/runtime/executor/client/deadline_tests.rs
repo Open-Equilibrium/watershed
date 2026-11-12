@@ -1,8 +1,10 @@
-use super::super::process::{child_exited_without_reaping, force_cleanup_survivor_for_test};
+use super::super::process::child_exited_without_reaping;
+#[cfg(target_os = "macos")]
+use super::super::process::force_cleanup_survivor_for_test;
 use super::tests::one_shot_request;
 use super::transport::{
     ExecutorPreflightProcess, WaitingExecutor, preflight_one_shot, preflight_one_shot_at_deadline,
-    start_one_shot, start_one_shot_at_deadlines,
+    start_one_shot_at_deadlines,
 };
 use crate::runtime::types::RuntimeError;
 use std::{
@@ -238,7 +240,8 @@ fn valid_answer_is_kept_when_a_group_outlives_cleanup() {
     let waiting = waiting_executor(&request, &protected_descriptors, &tool_started);
     force_cleanup_survivor_for_test();
 
-    let started = start_one_shot(waiting).expect("the valid Executor answer is kept");
+    let started =
+        super::transport::start_one_shot(waiting).expect("the valid Executor answer is kept");
 
     assert!(
         started.cleanup_unknown,
