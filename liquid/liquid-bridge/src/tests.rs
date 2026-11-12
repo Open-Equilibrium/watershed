@@ -901,6 +901,34 @@ fn holds_events_beyond_the_window_until_liquid_confirms() {
 }
 
 #[test]
+fn closing_a_full_window_releases_the_forwarder() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let (events, receiver) = tokio::sync::mpsc::channel(4096);
+        let (delivered, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
+        let forwarding = tokio::spawn(forward(
+            Vec::new(),
+            receiver,
+            credit.clone(),
+            move |event| delivered.send(event).is_ok(),
+        ));
+        for item in 1..=WINDOW as u64 + 44 {
+            events.send(started(item)).await.expect("sent");
+        }
+        settle().await;
+        assert_eq!(taken(&mut deliveries).len(), WINDOW);
+        // Closing confirms everything Liquid applied, then ends the session.
+        credit.confirm(1 << 53);
+        drop(events);
+        tokio::time::timeout(Duration::from_secs(1), forwarding)
+            .await
+            .expect("forward returns once the window is confirmed and the session ended")
+            .expect("forward completes");
+        assert_eq!(taken(&mut deliveries).len(), 44);
+    });
+}
+
+#[test]
 fn falling_behind_keeps_finished_items_and_sends_one_fell_behind_event() {
     paused_runtime().block_on(async {
         let credit = Arc::new(Credit::default());
