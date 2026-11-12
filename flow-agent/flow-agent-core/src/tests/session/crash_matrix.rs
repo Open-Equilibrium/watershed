@@ -309,8 +309,8 @@ struct CrashRecord {
 /// Every published Run dispatches at most one provider effect in total, so the effects added
 /// since the scenario started never exceed the Runs added since then.
 ///
-/// `must_resume` marks a power cut that lost a final line feed of an event or context log: ADR-0259
-/// requires exact Resume to drop it and resume, not merely to fail closed.
+/// `must_resume` marks a power cut whose torn append exact Resume must roll back and resume from,
+/// not merely fail closed (ADR-0259; see `must_resume_after_cut`).
 fn assert_recovery_invariants(
     store: &Store,
     crashed: &CrashRecord,
@@ -582,15 +582,10 @@ fn run_crash_matrix(
                     .difference(&crashed.runs)
                     .next()
                     .cloned();
-                assert_recovery_invariants(
-                    &store,
-                    &crashed,
-                    run.as_deref(),
-                    &label,
-                    matches!(death, Death::Power(PowerLoss::CutLastWrite))
-                        && index > 0
-                        && adr_0259_stream_write(&reference[index - 1]),
-                );
+                let must_resume = matches!(death, Death::Power(PowerLoss::CutLastWrite))
+                    && index > 0
+                    && must_resume_after_cut(&store, &reference[index - 1]);
+                assert_recovery_invariants(&store, &crashed, run.as_deref(), &label, must_resume);
                 next_reservation(&store, &label);
             }));
             if checked.is_err() {
@@ -607,8 +602,12 @@ fn run_crash_matrix(
     reference
 }
 
-/// Whether a traced `write` step appended to an event or context log, the streams ADR-0259 covers.
-fn adr_0259_stream_write(step: &str) -> bool {
+/// Whether a power cut that tears the traced write `step` must resume exactly (ADR-0259).
+///
+/// A torn event, context or history line, and a torn Provider or Tool intent, are rolled back as
+/// appends that never happened, so exact Resume resumes the Run. A torn terminal result leaves its
+/// attempt uncertain, which exact Resume refuses until external evidence reconciles it.
+fn must_resume_after_cut(store: &Store, step: &str) -> bool {
     let Some(path) = step.strip_prefix("write ") else {
         return false;
     };
@@ -616,7 +615,21 @@ fn adr_0259_stream_write(step: &str) -> bool {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default();
-    leaf.starts_with("events") || leaf.starts_with("contexts")
+    match leaf {
+        "history.jsonl" => true,
+        "run-log.jsonl" => {
+            unterminated_record_type(&store.root.join(path)).as_deref() == Some("intent")
+        }
+        _ => leaf.starts_with("events") || leaf.starts_with("contexts"),
+    }
+}
+
+/// The `record_type` of the unterminated record that ends a JSONL file, if it has one.
+fn unterminated_record_type(path: &Path) -> Option<String> {
+    let bytes = fs::read(path).expect("written JSONL file reads");
+    let tail = bytes.rsplit(|byte| *byte == b'\n').next()?;
+    let record: serde_json::Value = serde_json::from_slice(tail).ok()?;
+    record["record_type"].as_str().map(str::to_owned)
 }
 
 /// A Conversation's staged Run left by a crash is gone after the next reservation.
