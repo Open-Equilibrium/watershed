@@ -74,7 +74,9 @@ pub(crate) fn replica_key(
         };
         keys.write(&name, &key)?;
     }
-    if filed.is_some() {
+    // Only the entry holding the key in use goes: a path entry of another key belongs to a
+    // replica that moved away and may still need it.
+    if filed == Some(key) {
         keys.delete(&path)?;
     }
     Ok(key)

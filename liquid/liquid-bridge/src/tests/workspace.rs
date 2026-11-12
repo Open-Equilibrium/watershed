@@ -275,6 +275,19 @@ fn a_failed_key_migration_keeps_the_old_key_for_a_retry() {
 }
 
 #[test]
+fn a_path_entry_holding_another_key_is_kept() {
+    let folder = Folder::new("other-key");
+    let keys = Memory::default();
+    lisbon(&LiquidWorkspace::open_with(&folder.0, &keys).unwrap());
+    let path = path_name(&folder.0).unwrap();
+    let other = [7; 32];
+    keys.write(&path, &other).unwrap();
+
+    assert!(LiquidWorkspace::open_with(&folder.0, &keys).is_ok());
+    assert_eq!(keys.read(&path).unwrap(), Some(other));
+}
+
+#[test]
 fn a_malformed_key_name_file_is_refused() {
     let folder = Folder::new("malformed");
     let keys = Memory::default();
