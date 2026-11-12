@@ -54,7 +54,7 @@ thread_local! {
 }
 
 /// Makes the next completed-Executor cleanup report a group that survived its wait.
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 pub(super) fn force_cleanup_survivor_for_test() {
     FORCE_CLEANUP_SURVIVOR.set(true);
 }
