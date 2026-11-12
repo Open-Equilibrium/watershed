@@ -166,12 +166,25 @@ where
             tool_id: Some(tool.identity.id.clone()),
             timestamp: timestamp.clone(),
         })?;
-        let dispatch = crate::runtime::cancellation::claim_productive_effect_dispatch()?;
-        let preflight = context.tool_executor.preflight(prepared);
-        drop(dispatch);
-        let waiting = match preflight? {
-            ProductiveToolPreflight::Ready(waiting) => waiting,
-            ProductiveToolPreflight::Rejected(code) => {
+        let preflight = match crate::runtime::cancellation::claim_productive_effect_dispatch() {
+            Ok(dispatch) => {
+                let preflight = context.tool_executor.preflight(prepared);
+                drop(dispatch);
+                preflight
+            }
+            Err(error) => Err(error),
+        };
+        // WHY: every pre-Start exit is definitive because no Tool exists before `Start`.
+        let waiting = match preflight {
+            Ok(ProductiveToolPreflight::Ready(waiting)) => {
+                crate::runtime::cancellation::ensure_productive_dispatch_allowed().map(|()| waiting)
+            }
+            Ok(ProductiveToolPreflight::Rejected(code)) => Err(RuntimeError::executor(code, "")),
+            Err(error) => Err(error),
+        };
+        let waiting = match waiting {
+            Ok(waiting) => waiting,
+            Err(RuntimeError::Executor(failure)) => {
                 persist_executor_dispatch_failure(
                     context.attempts,
                     context.recovery,
@@ -181,12 +194,28 @@ where
                     &request_hash,
                     &timestamp,
                     ExecutorAttemptStage::Preflight,
-                    code,
+                    failure.code(),
                 )?;
-                return Err(RuntimeError::executor(code, ""));
+                return Err(RuntimeError::Executor(failure));
             }
+            Err(error)
+                if matches!(error, RuntimeError::Cancelled)
+                    || crate::runtime::cancellation::ensure_productive_dispatch_allowed()
+                        .is_err() =>
+            {
+                persist_cancelled_tool_attempt(
+                    context.attempts,
+                    context.recovery,
+                    &mut context.recovery_failed,
+                    tool,
+                    &attempt_id,
+                    &request_hash,
+                    &timestamp,
+                )?;
+                return Err(RuntimeError::Cancelled);
+            }
+            Err(error) => return Err(error),
         };
-        crate::runtime::cancellation::ensure_productive_dispatch_allowed()?;
         if let Err(error) = emit_and_commit(
             builder,
             Some(invocation),

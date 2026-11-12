@@ -6,7 +6,9 @@ use proto::{
     ExecutorToolStatusV0 as Status, decode_executor_stream_v0,
 };
 use std::{
-    fs, thread,
+    fs,
+    os::unix::fs::PermissionsExt,
+    thread,
     time::{Duration, Instant},
 };
 
@@ -87,6 +89,37 @@ fn a_mismatched_protected_descriptor_is_rejected_before_ready() {
         proto::ExecutorPreflightV0::Error { .. }
     ));
     running.exited();
+    assert!(!fixture.project.join("marker").exists());
+}
+
+#[test]
+fn a_tool_that_cannot_launch_is_a_setup_failure_not_an_uncertain_attempt() {
+    let fixture = Fixture::new();
+    let script = fixture.project.join("tool");
+    fs::write(
+        &script,
+        "#!/missing/interpreter\nprintf executed > marker\n",
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    let mut request = fixture.request("", limits(1024, 1024, 2000));
+    request.resolved_policy.executable = script.to_str().unwrap().to_owned();
+    request.resolved_policy.argv.clear();
+    request.policy_digest = proto::resolved_policy_digest_v0(&request.resolved_policy).unwrap();
+    let mut running = fixture.spawn(&request);
+    running.ready(&request);
+    running.start(&request);
+    let response = running.finish(&request);
+    assert!(
+        matches!(
+            response,
+            ExecutorResponseV0::Error {
+                code: proto::ExecutorErrorCodeV0::SandboxSetupFailed,
+                ..
+            }
+        ),
+        "{response:?}"
+    );
     assert!(!fixture.project.join("marker").exists());
 }
 
@@ -275,4 +308,28 @@ fn timeout_and_cancellation_reap_the_tool_root_after_term_grace() {
             );
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn the_inner_executor_reaps_orphans_while_the_tool_root_runs() {
+    let fixture = Fixture::new();
+    // Orphans reparent to the inner Executor, which is PID 1 of the Tool's PID namespace.
+    let script = r#"
+for i in $(seq 200); do (true &); done
+sleep 0.5
+zombies=0
+for stat in /proc/[0-9]*/stat; do
+    read -r line < "$stat" 2>/dev/null || continue
+    state=${line##*) }
+    [ "${state%% *}" = Z ] && zombies=$((zombies + 1))
+done
+printf %s "$zombies"
+"#;
+    let result = fixture.run(script, limits(1024, 1024, 5000));
+    native_support::assert_success(&result);
+    assert_eq!(
+        decode_executor_stream_v0(&result.stdout_base64).unwrap(),
+        b"0"
+    );
 }

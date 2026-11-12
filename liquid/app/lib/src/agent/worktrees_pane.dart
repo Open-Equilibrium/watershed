@@ -238,35 +238,46 @@ class _RemoveWorktreeState extends State<_RemoveWorktree> {
         detail: '$error',
       );
     }
-    if (!mounted) return;
     final worktree = _review.worktree;
-    switch (outcome.kind) {
-      case BridgeWorktreeOutcomeKind.done:
-        widget.state.notify(
-          BridgeLevel.info,
-          'Removed the worktree at ${worktree.shown}${worktree.branch == null ? '' : '; the branch ${worktree.branch!.shown} stays'}.',
-        );
-        Navigator.of(context).pop();
-      case BridgeWorktreeOutcomeKind.changed:
-        setState(() {
+    // A question closed the dialog meanwhile, so the status bar says what happened.
+    final shown = mounted
+        ? 'this worktree'
+        : 'the worktree at ${worktree.shown}';
+    final error = switch (outcome.kind) {
+      BridgeWorktreeOutcomeKind.done => null,
+      BridgeWorktreeOutcomeKind.changed when mounted => null,
+      BridgeWorktreeOutcomeKind.changed =>
+        '${worktree.shown} changed since this dialog opened. Nothing was removed.',
+      BridgeWorktreeOutcomeKind.agentRunning =>
+        outcome.running.isEmpty
+            // Another window's Git action or revert holds this worktree.
+            ? 'Another action is using this repository; try again when it ends. Nothing was removed.'
+            : '${whoRuns(outcome.running, where: 'in this repository')}. Stop it or wait until it finishes; nothing was removed.',
+      BridgeWorktreeOutcomeKind.failed =>
+        'Could not remove $shown: “${outcome.detail}” It stays listed until Git removes it.',
+    };
+    if (outcome.kind == BridgeWorktreeOutcomeKind.done) {
+      widget.state.notify(
+        BridgeLevel.info,
+        'Removed the worktree at ${worktree.shown}${worktree.branch == null ? '' : '; the branch ${worktree.branch!.shown} stays'}.',
+      );
+      if (mounted) Navigator.of(context).pop();
+    } else if (!mounted) {
+      widget.state.notify(
+        outcome.kind == BridgeWorktreeOutcomeKind.changed
+            ? BridgeLevel.warning
+            : BridgeLevel.error,
+        error!,
+      );
+    } else {
+      setState(() {
+        _removing = false;
+        _error = error;
+        if (outcome.kind == BridgeWorktreeOutcomeKind.changed) {
           _review = outcome.removal!;
           _changed = true;
-          _removing = false;
-        });
-      case BridgeWorktreeOutcomeKind.agentRunning:
-        setState(() {
-          _removing = false;
-          _error = outcome.running.isEmpty
-              // Another window's Git action or revert holds this worktree.
-              ? 'Another action is using this repository; try again when it ends. Nothing was removed.'
-              : '${whoRuns(outcome.running, where: 'in this repository')}. Stop it or wait until it finishes; nothing was removed.';
-        });
-      case BridgeWorktreeOutcomeKind.failed:
-        setState(() {
-          _removing = false;
-          _error =
-              'Could not remove this worktree: “${outcome.detail}” It stays listed until Git removes it.';
-        });
+        }
+      });
     }
   }
 
@@ -372,7 +383,7 @@ class _RemoveWorktreeState extends State<_RemoveWorktree> {
             ),
           if (ignored > 0 || review.moreIgnored)
             Text(
-              'Git ignores ${review.moreIgnored ? 'more than ' : ''}${plural(ignored, 'file')} in this folder. Checkpoints and a normal stash do not save them. Move or remove them yourself before removing the worktree.',
+              '${ignored == 0 ? 'Git ignores files' : 'Git ignores ${review.moreIgnored ? 'more than ' : ''}${plural(ignored, 'file')}'} in this folder. Checkpoints and a normal stash do not save them. Move or remove them yourself before removing the worktree.',
               style: text,
             ),
           if (_error case final error?) WarningNotice(error),

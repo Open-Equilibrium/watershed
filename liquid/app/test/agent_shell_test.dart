@@ -14,6 +14,8 @@ import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/diff/diff_settings.dart';
 import 'package:liquid/src/rust/api/events.dart';
+import 'package:liquid/src/rust/api/git.dart';
+import 'package:liquid/src/rust/api/worktrees.dart';
 import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/icons.dart';
@@ -884,6 +886,179 @@ void main() {
     },
   );
 
+  testWidgets('the post-push offer keeps the last diff line in view', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    backend = FakeBackend()
+      ..git = gitStatusOf(
+        branch: 'feature/retry-after',
+        upstream: 'origin/feature/retry-after',
+        ahead: 2,
+      )
+      ..changed = [
+        BridgeFileChange(
+          path: 'long.ts',
+          shown: 'long.ts',
+          status: BridgeChangeStatus.added,
+          added: 200,
+          removed: 0,
+        ),
+      ]
+      ..patches = {
+        'long.ts': [
+          '@@ -0,0 +1,200 @@',
+          for (var line = 1; line <= 200; line++) '+line $line',
+        ].join('\n'),
+      };
+    state = SessionState(backend);
+    await state.git.refresh();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: AgentShell(state: state, info: info),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('git-next')));
+    await tester.pumpAndSettle();
+    expect(find.text('Create pull request…'), findsOneWidget);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+
+    final first = find.text('line 1', findRichText: true);
+    await tester.drag(first, const Offset(0, -10000));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getBottomLeft(find.text('line 200', findRichText: true)).dy,
+      lessThanOrEqualTo(tester.getTopLeft(find.byType(WidgetStrip)).dy),
+    );
+    await tester.pump(const Duration(seconds: 7));
+    state.git.stop();
+  });
+
+  group('a question that closes a running dialog', () {
+    Future<void> showBranch(WidgetTester tester) async {
+      await tester.binding.setSurfaceSize(const Size(1600, 900));
+      backend = FakeBackend()
+        ..git = gitStatusOf(branch: 'feature/retry-after')
+        ..worktreeList = [
+          worktreeOf('/code/api', branch: 'main', main: true, current: true),
+          worktreeOf('/code/api-hotfix', branch: 'hotfix/login'),
+        ];
+      backend.reviews['/code/api-hotfix'] = removalOf(
+        backend.worktreeList.last,
+      );
+      state = SessionState(backend);
+      await state.git.refresh();
+      await state.pulls.refresh();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: liquidTheme(Brightness.light),
+          home: AgentShell(state: state, info: info),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    Iterable<String> notices() => state.notices.value.map((n) => n.text);
+
+    testWidgets('reports a pull request creation that failed meanwhile', (
+      tester,
+    ) async {
+      await showBranch(tester);
+      await tester.tap(find.byKey(const Key('git-menu')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Create pull request…').last);
+      await tester.pumpAndSettle();
+      final gate = backend.createGate = Completer();
+      await tester.tap(find.widgetWithText(InkWell, 'Create pull request'));
+      await tester.pump();
+
+      await emit(tester, confirm('q1'));
+      expect(find.text('Create pull request'), findsNothing);
+      gate.complete(
+        pullRequestOutcomeOf(
+          kind: BridgePullRequestOutcomeKind.notCreated,
+          detail: 'Validation Failed (HTTP 422)',
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(notices(), [
+        'GitHub refused the pull request; none was created. “Validation Failed (HTTP 422)”',
+      ]);
+      state.git.stop();
+    });
+
+    testWidgets('reports a worktree removal that failed meanwhile', (
+      tester,
+    ) async {
+      await showBranch(tester);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.comma);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Worktrees'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(InkWell, 'Remove…'));
+      await tester.pumpAndSettle();
+      final gate = backend.removeGate = Completer();
+      await tester.tap(find.widgetWithText(InkWell, 'Remove worktree'));
+      await tester.pump();
+
+      await emit(tester, confirm('q1'));
+      expect(find.text('Remove hotfix/login worktree?'), findsNothing);
+      gate.complete(
+        const BridgeWorktreeOutcome(
+          kind: BridgeWorktreeOutcomeKind.failed,
+          running: [],
+          detail: 'fatal: validation failed',
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(notices(), [
+        'Could not remove the worktree at /code/api-hotfix: “fatal: validation failed” It stays listed until Git removes it.',
+      ]);
+      state.git.stop();
+    });
+
+    testWidgets('warns of a worktree removal that changed meanwhile', (
+      tester,
+    ) async {
+      await showBranch(tester);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.comma);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Worktrees'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(InkWell, 'Remove…'));
+      await tester.pumpAndSettle();
+      final gate = backend.removeGate = Completer();
+      await tester.tap(find.widgetWithText(InkWell, 'Remove worktree'));
+      await tester.pump();
+
+      await emit(tester, confirm('q1'));
+      expect(find.text('Remove hotfix/login worktree?'), findsNothing);
+      gate.complete(
+        const BridgeWorktreeOutcome(
+          kind: BridgeWorktreeOutcomeKind.changed,
+          running: [],
+          detail: '',
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(notices(), [
+        '/code/api-hotfix changed since this dialog opened. Nothing was removed.',
+      ]);
+      expect(state.notices.value.single.level, BridgeLevel.warning);
+      await tester.pump(const Duration(seconds: 7));
+      state.git.stop();
+    });
+  });
+
   testWidgets('answers a question in place of the composer', (tester) async {
     await show(tester);
     await emit(
@@ -1167,6 +1342,35 @@ void main() {
       ),
     );
     expect(find.text('1m 24s'), findsOneWidget, reason: 'as the Trajectory');
+  });
+
+  testWidgets('fits a tool with a 64-character name on its row', (
+    tester,
+  ) async {
+    await show(tester);
+    await emit(tester, event(BridgeEventKind.turnStarted));
+    final tool = 'mcp_${'x' * 60}';
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.itemStarted,
+        item: item(7, kind: BridgeItemKind.dynamicToolCall, tool: tool),
+      ),
+    );
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.itemCompleted,
+        item: item(
+          7,
+          kind: BridgeItemKind.dynamicToolCall,
+          tool: tool,
+          durationMs: 40,
+        ),
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    expect(find.text('40 ms'), findsOneWidget, reason: 'the outcome stays');
   });
 
   testWidgets('shows contextual shortcuts only while Cmd alone is held', (

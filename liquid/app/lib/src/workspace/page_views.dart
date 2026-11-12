@@ -75,18 +75,18 @@ class PageViews extends ChangeNotifier {
   StreamSubscription<BridgeChange>? _followed;
   bool _disposed = false;
 
-  /// False while the queue of this Page's earlier opening still writes, which its fields
-  /// wait for before taking keys.
+  /// False while the queue of this Page's earlier opening still writes and its Views are
+  /// read again after it, which its fields wait for before taking keys.
   final ready = ValueNotifier(true);
 
   void start() {
     if (state.pageWork(page) case final work?) {
       ready.value = false;
       unawaited(
-        work.whenComplete(() {
+        work.whenComplete(() async {
           if (_disposed) return;
-          ready.value = true;
-          unawaited(_views.reread());
+          await _views.reread();
+          if (!_disposed) ready.value = true;
         }),
       );
     }
@@ -131,17 +131,18 @@ class PageViews extends ChangeNotifier {
     if (!_disposed) _settled.add(block);
   }
 
-  /// Applies `change` after earlier writes, counting it for `blocks`.
+  /// Applies `change` after earlier writes, in its `chain` if given, counting it for `blocks`.
   Future<BridgeApplied> write(
     BridgeMutation change,
-    List<String> blocks,
-  ) async {
+    List<String> blocks, {
+    EditChain? chain,
+  }) async {
     for (final block in blocks) {
       _pending[block] = pending(block) + 1;
       _sent[block] = sent(block) + 1;
     }
     try {
-      return await state.apply(change);
+      return await state.apply(change, chain: chain);
     } finally {
       for (final block in blocks) {
         final left = _pending[block] = pending(block) - 1;

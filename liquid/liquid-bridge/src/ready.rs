@@ -49,7 +49,19 @@ pub(crate) async fn ready(
     let gate = std::future::poll_fn(|context| {
         let checked = check.as_mut().poll(context);
         // Events the agent sent before its answer are in the channel once the answer arrived.
-        while let Poll::Ready(Some(event)) = receiver.poll_recv(context) {
+        // `poll_recv` yields early, with some still queued, once the task's budget is spent, so
+        // an answer that is ready takes them with `try_recv`, which never does.
+        let answered = checked.is_ready();
+        loop {
+            let next = if answered {
+                receiver.try_recv().ok()
+            } else {
+                match receiver.poll_recv(context) {
+                    Poll::Ready(next) => next,
+                    Poll::Pending => None,
+                }
+            };
+            let Some(event) = next else { break };
             if early.len() == EARLY_EVENTS {
                 return Poll::Ready(Err(format!(
                     "pi sent more than {EARLY_EVENTS} events before it was ready"

@@ -7,7 +7,7 @@ import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/shortcuts/keymap.dart';
 import 'package:liquid/src/shortcuts/shortcut_store.dart';
-import 'package:liquid/src/shortcuts/shortcuts_page.dart';
+import 'package:liquid/src/settings_page.dart';
 import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';

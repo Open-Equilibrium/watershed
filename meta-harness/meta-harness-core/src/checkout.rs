@@ -1,8 +1,9 @@
 //! Which agents run a turn in a Git checkout, so a revert never changes files under one
 //! (ADR-0234). Each running agent holds a shared lock on its checkout, one on the repository its
-//! worktrees share, and a lock on a file named after its session in `<git-dir>/watershed`; a
-//! revert holds the checkout alone, and removing checkpoints, which all worktrees share, holds
-//! the repository alone. Stash writes hold a separate repository lock across lookup and mutation.
+//! worktrees share, and a shared lock on a file named after its session in
+//! `<git-dir>/watershed`; a revert holds the checkout alone, and removing checkpoints, which all
+//! worktrees share, holds the repository alone. Stash writes hold a separate repository lock
+//! across lookup and mutation.
 //! The system drops the locks of a process that ends, so a crash leaves no agent running.
 
 use std::ffi::CString;
@@ -21,7 +22,8 @@ use crate::diff::DiffError;
 /// How often a turn's start retries while a revert holds the checkout.
 pub(crate) const RETRY: Duration = Duration::from_millis(20);
 
-/// How often a turn's start tries for its session's name while a listing reads it.
+/// How often a turn's start tries for its session's name while a listing reads it or a turn
+/// that ended removes it.
 const NAME_TRIES: usize = 50;
 
 /// How often a revert or a removal tries for its lock while no agent is named running.
@@ -41,14 +43,18 @@ pub(crate) struct Running {
     _checkout: File,
     _repository: File,
     /// The `running` folder as it was opened, the name in it and the name's lock, when this
-    /// holder has it; only then it removes the name, there, wherever a link now points.
+    /// holder has it; the last holder removes the name, there, wherever a link now points.
     name_lock: Option<(OwnedFd, CString, OwnedFd)>,
 }
 
 impl Drop for Running {
     fn drop(&mut self) {
-        // Removed before its lock drops with the field, so no file outlives its holder.
-        if let Some((running, name, _)) = &self.name_lock {
+        // Only the last holder can hold the name alone. It removes the name before its lock
+        // drops with the field, so no file outlives its holders.
+        if let Some((running, name, file)) = &self.name_lock
+            && rustix::fs::flock(file, FlockOperation::NonBlockingLockExclusive).is_ok()
+            && names(running, name, file)
+        {
             let _ = rustix::fs::unlinkat(running, name.as_c_str(), AtFlags::empty());
         }
     }
@@ -115,10 +121,10 @@ impl Checkout {
         })
     }
 
-    /// The `running` folder, the name file `session` in it and its lock, unless it cannot be
-    /// had: a listing reads the name briefly, the same session in another process holds it as
-    /// long as it runs there, and a writer of the Git directory can put something else there,
-    /// so neither the folders nor the name are followed if they are links.
+    /// The `running` folder, the name file `session` in it and its shared lock, which the same
+    /// session's turns in other windows hold too, unless it cannot be had: a listing holds the
+    /// name alone briefly, and a writer of the Git directory can put something else there, so
+    /// neither the folders nor the name are followed if they are links.
     async fn name_lock(&self, session: &str) -> Option<(OwnedFd, CString, OwnedFd)> {
         let folder = OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::RDONLY;
         std::fs::create_dir_all(&self.dir).ok()?;
@@ -132,16 +138,21 @@ impl Checkout {
         let name = CString::new(session).ok()?;
         let flags =
             OFlags::CREATE | OFlags::RDWR | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
-        let file = rustix::fs::openat(&running, name.as_c_str(), flags, Mode::from_raw_mode(0o666))
-            .ok()?;
-        let stat = rustix::fs::fstat(&file).ok()?;
-        if FileType::from_raw_mode(stat.st_mode as _) != FileType::RegularFile {
-            return None;
-        }
         for _ in 0..NAME_TRIES {
-            match rustix::fs::flock(&file, FlockOperation::NonBlockingLockExclusive) {
-                Ok(()) => return Some((running, name, file)),
-                Err(rustix::io::Errno::WOULDBLOCK) => tokio::time::sleep(RETRY / 10).await,
+            let file =
+                rustix::fs::openat(&running, name.as_c_str(), flags, Mode::from_raw_mode(0o666))
+                    .ok()?;
+            let stat = rustix::fs::fstat(&file).ok()?;
+            if FileType::from_raw_mode(stat.st_mode as _) != FileType::RegularFile {
+                return None;
+            }
+            match rustix::fs::flock(&file, FlockOperation::NonBlockingLockShared) {
+                // A turn that ended may have removed the name before this lock, which then names
+                // nothing; the next try opens the name anew.
+                Ok(()) if names(&running, &name, &file) => return Some((running, name, file)),
+                Ok(()) | Err(rustix::io::Errno::WOULDBLOCK) => {
+                    tokio::time::sleep(RETRY / 10).await;
+                }
                 Err(_) => return None,
             }
         }
@@ -192,9 +203,8 @@ impl Checkout {
         let mut running: Vec<String> = entries
             .flatten()
             .filter(|entry| {
-                open(&entry.path(), false).is_ok_and(|file| {
-                    matches!(file.try_lock_shared(), Err(TryLockError::WouldBlock))
-                })
+                open(&entry.path(), false)
+                    .is_ok_and(|file| matches!(file.try_lock(), Err(TryLockError::WouldBlock)))
             })
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
             .collect();
@@ -225,6 +235,17 @@ async fn hold_alone(lock: File, running: impl Fn() -> Vec<String>) -> Result<Alo
         }
     }
     Err(DiffError::AgentRunning(running()))
+}
+
+/// Whether `name` in the folder `running` is still the file `file`.
+fn names(running: &OwnedFd, name: &CString, file: &OwnedFd) -> bool {
+    let (Ok(named), Ok(held)) = (
+        rustix::fs::statat(running, name.as_c_str(), AtFlags::SYMLINK_NOFOLLOW),
+        rustix::fs::fstat(file),
+    ) else {
+        return false;
+    };
+    (named.st_dev, named.st_ino) == (held.st_dev, held.st_ino)
 }
 
 /// A namespace owned by this user, with no ancestor another user may replace from within it.
@@ -299,6 +320,32 @@ mod tests {
                 assert_eq!(metadata.uid(), rustix::process::geteuid().as_raw());
                 assert_eq!(metadata.mode() & 0o077, 0);
             });
+    }
+
+    #[test]
+    fn a_session_stays_named_while_any_of_its_turns_runs() {
+        let root = std::env::temp_dir().join(format!("watershed-name-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let checkout = Checkout::new(root.join("checkout"), root.join("repository"));
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let first = checkout.run("s1", || {}).await.unwrap();
+                // The same session starts again, as in another window, and the first ends
+                // while the second waits for its name.
+                let ended = tokio::spawn(async move {
+                    tokio::time::sleep(RETRY / 2).await;
+                    drop(first);
+                });
+                let second = checkout.run("s1", || {}).await.unwrap();
+                ended.await.unwrap();
+                assert_eq!(checkout.running(), ["s1"]);
+                drop(second);
+                assert!(checkout.running().is_empty());
+            });
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

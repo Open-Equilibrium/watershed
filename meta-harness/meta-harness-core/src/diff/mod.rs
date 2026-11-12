@@ -10,6 +10,7 @@ use std::fmt;
 use std::fs::DirBuilder;
 use std::hash::{BuildHasher, RandomState};
 use std::io::ErrorKind;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -45,7 +46,12 @@ pub(crate) use stash::{before_drop, before_stash_identity};
 pub use sync::{GitTransfer, PushConfirmation};
 pub use worktrees::{Worktree, WorktreeFile, WorktreeFileState, WorktreeRemoval, WorktreeRemoved};
 
-use process::{Git, git, git_command, git_path, git_path_output, git_ref_output, unreadable};
+#[cfg(test)]
+pub(crate) use process::REPOSITORY_ENV;
+use process::{
+    Git, git, git_command, git_path, git_path_output, git_ref_output, sparse_checkout_enabled,
+    unreadable,
+};
 #[cfg(test)]
 pub(crate) use revert::holds_repository;
 
@@ -410,34 +416,59 @@ impl WorkingTree {
             .collect())
     }
 
-    /// The refs whose names start with `prefix`.
-    pub(crate) async fn references(&self, prefix: &str) -> Result<Vec<String>, DiffError> {
-        let listed = git(
-            &self.root,
-            &[],
-            &["for-each-ref", "--format=%(refname)", prefix],
-        )
-        .await?;
-        Ok(listed.lines().map(str::to_owned).collect())
+    /// Calls `each` with the name of every ref below `prefix`, in Git's sorted order. Git's
+    /// listing is read line by line, so no output limit applies however many there are.
+    pub(crate) async fn each_reference(
+        &self,
+        prefix: &str,
+        mut each: impl FnMut(&str),
+    ) -> Result<(), DiffError> {
+        let args = ["for-each-ref", "--format=%(refname)", prefix];
+        let mut command = git_command(&self.root, &[], &args);
+        let mut listing = Git::spawn(command.stderr(Stdio::null()))?;
+        let stdout = listing.child.stdout.take().expect("stdout is piped");
+        let mut names = BufReader::new(stdout).split(b'\n');
+        while let Some(name) = names.next_segment().await.map_err(unreadable)? {
+            each(&String::from_utf8_lossy(&name));
+        }
+        if !listing.wait().await.map_err(unreadable)?.success() {
+            return Err(DiffError::Git("could not list the checkpoints".to_owned()));
+        }
+        Ok(())
     }
 
-    /// Deletes `references` in one transaction, so either all or none go.
-    pub(crate) async fn delete_references(&self, references: &[String]) -> Result<(), DiffError> {
-        if references.is_empty() {
-            return Ok(());
-        }
-        let input: String = references
-            .iter()
-            .map(|reference| format!("delete {reference}\n"))
-            .collect();
+    /// Deletes every ref below `prefix` in one transaction, so either all or none go. Git's
+    /// listing streams into the deletion, which commits only once the listing completed.
+    pub(crate) async fn delete_references(&self, prefix: &str) -> Result<(), DiffError> {
+        let failed = || DiffError::Git("could not remove the checkpoints".to_owned());
+        let args = ["for-each-ref", "--format=delete %(refname)", prefix];
+        let mut command = git_command(&self.root, &[], &args);
+        let mut listing = Git::spawn(command.stderr(Stdio::null()))?;
+        let mut listed = listing.child.stdout.take().expect("stdout is piped");
         let args = ["update-ref", "--no-deref", "--stdin"];
-        self.git_input(
-            &[],
-            &args,
-            input.as_bytes(),
-            "could not remove the checkpoints",
-        )
-        .await
+        let mut command = git_command(&self.root, &[], &args);
+        let mut deleting = Git::spawn(
+            command
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null()),
+        )?;
+        let mut input = deleting.child.stdin.take().expect("stdin is piped");
+        // Git drops a transaction that ends without its commit.
+        input.write_all(b"start\n").await.map_err(unreadable)?;
+        tokio::io::copy(&mut listed, &mut input)
+            .await
+            .map_err(unreadable)?;
+        if !listing.wait().await.map_err(unreadable)?.success() {
+            return Err(failed());
+        }
+        input.write_all(b"commit\n").await.map_err(unreadable)?;
+        drop(input);
+        if deleting.wait().await.map_err(unreadable)?.success() {
+            Ok(())
+        } else {
+            Err(failed())
+        }
     }
 
     /// The branch checked out, or none when HEAD names a commit.
@@ -779,11 +810,13 @@ impl WorkingTree {
     /// Clears the marks with which the project told Git to assume files unchanged or outside its
     /// work in the copied index; `git add` would skip those files and hide their changes.
     async fn unmark(&self, env: &[(&'static str, OsString)]) -> Result<(), DiffError> {
+        let sparse = sparse_checkout_enabled(&self.root).await?;
         let mut command = git_command(&self.root, env, &["ls-files", "-z", "-v"]);
         let mut listing = Git::spawn(command.stderr(Stdio::null()))?;
         let stdout = listing.child.stdout.take().expect("stdout is piped");
         let mut entries = BufReader::new(stdout).split(0);
         let mut marked = Vec::new();
+        let mut present = Vec::new();
         while let Some(entry) = entries.next_segment().await.map_err(unreadable)? {
             // `ls-files -v` tags a file assumed unchanged with a lowercase letter and one
             // outside the work with `S`.
@@ -792,6 +825,12 @@ impl WorkingTree {
             {
                 marked.extend_from_slice(path);
                 marked.push(0);
+                // A skip mark on a file that sparse checkout leaves out of the work stays: such a
+                // file holds no edit, and clearing its mark would list it as deleted.
+                if !left_out_by_sparse(&self.root, path, sparse) {
+                    present.extend_from_slice(path);
+                    present.push(0);
+                }
             }
         }
         if !listing.wait().await.map_err(unreadable)?.success() {
@@ -799,13 +838,16 @@ impl WorkingTree {
                 "could not list the project's files".to_owned(),
             ));
         }
-        if marked.is_empty() {
-            return Ok(());
-        }
-        for mark in ["--no-assume-unchanged", "--no-skip-worktree"] {
+        for (mark, paths) in [
+            ("--no-assume-unchanged", &marked),
+            ("--no-skip-worktree", &present),
+        ] {
+            if paths.is_empty() {
+                continue;
+            }
             let args = ["update-index", mark, "-z", "--stdin"];
             let failed = "could not read the files the project marks as skipped";
-            self.git_input(env, &args, &marked, failed).await?;
+            self.git_input(env, &args, paths, failed).await?;
         }
         Ok(())
     }
@@ -823,6 +865,14 @@ impl WorkingTree {
             ("GIT_OPTIONAL_LOCKS", "0".into()),
         ]
     }
+}
+
+/// Whether sparse checkout leaves the file at `path` out of the work: it is then absent from disk
+/// by design. Any other error, such as a permission failure, leaves the file to be checked.
+fn left_out_by_sparse(root: &Path, path: &[u8], sparse: bool) -> bool {
+    sparse
+        && std::fs::symlink_metadata(root.join(OsStr::from_bytes(path)))
+            .is_err_and(|error| error.kind() == ErrorKind::NotFound)
 }
 
 /// Each file's added and removed lines from `git diff --numstat -z`; a binary file counts none.

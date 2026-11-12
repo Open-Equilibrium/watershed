@@ -177,6 +177,38 @@ void main() {
     expect(pulls.offer.value, isNull);
   });
 
+  test('the offer follows the branch, not how its name displays', () async {
+    // Two branches whose names differ only in characters shown the same way.
+    final pushed = gitStatusOf(branch: 'fix/a?', rawBranch: 'fix/a\u0007');
+    backend.git = pushed;
+    await git.refresh();
+    final transfer = transferOf(branch: 'fix/a?', upstream: 'origin/fix/a');
+    await pulls.pushed(
+      BridgeGitTransfer(
+        branch: transfer.branch,
+        remote: transfer.remote,
+        upstream: transfer.upstream,
+        ahead: transfer.ahead,
+        behind: transfer.behind,
+        firstPush: transfer.firstPush,
+        gone: transfer.gone,
+        destination: transfer.destination,
+        confirmation: BridgePushConfirmation(
+          branch: 'fix/a\u0007',
+          remote: transfer.confirmation.remote,
+          reference: transfer.confirmation.reference,
+          commit: transfer.confirmation.commit,
+          repository: transfer.confirmation.repository,
+        ),
+      ),
+    );
+    expect(pulls.offer.value, isNotNull);
+
+    backend.git = gitStatusOf(branch: 'fix/a?', rawBranch: 'fix/a\u0008');
+    await git.refresh();
+    expect(pulls.offer.value, isNull);
+  });
+
   test(
     'base records from several windows and devices keep each other',
     () async {

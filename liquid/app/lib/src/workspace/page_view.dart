@@ -75,10 +75,13 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
   void initState() {
     super.initState();
     _title.text = _page?.title ?? '';
+    _named = _title.text;
     _tree.addListener(_titleChanged);
+    _title.addListener(_typedTitle);
     _first.addListener(_typedFirst);
     _views.ready.addListener(_readied);
     widget.state.finishing.add(_typedFirst);
+    widget.state.finishing.add(_typedTitle);
     // After the frame, so it wins over the window's own first focus.
     if (widget.open.fresh) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -96,6 +99,9 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     }
     editor.left(this);
     widget.state.finishing.remove(_typedFirst);
+    // A composition still open in the title is written as it stands, as in the first line.
+    _writeTitle();
+    widget.state.finishing.remove(_typedTitle);
     _tree.removeListener(_titleChanged);
     _title.dispose();
     _titleFocus.dispose();
@@ -109,10 +115,32 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
   void _titleChanged() {
     if (_titleFocus.hasFocus) return;
     final title = _page?.title ?? '';
-    if (_title.text != title) _title.text = title;
+    if (_title.text != title) _show(title);
   }
 
-  /// Each change of the title is one rename; a refused one puts the stored title back.
+  /// Shows `title` as the stored one, which is no rename.
+  void _show(String title) {
+    _named = title;
+    _title.text = title;
+  }
+
+  /// Each change of the title, once any composition ends, is one rename (architecture rule 7).
+  void _typedTitle() {
+    // On quitting, a composition still open is written as it stands.
+    if (!_title.value.composing.isCollapsed && !widget.state.quitting) return;
+    _writeTitle();
+  }
+
+  /// Renames the Page to what the title holds, unless that is already sent or stored.
+  void _writeTitle() {
+    final title = _title.text;
+    if (title == _named) return;
+    _named = title;
+    _rename(title);
+  }
+
+  /// Each change of the title is one rename; a refused one puts the stored title back, read
+  /// again first, as the tree may not show an earlier rename yet.
   void _rename(String title) {
     final rename = ++_renames;
     unawaited(
@@ -120,16 +148,25 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
           .rename(widget.open.page, title)
           .then<void>(
             (_) {},
-            onError: (Object _) {
+            onError: (Object _) async {
               // Only the latest rename's refusal puts the stored title back.
               if (!mounted || rename != _renames) return;
-              _title.text = _page?.title ?? '';
+              try {
+                await widget.state.readPages(widget.open.area);
+              } on Object {
+                // The tree keeps its last read, and the problem shows.
+              }
+              if (!mounted || rename != _renames) return;
+              _show(_page?.title ?? '');
             },
           ),
     );
   }
 
   int _renames = 0;
+
+  /// The title last sent or stored, which a change of the field is compared with.
+  String _named = '';
 
   void _readied() {
     if (mounted) setState(() {});
@@ -265,7 +302,6 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                         key: const Key('page-title'),
                         controller: _title,
                         focusNode: _titleFocus,
-                        onChanged: _rename,
                         // The title wraps but stays one line, as in Notion.
                         maxLines: null,
                         keyboardType: TextInputType.text,

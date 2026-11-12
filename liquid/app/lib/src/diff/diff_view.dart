@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -56,6 +55,9 @@ class _DiffViewState extends State<DiffView> {
   List<FileRow> _rows = const [];
   BridgeFileChange? _selected;
   List<DiffLine> _lines = const [];
+
+  /// The shown lines likely widest, which set how far the lines scroll sideways.
+  List<String> _widest = const [];
 
   /// Why the selected file shows no lines, if it shows none.
   String? _note;
@@ -136,6 +138,7 @@ class _DiffViewState extends State<DiffView> {
       _selected = change;
       if (change?.path != _shownPath || _comparison != _shownComparison) {
         _lines = const [];
+        _widest = const [];
         _note = null;
       }
     });
@@ -178,6 +181,7 @@ class _DiffViewState extends State<DiffView> {
           _shownPath = wanted.path;
           _shownComparison = comparison;
           _lines = lines;
+          _widest = widestLines(lines);
           _note = note;
         });
         // Another file starts at its top.
@@ -287,32 +291,22 @@ class _DiffViewState extends State<DiffView> {
   }
 
   /// Uses `settings` at once and keeps them for the next start.
-  Future<void> _change(DiffSettings settings) async {
-    final saving = widget.settings.change(settings);
+  void _change(DiffSettings settings) {
+    unawaited(widget.settings.change(settings));
     setState(() {});
-    try {
-      await saving;
-    } on FileSystemException catch (error) {
-      widget.state.notify(
-        BridgeLevel.warning,
-        'Could not save the Diff settings: ${error.message}',
-      );
-    }
   }
 
   void _showLayout(DiffLayout layout) =>
-      unawaited(_change(widget.settings.value.copyWith(layout: layout)));
+      _change(widget.settings.value.copyWith(layout: layout));
 
   void _switchLayout() => _showLayout(
     _layout == DiffLayout.unified ? DiffLayout.split : DiffLayout.unified,
   );
 
   /// Leaves out or brings back the changes that are only whitespace.
-  void _switchWhitespace() => unawaited(
-    _change(
-      widget.settings.value.copyWith(
-        hideWhitespace: !widget.settings.value.hideWhitespace,
-      ),
+  void _switchWhitespace() => _change(
+    widget.settings.value.copyWith(
+      hideWhitespace: !widget.settings.value.hideWhitespace,
     ),
   );
 
@@ -530,6 +524,7 @@ class _DiffViewState extends State<DiffView> {
               header: _header(),
               change: _selected,
               lines: _lines,
+              widest: _widest,
               note: _note,
               settings: widget.settings.value,
               scroll: _scroll,
@@ -645,6 +640,7 @@ class _Patch extends StatelessWidget {
     required this.header,
     required this.change,
     required this.lines,
+    required this.widest,
     required this.note,
     required this.settings,
     required this.scroll,
@@ -657,6 +653,9 @@ class _Patch extends StatelessWidget {
   final Widget? header;
   final BridgeFileChange? change;
   final List<DiffLine> lines;
+
+  /// The shown lines likely widest.
+  final List<String> widest;
 
   /// Why the file shows no lines.
   final String? note;
@@ -736,13 +735,17 @@ class _Patch extends StatelessWidget {
                     )
                   : LayoutBuilder(
                       builder: (context, constraints) {
-                        final char = measureText('M', monoStyle(context)).width;
-                        final widest = lines.fold(
-                          0,
-                          (widest, line) => math.max(widest, line.text.length),
-                        );
+                        final style = monoStyle(context);
                         // Split shows each side as wide as the unified view's code.
-                        final code = widest * char + WsMetrics.space6;
+                        final code =
+                            widest.fold(
+                              0.0,
+                              (wide, text) => math.max(
+                                wide,
+                                measureText(text, style).width,
+                              ),
+                            ) +
+                            WsMetrics.space6;
                         final rows = split
                             ? splitRows(lines)
                             : const <SplitRow>[];
@@ -866,32 +869,39 @@ class _Toggle extends StatelessWidget {
   );
 }
 
-/// A line's code, colored lightly, with a faint ␍ for a Windows line end; a hunk
-/// header in the faint small style.
+/// A line's code, colored lightly, with a faint ␍ for a Windows line end and a faint … where
+/// a long line is cut; a hunk header in the faint small style.
 Widget _code(BuildContext context, DiffLine line) {
   final faint = context.ws.textFaint;
+  final (:text, :cut) = shownText(line.text);
   if (line.kind == DiffKind.hunk) {
     return Text(
-      line.text,
+      cut ? '$text…' : text,
       style: monoStyle(
         context,
         color: faint,
       ).copyWith(fontSize: WsMetrics.fsSmall),
     );
   }
-  final code = line.text.endsWith('\r')
-      ? line.text.substring(0, line.text.length - 1)
+  final crlf = !cut && text.endsWith('\r');
+  final end = cut
+      ? '…'
+      : crlf
+      ? '␍'
       : null;
-  final shown = highlight(context, code ?? line.text);
+  final shown = highlight(
+    context,
+    crlf ? text.substring(0, text.length - 1) : text,
+  );
   return Text.rich(
-    code == null
+    end == null
         ? shown
         : TextSpan(
             style: shown.style,
             children: [
               ...?shown.children,
               TextSpan(
-                text: '␍',
+                text: end,
                 style: TextStyle(color: faint),
               ),
             ],

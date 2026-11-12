@@ -2,7 +2,8 @@ use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    StoredSession, recent_sessions, session_id, session_title, session_title_of, session_titles,
+    History, StoredSession, recent_sessions, session_id, session_title, session_title_of,
+    session_titles,
 };
 
 /// Writes a pi session file started in `cwd` with `lines` after its header, modified at `at`.
@@ -89,28 +90,57 @@ fn lists_the_projects_recent_sessions_newest_first() {
     );
 }
 
+/// Makes a named pipe at `path`.
+fn pipe(path: &Path) {
+    let status = std::process::Command::new("mkfifo")
+        .arg(path)
+        .status()
+        .expect("mkfifo runs");
+    assert!(status.success());
+}
+
+/// Runs `read` on its own thread and fails, rather than hangs, when a pipe blocks it.
+fn unblocked<T: Send + 'static>(read: impl FnOnce() -> T + Send + 'static) -> T {
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = done.send(read());
+    });
+    finished
+        .recv_timeout(Duration::from_secs(5))
+        .expect("a pipe must not block the read")
+}
+
 #[test]
 fn passes_over_a_named_pipe_in_the_session_directory() {
     let dir = std::env::temp_dir().join(format!("watershed-fifo-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("directory");
-    let status = std::process::Command::new("mkfifo")
-        .arg(dir.join("pipe.jsonl"))
-        .status()
-        .expect("mkfifo runs");
-    assert!(status.success());
-    let (done, finished) = std::sync::mpsc::channel();
+    pipe(&dir.join("pipe.jsonl"));
     let listed = dir.clone();
-    std::thread::spawn(move || {
-        let _ = done.send(
-            recent_sessions(&listed, Path::new("/tmp"), None, 5).map(|sessions| sessions.len()),
-        );
+    let listed = unblocked(move || {
+        recent_sessions(&listed, Path::new("/tmp"), None, 5).map(|sessions| sessions.len())
     });
-    let listed = finished
-        .recv_timeout(std::time::Duration::from_secs(5))
-        .expect("a pipe must not block the listing");
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(listed.expect("listed"), 0);
+}
+
+#[test]
+fn refuses_a_pipe_named_as_the_session_file_without_waiting() {
+    let dir = std::env::temp_dir().join(format!("watershed-named-fifo-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("directory");
+    let file = dir.join("pipe.jsonl");
+    pipe(&file);
+    let project = Path::new("/tmp");
+    let read = unblocked(move || {
+        (
+            session_title(&file, project),
+            session_id(&file, project),
+            History::from_file(&file, 1024).map(|history| history.tree().nodes.len()),
+        )
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(matches!(read, (None, None, Err(_))), "{read:?}");
 }
 
 #[test]
@@ -129,13 +159,11 @@ fn lists_a_linked_session_file_but_not_a_linked_pipe() {
     );
     std::os::unix::fs::symlink(dir.join("store/real.jsonl"), dir.join("linked.jsonl"))
         .expect("link");
-    let status = std::process::Command::new("mkfifo")
-        .arg(dir.join("store/pipe"))
-        .status()
-        .expect("mkfifo runs");
-    assert!(status.success());
+    pipe(&dir.join("store/pipe"));
     std::os::unix::fs::symlink(dir.join("store/pipe"), dir.join("pipe.jsonl")).expect("link");
-    let sessions = recent_sessions(&dir, Path::new("/work/acme-api"), None, 5);
+    let listed = dir.clone();
+    let sessions =
+        unblocked(move || recent_sessions(&listed, Path::new("/work/acme-api"), None, 5));
     let _ = std::fs::remove_dir_all(&dir);
     let titles: Vec<_> = sessions
         .expect("listed")
@@ -191,7 +219,8 @@ fn lists_a_session_whose_first_prompt_comes_late() {
         r#"{{"type":"message","id":"s1","parentId":null,"message":{{"role":"system","content":"{}"}}}}"#,
         "x".repeat(300 * 1024)
     );
-    session(&dir, "late", "/work/acme-api", &[&system], 1);
+    let prompt = r#"{"type":"message","id":"u1","parentId":"s1","message":{"role":"user","content":"Add a limiter"}}"#;
+    session(&dir, "late", "/work/acme-api", &[&system, prompt], 1);
     let recent = recent_sessions(&dir, Path::new("/work/acme-api"), None, 5);
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(

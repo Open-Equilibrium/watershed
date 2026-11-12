@@ -466,7 +466,8 @@ class SecondaryButton extends StatelessWidget {
   );
 }
 
-/// A quiet button without a frame, for view options beside the main actions.
+/// A quiet button without a frame, for view options beside the main actions; in the accent
+/// while the option it opens is `on`.
 class GhostButton extends StatelessWidget {
   const GhostButton({
     super.key,
@@ -475,6 +476,7 @@ class GhostButton extends StatelessWidget {
     this.icon,
     this.shortcut,
     this.focusNode,
+    this.on = false,
   });
 
   final String label;
@@ -482,17 +484,22 @@ class GhostButton extends StatelessWidget {
   final String? shortcut;
   final VoidCallback onPressed;
   final FocusNode? focusNode;
+  final bool on;
 
   @override
-  Widget build(BuildContext context) => _Button(
-    label: label,
-    icon: icon,
-    shortcut: shortcut,
-    onPressed: onPressed,
-    focusNode: focusNode,
-    foreground: context.ws.textMuted,
-    background: Colors.transparent,
-  );
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return _Button(
+      label: label,
+      icon: icon,
+      shortcut: shortcut,
+      onPressed: onPressed,
+      focusNode: focusNode,
+      foreground: on ? ws.accent : ws.textMuted,
+      background: on ? ws.accentSubtle : Colors.transparent,
+      outline: on ? ws.accent.withValues(alpha: 0.4) : null,
+    );
+  }
 }
 
 /// The input area's card; controls in it show focus and hover above its background.

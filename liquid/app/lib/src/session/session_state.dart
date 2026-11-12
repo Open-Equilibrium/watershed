@@ -261,8 +261,14 @@ class SessionState {
   /// the send. A message the agent rejects goes back to the input area.
   Future<void> send(String message, {bool followUp = false}) async {
     // A message typed while the session changes goes to the new one, and one typed while the
-    // chat is restored follows it, so the restored chat does not hold its items twice.
+    // chat is restored or branched follows it, so the restored chat does not hold its items twice
+    // and keeps the items of the turn the message starts.
     await _switching?.future;
+    try {
+      await _branching;
+    } on Object {
+      // The branch or revert reports its own failure; the message still goes out.
+    }
     try {
       await _chat.loading;
     } on Object {
@@ -447,9 +453,11 @@ class SessionState {
   Future<void> _readChangesOnce() async {
     final generation = _generation;
     try {
+      final started = ++_turnReadsStarted;
       final read = await _backend.turns();
       if (generation != _generation) return;
       turns.value = read;
+      _turnsRead = started;
       if (diffScope.value is UncommittedChanges) {
         final whitespace = hideWhitespace.value;
         final (revision, files) = await _backend.uncommittedChanges(
@@ -544,14 +552,21 @@ class SessionState {
     }
   }
 
-  /// Reads the turns that ended and adds what each changed where it ended in the chat.
-  Future<void> _endTurn() async {
+  /// Reads the turns that ended and adds what each changed where it ended in the chat;
+  /// `ended` turns had ended live when it was asked.
+  Future<void> _endTurn(int ended) async {
     final generation = _generation;
+    final asked = _turnReadsStarted;
     unawaited(git.refresh());
     await readChanges();
     if (generation != _generation) return;
-    _chat.endTurns(turns.value);
+    _chat.endTurns(turns.value, _turnsRead > asked ? ended : 0);
   }
+
+  /// How many turn reads began, and the last of them that succeeded: a turn's end trusts
+  /// only the turns of a read that began after it.
+  int _turnReadsStarted = 0;
+  int _turnsRead = 0;
 
   static const _outsideGit = (
     title: 'Not a Git repository',
@@ -700,23 +715,27 @@ class SessionState {
   /// Reverts the files to before `turn` and continues the session on a new branch from before
   /// its prompt, which returns to the input area (ADR-0234). Only the plan `confirmation` came
   /// with runs (ADR-0256). Returns whether it reverted; a failure is reported.
-  Future<bool> revert(
-    BridgeTurn turn,
-    BridgeRevertConfirmation confirmation,
-  ) async {
+  Future<bool> revert(BridgeTurn turn, BridgeRevertConfirmation confirmation) {
     if (_branching != null || _switching != null) {
       notify(
         BridgeLevel.info,
         'The session is changing, so the files were not reverted.',
       );
-      return false;
+      return Future.value(false);
     }
-    final reverting = _backend
-        .revertToTurn(turn.id, confirmation)
-        .then((_) => true);
-    _branching = reverting;
+    return _branching = _revert(
+      turn,
+      confirmation,
+    ).whenComplete(() => _branching = null);
+  }
+
+  /// Reverts the files and shows the branch; messages wait until the chat has been restored.
+  Future<bool> _revert(
+    BridgeTurn turn,
+    BridgeRevertConfirmation confirmation,
+  ) async {
     try {
-      await reverting;
+      await _backend.revertToTurn(turn.id, confirmation);
     } on Object catch (error) {
       // The error says whether the files changed; the Diff tab shows them either way.
       final said = '$error';
@@ -727,8 +746,6 @@ class SessionState {
       );
       await readChanges();
       return false;
-    } finally {
-      _branching = null;
     }
     await _branched();
     await readChanges();
@@ -830,8 +847,7 @@ class SessionState {
         _stopping = false;
         stored.value++;
         unawaited(loadTitle());
-        _chat.turnCompleted();
-        unawaited(_endTurn());
+        unawaited(_endTurn(_chat.turnCompleted()));
       case BridgeEventKind.itemStarted:
         final started = event.item!;
         final view = ItemView(

@@ -1,7 +1,7 @@
 //! Whole-file commits and the checkout compared with its last commit. Explicit writes use
 //! the user's Git and hooks; snapshots keep the user's index intact.
 
-use super::process::{paths as nul_paths, user_git, user_git_input};
+use super::process::{paths as nul_paths, sparse_checkout_enabled, user_git, user_git_input};
 use super::*;
 use std::collections::BTreeMap;
 
@@ -271,7 +271,9 @@ impl WorkingTree {
             // An untracked file must first be known to Git for --only. Intent-to-add leaves its
             // content unstaged, also if the user's hook refuses the commit. Staged deletions
             // are absent from the index too; --only records them without adding a missing path.
+            let sparse = sparse_checkout_enabled(&self.root).await?;
             let mut marked = Vec::new();
+            let mut present = Vec::new();
             for entry in &entries {
                 if let [tag, b' ', path @ ..] = entry.as_bytes()
                     && (tag.is_ascii_lowercase() || *tag == b'S')
@@ -279,18 +281,23 @@ impl WorkingTree {
                 {
                     marked.extend_from_slice(path);
                     marked.push(0);
+                    // A skip mark on a file that sparse checkout leaves out of the work stays:
+                    // such a file holds no edit.
+                    if !left_out_by_sparse(&self.root, path, sparse) {
+                        present.extend_from_slice(path);
+                        present.push(0);
+                    }
                 }
             }
             // The dialog includes hidden edits; --only would silently skip marked files.
             // Clear only selected marks, leaving excluded index entries and flags intact.
-            if !marked.is_empty() {
-                for mark in ["--no-assume-unchanged", "--no-skip-worktree"] {
-                    user_git_input(
-                        &self.root,
-                        &["update-index", mark, "-z", "--stdin"],
-                        &marked,
-                    )
-                    .await?;
+            for (mark, paths) in [
+                ("--no-assume-unchanged", &marked),
+                ("--no-skip-worktree", &present),
+            ] {
+                if !paths.is_empty() {
+                    user_git_input(&self.root, &["update-index", mark, "-z", "--stdin"], paths)
+                        .await?;
                 }
             }
             let new: Vec<&str> = selected

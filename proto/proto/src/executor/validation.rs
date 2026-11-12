@@ -9,7 +9,7 @@ use super::{
     MAX_EXECUTOR_TOOL_STREAM_BYTES_V0, MAX_FEATURES, MAX_ID_CHARS, MAX_NAME_CHARS, MAX_PATH_CHARS,
     resolved_policy_digest_v0, validate_executor_exec_vector_v0,
 };
-use crate::session_object::decode_lowercase_sha256_hex;
+use crate::{canonical::is_nfc, session_object::decode_lowercase_sha256_hex};
 
 pub(super) fn validate_request(request: &ExecutorRequestV0) -> Result<(), ExecutorProtocolError> {
     validate_schema(&request.schema, EXECUTOR_REQUEST_SCHEMA_V0, "request")?;
@@ -324,7 +324,9 @@ pub(super) fn validate_text(
 }
 
 pub(super) fn validate_absolute_path(value: &str, name: &str) -> Result<(), ExecutorProtocolError> {
+    // WHY: canonical serialization normalizes strings, which would redirect a non-NFC path.
     if value == "/"
+        || !is_nfc(value)
         || !value.starts_with('/')
         || value.ends_with('/')
         || value.contains('\\')

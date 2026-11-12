@@ -60,8 +60,12 @@ impl PreparedExecutor {
             resolved_policy,
             schema: proto::EXECUTOR_REQUEST_SCHEMA_V0.to_owned(),
         };
-        let request_bytes =
-            proto::canonical_executor_request_v0(&request).map_err(invalid_request)?;
+        let request_bytes = proto::canonical_executor_request_v0(&request).map_err(|_| {
+            RuntimeError::executor(
+                proto::ExecutorErrorCodeV0::PolicyUnsupported,
+                "Executor request cannot represent the invocation exactly",
+            )
+        })?;
         let request_hash = crate::runtime::digest::prefixed_sha256_hex(&request_bytes);
         // The inventory is admitted once per controller. Per-Tool work duplicates
         // only the bounded retained object handles, never a recursive home scan.

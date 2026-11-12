@@ -189,7 +189,7 @@ mod tests {
     use crate::runtime::run_attempts::{RunAttemptOutcome, ToolTerminalClassification};
     use crate::runtime::{
         executor::ExecutorSelectionSource, fs_guards::AnchoredWorkspace,
-        tool_runner::ToolInvocation,
+        tool_runner::ToolInvocation, types::RuntimeError,
     };
     use std::{
         collections::BTreeMap,
@@ -617,6 +617,33 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn decomposed_workspace_path_is_unsupported_before_dispatch() {
+        let root = crate::tests::empty_workspace();
+        let decomposed = root.join("cafe\u{301}");
+        std::fs::create_dir(&decomposed).expect("decomposed Workspace directory creates");
+        let workspace = AnchoredWorkspace::open(&decomposed).expect("workspace opens");
+        let executor = preparation_fixture(vec![retained_object(&root)]);
+        let policy = executor_policy();
+        let invocation = ToolInvocation {
+            executable: "/bin/echo".to_owned(),
+            argv: Vec::new(),
+        };
+        let Err(RuntimeError::Executor(failure)) = executor.prepare_tool(
+            &workspace,
+            &policy,
+            &policy.commands[0],
+            &invocation,
+            "decomposed-workspace",
+        ) else {
+            panic!("a Workspace path that normalization changes must not be dispatched");
+        };
+        assert_eq!(
+            failure.code(),
+            proto::ExecutorErrorCodeV0::PolicyUnsupported
+        );
     }
 
     #[test]

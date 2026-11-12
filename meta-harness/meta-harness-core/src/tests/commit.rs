@@ -1,5 +1,5 @@
 use super::checkpoint::{Repo, at, run};
-use crate::{Checkpoints, DiffError, Phase, Whitespace};
+use crate::{ChangeStatus, Checkpoints, DiffError, Phase, Whitespace};
 
 fn identity(repo: &Repo) {
     repo.git(&["config", "user.name", "Test"]);
@@ -90,6 +90,109 @@ fn commit_includes_selected_files_hidden_by_index_marks() {
                 "unstaged excluded\n"
             );
         }
+    });
+}
+
+#[test]
+fn skip_marks_hide_only_files_absent_from_the_work() {
+    run(async {
+        // A file on disk that the project marks as skipped still shows its edit.
+        let marked = Repo::new("skip-on-disk");
+        marked.git(&["update-index", "--skip-worktree", "a.txt"]);
+        marked.write("a.txt", "marked edit\n");
+        let (_, changes) = Checkpoints::new(marked.path())
+            .uncommitted_changes(Whitespace::Shown)
+            .await
+            .unwrap();
+        assert_eq!(
+            changes
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+            ["a.txt"]
+        );
+        // dir/b.txt is outside the sparse checkout: absent from disk and not an edit.
+        let repo = Repo::new("sparse-checkout");
+        identity(&repo);
+        std::fs::create_dir(repo.path().join("dir")).unwrap();
+        repo.write("dir/b.txt", "b\n");
+        repo.git(&["add", "dir/b.txt"]);
+        repo.git(&["commit", "-m", "Add b"]);
+        repo.git(&["sparse-checkout", "set", "--no-cone", "/a.txt"]);
+        repo.write("a.txt", "edited\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        let (_, changes) = checkpoints
+            .uncommitted_changes(Whitespace::Shown)
+            .await
+            .unwrap();
+        assert_eq!(
+            changes
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+            ["a.txt"]
+        );
+        assert_eq!(checkpoints.status().await.unwrap().changed, 1);
+        let plan = checkpoints.commit_plan(&[]).await.unwrap();
+        let paths: Vec<String> = plan
+            .files
+            .iter()
+            .map(|file| file.change.path.clone())
+            .collect();
+        assert_eq!(paths, ["a.txt"]);
+        checkpoints
+            .commit(&plan.snapshot, &paths, "Commit a", None)
+            .await
+            .unwrap();
+        assert!(
+            repo.git(&["ls-tree", "-r", "--name-only", "HEAD"])
+                .lines()
+                .any(|path| path == "dir/b.txt")
+        );
+    });
+}
+
+#[test]
+fn skip_mark_without_sparse_checkout_keeps_a_deletion_visible() {
+    run(async {
+        // Without sparse checkout no file is left out of the work, so a deleted file is a deletion.
+        let repo = Repo::new("skip-deleted-without-sparse");
+        identity(&repo);
+        repo.write("b.txt", "b\n");
+        repo.git(&["add", "b.txt"]);
+        repo.git(&["commit", "-m", "Add b"]);
+        repo.git(&["update-index", "--skip-worktree", "b.txt"]);
+        std::fs::remove_file(repo.path().join("b.txt")).unwrap();
+        let checkpoints = Checkpoints::new(repo.path());
+        let (_, changes) = checkpoints
+            .uncommitted_changes(Whitespace::Shown)
+            .await
+            .unwrap();
+        assert_eq!(
+            changes
+                .iter()
+                .map(|file| (file.path.as_str(), file.status))
+                .collect::<Vec<_>>(),
+            [("b.txt", ChangeStatus::Deleted)]
+        );
+        let plan = checkpoints.commit_plan(&[]).await.unwrap();
+        assert_eq!(
+            plan.files
+                .iter()
+                .map(|file| (file.change.path.as_str(), file.change.status))
+                .collect::<Vec<_>>(),
+            [("b.txt", ChangeStatus::Deleted)]
+        );
+        checkpoints
+            .commit(&plan.snapshot, &["b.txt".into()], "Delete b", None)
+            .await
+            .unwrap();
+        assert!(
+            !repo
+                .git(&["ls-tree", "-r", "--name-only", "HEAD"])
+                .lines()
+                .any(|path| path == "b.txt")
+        );
     });
 }
 
@@ -227,7 +330,7 @@ fn commits_require_message_files_branch_and_no_merge_or_running_agent() {
         repo.git(&["switch", "main"]);
         repo.write("a.txt", "main edit\n");
         repo.git(&["commit", "-am", "Main edit"]);
-        let merge = std::process::Command::new("git")
+        let merge = super::fixture_git()
             .args(["merge", "other"])
             .current_dir(repo.path())
             .output()
@@ -243,6 +346,9 @@ fn commits_require_message_files_branch_and_no_merge_or_running_agent() {
                 .is_err()
         );
         repo.git(&["merge", "--abort"]);
+        // Only Git's record of a merge counts, not a ref that happens to share its name.
+        repo.git(&["tag", "MERGE_HEAD"]);
+        assert!(!checkpoints.status().await.unwrap().merging);
         repo.write("a.txt", "changed\n");
         repo.git(&["checkout", "--detach", "-q"]);
         assert!(matches!(
@@ -724,6 +830,45 @@ fn commit_plan_uses_the_first_available_start_as_its_baseline() {
 }
 
 #[test]
+fn a_turn_without_its_end_checkpoint_keeps_its_changes() {
+    use crate::TurnCheckpoints;
+    run(async {
+        let repo = Repo::new("attribution-missing-end");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints.capture(&at("t1", Phase::Start)).await.unwrap();
+        repo.write("a.txt", "turn one\n");
+        checkpoints.capture(&at("t2", Phase::Start)).await.unwrap();
+        repo.write("b.txt", "turn two\n");
+        let turns: Vec<_> = (1..=2)
+            .map(|number| TurnCheckpoints {
+                session: "s1".into(),
+                turn: format!("t{number}"),
+                number,
+                start_entry: "start".into(),
+                end_entry: None,
+                prompt_entry: None,
+                prompt: String::new(),
+                started_ms: None,
+                ended_ms: None,
+                ended: false,
+                failure: None,
+                changed: None,
+            })
+            .collect();
+        let plan = checkpoints.commit_plan(&turns).await.unwrap();
+        let attributed: Vec<_> = plan
+            .files
+            .iter()
+            .map(|file| (file.change.path.as_str(), file.turns.clone(), file.edited))
+            .collect();
+        assert_eq!(
+            attributed,
+            [("a.txt", vec![1], false), ("b.txt", vec![2], false)]
+        );
+    });
+}
+
+#[test]
 fn commit_refuses_selected_content_changed_since_the_plan() {
     run(async {
         let repo = Repo::new("commit-stale");
@@ -852,6 +997,37 @@ fn attribution_bounds_keep_files_without_partial_labels() {
             .await
             .unwrap();
         assert_eq!(repo.git(&["show", "HEAD:a.txt"]), "turn change\n");
+    });
+}
+
+#[test]
+fn malformed_checkpoint_ids_list_files_without_attribution() {
+    use crate::TurnCheckpoints;
+    run(async {
+        let repo = Repo::new("malformed-checkpoint-id");
+        repo.write("a.txt", "changed\n");
+        // A session id outside letters, digits, `-` and `_` names no checkpoint ref.
+        let turn = TurnCheckpoints {
+            session: "a.b".into(),
+            turn: "t1".into(),
+            number: 1,
+            start_entry: "start".into(),
+            end_entry: Some("end".into()),
+            prompt_entry: None,
+            prompt: String::new(),
+            started_ms: None,
+            ended_ms: None,
+            ended: true,
+            failure: None,
+            changed: None,
+        };
+        let plan = Checkpoints::new(repo.path())
+            .commit_plan(&[turn])
+            .await
+            .unwrap();
+        assert_eq!(plan.files.len(), 1);
+        assert_eq!(plan.files[0].change.path, "a.txt");
+        assert!(!plan.files[0].attribution_available);
     });
 }
 

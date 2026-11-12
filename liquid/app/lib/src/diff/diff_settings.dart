@@ -36,8 +36,15 @@ class DiffSettings {
 }
 
 /// The Diff tab's settings in use; each change is saved.
-class DiffSettingsController extends ValueNotifier<DiffSettings> {
-  DiffSettingsController([super.value = const DiffSettings(), this._file]);
+class DiffSettingsController extends SavedSettings<DiffSettings> {
+  DiffSettingsController([
+    DiffSettings value = const DiffSettings(),
+    SettingsFile? file,
+  ]) : super(
+         value,
+         file == null ? null : (settings) => file.save(settings.toJson()),
+         'the Diff settings',
+       );
 
   static Future<DiffSettingsController> load(SettingsFile file) async {
     final json = await file.load();
@@ -45,20 +52,5 @@ class DiffSettingsController extends ValueNotifier<DiffSettings> {
       json == null ? const DiffSettings() : DiffSettings.fromJson(json),
       file,
     );
-  }
-
-  final SettingsFile? _file;
-
-  /// The latest save; each waits for the one before, so the last change is the one kept.
-  Future<void> _saving = Future.value();
-
-  /// Uses `settings` at once; fails if they could not be saved.
-  Future<void> change(DiffSettings settings) {
-    value = settings;
-    final file = _file;
-    if (file == null) return Future.value();
-    final saved = _saving.then((_) => file.save(settings.toJson()));
-    _saving = saved.then((_) {}, onError: (Object _) {});
-    return saved;
   }
 }

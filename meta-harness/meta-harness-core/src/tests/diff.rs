@@ -22,7 +22,7 @@ impl Repo {
     }
 
     fn git(&self, args: &[&str]) -> String {
-        let output = Command::new("git")
+        let output = super::fixture_git()
             .args([
                 "-c",
                 "user.name=Test",
@@ -175,7 +175,7 @@ fn diff_listings_never_alias_an_undecodable_path_to_its_replacement_sibling() {
         let sibling = repo.git(&["hash-object", "-w", "file-\u{fffd}"]);
         let invalid = repo.git(&["hash-object", "-w", "base"]);
         // Git trees can hold pathname bytes that this host's filesystem cannot create.
-        let mut make_tree = Command::new("git")
+        let mut make_tree = super::fixture_git()
             .args(["mktree", "-z"])
             .current_dir(repo.path())
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -296,7 +296,8 @@ fn diffs_a_run_against_its_snapshot_without_touching_the_projects_index() {
 #[test]
 fn rejects_a_directory_outside_git() {
     run(async {
-        let dir = std::env::temp_dir().join(format!("watershed-no-git-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("watershed-diff-no-git-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("directory");
         let outside = WorkingTree::open(&dir).await;
         let _ = std::fs::remove_dir_all(&dir);

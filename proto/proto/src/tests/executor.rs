@@ -1130,6 +1130,20 @@ fn executor_paths_are_canonical_object_identities() {
             );
         }
     }
+    for field in ["executable", "working_directory", "protected object"] {
+        let mut candidate = request();
+        let decomposed = "/tmp/cafe\u{301}".to_owned();
+        match field {
+            "executable" => candidate.resolved_policy.executable = decomposed,
+            "working_directory" => candidate.resolved_policy.working_directory = decomposed,
+            _ => candidate.resolved_policy.protected_objects[0].path = decomposed,
+        }
+        refresh_policy_digest(&mut candidate);
+        assert!(
+            canonical_executor_request_v0(&candidate).is_err(),
+            "normalization must not redirect the {field} path"
+        );
+    }
 }
 
 #[test]

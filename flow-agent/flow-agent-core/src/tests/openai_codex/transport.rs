@@ -316,6 +316,37 @@ fn productive_http_dispatch_rejects_a_missing_terminal_sentinel() {
 }
 
 #[test]
+fn productive_http_dispatch_leaves_a_stream_without_a_terminal_event_uncertain() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("fake provider binds");
+    let endpoint = format!("http://{}/responses", listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("one provider request");
+        let mut request = [0_u8; 16 * 1024];
+        assert!(stream.read(&mut request).expect("request reads") > 0);
+        let body = concat!(
+            "data:{\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n",
+            "data:[DONE]\n\n"
+        );
+        write_sse_response(&mut stream, body);
+    });
+
+    let error = OpenAiCodexProvider::default()
+        .turn_at(
+            &endpoint,
+            &fixture_credential(),
+            &serde_json::json!({"model":"fixture"}),
+        )
+        .expect_err("a stream without a terminal event fails");
+    assert!(
+        !error
+            .provider_failure()
+            .expect("provider failure")
+            .is_definitive()
+    );
+    server.join().expect("fake provider completes");
+}
+
+#[test]
 fn productive_http_dispatch_returns_after_the_terminal_sentinel() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("fake provider binds");
     let endpoint = format!("http://{}/responses", listener.local_addr().unwrap());

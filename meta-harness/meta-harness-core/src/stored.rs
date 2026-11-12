@@ -1,7 +1,9 @@
 //! pi's stored session files, read only as far as a listing needs.
 
 use std::collections::HashMap;
+use std::fs::File;
 use std::io::Read;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -106,8 +108,6 @@ fn session_files(dir: &Path) -> std::io::Result<impl Iterator<Item = PathBuf>> {
     Ok(std::fs::read_dir(dir)?
         .flatten()
         .map(|entry| entry.path())
-        // A pipe or device would block the read; pi writes plain files, perhaps linked.
-        .filter(|path| path.metadata().is_ok_and(|metadata| metadata.is_file()))
         .filter(|path| {
             path.extension()
                 .is_some_and(|extension| extension == "jsonl")
@@ -124,7 +124,7 @@ struct Head {
 /// The start of a session file; `None` when the file is not a session started in `project`.
 fn head(path: &Path, project: &Path) -> Option<Head> {
     let mut start = Vec::new();
-    std::fs::File::open(path)
+    open(path)
         .ok()?
         .take(START_BYTES as u64)
         .read_to_end(&mut start)
@@ -171,6 +171,22 @@ fn head(path: &Path, project: &Path) -> Option<Head> {
         id,
         title: name.or(prompt).filter(|title: &String| !title.is_empty()),
     })
+}
+
+/// Opens a session file pi stored, perhaps linked. pi writes plain files, so a pipe or device
+/// opens without waiting and is refused.
+pub(crate) fn open(path: &Path) -> std::io::Result<File> {
+    let file = File::options()
+        .read(true)
+        .custom_flags(rustix::fs::OFlags::NONBLOCK.bits() as i32)
+        .open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("{} is no plain file", path.display()),
+        ));
+    }
+    Ok(file)
 }
 
 /// The path with links resolved, or as given when it does not exist here.

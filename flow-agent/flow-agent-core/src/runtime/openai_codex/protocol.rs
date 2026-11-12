@@ -171,9 +171,9 @@ pub(crate) fn decode_responses_turn(
         }
     }
     if completed != 1 {
-        return Err(provider_protocol(format!(
-            "response requires exactly one successful terminal event; observed {completed}"
-        )));
+        return Err(RuntimeError::uncertain_provider_error(
+            "Responses stream ended without a terminal event",
+        ));
     }
     let response_id = completed_id.expect("one completed event has an id");
     if let Some(created_id) = created_id

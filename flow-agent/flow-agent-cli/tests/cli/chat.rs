@@ -124,6 +124,20 @@ fn chat_rejects_increasing_overlong_references_before_session_mutation() {
 }
 
 #[test]
+fn chat_rejects_invalid_utf8_as_input_validation_before_session_mutation() {
+    let workspace = workspace_copy("hello-flow");
+    let output = run_chat(&workspace, b"\xff\n");
+
+    assert_eq!(output.status.code(), Some(64));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stderr).expect("stderr should be UTF-8"),
+        "error: flow chat stdin must be valid UTF-8\n"
+    );
+    assert!(!workspace_session_dir(&workspace).exists());
+}
+
+#[test]
 fn chat_unknown_reference_fails_before_session_mutation() {
     let workspace = workspace_copy("hello-flow");
     let output = run_chat(&workspace, b"/unknown\n");

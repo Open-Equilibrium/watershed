@@ -12,6 +12,7 @@ import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
+import 'package:liquid/src/theme/tokens.g.dart';
 import 'package:liquid/src/trajectory/compare_view.dart';
 import 'package:liquid/src/trajectory/filter_bar.dart';
 import 'package:liquid/src/trajectory/overview.dart';
@@ -477,7 +478,7 @@ void main() {
       'AGENTS.md ≈200',
       'Tools ≈400',
       'Carried over ≈200',
-      'This step ≈2.0k',
+      'This step ≈2.0k (65 % of the request)',
     ]) {
       expect(find.text(part), findsOneWidget, reason: part);
     }
@@ -641,6 +642,14 @@ void main() {
     await tester.tap(find.byTooltip('Collapse the session tree'));
     await tester.pumpAndSettle();
     expect(width(), 24);
+    expect(
+      find.descendant(
+        of: find.byType(SessionTreeView),
+        matching: find.text('Tree'),
+      ),
+      findsOneWidget,
+      reason: 'the rail says what it is',
+    );
 
     await show(tester, historyOf(branchA), size: narrowest);
     expect(width(), 24, reason: 'below 1280 px it starts collapsed');
@@ -853,7 +862,7 @@ void main() {
     expect(find.byKey(const Key('range')), findsNothing);
   });
 
-  testWidgets('a tree node outside the range clears it to show its step', (
+  testWidgets('a jump outside the range moves the range to its step', (
     tester,
   ) async {
     await show(tester, historyOf(long));
@@ -871,8 +880,21 @@ void main() {
     expect(find.byKey(const ValueKey('step-s3')), findsNothing);
     await tester.tap(find.byKey(const ValueKey('tree-s3')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('range')), findsNothing);
     expect(find.byKey(const ValueKey('step-s3')), findsOneWidget);
+    expect(find.byKey(const ValueKey('step-s58')), findsNothing);
+    expect(find.byKey(const Key('range')), findsOneWidget);
+
+    // Step 50 runs from 50 s to 50.5 s of 59.5 s.
+    await tester.tapAt(
+      Offset(tracks.left + tracks.width * 50.25 / 59.5, tracks.center.dy),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.getSemantics(find.byKey(const ValueKey('step-s50'))),
+      isSemantics(isSelected: true),
+    );
+    expect(find.byKey(const ValueKey('step-s3')), findsNothing);
+    expect(find.byKey(const Key('range')), findsOneWidget);
   });
 
   testWidgets('dragging the range slowly scrolls the list', (tester) async {
@@ -934,7 +956,13 @@ void main() {
       find.descendant(of: find.byType(FilterBar), matching: find.text('Tools')),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Filter · 1'), findsOneWidget);
+    Color? color(String label) =>
+        tester.widget<Text>(find.text(label)).style?.color;
+    expect(
+      color('Filter · 1'),
+      WsPalette.light.accent,
+      reason: 'the accent marks filters that are on',
+    );
     expect(opacity(tester, 'e2'), lessThan(1), reason: 'a response');
     expect(opacity(tester, 'e3'), 1, reason: 'a tool');
     expect(
@@ -983,6 +1011,7 @@ void main() {
     await tester.tap(find.text('Clear'));
     await tester.pumpAndSettle();
     expect(opacity(tester, 'e2'), 1);
+    expect(color('Filter'), isNot(WsPalette.light.accent));
   });
 
   testWidgets('says why compare or branch does nothing', (tester) async {
@@ -1048,6 +1077,26 @@ void main() {
       isSemantics(isSelected: true),
       reason: 'the open tab is told, not only drawn',
     );
+    Border? underline(String label) =>
+        (tester
+                        .widget<Container>(
+                          find
+                              .ancestor(
+                                of: tab(label),
+                                matching: find.byType(Container),
+                              )
+                              .first,
+                        )
+                        .decoration
+                    as BoxDecoration?)
+                ?.border
+            as Border?;
+    expect(
+      underline('Context')?.bottom.color,
+      WsPalette.light.accent,
+      reason: 'and takes the accent underline',
+    );
+    expect(underline('Summary'), isNull);
 
     // Return presses the focused switch rather than opening the step.
     Focus.of(tester.element(find.text('Equal width'))).requestFocus();
@@ -1067,7 +1116,8 @@ void main() {
     );
   });
 
-  testWidgets('compares two branches side by side', (tester) async {
+  /// Shows branch B of a session with two branches, ready to compare them.
+  Future<void> showBranches(WidgetTester tester) async {
     final branchB = [
       ...branchA.take(3),
       record('b1', 2, BridgeRecordKind.user, 'Use a token bucket', 60000),
@@ -1108,6 +1158,10 @@ void main() {
       leaf: 'b2',
       others: [branchB],
     );
+  }
+
+  testWidgets('compares two branches side by side', (tester) async {
+    await showBranches(tester);
     expect(find.text('session branch B · 5 steps · 1m 01s'), findsOneWidget);
     await press(tester, LogicalKeyboardKey.arrowDown);
     await press(tester, LogicalKeyboardKey.enter);
@@ -1165,6 +1219,32 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('tree-e6')));
     await tester.pumpAndSettle();
     expect(backend.calls.last, 'history e6');
+  });
+
+  testWidgets('keys for the list leave what the comparison hides alone', (
+    tester,
+  ) async {
+    await showBranches(tester);
+    await press(tester, LogicalKeyboardKey.arrowDown);
+    await press(tester, LogicalKeyboardKey.keyC);
+    await press(tester, LogicalKeyboardKey.enter);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+    await tester.pumpAndSettle();
+    await press(tester, LogicalKeyboardKey.keyC);
+    expect(find.text('Comparing'), findsNothing);
+    expect(find.byKey(const Key('inspector')), findsNothing);
+    expect(find.byType(FilterBar), findsNothing);
+    expect(
+      find.byKey(const ValueKey('step-e2')),
+      findsOneWidget,
+      reason: 'collapse all waits for the comparison to end',
+    );
   });
 
   testWidgets('shows tool outcomes, the token split and the context tab', (
@@ -1298,6 +1378,40 @@ void main() {
     backend.controller.add(event(BridgeEventKind.itemCompleted, item: item(1)));
     await tester.pumpAndSettle();
     expect(find.text("I'll look first."), findsOneWidget);
+  });
+
+  testWidgets('a running turn reloads the Trajectory at most once a second', (
+    tester,
+  ) async {
+    await show(tester, historyOf(branchA.take(1).toList()));
+    int reads() =>
+        backend.calls.where((call) => call.startsWith('history')).length;
+    backend.controller.add(event(BridgeEventKind.turnStarted));
+    await tester.pump();
+    backend.stored = historyOf(branchA.take(2).toList());
+    for (var id = 1; id <= 50; id++) {
+      backend.controller.add(
+        event(BridgeEventKind.itemCompleted, item: item(id)),
+      );
+    }
+    await tester.pump();
+    expect(
+      reads(),
+      lessThanOrEqualTo(2),
+      reason: 'the steps of a burst share a reload',
+    );
+
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text("I'll look first."), findsOneWidget);
+
+    backend.stored = historyOf(branchA);
+    backend.controller.add(event(BridgeEventKind.turnCompleted));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Done.'),
+      findsOneWidget,
+      reason: 'the turn’s end shows its final steps',
+    );
   });
 }
 

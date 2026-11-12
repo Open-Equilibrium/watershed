@@ -9,11 +9,12 @@ use super::super::{FLOW_HASH, REGISTRY_HASH, create_review_run, entry, write_ter
 use crate::runtime::{
     context::ContextHistory,
     conversations::{
-        ConversationEntryType, ProductiveRecoveryWriter, append_conversation_entry,
-        append_productive_run_checkpoint, create_conversation_run,
-        create_unpublished_productive_conversation_run, read_conversation_history,
-        reclaim_unpublished_productive_run, reserve_conversation_continuation,
-        reserve_conversation_run_recovery, reserve_new_conversation_run,
+        ConversationEntryType, ProductiveRecoveryWriter, StatusTransactionCrashPoint,
+        append_conversation_entry, append_productive_run_checkpoint, conversation_status_page,
+        create_conversation_run, create_unpublished_productive_conversation_run,
+        read_conversation_history, reclaim_unpublished_productive_run,
+        reserve_conversation_continuation, reserve_conversation_run_recovery,
+        reserve_new_conversation_run, set_status_transaction_crash_point,
     },
     session_authority::set_session_ownership_release_failure_for_test,
     types::RuntimeError,
@@ -87,6 +88,53 @@ fn active_continuation_serializes_run_publication() {
     assert_eq!(second.parent_entry_id(), Some("continued"));
     assert_eq!(second.run_session_id(), "review-3");
     second.release().expect("second continuation releases");
+}
+
+#[test]
+fn continuation_reclaims_an_unpublished_run_left_by_an_interrupted_continuation() {
+    let workspace = empty_workspace("conversation-continuation-reclaims-unpublished");
+    create_conversation_run(
+        &workspace,
+        "review",
+        "review",
+        "review-flow",
+        REGISTRY_HASH,
+        FLOW_HASH,
+    )
+    .expect("root Run is created");
+    write_terminal_run(&workspace, "review", "review");
+    write_terminal_recovery_fixture(&workspace, "review", "review", "root");
+    set_status_transaction_crash_point(StatusTransactionCrashPoint::RunCreationApplied);
+    let crash = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        create_unpublished_productive_conversation_run(
+            &workspace,
+            "review",
+            "review-2",
+            "review-flow",
+            REGISTRY_HASH,
+            FLOW_HASH,
+        )
+    }));
+    assert!(crash.is_err(), "continuation creation is interrupted");
+
+    let reservation = reserve_conversation_continuation(&workspace, "review", None)
+        .expect("the next continuation reserves");
+    assert_eq!(reservation.run_session_id(), "review-2");
+    reservation.release().expect("continuation releases");
+    assert_eq!(
+        conversation_status_page(&workspace, None)
+            .expect("status reads")
+            .conversations[0]
+            .run_count,
+        1
+    );
+    let mut runs =
+        fs::read_dir(crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs"))
+            .expect("runs list")
+            .map(|entry| entry.expect("run entry").file_name())
+            .collect::<Vec<_>>();
+    runs.sort();
+    assert_eq!(runs, ["review"]);
 }
 
 #[test]

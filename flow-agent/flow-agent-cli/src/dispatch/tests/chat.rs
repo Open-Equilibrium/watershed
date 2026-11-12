@@ -48,10 +48,6 @@ fn chat_reader_preserves_utf8_crlf_and_eof_surfaces() {
     for input in [b"\xff\n".as_slice(), b"\xe2\x82".as_slice()] {
         let error = read_chat_reference(&mut Cursor::new(input))
             .expect_err("invalid or incomplete UTF-8 is rejected");
-        assert!(matches!(
-            error,
-            RuntimeError::Io { source, .. }
-                if source.kind() == std::io::ErrorKind::InvalidData
-        ));
+        assert!(matches!(error, RuntimeError::Usage(_)));
     }
 }

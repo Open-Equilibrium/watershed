@@ -7,7 +7,8 @@ use crate::runtime::tool_runner::{
 };
 use crate::runtime::{fs_guards::AnchoredWorkspace, run_attempts::RunAttemptOutcome};
 use std::{
-    path::Path,
+    cell::RefCell,
+    path::{Path, PathBuf},
     sync::atomic::AtomicBool,
     time::{Duration, Instant},
 };
@@ -69,6 +70,50 @@ fn run_escaped_output_fixture(marker: &str, write_cap: bool) -> bool {
 
 fn contains_bytes(bytes: &[u8], needle: &[u8]) -> bool {
     bytes.windows(needle.len()).any(|window| window == needle)
+}
+
+const TERM_READY: &str = "term-ready";
+
+thread_local! {
+    static TERM_READY_WORKSPACE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
+// A short deadline can expire before the shell has set its TERM trap. Hold the
+// group TERM until the tool creates `TERM_READY` after setting it; on timeout
+// the TERM proceeds and the test's own assertions report the failure.
+fn await_term_ready(signal: rustix::process::Signal) {
+    let Some(workspace) = TERM_READY_WORKSPACE.with_borrow(Clone::clone) else {
+        return;
+    };
+    let ready_deadline = Instant::now() + Duration::from_secs(5);
+    while signal == rustix::process::Signal::TERM
+        && !workspace.join(TERM_READY).is_file()
+        && Instant::now() < ready_deadline
+    {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+fn hold_term_until_ready(_: rustix::process::Pid, signal: rustix::process::Signal) {
+    await_term_ready(signal);
+}
+
+fn execute_timed_out_after_term_ready(label: &str, body: &str) -> ToolExecutionOutcome {
+    let workspace = empty_workspace(label);
+    TERM_READY_WORKSPACE.set(Some(workspace.to_path_buf()));
+    observe_group_signals_for_test(Some(hold_term_until_ready));
+    let cancelled = AtomicBool::new(false);
+    let outcome = execute_tool_invocation(
+        &shell_invocation(body),
+        &workspace,
+        ToolRunControl {
+            cancelled: &cancelled,
+            deadline: Instant::now() + Duration::from_millis(100),
+        },
+    );
+    observe_group_signals_for_test(None);
+    TERM_READY_WORKSPACE.set(None);
+    outcome
 }
 
 #[test]
@@ -284,6 +329,7 @@ fn runner_owns_completed_leader_until_final_group_signal() {
         static LAST_SIGNAL: Cell<Option<rustix::process::Signal>> = const { Cell::new(None) };
     }
     fn observe_owned_leader(pid: rustix::process::Pid, signal: rustix::process::Signal) {
+        await_term_ready(signal);
         // Only the controller can verify that this exact child remains waitable.
         // NOWAIT leaves ownership intact through the signal that follows.
         let status = rustix::process::waitid(
@@ -329,7 +375,7 @@ fn runner_owns_completed_leader_until_final_group_signal() {
             true,
         ),
         (
-            "trap '' TERM; (while :; do :; done) & trap 'exit 17' TERM; printf ready; while :; do :; done",
+            "trap '' TERM; (while :; do :; done) & trap 'exit 17' TERM; : > term-ready; while :; do :; done",
             Duration::from_millis(100),
             ToolTerminalClassification::ToolTimedOut,
             None,
@@ -337,6 +383,11 @@ fn runner_owns_completed_leader_until_final_group_signal() {
             true,
         ),
     ] {
+        let workspace = empty_workspace("runner-owns-completed-leader");
+        TERM_READY_WORKSPACE.set(
+            (classification == ToolTerminalClassification::ToolTimedOut)
+                .then(|| workspace.to_path_buf()),
+        );
         LOST_OWNERSHIP.set(false);
         LAST_SIGNAL_COMPLETED.set(false);
         LAST_SIGNAL_EXIT.set(None);
@@ -345,13 +396,14 @@ fn runner_owns_completed_leader_until_final_group_signal() {
         let cancelled = AtomicBool::new(false);
         let outcome = execute_tool_invocation(
             &shell_invocation(body),
-            Path::new("."),
+            &workspace,
             ToolRunControl {
                 cancelled: &cancelled,
                 deadline: Instant::now() + deadline,
             },
         );
         observe_group_signals_for_test(None);
+        TERM_READY_WORKSPACE.set(None);
 
         assert!(
             !LOST_OWNERSHIP.get(),
@@ -376,15 +428,10 @@ fn runner_owns_completed_leader_until_final_group_signal() {
 
 #[test]
 fn runner_term_grace() {
-    let cancelled = AtomicBool::new(false);
     let started = Instant::now();
-    let outcome = execute_tool_invocation(
-        &shell_invocation("trap '' TERM; printf ready; while :; do /bin/sleep 1; done"),
-        Path::new("."),
-        ToolRunControl {
-            cancelled: &cancelled,
-            deadline: Instant::now() + Duration::from_millis(100),
-        },
+    let outcome = execute_timed_out_after_term_ready(
+        "runner-term-grace",
+        "trap '' TERM; : > term-ready; printf ready; while :; do /bin/sleep 1; done",
     );
 
     assert_eq!(outcome.status, RunAttemptOutcome::TimedOut);
@@ -400,15 +447,10 @@ fn runner_term_grace() {
 #[test]
 fn runner_forced_reap() {
     force_reap_timeout_for_test(true);
-    let cancelled = AtomicBool::new(false);
     let started = Instant::now();
-    let outcome = execute_tool_invocation(
-        &shell_invocation("trap '' TERM; while :; do /bin/sleep 1; done"),
-        Path::new("."),
-        ToolRunControl {
-            cancelled: &cancelled,
-            deadline: Instant::now() + Duration::from_millis(100),
-        },
+    let outcome = execute_timed_out_after_term_ready(
+        "runner-forced-reap",
+        "trap '' TERM; : > term-ready; while :; do /bin/sleep 1; done",
     );
     force_reap_timeout_for_test(false);
 

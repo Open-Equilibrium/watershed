@@ -111,7 +111,7 @@ pub(super) fn selected_entry_recovery_history(
     let event_count = usize::try_from(*cumulative_event_count)
         .map_err(|_| protocol("productive recovery event count exceeds this platform"))?;
     Ok((
-        ContextHistory::from_recovery_bytes(&history_bytes)?,
+        ContextHistory::from_recovery_bytes(&history_bytes, *cumulative_event_count)?,
         event_count,
     ))
 }

@@ -11,7 +11,9 @@ import IOKit.hidsystem
 
 if CommandLine.arguments.dropFirst().first == "--remove" {
     if Mapping.apply(on: false) { exit(0) }
-    FileHandle.standardError.write(Data("Liquid Key: could not give Caps Lock back\n".utf8))
+    // Liquid quotes this to the user.
+    FileHandle.standardError.write(
+        Data("a keyboard may keep Caps Lock as the Liquid key\n".utf8))
     exit(1)
 }
 

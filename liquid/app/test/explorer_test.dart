@@ -8,6 +8,7 @@ import 'package:liquid/src/agent/chat_view.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/rust/api/events.dart';
+import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
 import 'package:liquid/src/workspace/page_view.dart';
@@ -43,6 +44,10 @@ void main() {
   }
 
   Finder title() => find.byKey(const Key('page-title'));
+  List<String?> renames() => [
+    for (final mutation in fake.applied)
+      if (mutation.kind == BridgeMutationKind.renamePage) mutation.text,
+  ];
   Finder inSidebar(String text) =>
       find.descendant(of: find.byType(Sidebar), matching: find.text(text));
   Finder header(String text) => find.descendant(
@@ -237,6 +242,74 @@ void main() {
     },
   );
 
+  testWidgets('a Page title is renamed once its composition ends', (
+    tester,
+  ) async {
+    await show(tester);
+    await tester.tap(title());
+    await tester.pump();
+    fake.applied.clear();
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'nihon',
+        selection: TextSelection.collapsed(offset: 5),
+        composing: TextRange(start: 0, end: 5),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(renames(), isEmpty);
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: '日本',
+        selection: TextSelection.collapsed(offset: 2),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(renames(), ['日本']);
+  });
+
+  testWidgets('quitting writes a composition still open in the title', (
+    tester,
+  ) async {
+    await show(tester);
+    await tester.tap(title());
+    await tester.pump();
+    fake.applied.clear();
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'nihon',
+        selection: TextSelection.collapsed(offset: 5),
+        composing: TextRange(start: 0, end: 5),
+      ),
+    );
+    await tester.pump();
+    var drained = false;
+    unawaited(workspace.drain().then((_) => drained = true));
+    await tester.pump();
+    expect(drained, isTrue);
+    expect(renames(), ['nihon']);
+  });
+
+  testWidgets('leaving the Page writes a composition still open in the title', (
+    tester,
+  ) async {
+    await show(tester);
+    await tester.tap(title());
+    await tester.pump();
+    fake.applied.clear();
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'nihon',
+        selection: TextSelection.collapsed(offset: 5),
+        composing: TextRange(start: 0, end: 5),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(renames(), ['nihon']);
+  });
+
   testWidgets('a nested Page’s disclosure opens from the keyboard', (
     tester,
   ) async {
@@ -287,6 +360,27 @@ void main() {
     await tester.pumpAndSettle();
     expect(fake.pages.values.single.single.title, 'Pl');
     expect(tester.widget<TextField>(title()).controller!.text, 'Pl');
+  });
+
+  testWidgets('a refused rename shows the stored title, not an older one', (
+    tester,
+  ) async {
+    await show(tester);
+    // The tree is not read again yet, so it still holds the title before 'P'.
+    fake.deferredKinds = {BridgeQueryKind.pages};
+    fake.deferred = [];
+    await tester.enterText(title(), 'P');
+    await tester.pumpAndSettle();
+    fake.refuseNext = 1;
+    await tester.enterText(title(), 'Pl');
+    await tester.pumpAndSettle();
+    fake.deferredKinds = {};
+    for (final release in [...fake.deferred!]) {
+      release.complete();
+    }
+    await tester.pumpAndSettle();
+    expect(fake.pages.values.single.single.title, 'P');
+    expect(tester.widget<TextField>(title()).controller!.text, 'P');
   });
 
   testWidgets('focus and hover show in the sidebar', (tester) async {

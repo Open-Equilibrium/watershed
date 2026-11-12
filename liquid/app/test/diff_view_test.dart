@@ -1053,6 +1053,33 @@ void main() {
     expect(mark?.style?.color, palette.textFaint);
   });
 
+  testWidgets('shows the start of a very long line, marked as cut', (
+    tester,
+  ) async {
+    // One line of a minified bundle, about 1 MB.
+    final bundle = 'let a = 1;' * 100000;
+    final backend = FakeBackend()
+      ..changed = [modified('bundle.js', 1, 0)]
+      ..patches = {'bundle.js': '@@ -0,0 +1 @@\n+$bundle\n'};
+    await show(tester, backend);
+    final line = tester.widget<RichText>(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is RichText &&
+            widget.text.toPlainText().startsWith('let a = 1;'),
+      ),
+    );
+    final shown = line.text.toPlainText();
+    var spans = 0;
+    line.text.visitChildren((_) {
+      spans++;
+      return true;
+    });
+    expect(shown.length, lessThan(5000));
+    expect(spans, lessThan(2000));
+    expect(shown, endsWith('…'));
+  });
+
   group('reverting to before a turn', () {
     const started = 1793527800000;
     const edited = 1793528520000;

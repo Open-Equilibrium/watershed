@@ -464,6 +464,128 @@ void main() {
     ]);
   });
 
+  test(
+    'a turn that ended outside Git leaves its place to no later turn',
+    () async {
+      // Outside Git the turns end without checkpoints, so their positions are never used.
+      backend.turnList = const [];
+      await emit(
+        event(
+          BridgeEventKind.itemStarted,
+          item: item(1, kind: BridgeItemKind.userMessage),
+        ),
+      );
+      await emit(event(BridgeEventKind.turnCompleted));
+      await emit(
+        event(
+          BridgeEventKind.itemStarted,
+          item: item(2, kind: BridgeItemKind.userMessage),
+        ),
+      );
+      await emit(event(BridgeEventKind.turnCompleted));
+      // Git is initialized, and the third turn changes files.
+      backend.turnList = [turnOf('T3', number: 3, added: 1, removed: 0)];
+      await emit(
+        event(
+          BridgeEventKind.itemStarted,
+          item: item(3, kind: BridgeItemKind.userMessage),
+        ),
+      );
+      await emit(event(BridgeEventKind.turnCompleted));
+      expect(
+        state.items.value.map((view) => view.turnEnd?.id ?? '${view.id}'),
+        ['1', '2', '3', 'T3'],
+      );
+    },
+  );
+
+  Future<void> turn(int id) async {
+    await emit(
+      event(
+        BridgeEventKind.itemStarted,
+        item: item(id, kind: BridgeItemKind.userMessage),
+      ),
+    );
+    await emit(event(BridgeEventKind.turnCompleted));
+  }
+
+  test('a turn whose end is recorded late keeps its place', () async {
+    // The first read after the turn ended does not show its end checkpoint yet.
+    backend.turnList = [turnOf('T1', number: 1, ended: false)];
+    await turn(1);
+    expect(state.items.value.where((view) => view.turnEnd != null), isEmpty);
+    backend.turnList = [
+      turnOf('T1', number: 1, added: 1, removed: 0),
+      turnOf('T2', number: 2, added: 1, removed: 0),
+    ];
+    await turn(2);
+    expect(state.items.value.map((view) => view.turnEnd?.id ?? '${view.id}'), [
+      '1',
+      'T1',
+      '2',
+      'T2',
+    ]);
+  });
+
+  test(
+    'a turn that never recorded its end takes no later turn\'s place',
+    () async {
+      backend.turnList = [turnOf('T1', number: 1, ended: false)];
+      await turn(1);
+      backend.turnList = [
+        turnOf('T1', number: 1, ended: false),
+        turnOf('T2', number: 2, added: 1, removed: 0),
+      ];
+      await turn(2);
+      expect(
+        state.items.value.map((view) => view.turnEnd?.id ?? '${view.id}'),
+        ['1', '2', 'T2'],
+      );
+    },
+  );
+
+  test('a turn keeps its place when its turns could not be read', () async {
+    backend.turnList = [turnOf('T1', number: 1, added: 1, removed: 0)];
+    backend.failTurns = true;
+    await turn(1);
+    backend.failTurns = false;
+    backend.turnList = [
+      turnOf('T1', number: 1, added: 1, removed: 0),
+      turnOf('T2', number: 2, added: 1, removed: 0),
+    ];
+    await turn(2);
+    expect(state.items.value.map((view) => view.turnEnd?.id ?? '${view.id}'), [
+      '1',
+      'T1',
+      '2',
+      'T2',
+    ]);
+  });
+
+  test('a turn keeps its place when only an earlier read succeeded', () async {
+    // A read that began before the turn ended returns the turns from before its end.
+    backend.turnList = const [];
+    backend.turnsGate = Completer();
+    final earlier = state.readChanges();
+    await turn(1);
+    backend.turnsFailFrom = backend.turnReads + 1;
+    backend.turnsGate!.complete();
+    await earlier;
+    await pumpEventQueue();
+    backend.turnsFailFrom = null;
+    backend.turnList = [
+      turnOf('T1', number: 1, added: 1, removed: 0),
+      turnOf('T2', number: 2, added: 1, removed: 0),
+    ];
+    await turn(2);
+    expect(state.items.value.map((view) => view.turnEnd?.id ?? '${view.id}'), [
+      '1',
+      'T1',
+      '2',
+      'T2',
+    ]);
+  });
+
   test('says nothing below a turn that changed no file', () async {
     backend.turnList = [
       turnOf('T1', number: 1, files: 0, added: 0, removed: 0),
@@ -888,6 +1010,27 @@ void main() {
     backend.gate!.complete();
     await Future.wait([restoring, sending]);
     expect(backend.calls.last, 'send Hi');
+  });
+
+  test('a message sent during a revert keeps the item of its turn', () async {
+    final turn = turnOf('T2', number: 2);
+    backend.turnList = [turnOf('T1', number: 1), turn];
+    backend.revertGate = Completer();
+    // The agent starts a turn as each message reaches it.
+    backend.onSend = (_) => backend.controller.add(
+      event(
+        BridgeEventKind.itemStarted,
+        item: item(7, kind: BridgeItemKind.userMessage),
+      ),
+    );
+    final reverting = state.revert(turn, revertPlanOf().confirmation);
+    final sending = state.send('Again');
+    await pumpEventQueue();
+    backend.revertGate!.complete();
+    expect(await reverting, isTrue);
+    await sending;
+    await pumpEventQueue();
+    expect(state.items.value.map((view) => view.id), [7]);
   });
 
   test('retires open cards when the agent exits', () async {

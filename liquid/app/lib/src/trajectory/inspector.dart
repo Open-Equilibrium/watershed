@@ -78,6 +78,7 @@ class Inspector extends StatelessWidget {
                 border: Border(bottom: BorderSide(color: ws.border)),
               ),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   for (final (label, value) in [
                     ('Summary', InspectorTab.summary),
@@ -94,14 +95,28 @@ class Inspector extends StatelessWidget {
                         shortcuts: activateKeys,
                         child: InkWell(
                           onTap: () => onTab(value),
-                          child: Text(
-                            label,
-                            style: TextStyle(
-                              fontSize: WsMetrics.fsCompact,
-                              color: value == shown ? ws.text : ws.textMuted,
-                              fontWeight: value == shown
-                                  ? WsMetrics.fwMedium
-                                  : WsMetrics.fwRegular,
+                          // The open tab takes an accent underline on the header's edge.
+                          child: Container(
+                            alignment: Alignment.center,
+                            decoration: value == shown
+                                ? BoxDecoration(
+                                    border: Border(
+                                      bottom: BorderSide(
+                                        color: ws.accent,
+                                        width: 2,
+                                      ),
+                                    ),
+                                  )
+                                : null,
+                            child: Text(
+                              label,
+                              style: TextStyle(
+                                fontSize: WsMetrics.fsCompact,
+                                color: value == shown ? ws.text : ws.textMuted,
+                                fontWeight: value == shown
+                                    ? WsMetrics.fwSemibold
+                                    : WsMetrics.fwRegular,
+                              ),
                             ),
                           ),
                         ),
@@ -231,15 +246,6 @@ List<int> _tokenSplit(BridgeRecord record) {
     saw.toolChars,
     saw.messageChars,
   ]);
-}
-
-/// Tokens of `chars` characters at this request's ratio of tokens to characters.
-int _tokensFor(BridgeRecord record, int chars) {
-  final usage = record.usage;
-  final saw = record.context;
-  if (usage == null || saw == null) return 0;
-  final total = saw.promptChars + saw.toolChars + saw.messageChars;
-  return total == 0 ? 0 : (promptTokens(usage) * chars / total).round();
 }
 
 /// System prompt, tools and messages as one bar.
@@ -436,7 +442,7 @@ class _MessageSummary extends StatelessWidget {
                           '${previous < 0 ? 'New since the session started' : 'New since step ${previous + 1}'}: '
                               '${saw.newSincePrevious.join(', ')}',
                           if (freshChars != null && freshChars > 0)
-                            '≈ ${formatCount(_tokensFor(record, freshChars))} tokens',
+                            '≈ ${formatCount(tokensOf(record, freshChars))} tokens',
                         ].join(' · '),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -570,7 +576,15 @@ class _ContextTab extends StatelessWidget {
                 _Legend(ws.warning, 'AGENTS.md', parts.projectContext),
               _Legend(ws.data3, 'Tools', parts.tools),
               _Legend(ws.data1, 'Carried over', parts.carried),
-              _Legend(ws.accent, stepLabel, parts.step, hatched: true),
+              _Legend(
+                ws.accent,
+                stepLabel,
+                parts.step,
+                hatched: true,
+                share: parts.total == 0
+                    ? null
+                    : '(${(parts.step * 100 / parts.total).round()} % of the request)',
+              ),
             ],
           ),
           if (parts.largest.isNotEmpty) ...[
@@ -695,14 +709,21 @@ class _Hatch extends CustomPainter {
   bool shouldRepaint(_Hatch old) => old.color != color;
 }
 
-/// A colored square and a part's estimated tokens.
+/// A colored square and a part's estimated tokens, with its share of the request if given.
 class _Legend extends StatelessWidget {
-  const _Legend(this.color, this.label, this.tokens, {this.hatched = false});
+  const _Legend(
+    this.color,
+    this.label,
+    this.tokens, {
+    this.hatched = false,
+    this.share,
+  });
 
   final Color color;
   final String label;
   final int tokens;
   final bool hatched;
+  final String? share;
 
   @override
   Widget build(BuildContext context) => Row(
@@ -722,8 +743,17 @@ class _Legend extends StatelessWidget {
       ),
       const SizedBox(width: WsMetrics.space2),
       Flexible(
-        child: Text(
-          '$label ≈${formatCompact(tokens)}',
+        child: Text.rich(
+          TextSpan(
+            text: '$label ≈${formatCompact(tokens)}',
+            children: [
+              if (share case final share?)
+                TextSpan(
+                  text: ' $share',
+                  style: TextStyle(color: context.ws.textFaint),
+                ),
+            ],
+          ),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
@@ -903,7 +933,7 @@ class _ContextList extends StatelessWidget {
           SizedBox(
             width: 64,
             child: Text(
-              gone ? '–' : '≈ ${formatCount(_tokensFor(record, chars))}',
+              gone ? '–' : '≈ ${formatCount(tokensOf(record, chars))}',
               textAlign: TextAlign.right,
               style: TextStyle(
                 color: ws.textMuted,

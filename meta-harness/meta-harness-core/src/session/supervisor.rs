@@ -241,12 +241,18 @@ impl Supervisor {
                         }
                         continue;
                     }
+                    // Counted from now: pi's timer runs while the event waits for room.
                     expiry = record
                         .get("timeout")
                         .and_then(Value::as_u64)
                         // Like pi, which sets no timer for a zero timeout.
                         .filter(|timeout| *timeout > 0)
-                        .map(|timeout| (request.clone(), Duration::from_millis(timeout)));
+                        .map(|timeout| {
+                            (
+                                request.clone(),
+                                Instant::now() + Duration::from_millis(timeout),
+                            )
+                        });
                     true
                 }
                 AgentEvent::TurnStarted { .. } => {
@@ -273,8 +279,8 @@ impl Supervisor {
                     return false;
                 }
             }
-            if let Some((request, timeout)) = expiry {
-                self.expire(request, timeout);
+            if let Some((request, deadline)) = expiry {
+                self.expire(request, deadline);
             }
         }
         true
@@ -289,13 +295,13 @@ impl Supervisor {
             .is_some()
     }
 
-    /// Forgets a question once its time is up: pi then answers it itself without telling.
-    /// An answered question or the agent's exit ends the timer, so it keeps nothing alive.
-    fn expire(&self, request: RequestId, timeout: Duration) {
+    /// Forgets a question at `deadline`: pi then answers it itself without telling. An
+    /// answered question or the agent's exit ends the timer, so it keeps nothing alive.
+    fn expire(&self, request: RequestId, deadline: Instant) {
         let (state, events, ended) = (self.state.clone(), self.events.clone(), self.ended.clone());
         let expired = request.clone();
         let timer = tokio::spawn(async move {
-            tokio::time::sleep(timeout).await;
+            tokio::time::sleep_until(deadline).await;
             // Like a user's answer, it never follows the exit.
             let ended = ended.lock().await;
             let open = {
@@ -540,5 +546,79 @@ pub(super) async fn read_end(
     while let Ok(read @ 1..) = reader.read(&mut chunk).await {
         let mut kept = kept.lock().unwrap_or_else(PoisonError::into_inner);
         keep_end(&mut kept, &chunk[..read], MAX_ERROR_OUTPUT);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_question_s_time_limit_runs_while_its_event_waits_for_room() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .start_paused(true)
+            .build()
+            .expect("test runtime starts");
+        runtime.block_on(async {
+            let (events, mut received) = mpsc::channel(1);
+            let (writer, _writes) = mpsc::channel(1);
+            let (captures, _requests) = mpsc::channel(1);
+            let state = State(Arc::default());
+            let mut supervisor = Supervisor {
+                events: events.clone(),
+                ended: Arc::default(),
+                writer,
+                state: state.clone(),
+                adapter: PiAdapter::new(),
+                killed: None,
+                kill_requested: false,
+                error_output: Arc::default(),
+                error_reader: tokio::spawn(async {}),
+                input_writer: tokio::spawn(async {}),
+                captures,
+                checkpoints: Arc::new(Checkpoints::new(&std::env::temp_dir())),
+            };
+            // The event buffer is full, so the question waits for room.
+            let waiting = AgentEvent::QueueChanged(Default::default());
+            events
+                .send(SessionEvent::Agent(waiting.clone()))
+                .await
+                .expect("room");
+            let Value::Object(record) = json!({
+                "type": "extension_ui_request",
+                "id": "q1",
+                "method": "confirm",
+                "title": "Sure?",
+                "message": "Really",
+                "timeout": 1000,
+            }) else {
+                unreachable!()
+            };
+            let handled = tokio::spawn(async move { supervisor.handle(record).await });
+            let request = RequestId("q1".to_owned());
+            while !state.lock().questions.contains(&request) {
+                tokio::task::yield_now().await;
+            }
+            tokio::time::advance(Duration::from_secs(2)).await;
+            assert_eq!(received.recv().await, Some(SessionEvent::Agent(waiting)));
+            assert!(matches!(
+                received.recv().await,
+                Some(SessionEvent::Agent(AgentEvent::UserInputRequested { .. }))
+            ));
+            let delivered = Instant::now();
+            assert_eq!(
+                received.recv().await,
+                Some(SessionEvent::Agent(AgentEvent::UserInputResolved {
+                    request
+                }))
+            );
+            assert_eq!(
+                Instant::now(),
+                delivered,
+                "pi answered it itself while it waited"
+            );
+            assert!(handled.await.expect("handled"));
+        });
     }
 }

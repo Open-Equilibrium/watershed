@@ -82,7 +82,10 @@ impl ContextHistory {
         Ok(canonical.into_bytes())
     }
 
-    pub(crate) fn from_recovery_bytes(bytes: &[u8]) -> Result<Self, RuntimeError> {
+    pub(crate) fn from_recovery_bytes(
+        bytes: &[u8],
+        cumulative_event_count: u64,
+    ) -> Result<Self, RuntimeError> {
         if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_SESSION_OBJECT_BYTES {
             return Err(RuntimeError::Protocol(
                 "recovery context exceeds its object byte limit".to_owned(),
@@ -132,13 +135,9 @@ impl ContextHistory {
                 "recovery context has an invalid event sequence".to_owned(),
             ));
         }
-        if snapshot
-            .latest_completed
-            .as_ref()
-            .is_some_and(|latest| completed_interactions > latest.sequence)
-        {
+        if completed_interactions > cumulative_event_count {
             return Err(RuntimeError::Protocol(
-                "recovery context completed interaction count exceeds the latest event sequence"
+                "recovery context completed interaction count exceeds the cumulative event count"
                     .to_owned(),
             ));
         }

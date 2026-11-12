@@ -273,14 +273,22 @@ impl RunObjectWriter {
         if candidate_count > self.maximum_objects {
             return Err(protocol("run object count exceeds its limit"));
         }
-        let candidate_bytes = candidates
-            .iter()
-            .filter(|(digest, _)| !self.objects.contains_key(*digest))
-            .try_fold(self.accounted_bytes, |total, (_, object)| {
-                total
-                    .checked_add(u64::try_from(object.bytes.len()).unwrap_or(u64::MAX))
-                    .ok_or_else(|| protocol("run object byte count overflow"))
-            })?;
+        let candidate_bytes =
+            candidates
+                .iter()
+                .try_fold(self.accounted_bytes, |total, (digest, object)| {
+                    let stored = self
+                        .objects
+                        .get(digest)
+                        .map_or(0, |entry| u64::from(entry.length));
+                    total
+                        .checked_add(
+                            u64::try_from(object.bytes.len())
+                                .unwrap_or(u64::MAX)
+                                .saturating_sub(stored),
+                        )
+                        .ok_or_else(|| protocol("run object byte count overflow"))
+                })?;
         ensure_session_object_total(candidate_bytes)?;
 
         let mut newly_directory_synced = Vec::new();
@@ -295,7 +303,7 @@ impl RunObjectWriter {
             };
             if !metadata.file_type().is_file()
                 || metadata.len() != u64::from(entry.length)
-                || metadata.len() != u64::try_from(object.bytes.len()).unwrap_or(u64::MAX)
+                || metadata.len() > u64::try_from(object.bytes.len()).unwrap_or(u64::MAX)
             {
                 return self.fail(protocol("existing run object does not match its digest"));
             }
@@ -317,12 +325,24 @@ impl RunObjectWriter {
                 path.diagnostic_path(),
                 RunObjectReadStage::Retained(bytes.len()),
             );
-            if bytes != object.bytes {
+            if !object.bytes.starts_with(&bytes) {
                 return self.fail(protocol("existing run object does not match its digest"));
+            }
+            // WHY: a strict prefix is an interrupted write; records reference an object only
+            // after it is synchronized, so completing it cannot change committed state.
+            if let Err(source) = file.write_all(&object.bytes[bytes.len()..]) {
+                return self.fail(path_io_error(path.diagnostic_path(), source));
             }
             conversation_file_sync_checkpoint(path.diagnostic_path())?;
             file.sync_all()
                 .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
+            let length =
+                u32::try_from(object.bytes.len()).expect("session object byte limit fits in u32");
+            self.accounted_bytes += u64::from(length - entry.length);
+            self.objects
+                .get_mut(digest)
+                .expect("existing candidate remains inventoried")
+                .length = length;
             if !entry.directory_synced {
                 newly_directory_synced.push(*digest);
             }

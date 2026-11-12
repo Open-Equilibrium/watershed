@@ -41,7 +41,8 @@ class TextBlock extends StatefulWidget {
 }
 
 class _TextBlockState extends State<TextBlock> implements EditorSource {
-  final _text = TextEditingController();
+  /// The field's controller, which a text Liquid replaced swaps for a fresh one (see [_adopt]).
+  var _text = TextEditingController();
 
   /// Keeps the field, its text input included, when a new style wraps it differently.
   final _field = GlobalKey(debugLabel: 'Text Block field');
@@ -57,8 +58,14 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   /// While the text changes from the core or a key, not from typing.
   bool _quiet = false;
 
+  /// Whether Liquid replaced the text since the field last took its controller.
+  bool _replaced = false;
+
   /// Reads asked for, so only the latest shows.
   int _reads = 0;
+
+  /// The edits sent since the stored text was last read.
+  var _edits = EditChain();
 
   /// Whether the field was last built editable, which it is once its text is known.
   bool _editable = false;
@@ -148,10 +155,10 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     super.dispose();
   }
 
-  /// The Page's earlier queue finished: what it wrote shows, and the field takes keys.
+  /// The Page's earlier queue finished: the field takes keys once what it wrote shows.
   void _readied() {
     if (!mounted) return;
-    setState(() {});
+    setState(() => _stored = null);
     unawaited(_read());
   }
 
@@ -418,6 +425,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     // Editable once the text is known, so nothing typed before is lost.
     if (_stored == null) setState(() {});
     _stored = text;
+    _edits = EditChain();
     if (_text.text != text && !_composing) {
       final offset = (_wanted ?? _text.selection.baseOffset).clamp(
         0,
@@ -433,11 +441,26 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
 
   void _set(String text, int offset) {
     _quiet = true;
+    final replaced = _text.text != text;
     _text.value = TextEditingValue(
       text: text,
       selection: TextSelection.collapsed(offset: offset),
     );
     _quiet = false;
+    if (replaced && mounted) setState(() => _replaced = true);
+  }
+
+  /// Flutter keeps a field's undo history with its controller, so ⌘Z after a text Liquid
+  /// replaced would bring back the text before it (rule 7). The field takes a fresh controller
+  /// holding the same text while it builds; the old one still holds it until then, so what is
+  /// typed before that frame is carried over.
+  void _adopt() {
+    _replaced = false;
+    final previous = _text;
+    _text = TextEditingController.fromValue(previous.value)
+      ..addListener(_typed);
+    previous.removeListener(_typed);
+    WidgetsBinding.instance.addPostFrameCallback((_) => previous.dispose());
   }
 
   @override
@@ -543,18 +566,23 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     _offer(text, stored);
   }
 
-  /// Sends the change from the stored text to `text` as one edit.
+  /// Sends the change from the stored text to `text` as one edit; after a refused one, none
+  /// until the stored text is read again, which each change asks for.
   void _send(String text) {
     final stored = _stored!;
+    if (_edits.refused != null) {
+      unawaited(_read());
+      return;
+    }
     if (text == stored) return;
     _stored = text;
-    _write(textEdit(_page, block, stored, text));
+    _write(textEdit(_page, block, stored, text), chain: _edits);
   }
 
   /// Writes `change` after earlier ones; a refusal shows the stored text again (rule 7).
-  void _write(BridgeMutation change) => unawaited(
+  void _write(BridgeMutation change, {EditChain? chain}) => unawaited(
     widget.views
-        .write(change, [block])
+        .write(change, [block], chain: chain)
         .then<void>((_) {}, onError: (Object _) {}),
   );
 
@@ -694,6 +722,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
+    if (_replaced) _adopt();
     final (size, line, weight, top) = switch (_style) {
       BridgeTextStyle.heading1 => (
         WsMetrics.fsH1,

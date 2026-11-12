@@ -107,7 +107,7 @@ impl PiAdapter {
                 let open = self.blocks.drain().map(|(_, block)| block).chain(
                     self.tools
                         .drain()
-                        .map(|(_, tool)| (tool.item, tool.kind, String::new())),
+                        .map(|(_, tool)| (tool.item, tool.kind, tool.output)),
                 );
                 fail(turn, open, &mut events);
                 events.push(
@@ -142,12 +142,13 @@ impl PiAdapter {
             }
             Some("tool_execution_start") => self.tool_start(turn, record, &mut events),
             Some("tool_execution_update") => {
-                if let Some(&OpenTool { item, .. }) =
-                    self.tools.get(str_field(record, "toolCallId"))
-                {
-                    let output =
+                if let Some(tool) = self.tools.get_mut(str_field(record, "toolCallId")) {
+                    tool.output =
                         content_text(record.get("partialResult").and_then(|r| r.get("content")));
-                    events.push(AgentEvent::ItemUpdated { item, output });
+                    events.push(AgentEvent::ItemUpdated {
+                        item: tool.item,
+                        output: tool.output.clone(),
+                    });
                 }
             }
             Some("tool_execution_end") => {
@@ -265,6 +266,7 @@ impl PiAdapter {
                 item,
                 kind,
                 written,
+                output: String::new(),
             },
         );
         let arguments = record.get("args").map(Value::to_string).unwrap_or_default();
@@ -330,6 +332,8 @@ struct OpenTool {
     kind: ItemKind,
     /// The lines a `write` call writes.
     written: Option<u32>,
+    /// Its latest partial output, kept should it end unfinished.
+    output: String,
 }
 
 fn role(record: &Map<String, Value>) -> Option<&str> {
@@ -339,13 +343,17 @@ fn role(record: &Map<String, Value>) -> Option<&str> {
 /// Characters of a call's target kept for one-line summaries.
 const TARGET_CHARS: usize = 120;
 
+/// The arguments that name the file a call of one of pi's file tools changes.
+pub(crate) const PATH_ARGUMENTS: [&str; 2] = ["path", "file_path"];
+
 /// The argument that names what a call of one of pi's tools works on: its command, path or
 /// pattern, as its first line.
 pub(crate) fn call_argument(arguments: &str) -> Option<String> {
     let arguments: Value = serde_json::from_str(arguments).ok()?;
-    ["command", "path", "file_path", "pattern"]
-        .iter()
-        .find_map(|name| arguments.get(*name)?.as_str())
+    std::iter::once("command")
+        .chain(PATH_ARGUMENTS)
+        .chain(["pattern"])
+        .find_map(|name| arguments.get(name)?.as_str())
         .map(|text| first_line(&visible(text), TARGET_CHARS))
 }
 
@@ -353,9 +361,6 @@ pub(crate) fn call_argument(arguments: &str) -> Option<String> {
 pub(crate) fn call_target(arguments: &str) -> String {
     call_argument(arguments).unwrap_or_else(|| first_line(&visible(arguments), TARGET_CHARS))
 }
-
-/// The arguments that name the file a call of one of pi's file tools changes.
-pub(crate) const PATH_ARGUMENTS: [&str; 2] = ["path", "file_path"];
 
 /// The file a call of one of pi's file tools changes.
 pub(crate) fn changed_path(tool: &str, arguments: &str) -> Option<String> {

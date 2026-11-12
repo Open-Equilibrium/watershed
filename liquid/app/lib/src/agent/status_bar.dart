@@ -11,7 +11,8 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'sidebar.dart';
 
-/// The status entry the session sets while a turn waits for a revert in its checkout.
+/// The status entry the session sets while a turn waits for another Git action that holds its
+/// checkout alone.
 const revertWaitKey = 'watershed.revert';
 
 /// Run status, tokens, cost and extension status entries. A notification takes the status

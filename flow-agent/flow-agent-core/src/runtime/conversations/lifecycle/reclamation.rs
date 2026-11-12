@@ -196,10 +196,11 @@ fn reclaim_productive_run(
     }
     if let ProductiveRunReclaimBoundary::Creation(ProductiveRecoveryRecord::Header {
         prior_history_object,
+        prior_event_count,
         ..
     }) = boundary
     {
-        validate_productive_run_creation_object(&run, prior_history_object)?;
+        validate_productive_run_creation_object(&run, prior_history_object, *prior_event_count)?;
     }
     if conversation_id == run_session_id {
         let mut run_count = 0usize;
@@ -378,6 +379,7 @@ fn validate_productive_run_creation_recovery(
 fn validate_productive_run_creation_object(
     run: &AnchoredDir,
     prior_history_object: &str,
+    prior_event_count: u64,
 ) -> Result<(), RuntimeError> {
     let digest = validate_recovery_object_uri(prior_history_object)?;
     let objects = run
@@ -391,7 +393,7 @@ fn validate_productive_run_creation_object(
         ));
     }
     let bytes = read_run_object_uri(&objects, prior_history_object)?;
-    ContextHistory::from_recovery_bytes(&bytes)?;
+    ContextHistory::from_recovery_bytes(&bytes, prior_event_count)?;
     Ok(())
 }
 

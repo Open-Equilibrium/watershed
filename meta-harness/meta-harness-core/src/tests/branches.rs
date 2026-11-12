@@ -17,7 +17,7 @@ impl Clone {
         origin.git(&["branch", "-M", "main"]);
         let dir = PathBuf::from(format!("{}-clone", origin.path().display()));
         let _ = std::fs::remove_dir_all(&dir);
-        let cloned = Command::new("git")
+        let cloned = super::fixture_git()
             .args(["clone", "-q"])
             .arg(origin.path())
             .arg(&dir)
@@ -272,7 +272,8 @@ fn a_detached_head_or_a_branch_without_upstream_has_no_counts() {
         assert_eq!(status.branch, None);
         assert_eq!(status.commit, Some(head));
 
-        let outside = std::env::temp_dir().join(format!("watershed-no-git-{}", std::process::id()));
+        let outside =
+            std::env::temp_dir().join(format!("watershed-branches-no-git-{}", std::process::id()));
         std::fs::create_dir_all(&outside).expect("folder");
         assert!(matches!(
             Checkpoints::new(&outside).status().await,
@@ -329,7 +330,7 @@ fn the_bounded_branch_list_keeps_the_current_branch_and_recent_order() {
             .parse::<u64>()
             .expect("commit timestamp")
             + 1;
-        let newer = Command::new("git")
+        let newer = super::fixture_git()
             .args([
                 "-c",
                 "user.name=Test",
@@ -1529,7 +1530,7 @@ fn no_restore_runs_over_uncommitted_changes_or_ignored_files_in_the_way() {
         repo.git(&["switch", "-q", &main]);
         repo.write("a.txt", "ours\n");
         repo.git(&["commit", "-q", "-am", "ours"]);
-        let merged = Command::new("git")
+        let merged = super::fixture_git()
             .args([
                 "-c",
                 "user.name=Test",
@@ -1760,7 +1761,7 @@ fn no_restore_partly_applies_a_stash_with_undecodable_paths() {
         let original = stash_of(&checkpoints).await;
         let blob = repo.git(&["hash-object", "-w", "a.txt"]);
         // Git objects can contain these pathname bytes even on a host whose filesystem cannot.
-        let mut make_tree = Command::new("git")
+        let mut make_tree = super::fixture_git()
             .args(["mktree", "-z"])
             .current_dir(repo.path())
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -2613,7 +2614,7 @@ fn a_stash_another_git_stores_meanwhile_survives_a_discard_and_a_restore() {
             let stored = theirs.clone();
             // Between finding its place and dropping it, another Git stores a stash on top.
             crate::diff::before_drop(repo.path(), move || {
-                let output = Command::new("git")
+                let output = super::fixture_git()
                     .args(["stash", "store", "-m", "theirs", &stored])
                     .current_dir(&root)
                     .env("GIT_CONFIG_GLOBAL", "/dev/null")

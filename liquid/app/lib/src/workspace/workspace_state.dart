@@ -71,6 +71,13 @@ BridgeQuery query(
   filter: filter,
 );
 
+/// Edits that each assume the one before, such as a Text Block's: once one is refused, the
+/// later ones are refused unapplied, as their offsets assumed it.
+class EditChain {
+  /// Why the chain broke, or none.
+  Object? refused;
+}
+
 /// The Page the window shows.
 @immutable
 class OpenPage {
@@ -88,22 +95,26 @@ class _Reread {
   _Reread(this._read);
 
   final Future<void> Function() _read;
-  bool _reading = false;
+  Future<void>? _reading;
   bool _again = false;
 
-  Future<void> call() async {
-    if (_reading) {
+  /// Reads, or once more after the read running now; done once that read is.
+  Future<void> call() {
+    if (_reading case final reading?) {
       _again = true;
-      return;
+      return reading;
     }
-    _reading = true;
+    return _reading = _loop();
+  }
+
+  Future<void> _loop() async {
     try {
       do {
         _again = false;
         await _read();
       } while (_again);
     } finally {
-      _reading = false;
+      _reading = null;
     }
   }
 }
@@ -125,7 +136,7 @@ class WorkspaceState {
   final problem = ValueNotifier<String?>(null);
 
   final _trees = <String, ValueNotifier<List<BridgePage>>>{};
-  final _followedAreas = <String>{};
+  final _treeReads = <String, _Reread>{};
   final _followed = <StreamSubscription<BridgeChange>>[];
   Future<void> _applied = Future.value();
   bool _disposed = false;
@@ -142,9 +153,10 @@ class WorkspaceState {
   /// Completes once every mutation asked for so far is applied or refused.
   Future<void> get settled => _applied;
 
-  /// Applies mutations in the order asked: the bridge may run two calls at once.
-  Future<BridgeApplied> apply(BridgeMutation change) {
-    final applied = _applied.then((_) => workspace.apply(mutation: change));
+  /// Applies mutations in the order asked: the bridge may run two calls at once. A change in
+  /// a `chain` an earlier change broke is refused unapplied.
+  Future<BridgeApplied> apply(BridgeMutation change, {EditChain? chain}) {
+    final applied = _applied.then((_) => _applyIn(chain, change));
     _applied = applied.then<void>((_) {}, onError: (_) {});
     return applied.then(
       (applied) {
@@ -156,6 +168,20 @@ class WorkspaceState {
         throw error;
       },
     );
+  }
+
+  Future<BridgeApplied> _applyIn(
+    EditChain? chain,
+    BridgeMutation change,
+  ) async {
+    if (chain?.refused case final refused?) throw refused;
+    try {
+      return await workspace.apply(mutation: change);
+    } on Object catch (error) {
+      // Before the next change's turn, so it sees the chain broken.
+      chain?.refused = error;
+      rethrow;
+    }
   }
 
   /// Follows the areas and their Page trees. A new Workspace gets the area "Private" with
@@ -198,6 +224,11 @@ class WorkspaceState {
   Future<void> rename(String page, String title) =>
       apply(mutation(BridgeMutationKind.renamePage, page: page, text: title));
 
+  /// Reads the followed `area`'s Page tree again; done once a read started after this call
+  /// is.
+  Future<void> readPages(String area) =>
+      _treeReads[area]?.call() ?? Future.value();
+
   void _listen(BridgeResource resource, _Reread reread) {
     _followed.add(
       follow(workspace, resource).listen(
@@ -231,11 +262,11 @@ class WorkspaceState {
     // A read still running when the window closed changes nothing.
     if (_disposed) return;
     for (final area in read) {
-      if (!_followedAreas.add(area.id)) continue;
+      if (_treeReads.containsKey(area.id)) continue;
       pages(area.id);
       _listen(
         BridgeResource(kind: BridgeResourceKind.pages, area: area.id),
-        _Reread(() => _readPages(area.id)),
+        _treeReads[area.id] = _Reread(() => _readPages(area.id)),
       );
     }
     areas.value = read;

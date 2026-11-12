@@ -124,11 +124,5 @@ fn read_stdin_byte(reader: &mut impl BufRead) -> Result<Option<u8>, RuntimeError
 }
 
 fn invalid_stdin_utf8() -> RuntimeError {
-    RuntimeError::Io {
-        path: PathBuf::from("<stdin>"),
-        source: io::Error::new(
-            io::ErrorKind::InvalidData,
-            "stream did not contain valid UTF-8",
-        ),
-    }
+    RuntimeError::Usage("flow chat stdin must be valid UTF-8".to_owned())
 }

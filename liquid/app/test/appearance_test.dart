@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -7,6 +6,7 @@ import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/theme/tokens.g.dart';
 import 'package:liquid/src/app.dart';
 import 'package:liquid/src/appearance.dart';
+import 'package:liquid/src/diff/diff_settings.dart';
 import 'package:liquid/src/launch.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/settings_file.dart';
@@ -92,61 +92,57 @@ void main() {
     },
   );
 
-  testWidgets('says when the appearance could not be saved', (tester) async {
+  testWidgets('two choices before the next frame both apply', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1600, 900));
+    final appearance = AppearanceController();
     await tester.pumpWidget(
       MaterialApp(
         theme: liquidTheme(Brightness.light),
-        home: Scaffold(body: AppearancePane(appearance: _Unsaved())),
-      ),
-    );
-    await tester.tap(find.text('Dark'));
-    await tester.pumpAndSettle();
-    expect(
-      find.text('Could not save the appearance: disk full'),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('a later saved change clears an earlier failure', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 900));
-    final saves = _Slow();
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: Scaffold(body: AppearancePane(appearance: saves)),
+        home: Scaffold(body: AppearancePane(appearance: appearance)),
       ),
     );
     await tester.tap(find.text('Dark'));
     await tester.tap(find.text('Large'));
-    saves.pending[0].completeError(const FileSystemException('disk full'));
-    saves.pending[1].complete();
+    expect(
+      (appearance.value.theme, appearance.value.textSize),
+      (ThemeChoice.dark, TextSize.large),
+    );
+  });
+
+  testWidgets('says in the status bar when settings could not be saved', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    final appearance = AppearanceController(const Appearance(), _Full());
+    final diff = DiffSettingsController(const DiffSettings(), _Full());
+    final state = SessionState(FakeBackend());
+    await tester.pumpWidget(
+      LiquidApp(
+        launch: Launch.session(state, info),
+        appearance: appearance,
+        diffSettings: diff,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await appearance.change(const Appearance(theme: ThemeChoice.dark));
+    await diff.change(const DiffSettings(layout: DiffLayout.split));
     await tester.pumpAndSettle();
     expect(
-      find.textContaining('Could not save'),
-      findsNothing,
-      reason: 'the later save wrote the whole appearance',
+      [for (final notice in state.notices.value) notice.text],
+      containsAll([
+        'Could not save the appearance: disk full',
+        'Could not save the Diff settings: disk full',
+      ]),
     );
+    expect(appearance.value.theme, ThemeChoice.dark, reason: 'still applies');
   });
 }
 
-/// An appearance whose saves end when the test says so.
-class _Slow extends AppearanceController {
-  final pending = <Completer<void>>[];
+/// A settings file on a full disk.
+class _Full extends SettingsFile {
+  _Full() : super(File('unused'));
 
   @override
-  Future<void> change(Appearance appearance) {
-    value = appearance;
-    pending.add(Completer());
-    return pending.last.future;
-  }
-}
-
-/// An appearance that applies but cannot be saved.
-class _Unsaved extends AppearanceController {
-  @override
-  Future<void> change(Appearance appearance) {
-    value = appearance;
-    return Future.error(const FileSystemException('disk full'));
-  }
+  Future<void> save(Map<String, Object?> json) async =>
+      throw const FileSystemException('disk full');
 }

@@ -58,6 +58,7 @@ class TrajectoryToolbar extends StatelessWidget {
               label: filters == 0 ? 'Filter' : 'Filter · $filters',
               shortcut: keys.label(Command.filterSteps),
               onPressed: onFilter,
+              on: filters > 0,
             ),
           ],
           Expanded(

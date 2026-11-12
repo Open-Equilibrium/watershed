@@ -191,6 +191,12 @@ fn productive_policy_rejection_precedes_tool_lifecycle_and_replays_without_start
             false,
         ),
         (
+            FakeToolExecutionFault::PreflightError,
+            "executor_invalid_response",
+            "preflight",
+            false,
+        ),
+        (
             FakeToolExecutionFault::StartedExecutorError,
             "sandbox_setup_failed",
             "started",

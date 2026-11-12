@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 
 import 'controls.dart';
@@ -60,8 +58,15 @@ class Appearance {
 }
 
 /// The appearance in use; each change applies at once and is saved.
-class AppearanceController extends ValueNotifier<Appearance> {
-  AppearanceController([super.value = const Appearance(), this._file]);
+class AppearanceController extends SavedSettings<Appearance> {
+  AppearanceController([
+    Appearance value = const Appearance(),
+    SettingsFile? file,
+  ]) : super(
+         value,
+         file == null ? null : (appearance) => file.save(appearance.toJson()),
+         'the appearance',
+       );
 
   static Future<AppearanceController> load(SettingsFile file) async {
     final json = await file.load();
@@ -69,21 +74,6 @@ class AppearanceController extends ValueNotifier<Appearance> {
       json == null ? const Appearance() : Appearance.fromJson(json),
       file,
     );
-  }
-
-  final SettingsFile? _file;
-
-  /// The latest save; each waits for the one before, so the last change is the one kept.
-  Future<void> saved = Future.value();
-
-  /// Uses `appearance` at once; fails if it could not be saved.
-  Future<void> change(Appearance appearance) {
-    value = appearance;
-    final file = _file;
-    if (file == null) return Future.value();
-    final saving = saved.then((_) => file.save(appearance.toJson()));
-    saved = saving.then((_) {}, onError: (Object _) {});
-    return saving;
   }
 }
 
@@ -121,42 +111,17 @@ class UiScale extends StatelessWidget {
 }
 
 /// Settings → Appearance: the theme and the text size, applied at once.
-class AppearancePane extends StatefulWidget {
+class AppearancePane extends StatelessWidget {
   const AppearancePane({super.key, required this.appearance});
 
   final AppearanceController appearance;
 
-  @override
-  State<AppearancePane> createState() => _AppearancePaneState();
-}
-
-class _AppearancePaneState extends State<AppearancePane> {
-  /// Why the latest change could not be saved; it still applies until Liquid quits.
-  String? _failure;
-
-  /// Counts the changes, so only the latest one's save decides what the pane says: each save
-  /// writes the whole appearance.
-  int _changes = 0;
-
-  void _change(Appearance next) {
-    final change = ++_changes;
-    setState(() => _failure = null);
-    widget.appearance.change(next).catchError((Object error) {
-      if (mounted && change == _changes) {
-        setState(
-          () => _failure = switch (error) {
-            FileSystemException(:final message) =>
-              'Could not save the appearance: $message',
-            _ => 'Could not save the appearance: $error',
-          },
-        );
-      }
-    });
-  }
+  /// Changes the appearance in use now, so two choices before the next frame both apply.
+  void _change(Appearance Function(Appearance appearance) change) =>
+      appearance.change(change(appearance.value));
 
   @override
   Widget build(BuildContext context) {
-    final appearance = widget.appearance;
     final ws = context.ws;
     final label = TextStyle(color: ws.textMuted, fontSize: WsMetrics.fsCompact);
     Widget row(String title, Widget control) => Padding(
@@ -195,7 +160,7 @@ class _AppearancePaneState extends State<AppearancePane> {
                   (ThemeChoice.dark, 'Dark'),
                 ],
                 selected: chosen.theme,
-                onSelect: (theme) => _change(chosen.copyWith(theme: theme)),
+                onSelect: (theme) => _change((it) => it.copyWith(theme: theme)),
               ),
             ),
             row(
@@ -207,14 +172,10 @@ class _AppearancePaneState extends State<AppearancePane> {
                   (TextSize.large, 'Large'),
                 ],
                 selected: chosen.textSize,
-                onSelect: (size) => _change(chosen.copyWith(textSize: size)),
+                onSelect: (size) =>
+                    _change((it) => it.copyWith(textSize: size)),
               ),
             ),
-            if (_failure case final failure?)
-              Text(
-                failure,
-                style: TextStyle(color: ws.danger, fontSize: WsMetrics.fsSmall),
-              ),
           ],
         ),
       ),

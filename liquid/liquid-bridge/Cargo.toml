@@ -20,6 +20,9 @@ liquid-storage.workspace = true
 meta-harness-core.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
 

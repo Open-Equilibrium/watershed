@@ -44,9 +44,13 @@ class FakeBackend implements SessionBackend {
   /// Holds sends until it completes.
   Completer<void>? sendGate;
 
+  /// Called as each send reaches the agent, which then starts its turn.
+  void Function(String message)? onSend;
+
   @override
   Future<void> send(String message, {required bool followUp}) async {
     calls.add('${followUp ? 'follow-up' : 'send'} $message');
+    onSend?.call(message);
     await sendGate?.future;
     if (sendError case final error?) throw error;
   }
@@ -105,9 +109,20 @@ class FakeBackend implements SessionBackend {
 
   @override
   Future<List<BridgeTurn>> turns() async {
+    final read = ++turnReads;
     await turnsGate?.future;
+    if (failTurns || (turnsFailFrom != null && read >= turnsFailFrom!)) {
+      throw StateError('no turns');
+    }
     return turnList;
   }
+
+  /// Whether turn reads fail, and the first read that fails while earlier ones succeed.
+  bool failTurns = false;
+  int? turnsFailFrom;
+
+  /// How many turn reads began.
+  int turnReads = 0;
 
   /// Holds turn reads until it completes.
   Completer<void>? turnsGate;
@@ -630,6 +645,9 @@ class FakeBackend implements SessionBackend {
   Map<String, BridgeWorktreeRemoval> reviews = {};
   BridgeWorktreeOutcome? removed;
 
+  /// Holds a removal until it completes with its outcome.
+  Completer<BridgeWorktreeOutcome>? removeGate;
+
   @override
   Future<List<BridgeWorktree>> worktrees() async {
     calls.add('worktrees');
@@ -647,6 +665,7 @@ class FakeBackend implements SessionBackend {
     BridgeWorktreeRemoval reviewed,
   ) async {
     calls.add('remove ${reviewed.worktree.path}');
+    if (removeGate case final gate?) return gate.future;
     return removed ??
         const BridgeWorktreeOutcome(
           kind: BridgeWorktreeOutcomeKind.done,
@@ -660,6 +679,9 @@ class FakeBackend implements SessionBackend {
 
   /// What a revert fails with.
   Object? revertError;
+
+  /// Holds reverts until it completes.
+  Completer<void>? revertGate;
 
   @override
   Future<BridgeRevertPlan> revertPlan(String turn) async {
@@ -677,6 +699,7 @@ class FakeBackend implements SessionBackend {
   ) async {
     calls.add('revert $turn');
     revertedWith = confirmation;
+    await revertGate?.future;
     if (revertError case final error?) throw error;
   }
 
@@ -1206,6 +1229,7 @@ BridgeWorktreeRemoval removalOf(
   int unpushed = 0,
   int stranded = 0,
   bool moreMarked = false,
+  bool moreIgnored = false,
 }) => BridgeWorktreeRemoval(
   worktree: worktree,
   head: 'c0ffee',
@@ -1213,12 +1237,13 @@ BridgeWorktreeRemoval removalOf(
   moreFiles: false,
   moreMarked: moreMarked,
   ignored: ignored,
-  moreIgnored: false,
+  moreIgnored: moreIgnored,
   unpushed: unpushed,
   stranded: stranded,
   removable:
       files.isEmpty &&
       ignored == 0 &&
+      !moreIgnored &&
       stranded == 0 &&
       !moreMarked &&
       !worktree.unreadable &&
