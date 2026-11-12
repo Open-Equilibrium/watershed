@@ -18,7 +18,7 @@ use crate::runtime::{
     policy_resolution::command_policy_for_phase,
     productive::{
         ProductiveExecution, ProductiveProvider, ProductiveToolExecutor, ProductiveToolPreflight,
-        execute_productive_flow_with_tool_executor,
+        ProviderCredential, execute_productive_flow_with_tool_executor,
     },
     stream_signature::FlowInvocation,
     tool_runner::ToolInvocation,
@@ -273,7 +273,7 @@ struct ImmediateProductiveProvider {
 impl ProductiveProvider for ImmediateProductiveProvider {
     fn turn(
         &mut self,
-        _credential: &CredentialRecord,
+        _credential: &ProviderCredential,
         _body: &serde_json::Value,
     ) -> Result<ProviderTurn, RuntimeError> {
         self.calls += 1;
@@ -342,14 +342,14 @@ fn productive_execution_at_live_limit() -> (
         .flow_block("smoke-flow")
         .expect("smoke-flow fixture exists");
     let anchored = AnchoredWorkspace::open(&workspace).expect("workspace anchor opens");
-    let credential = CredentialRecord {
+    let credential = ProviderCredential::OpenAiCodex(CredentialRecord {
         credential_type: "oauth".to_owned(),
         access: "secret-access".to_owned(),
         refresh: "secret-refresh".to_owned(),
         expires: u64::MAX,
         account_id: "secret-account".to_owned(),
         is_fedramp: false,
-    };
+    });
     let mut provider = ImmediateProductiveProvider::default();
     let mut attempts = DiscardAttempts;
     let mut sink = CollectingEventSink::default();

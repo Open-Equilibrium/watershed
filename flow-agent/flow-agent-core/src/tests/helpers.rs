@@ -19,7 +19,7 @@ pub(in crate::tests) use productive::{
     ProductiveExecutionFixture, disabled_configured_smoke_productive_execution_fixture,
     disabled_smoke_productive_execution_fixture, load_productive_execution_fixture,
     load_productive_execution_fixture_for_flow, load_productive_execution_fixture_with_credential,
-    smoke_productive_execution_fixture,
+    load_productive_execution_fixture_with_provider_credential, smoke_productive_execution_fixture,
 };
 pub(super) use stream::fill_event_segments_to_final_byte;
 pub(super) use validation::{

@@ -1,7 +1,6 @@
 use crate::runtime::{
-    oauth_credential::CredentialRecord,
     openai_codex::{ProviderToolCall, ProviderTurn, decode_responses_turn},
-    productive::ProductiveProvider,
+    productive::{ProductiveProvider, ProviderCredential},
     types::RuntimeError,
 };
 use std::collections::VecDeque;
@@ -31,7 +30,7 @@ pub(in super::super) struct ReplyInvalidProvider {
 impl ProductiveProvider for ReplyInvalidProvider {
     fn turn(
         &mut self,
-        _credential: &CredentialRecord,
+        _credential: &ProviderCredential,
         body: &serde_json::Value,
     ) -> Result<ProviderTurn, RuntimeError> {
         self.bodies.push(body.clone());
@@ -59,7 +58,7 @@ pub(in super::super) fn single_tool_provider_turn(
 impl ProductiveProvider for DefinitiveFailureProvider {
     fn turn(
         &mut self,
-        _credential: &CredentialRecord,
+        _credential: &ProviderCredential,
         body: &serde_json::Value,
     ) -> Result<ProviderTurn, RuntimeError> {
         self.bodies.push(body.clone());
@@ -73,7 +72,7 @@ impl ProductiveProvider for DefinitiveFailureProvider {
 impl ProductiveProvider for ScriptedProvider {
     fn turn(
         &mut self,
-        _credential: &CredentialRecord,
+        _credential: &ProviderCredential,
         body: &serde_json::Value,
     ) -> Result<ProviderTurn, RuntimeError> {
         self.bodies.push(body.clone());
@@ -86,7 +85,7 @@ impl ProductiveProvider for ScriptedProvider {
 impl ProductiveProvider for FakeProvider {
     fn turn(
         &mut self,
-        _credential: &CredentialRecord,
+        _credential: &ProviderCredential,
         body: &serde_json::Value,
     ) -> Result<ProviderTurn, RuntimeError> {
         self.bodies.push(body.clone());

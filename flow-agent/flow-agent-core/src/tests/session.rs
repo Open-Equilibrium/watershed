@@ -1,5 +1,7 @@
 use crate::runtime::{
-    oauth_credential::CredentialRecord, openai_codex::ProviderTurn, productive::ProductiveProvider,
+    oauth_credential::CredentialRecord,
+    openai_codex::ProviderTurn,
+    productive::{ProductiveProvider, ProviderCredential},
     types::RuntimeError,
 };
 
@@ -16,7 +18,7 @@ pub(super) struct SessionProvider {
 impl ProductiveProvider for SessionProvider {
     fn turn(
         &mut self,
-        _credential: &CredentialRecord,
+        _credential: &ProviderCredential,
         _body: &serde_json::Value,
     ) -> Result<ProviderTurn, RuntimeError> {
         self.calls = self.calls.saturating_add(1);

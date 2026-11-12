@@ -11,6 +11,21 @@ use std::sync::atomic::AtomicBool;
 
 const MAX_PROVIDER_ERROR_BODY_BYTES: usize = 64 * 1024;
 
+/// How one Responses request authenticates, and what must end its stream.
+#[derive(Clone, Copy)]
+pub(crate) enum ResponsesAuth<'a> {
+    /// The ChatGPT subscription: account routing headers; the `[DONE]` sentinel ends the stream.
+    Subscription(&'a crate::runtime::oauth_credential::CredentialRecord),
+    /// An OpenAI-compatible endpoint key: bearer only; the terminal event ends the stream.
+    ApiKey(&'a str),
+}
+
+impl ResponsesAuth<'_> {
+    fn requires_done_sentinel(self) -> bool {
+        matches!(self, Self::Subscription(_))
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn request_responses_at_with_deadlines_and_cancellation(
     endpoint: &str,
@@ -24,7 +39,12 @@ pub(crate) fn request_responses_at_with_deadlines_and_cancellation(
             RuntimeError::definitive_provider_error(None, "HTTP client construction failed")
         })?;
         request_responses_with_client_async(
-            client, endpoint, credential, body, deadlines, cancelled,
+            client,
+            endpoint,
+            ResponsesAuth::Subscription(credential),
+            body,
+            deadlines,
+            cancelled,
         )
         .await
     })?
@@ -33,38 +53,38 @@ pub(crate) fn request_responses_at_with_deadlines_and_cancellation(
 pub(crate) async fn request_responses_with_client_async(
     client: reqwest::Client,
     endpoint: &str,
-    credential: &crate::runtime::oauth_credential::CredentialRecord,
+    auth: ResponsesAuth<'_>,
     body: &serde_json::Value,
     deadlines: HttpDeadlines,
     cancelled: &AtomicBool,
 ) -> Result<ProviderTurn, RuntimeError> {
-    let mut response = await_deadline_or_cancellation(
-        deadlines.header,
-        cancelled,
-        routed_request(
-            client
-                .post(endpoint)
+    let request = client
+        .post(endpoint)
+        .header(reqwest::header::ACCEPT, "text/event-stream")
+        .header(
+            reqwest::header::USER_AGENT,
+            concat!("flow-agent/", env!("CARGO_PKG_VERSION")),
+        )
+        .json(body);
+    let request = match auth {
+        ResponsesAuth::Subscription(credential) => routed_request(
+            request
                 .bearer_auth(&credential.access)
                 .header("chatgpt-account-id", &credential.account_id)
-                .header("originator", OPENAI_CODEX_ORIGINATOR)
-                .header(reqwest::header::ACCEPT, "text/event-stream")
-                .header(
-                    reqwest::header::USER_AGENT,
-                    concat!("flow-agent/", env!("CARGO_PKG_VERSION")),
-                )
-                .json(body),
+                .header("originator", OPENAI_CODEX_ORIGINATOR),
             credential.is_fedramp,
-        )
-        .send(),
-    )
-    .await
-    .map_err(|interruption| match interruption {
-        AwaitInterruption::Cancelled => RuntimeError::Cancelled,
-        AwaitInterruption::DeadlineElapsed => {
-            RuntimeError::uncertain_provider_error("Responses header deadline elapsed")
-        }
-    })?
-    .map_err(|_| RuntimeError::uncertain_provider_error("Responses request failed"))?;
+        ),
+        ResponsesAuth::ApiKey(key) => request.bearer_auth(key),
+    };
+    let mut response = await_deadline_or_cancellation(deadlines.header, cancelled, request.send())
+        .await
+        .map_err(|interruption| match interruption {
+            AwaitInterruption::Cancelled => RuntimeError::Cancelled,
+            AwaitInterruption::DeadlineElapsed => {
+                RuntimeError::uncertain_provider_error("Responses header deadline elapsed")
+            }
+        })?
+        .map_err(|_| RuntimeError::uncertain_provider_error("Responses request failed"))?;
     let status = response.status();
     if !status.is_success() {
         let message = read_provider_error_message(&mut response, deadlines, cancelled).await;
@@ -109,7 +129,7 @@ pub(crate) async fn request_responses_with_client_async(
     let parsed = decoder
         .finish()
         .map_err(|error| RuntimeError::uncertain_provider_error(error.to_string()))?;
-    if !parsed.terminal_sentinel {
+    if auth.requires_done_sentinel() && !parsed.terminal_sentinel {
         return Err(RuntimeError::uncertain_provider_error(
             "Responses stream ended without terminal sentinel",
         ));

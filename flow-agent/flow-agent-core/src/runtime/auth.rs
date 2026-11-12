@@ -4,7 +4,9 @@ mod protocol;
 mod transport;
 
 use crate::runtime::{
-    credential_store::CredentialStore, oauth_credential::CredentialRecord, types::RuntimeError,
+    config_io::ExecutionBackend, credential_store::CredentialStore,
+    endpoint_credential::EndpointCredential, oauth_credential::CredentialRecord,
+    productive::ProviderCredential, types::RuntimeError,
 };
 use std::{thread, time::Instant};
 
@@ -120,13 +122,64 @@ pub fn logout_openai_codex() -> Result<bool, RuntimeError> {
     CredentialStore::platform_default()?.logout()
 }
 
-pub(crate) fn resolve_openai_codex_credential() -> Result<CredentialRecord, RuntimeError> {
-    let store = CredentialStore::platform_default()?;
+/// Stores an OpenAI-compatible endpoint key with the base URL it was issued for (ADR-0263).
+pub fn login_openai_compatible(base_url: &str, api_key: &str) -> Result<AuthStatus, RuntimeError> {
+    let credential = EndpointCredential::new(base_url, api_key)?;
     let started = Instant::now();
-    store.resolve_with_clock(
-        protocol::epoch_milliseconds,
-        transport::refresh_credential,
+    CredentialStore::platform_default()?.replace_endpoint_with_clock(
+        &credential,
         || started.elapsed(),
         thread::sleep,
-    )
+    )?;
+    Ok(AuthStatus {
+        authenticated: true,
+        expires_epoch_milliseconds: None,
+    })
+}
+
+/// Returns redacted OpenAI-compatible authentication status from Flow Agent's own store.
+pub fn openai_compatible_auth_status() -> Result<AuthStatus, RuntimeError> {
+    Ok(AuthStatus {
+        authenticated: CredentialStore::platform_default()?
+            .read_endpoint()?
+            .is_some(),
+        expires_epoch_milliseconds: None,
+    })
+}
+
+/// Removes only Flow Agent's local OpenAI-compatible credential record.
+pub fn logout_openai_compatible() -> Result<bool, RuntimeError> {
+    let started = Instant::now();
+    CredentialStore::platform_default()?
+        .logout_endpoint_with_clock(|| started.elapsed(), thread::sleep)
+}
+
+pub(crate) fn resolve_openai_codex_credential() -> Result<ProviderCredential, RuntimeError> {
+    let store = CredentialStore::platform_default()?;
+    let started = Instant::now();
+    store
+        .resolve_with_clock(
+            protocol::epoch_milliseconds,
+            transport::refresh_credential,
+            || started.elapsed(),
+            thread::sleep,
+        )
+        .map(ProviderCredential::OpenAiCodex)
+}
+
+pub(crate) fn resolve_openai_compatible_credential() -> Result<ProviderCredential, RuntimeError> {
+    CredentialStore::platform_default()?
+        .resolve_endpoint()
+        .map(ProviderCredential::OpenAiCompatible)
+}
+
+/// The credential for the provider a productive backend names.
+pub(crate) fn resolve_provider_credential(
+    backend: &ExecutionBackend,
+) -> Result<ProviderCredential, RuntimeError> {
+    match backend {
+        ExecutionBackend::OpenAiCodex { .. } => resolve_openai_codex_credential(),
+        ExecutionBackend::OpenAiCompatible { .. } => resolve_openai_compatible_credential(),
+        ExecutionBackend::Fixture => Err(RuntimeError::ExecutionBackendUnavailable),
+    }
 }

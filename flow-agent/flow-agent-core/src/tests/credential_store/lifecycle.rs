@@ -1,5 +1,5 @@
 use super::super::helpers::empty_workspace;
-use super::support::credential;
+use super::support::{credential, endpoint_credential};
 use crate::runtime::{
     credential_store::{CREDENTIAL_STORE_MAX_BYTES, CredentialStore},
     oauth_credential::{CredentialRecord, MAX_OAUTH_FIELD_BYTES, MAX_OAUTH_SECRET_BYTES},
@@ -37,6 +37,111 @@ fn credential_store_replaces_atomically_and_logout_is_local() {
     );
     assert_eq!(store.read().expect("empty store"), None);
     assert_eq!(fs::read(foreign).expect("foreign unchanged"), b"foreign");
+}
+
+#[test]
+fn credential_store_keeps_each_provider_slot_through_every_write() {
+    let workspace = empty_workspace("credential-store-provider-slots");
+    let store = CredentialStore::at(workspace.join("private/credentials.json"));
+    let subscription = credential(300_000);
+    let endpoint = endpoint_credential("https://models.example.test/v1", "sk-slot-fixture");
+    store
+        .replace_with_clock(&subscription, || Duration::ZERO, |_| {})
+        .expect("subscription credential stores");
+    store
+        .replace_endpoint_with_clock(&endpoint, || Duration::ZERO, |_| {})
+        .expect("endpoint credential stores beside it");
+    assert_eq!(
+        store.read().expect("subscription reads"),
+        Some(subscription.clone())
+    );
+    assert_eq!(
+        store.read_endpoint().expect("endpoint reads"),
+        Some(endpoint.clone())
+    );
+
+    let refreshed = credential(900_000);
+    store
+        .resolve_with_clock(
+            || Ok(1),
+            |_| Ok(refreshed.clone()),
+            || Duration::ZERO,
+            |_| {},
+        )
+        .expect("subscription refreshes");
+    assert_eq!(
+        store.read_endpoint().expect("refresh keeps the endpoint"),
+        Some(endpoint.clone())
+    );
+
+    assert!(store.logout().expect("subscription logs out"));
+    assert_eq!(store.read().expect("subscription is gone"), None);
+    assert_eq!(
+        store
+            .read_endpoint()
+            .expect("subscription logout keeps the endpoint"),
+        Some(endpoint)
+    );
+
+    assert!(
+        store
+            .logout_endpoint_with_clock(|| Duration::ZERO, |_| {})
+            .expect("endpoint logs out")
+    );
+    assert_eq!(store.read_endpoint().expect("endpoint is gone"), None);
+}
+
+#[test]
+fn credential_store_reads_subscription_only_files_and_isolates_a_broken_endpoint_slot() {
+    let workspace = empty_workspace("credential-store-slot-compat");
+    let path = workspace.join("private/credentials.json");
+    let store = CredentialStore::at(path.clone());
+    let subscription = credential(900_000);
+    store
+        .replace_with_clock(&subscription, || Duration::ZERO, |_| {})
+        .expect("private document initializes");
+
+    let subscription_only = serde_json::to_vec(&serde_json::json!({
+        "openai-codex": subscription.clone(),
+    }))
+    .expect("subscription-only document");
+    fs::write(&path, subscription_only).expect("subscription-only fixture");
+    assert_eq!(
+        store.read().expect("subscription-only file reads"),
+        Some(subscription.clone())
+    );
+    assert_eq!(
+        store
+            .read_endpoint()
+            .expect("file without endpoint slot reads"),
+        None
+    );
+
+    let broken_endpoint = serde_json::to_vec(&serde_json::json!({
+        "openai-codex": subscription.clone(),
+        "openai-compatible": {
+            "type": "api-key",
+            "baseUrl": "http://models.example.test/v1",
+            "key": "sk-broken-fixture",
+        },
+    }))
+    .expect("broken endpoint document");
+    fs::write(&path, broken_endpoint).expect("broken endpoint fixture");
+    assert_eq!(
+        store
+            .read()
+            .expect("a broken endpoint slot leaves the subscription"),
+        Some(subscription.clone())
+    );
+    assert!(store.read_endpoint().is_err());
+
+    store
+        .replace_with_clock(&credential(1_200_000), || Duration::ZERO, |_| {})
+        .expect("subscription login replaces the broken endpoint slot");
+    assert_eq!(
+        store.read_endpoint().expect("broken slot was dropped"),
+        None
+    );
 }
 
 #[test]

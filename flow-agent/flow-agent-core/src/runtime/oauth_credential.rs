@@ -1,11 +1,12 @@
 use crate::runtime::types::RuntimeError;
 use serde::Deserialize;
+use std::fmt;
 
 pub(crate) const MAX_OAUTH_FIELD_BYTES: usize = 8 * 1024;
 pub(crate) const MAX_OAUTH_SECRET_BYTES: usize = 64 * 1024;
 pub(crate) const OAUTH_CREDENTIAL_TYPE: &str = "oauth";
 
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub(crate) struct CredentialRecord {
     #[serde(rename = "type")]
     pub(crate) credential_type: String,
@@ -16,6 +17,20 @@ pub(crate) struct CredentialRecord {
     pub(crate) account_id: String,
     #[serde(rename = "isFedramp")]
     pub(crate) is_fedramp: bool,
+}
+
+impl fmt::Debug for CredentialRecord {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CredentialRecord")
+            .field("credential_type", &self.credential_type)
+            .field("access", &"<redacted>")
+            .field("refresh", &"<redacted>")
+            .field("expires", &self.expires)
+            .field("account_id", &"<redacted>")
+            .field("is_fedramp", &self.is_fedramp)
+            .finish()
+    }
 }
 
 #[derive(Deserialize)]

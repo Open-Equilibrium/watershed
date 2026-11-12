@@ -10,6 +10,7 @@ use crate::{
         fs_guards::AnchoredWorkspace,
         instructions::{read_applicable_agent_instructions, read_workspace_agent_instructions},
         live_events::live_event_channel,
+        productive::ProviderCredential,
         session::{
             continue_conversation, continue_conversation_with_execution_activation,
             continue_conversation_with_live_events, continue_conversation_with_provider,
@@ -621,7 +622,7 @@ fn conversation_continuation_rejects_registry_drift_before_auth_or_run_creation(
         None,
         None,
         false,
-        || Ok(session_credential()),
+        || Ok(ProviderCredential::OpenAiCodex(session_credential())),
         &mut provider,
     )
     .expect_err("registry drift must reject continuation");

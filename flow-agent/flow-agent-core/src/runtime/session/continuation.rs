@@ -4,9 +4,10 @@ use super::{
     prepare_recorded_productive_preflight, reconcile_productive_preflight,
 };
 use crate::runtime::{
-    auth::resolve_openai_codex_credential,
+    auth::resolve_provider_credential,
     config_io::{ExecutionBackend, load_global_config_authority, require_execution_backend},
     conversations::{read_conversation_continuation_definition, reserve_conversation_continuation},
+    endpoint_credential::OPENAI_COMPATIBLE_PROVIDER_ID,
     fs_guards::AnchoredWorkspace,
     live_events::LiveEventNotifier,
     openai_codex::OPENAI_CODEX_PROVIDER_ID,
@@ -76,7 +77,7 @@ pub fn continue_conversation_with_execution_activation<G>(
         activate,
         ensure_productive_execution_platform,
         &mut provider,
-        resolve_openai_codex_credential,
+        resolve_provider_credential,
     )?;
     if live {
         output.stdout.clear();
@@ -103,7 +104,7 @@ fn continue_conversation_internal(
         |_| Ok(()),
         ensure_productive_execution_platform,
         &mut provider,
-        resolve_openai_codex_credential,
+        resolve_provider_credential,
     )
 }
 
@@ -122,7 +123,9 @@ fn continue_conversation_internal_with_provider<P, C, A, G>(
 ) -> Result<RunOutput, RuntimeError>
 where
     P: ProductiveProvider,
-    C: FnOnce() -> Result<crate::runtime::oauth_credential::CredentialRecord, RuntimeError>,
+    C: FnOnce(
+        &ExecutionBackend,
+    ) -> Result<crate::runtime::productive::ProviderCredential, RuntimeError>,
     A: FnOnce(bool) -> Result<G, RuntimeError>,
 {
     if !proto::is_valid_session_id(conversation_id)
@@ -136,14 +139,21 @@ where
     let execution_workspace = AnchoredWorkspace::open(workspace)?;
     let authority = load_global_config_authority()?;
     let config = &authority.config;
-    let ExecutionBackend::OpenAiCodex {
-        model,
-        model_profile,
-    } = require_execution_backend(config)?
-    else {
-        return Err(RuntimeError::Usage(format!(
-            "conversation continuation requires provider {OPENAI_CODEX_PROVIDER_ID}"
-        )));
+    let backend = require_execution_backend(config)?;
+    let (model, model_profile) = match &backend {
+        ExecutionBackend::OpenAiCodex {
+            model,
+            model_profile,
+        }
+        | ExecutionBackend::OpenAiCompatible {
+            model,
+            model_profile,
+        } => (model.clone(), *model_profile),
+        ExecutionBackend::Fixture => {
+            return Err(RuntimeError::Usage(format!(
+                "conversation continuation requires provider {OPENAI_CODEX_PROVIDER_ID} or {OPENAI_COMPATIBLE_PROVIDER_ID}"
+            )));
+        }
     };
     let _activation = activate(true)?;
     reconcile_productive_preflight(platform_preflight())?;
@@ -165,7 +175,7 @@ where
         model_profile,
     )?;
     let mut tool_executor = prepare_productive_tool_executor(&policy)?;
-    let credential = reconcile_productive_preflight(resolve_credential())?;
+    let credential = reconcile_productive_preflight(resolve_credential(&backend))?;
     let reservation = reconcile_productive_preflight(reserve_conversation_continuation(
         workspace,
         conversation_id,
@@ -217,7 +227,7 @@ pub(crate) fn continue_conversation_with_provider<P, C>(
 ) -> Result<RunOutput, RuntimeError>
 where
     P: ProductiveProvider,
-    C: FnOnce() -> Result<crate::runtime::oauth_credential::CredentialRecord, RuntimeError>,
+    C: FnOnce() -> Result<crate::runtime::productive::ProviderCredential, RuntimeError>,
 {
     continue_conversation_internal_with_provider(
         workspace,
@@ -229,6 +239,6 @@ where
         |_| Ok(()),
         || Ok(()),
         provider,
-        resolve_credential,
+        |_| resolve_credential(),
     )
 }

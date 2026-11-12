@@ -11,9 +11,8 @@ use crate::{
         context::{CONTEXT_SAFETY_MARGIN, ContextModelProfile, OPERATOR_MODEL_PROFILE_ID},
         conversations::conversation_status_page,
         fs_guards::{CRASH_EXIT_CODE, CrashPoint, finish_durable_trace, start_durable_trace},
-        oauth_credential::CredentialRecord,
         openai_codex::ProviderTurn,
-        productive::ProductiveProvider,
+        productive::{ProductiveProvider, ProviderCredential},
         session::{
             continue_conversation_with_provider, resume_conversation_run_with_provider,
             run_productive_session_with_provider,
@@ -54,7 +53,7 @@ struct EffectProvider {
 impl ProductiveProvider for EffectProvider {
     fn turn(
         &mut self,
-        _credential: &CredentialRecord,
+        _credential: &ProviderCredential,
         _body: &serde_json::Value,
     ) -> Result<ProviderTurn, RuntimeError> {
         let calls = self.effects.fetch_add(1, Ordering::SeqCst) + 1;

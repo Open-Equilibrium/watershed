@@ -13,11 +13,14 @@ use crate::runtime::fs_guards::{
     AnchoredDir, DirectoryErrorMode, open_anchored_file_for_read, sync_anchored_directory,
 };
 use crate::runtime::{
+    endpoint_credential::{
+        EndpointCredential, OPENAI_COMPATIBLE_PROVIDER_ID, validate_endpoint_credential,
+    },
     oauth_credential::{CredentialRecord, validate_credential_record},
     openai_codex::OPENAI_CODEX_PROVIDER_ID,
     types::RuntimeError,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     ffi::OsStr,
     io::{self, Read},
@@ -33,26 +36,81 @@ use std::{
 pub(crate) const CREDENTIAL_STORE_MAX_BYTES: u64 = 256 * 1024;
 const REFRESH_WINDOW_MILLISECONDS: u64 = 5 * 60 * 1_000;
 
-/// A protected document's record, or why it does not decode or validate. Only a document that
-/// passed every file-safety check is decoded, so a locked mutation may replace an undecodable one.
-type DecodedDocument = Result<Option<CredentialRecord>, RuntimeError>;
+/// One provider slot's record, or why it does not decode or validate. Only a document that passed
+/// every file-safety check is decoded, so a locked mutation may replace an undecodable slot.
+type SlotResult<T> = Result<Option<T>, RuntimeError>;
 
-fn decode_credential_document(bytes: &[u8]) -> DecodedDocument {
-    let document: CredentialDocument =
-        serde_json::from_slice(bytes).map_err(|_| authentication_required())?;
-    if let Some(credential) = &document.openai_codex {
-        validate_credential_record(credential).map_err(|_| authentication_required())?;
-    }
-    Ok(document.openai_codex)
+/// Both slots, each decoded on its own so that a broken slot does not hide the other one.
+struct DecodedDocument {
+    openai_codex: SlotResult<CredentialRecord>,
+    openai_compatible: SlotResult<EndpointCredential>,
 }
 
-fn encode_credential_document(
-    credential: Option<CredentialRecord>,
-) -> Result<Vec<u8>, RuntimeError> {
-    let bytes = serde_json::to_vec(&CredentialDocument {
-        openai_codex: credential,
-    })
-    .map_err(|_| auth_store_failure())?;
+impl DecodedDocument {
+    fn absent() -> Self {
+        Self {
+            openai_codex: Ok(None),
+            openai_compatible: Ok(None),
+        }
+    }
+
+    fn undecodable() -> Self {
+        Self {
+            openai_codex: Err(authentication_required(OPENAI_CODEX_PROVIDER_ID)),
+            openai_compatible: Err(authentication_required(OPENAI_COMPATIBLE_PROVIDER_ID)),
+        }
+    }
+
+    /// The document a locked mutation writes: both decoded slots, while a slot that does not
+    /// decode is dropped instead of kept.
+    fn preserved(&self) -> CredentialDocument {
+        CredentialDocument {
+            openai_codex: self.openai_codex.as_ref().ok().and_then(Clone::clone),
+            openai_compatible: self.openai_compatible.as_ref().ok().and_then(Clone::clone),
+        }
+    }
+}
+
+/// The one slot a locked mutation changes; the other slot is preserved.
+enum Slot {
+    OpenAiCodex(Option<CredentialRecord>),
+    OpenAiCompatible(Option<EndpointCredential>),
+}
+
+fn decode_credential_document(bytes: &[u8]) -> DecodedDocument {
+    let Ok(document) = serde_json::from_slice::<StoredDocument>(bytes) else {
+        return DecodedDocument::undecodable();
+    };
+    DecodedDocument {
+        openai_codex: decode_slot(
+            document.openai_codex,
+            OPENAI_CODEX_PROVIDER_ID,
+            validate_credential_record,
+        ),
+        openai_compatible: decode_slot(
+            document.openai_compatible,
+            OPENAI_COMPATIBLE_PROVIDER_ID,
+            validate_endpoint_credential,
+        ),
+    }
+}
+
+fn decode_slot<T: DeserializeOwned>(
+    value: Option<serde_json::Value>,
+    provider_id: &str,
+    validate: impl FnOnce(&T) -> Result<(), RuntimeError>,
+) -> SlotResult<T> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let credential: T =
+        serde_json::from_value(value).map_err(|_| authentication_required(provider_id))?;
+    validate(&credential).map_err(|_| authentication_required(provider_id))?;
+    Ok(Some(credential))
+}
+
+fn encode_credential_document(document: &CredentialDocument) -> Result<Vec<u8>, RuntimeError> {
+    let bytes = serde_json::to_vec(document).map_err(|_| auth_store_failure())?;
     if bytes.len() as u64 >= CREDENTIAL_STORE_MAX_BYTES {
         return Err(auth_store_failure());
     }
@@ -103,10 +161,28 @@ impl CredentialStore {
     }
 
     pub(crate) fn read(&self) -> Result<Option<CredentialRecord>, RuntimeError> {
+        self.read_document()?
+            .map_or(Ok(None), |document| document.openai_codex)
+    }
+
+    /// The endpoint record a Run uses; an absent or undecodable one requires reauthentication.
+    pub(crate) fn resolve_endpoint(&self) -> Result<EndpointCredential, RuntimeError> {
+        let slot = self
+            .read_document()?
+            .map_or(Ok(None), |document| document.openai_compatible);
+        require_record(slot, OPENAI_COMPATIBLE_PROVIDER_ID)
+    }
+
+    pub(crate) fn read_endpoint(&self) -> Result<Option<EndpointCredential>, RuntimeError> {
+        self.read_document()?
+            .map_or(Ok(None), |document| document.openai_compatible)
+    }
+
+    fn read_document(&self) -> Result<Option<DecodedDocument>, RuntimeError> {
         let Some(parent) = self.open_protected_parent(false)? else {
             return Ok(None);
         };
-        self.read_anchored(&parent)?
+        self.read_anchored(&parent).map(Some)
     }
 
     pub(crate) fn replace_with_clock(
@@ -116,7 +192,18 @@ impl CredentialStore {
         wait: impl FnMut(Duration),
     ) -> Result<(), RuntimeError> {
         validate_credential_record(credential)?;
-        self.mutate_with_clock(now, wait, Some(credential.clone()))
+        self.mutate_with_clock(now, wait, Slot::OpenAiCodex(Some(credential.clone())))
+            .map(|_| ())
+    }
+
+    pub(crate) fn replace_endpoint_with_clock(
+        &self,
+        credential: &EndpointCredential,
+        now: impl FnMut() -> Duration,
+        wait: impl FnMut(Duration),
+    ) -> Result<(), RuntimeError> {
+        validate_endpoint_credential(credential)?;
+        self.mutate_with_clock(now, wait, Slot::OpenAiCompatible(Some(credential.clone())))
             .map(|_| ())
     }
 
@@ -125,7 +212,15 @@ impl CredentialStore {
         now: impl FnMut() -> Duration,
         wait: impl FnMut(Duration),
     ) -> Result<bool, RuntimeError> {
-        self.mutate_with_clock(now, wait, None)
+        self.mutate_with_clock(now, wait, Slot::OpenAiCodex(None))
+    }
+
+    pub(crate) fn logout_endpoint_with_clock(
+        &self,
+        now: impl FnMut() -> Duration,
+        wait: impl FnMut(Duration),
+    ) -> Result<bool, RuntimeError> {
+        self.mutate_with_clock(now, wait, Slot::OpenAiCompatible(None))
     }
 
     pub(crate) fn resolve_with_clock(
@@ -136,9 +231,12 @@ impl CredentialStore {
         wait: impl FnMut(Duration),
     ) -> Result<CredentialRecord, RuntimeError> {
         let Some(parent) = self.open_protected_parent(false)? else {
-            return Err(authentication_required());
+            return Err(authentication_required(OPENAI_CODEX_PROVIDER_ID));
         };
-        let current = require_record(self.read_anchored(&parent)?)?;
+        let current = require_record(
+            self.read_anchored(&parent)?.openai_codex,
+            OPENAI_CODEX_PROVIDER_ID,
+        )?;
         if !needs_refresh(&current, now_epoch_milliseconds()?) {
             return Ok(current);
         }
@@ -147,14 +245,17 @@ impl CredentialStore {
             .ok_or_else(auth_store_failure)?;
         let lock_path = parent.file(self.lock_leaf()?);
         let _lock = StoreLock::acquire_anchored(&lock_path, lock_now, wait)?;
-        let current = require_record(self.read_anchored_and_finalize(&parent)?)?;
+        let decoded = self.read_anchored_and_finalize(&parent)?;
+        let mut document = decoded.preserved();
+        let current = require_record(decoded.openai_codex, OPENAI_CODEX_PROVIDER_ID)?;
         // Waiting for the lock may have consumed the refresh window, so expiry is judged now.
         if !needs_refresh(&current, now_epoch_milliseconds()?) {
             return Ok(current);
         }
         let replacement = refresh(&current)?;
         validate_credential_record(&replacement)?;
-        self.write_document_anchored(&parent, Some(replacement.clone()))?;
+        document.openai_codex = Some(replacement.clone());
+        self.write_document_anchored(&parent, &document)?;
         Ok(replacement)
     }
 
@@ -168,23 +269,38 @@ impl CredentialStore {
         self.logout_with_clock(|| started.elapsed(), thread::sleep)
     }
 
-    /// Writes `replacement` under the lock and reports whether a record was present.
+    /// Changes one slot under the lock, keeps the other, and reports whether the changed slot held a
+    /// record.
     fn mutate_with_clock(
         &self,
         now: impl FnMut() -> Duration,
         wait: impl FnMut(Duration),
-        replacement: Option<CredentialRecord>,
+        slot: Slot,
     ) -> Result<bool, RuntimeError> {
         let parent = self
             .open_protected_parent(true)?
             .ok_or_else(auth_store_failure)?;
         let lock_path = parent.file(self.lock_leaf()?);
         let _lock = StoreLock::acquire_anchored(&lock_path, now, wait)?;
-        let present = !matches!(self.read_anchored_and_finalize(&parent)?, Ok(None));
-        if let Some(credential) = &replacement {
-            validate_credential_record(credential)?;
-        }
-        self.write_document_anchored(&parent, replacement)?;
+        let decoded = self.read_anchored_and_finalize(&parent)?;
+        let mut document = decoded.preserved();
+        let present = match slot {
+            Slot::OpenAiCodex(replacement) => {
+                if let Some(credential) = &replacement {
+                    validate_credential_record(credential)?;
+                }
+                document.openai_codex = replacement;
+                slot_present(&decoded.openai_codex)
+            }
+            Slot::OpenAiCompatible(replacement) => {
+                if let Some(credential) = &replacement {
+                    validate_endpoint_credential(credential)?;
+                }
+                document.openai_compatible = replacement;
+                slot_present(&decoded.openai_compatible)
+            }
+        };
+        self.write_document_anchored(&parent, &document)?;
         Ok(present)
     }
 
@@ -241,7 +357,7 @@ impl CredentialStore {
         let (mut file, metadata) = match open_anchored_file_for_read(&path) {
             Ok(opened) => opened,
             Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
-                return Ok(Ok(None));
+                return Ok(DecodedDocument::absent());
             }
             Err(error) => return Err(error),
         };
@@ -273,9 +389,9 @@ impl CredentialStore {
     fn write_document_anchored(
         &self,
         parent: &AnchoredDir,
-        replacement: Option<CredentialRecord>,
+        document: &CredentialDocument,
     ) -> Result<(), RuntimeError> {
-        let bytes = encode_credential_document(replacement)?;
+        let bytes = encode_credential_document(document)?;
         replace_atomically_anchored(&parent.file(self.credential_leaf()?), &bytes)
     }
 
@@ -344,23 +460,41 @@ fn needs_refresh(credential: &CredentialRecord, now_epoch_milliseconds: u64) -> 
 }
 
 /// An absent or undecodable record fails closed and requires reauthentication.
-fn require_record(document: DecodedDocument) -> Result<CredentialRecord, RuntimeError> {
-    document.ok().flatten().ok_or_else(authentication_required)
+fn require_record<T>(slot: SlotResult<T>, provider_id: &str) -> Result<T, RuntimeError> {
+    slot?.ok_or_else(|| authentication_required(provider_id))
 }
 
-fn authentication_required() -> RuntimeError {
+/// Whether a slot holds a record; one that does not decode still counts, so it is reported and replaced.
+fn slot_present<T>(slot: &SlotResult<T>) -> bool {
+    !matches!(slot, Ok(None))
+}
+
+fn authentication_required(provider_id: &str) -> RuntimeError {
+    let login = if provider_id == OPENAI_COMPATIBLE_PROVIDER_ID {
+        format!("flow auth login {provider_id} --base-url <URL> --api-key")
+    } else {
+        format!("flow auth login {provider_id}")
+    };
     RuntimeError::AuthenticationRequired(format!(
-        "{OPENAI_CODEX_PROVIDER_ID} authentication is required; run flow auth login {OPENAI_CODEX_PROVIDER_ID}"
+        "{provider_id} authentication is required; run {login}"
     ))
 }
 
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+/// The protected document: one slot per provider, each optional.
+#[derive(Serialize)]
 struct CredentialDocument {
-    #[serde(
-        rename = "openai-codex",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "openai-codex", skip_serializing_if = "Option::is_none")]
     openai_codex: Option<CredentialRecord>,
+    #[serde(rename = "openai-compatible", skip_serializing_if = "Option::is_none")]
+    openai_compatible: Option<EndpointCredential>,
+}
+
+/// The stored document as read: each slot kept raw until it is decoded and validated on its own.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredDocument {
+    #[serde(rename = "openai-codex", default)]
+    openai_codex: Option<serde_json::Value>,
+    #[serde(rename = "openai-compatible", default)]
+    openai_compatible: Option<serde_json::Value>,
 }
