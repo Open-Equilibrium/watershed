@@ -137,9 +137,144 @@ fn credential_store_reads_subscription_only_files_and_isolates_a_broken_endpoint
 
     store
         .replace_with_clock(&credential(1_200_000), || Duration::ZERO, |_| {})
-        .expect("subscription login replaces the broken endpoint slot");
+        .expect("subscription login stores beside the broken endpoint slot");
+    assert!(
+        store.read_endpoint().is_err(),
+        "the broken endpoint slot is kept and still fails closed"
+    );
+}
+
+const BROKEN_ENDPOINT: &str = r#"{ "type" : "api-key", "baseUrl": "http://models.example.test/v1", "key": "sk-broken-fixture" }"#;
+const BROKEN_SUBSCRIPTION: &str =
+    r#"{"type":"oauth","access":"a","refresh":"r","expires":1,"accountId":"x"}"#;
+const UNKNOWN_SLOT: &str = r#"{"nested": [1, 2, 3], "note": "kept"}"#;
+
+fn assert_document_keeps(path: &std::path::Path, raw_entries: &[&str]) {
+    let document = fs::read_to_string(path).expect("credential document reads");
+    for entry in raw_entries {
+        assert!(
+            document.contains(entry),
+            "{entry} was not kept byte for byte in {document}"
+        );
+    }
+}
+
+#[test]
+fn credential_store_keeps_an_undecodable_endpoint_slot_through_subscription_writes() {
+    let workspace = empty_workspace("credential-store-keep-endpoint-slot");
+    let path = workspace.join("private/credentials.json");
+    let store = CredentialStore::at(path.clone());
+    store
+        .replace_with_clock(&credential(900_000), || Duration::ZERO, |_| {})
+        .expect("private document initializes");
+    let subscription =
+        serde_json::to_string(&credential(900_000)).expect("subscription record serializes");
+    fs::write(
+        &path,
+        format!(
+            r#"{{"openai-codex":{subscription},"openai-compatible":{BROKEN_ENDPOINT},"future-provider":{UNKNOWN_SLOT}}}"#
+        ),
+    )
+    .expect("mixed document written");
+    assert!(store.read_endpoint().is_err());
+
+    store
+        .replace_with_clock(&credential(1_200_000), || Duration::ZERO, |_| {})
+        .expect("subscription login stores");
+    assert_document_keeps(&path, &[BROKEN_ENDPOINT, UNKNOWN_SLOT]);
+    assert!(store.read_endpoint().is_err());
+
+    store
+        .replace_with_clock(&credential(300_000), || Duration::ZERO, |_| {})
+        .expect("near-expiry subscription stores");
+    store
+        .resolve_with_clock(
+            || Ok(1),
+            |_| Ok(credential(900_000)),
+            || Duration::ZERO,
+            |_| {},
+        )
+        .expect("subscription refreshes");
+    assert_document_keeps(&path, &[BROKEN_ENDPOINT, UNKNOWN_SLOT]);
+
+    assert!(store.logout().expect("subscription logs out"));
+    assert_document_keeps(&path, &[BROKEN_ENDPOINT, UNKNOWN_SLOT]);
+
+    store
+        .replace_endpoint_with_clock(
+            &endpoint_credential("https://models.example.test/v1", "sk-slot-fixture"),
+            || Duration::ZERO,
+            |_| {},
+        )
+        .expect("endpoint login replaces its own broken slot");
+    assert!(
+        store
+            .read_endpoint()
+            .expect("replaced slot reads")
+            .is_some()
+    );
+    assert_document_keeps(&path, &[UNKNOWN_SLOT]);
+}
+
+#[test]
+fn credential_store_keeps_an_undecodable_subscription_slot_through_endpoint_writes() {
+    let workspace = empty_workspace("credential-store-keep-subscription-slot");
+    let path = workspace.join("private/credentials.json");
+    let store = CredentialStore::at(path.clone());
+    store
+        .replace_endpoint_with_clock(
+            &endpoint_credential("https://models.example.test/v1", "sk-slot-fixture"),
+            || Duration::ZERO,
+            |_| {},
+        )
+        .expect("private document initializes");
+    let endpoint = serde_json::to_string(&endpoint_credential(
+        "https://models.example.test/v1",
+        "sk-slot-fixture",
+    ))
+    .expect("endpoint record serializes");
+    fs::write(
+        &path,
+        format!(r#"{{"openai-codex":{BROKEN_SUBSCRIPTION},"openai-compatible":{endpoint}}}"#),
+    )
+    .expect("mixed document written");
+    assert!(store.read().is_err());
+
+    store
+        .replace_endpoint_with_clock(
+            &endpoint_credential("https://models.example.test/v1", "sk-next-fixture"),
+            || Duration::ZERO,
+            |_| {},
+        )
+        .expect("endpoint login stores beside the broken subscription slot");
+    assert_document_keeps(&path, &[BROKEN_SUBSCRIPTION]);
+    assert!(store.read().is_err());
+
+    assert!(
+        store
+            .logout_endpoint_with_clock(|| Duration::ZERO, |_| {})
+            .expect("endpoint logs out")
+    );
+    assert_document_keeps(&path, &[BROKEN_SUBSCRIPTION]);
+    assert!(store.read().is_err());
+}
+
+#[test]
+fn credential_store_reads_unknown_slots_as_absent() {
+    let workspace = empty_workspace("credential-store-unknown-slot");
+    let path = workspace.join("private/credentials.json");
+    let store = CredentialStore::at(path.clone());
+    store.logout().expect("private empty document initializes");
+    fs::write(&path, br#"{"unknown":true}"#).expect("unknown-slot document written");
+
     assert_eq!(
-        store.read_endpoint().expect("broken slot was dropped"),
+        store.read().expect("unknown slot is not a subscription"),
+        None
+    );
+    assert_eq!(
+        store
+            .read_endpoint()
+            .expect("unknown slot is not an endpoint"),
         None
     );
 }
@@ -228,7 +363,6 @@ fn credential_store_rejects_malformed_and_oversized_documents() {
 
     for document in [
         b"not-json".as_slice(),
-        br#"{"unknown":true}"#.as_slice(),
         br#"{"openai-codex":{"type":"oauth","access":"a","refresh":"r","expires":1,"accountId":"x"}}"#
             .as_slice(),
         br#"{"openai-codex":{"type":"api-key","access":"x","refresh":"x","expires":1,"accountId":"x"}}"#

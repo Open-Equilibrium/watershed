@@ -20,8 +20,10 @@ use crate::runtime::{
     openai_codex::OPENAI_CODEX_PROVIDER_ID,
     types::RuntimeError,
 };
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Serialize, de::DeserializeOwned};
+use serde_json::value::RawValue;
 use std::{
+    collections::BTreeMap,
     ffi::OsStr,
     io::{self, Read},
     path::{Component, Path, PathBuf},
@@ -36,12 +38,17 @@ use std::{
 pub(crate) const CREDENTIAL_STORE_MAX_BYTES: u64 = 256 * 1024;
 const REFRESH_WINDOW_MILLISECONDS: u64 = 5 * 60 * 1_000;
 
+/// A stored document as raw JSON. Every entry keeps its stored bytes until a write changes it.
+type RawDocument = BTreeMap<String, Box<RawValue>>;
+
 /// One provider slot's record, or why it does not decode or validate. Only a document that passed
 /// every file-safety check is decoded, so a locked mutation may replace an undecodable slot.
 type SlotResult<T> = Result<Option<T>, RuntimeError>;
 
-/// Both slots, each decoded on its own so that a broken slot does not hide the other one.
+/// Both provider slots, each decoded on its own so that a broken slot does not hide the other one.
+/// `raw` keeps every entry as stored, so a write keeps each entry it does not change.
 struct DecodedDocument {
+    raw: RawDocument,
     openai_codex: SlotResult<CredentialRecord>,
     openai_compatible: SlotResult<EndpointCredential>,
 }
@@ -49,67 +56,85 @@ struct DecodedDocument {
 impl DecodedDocument {
     fn absent() -> Self {
         Self {
+            raw: RawDocument::new(),
             openai_codex: Ok(None),
             openai_compatible: Ok(None),
         }
     }
 
+    /// A document that is not a JSON object with unique keys has no slots to keep.
     fn undecodable() -> Self {
         Self {
+            raw: RawDocument::new(),
             openai_codex: Err(authentication_required(OPENAI_CODEX_PROVIDER_ID)),
             openai_compatible: Err(authentication_required(OPENAI_COMPATIBLE_PROVIDER_ID)),
         }
     }
-
-    /// The document a locked mutation writes: both decoded slots, while a slot that does not
-    /// decode is dropped instead of kept.
-    fn preserved(&self) -> CredentialDocument {
-        CredentialDocument {
-            openai_codex: self.openai_codex.as_ref().ok().and_then(Clone::clone),
-            openai_compatible: self.openai_compatible.as_ref().ok().and_then(Clone::clone),
-        }
-    }
 }
 
-/// The one slot a locked mutation changes; the other slot is preserved.
+/// The one slot a locked mutation changes; every other entry is kept as stored.
 enum Slot {
     OpenAiCodex(Option<CredentialRecord>),
     OpenAiCompatible(Option<EndpointCredential>),
 }
 
 fn decode_credential_document(bytes: &[u8]) -> DecodedDocument {
-    let Ok(document) = serde_json::from_slice::<StoredDocument>(bytes) else {
-        return DecodedDocument::undecodable();
+    let is_object = std::str::from_utf8(bytes)
+        .ok()
+        .and_then(|text| proto::parse_unique_json(text).ok())
+        .is_some_and(|value| value.is_object());
+    let raw = match is_object.then(|| serde_json::from_slice::<RawDocument>(bytes)) {
+        Some(Ok(raw)) => raw,
+        _ => return DecodedDocument::undecodable(),
     };
     DecodedDocument {
-        openai_codex: decode_slot(
-            document.openai_codex,
-            OPENAI_CODEX_PROVIDER_ID,
-            validate_credential_record,
-        ),
+        openai_codex: decode_slot(&raw, OPENAI_CODEX_PROVIDER_ID, validate_credential_record),
         openai_compatible: decode_slot(
-            document.openai_compatible,
+            &raw,
             OPENAI_COMPATIBLE_PROVIDER_ID,
             validate_endpoint_credential,
         ),
+        raw,
     }
 }
 
 fn decode_slot<T: DeserializeOwned>(
-    value: Option<serde_json::Value>,
+    raw: &RawDocument,
     provider_id: &str,
     validate: impl FnOnce(&T) -> Result<(), RuntimeError>,
 ) -> SlotResult<T> {
-    let Some(value) = value else {
+    let Some(entry) = raw.get(provider_id) else {
         return Ok(None);
     };
-    let credential: T =
-        serde_json::from_value(value).map_err(|_| authentication_required(provider_id))?;
+    let credential: Option<T> =
+        serde_json::from_str(entry.get()).map_err(|_| authentication_required(provider_id))?;
+    let Some(credential) = credential else {
+        return Ok(None);
+    };
     validate(&credential).map_err(|_| authentication_required(provider_id))?;
     Ok(Some(credential))
 }
 
-fn encode_credential_document(document: &CredentialDocument) -> Result<Vec<u8>, RuntimeError> {
+/// Sets one entry of a raw document, or removes it for `None`; every other entry is kept as stored.
+fn set_entry<T: Serialize>(
+    document: &mut RawDocument,
+    provider_id: &str,
+    value: Option<T>,
+) -> Result<(), RuntimeError> {
+    match value {
+        Some(value) => {
+            let entry =
+                serde_json::value::to_raw_value(&value).map_err(|_| auth_store_failure())?;
+            document.insert(provider_id.to_owned(), entry);
+        }
+        None => {
+            document.remove(provider_id);
+        }
+    }
+    Ok(())
+}
+
+fn encode_credential_document(document: &RawDocument) -> Result<Vec<u8>, RuntimeError> {
     let bytes = serde_json::to_vec(document).map_err(|_| auth_store_failure())?;
     if bytes.len() as u64 >= CREDENTIAL_STORE_MAX_BYTES {
         return Err(auth_store_failure());
@@ -246,7 +271,7 @@ impl CredentialStore {
         let lock_path = parent.file(self.lock_leaf()?);
         let _lock = StoreLock::acquire_anchored(&lock_path, lock_now, wait)?;
         let decoded = self.read_anchored_and_finalize(&parent)?;
-        let mut document = decoded.preserved();
+        let mut document = decoded.raw.clone();
         let current = require_record(decoded.openai_codex, OPENAI_CODEX_PROVIDER_ID)?;
         // Waiting for the lock may have consumed the refresh window, so expiry is judged now.
         if !needs_refresh(&current, now_epoch_milliseconds()?) {
@@ -254,7 +279,11 @@ impl CredentialStore {
         }
         let replacement = refresh(&current)?;
         validate_credential_record(&replacement)?;
-        document.openai_codex = Some(replacement.clone());
+        set_entry(
+            &mut document,
+            OPENAI_CODEX_PROVIDER_ID,
+            Some(replacement.clone()),
+        )?;
         self.write_document_anchored(&parent, &document)?;
         Ok(replacement)
     }
@@ -283,21 +312,23 @@ impl CredentialStore {
         let lock_path = parent.file(self.lock_leaf()?);
         let _lock = StoreLock::acquire_anchored(&lock_path, now, wait)?;
         let decoded = self.read_anchored_and_finalize(&parent)?;
-        let mut document = decoded.preserved();
+        let mut document = decoded.raw.clone();
         let present = match slot {
             Slot::OpenAiCodex(replacement) => {
                 if let Some(credential) = &replacement {
                     validate_credential_record(credential)?;
                 }
-                document.openai_codex = replacement;
-                slot_present(&decoded.openai_codex)
+                let present = slot_present(&decoded.openai_codex);
+                set_entry(&mut document, OPENAI_CODEX_PROVIDER_ID, replacement)?;
+                present
             }
             Slot::OpenAiCompatible(replacement) => {
                 if let Some(credential) = &replacement {
                     validate_endpoint_credential(credential)?;
                 }
-                document.openai_compatible = replacement;
-                slot_present(&decoded.openai_compatible)
+                let present = slot_present(&decoded.openai_compatible);
+                set_entry(&mut document, OPENAI_COMPATIBLE_PROVIDER_ID, replacement)?;
+                present
             }
         };
         self.write_document_anchored(&parent, &document)?;
@@ -389,7 +420,7 @@ impl CredentialStore {
     fn write_document_anchored(
         &self,
         parent: &AnchoredDir,
-        document: &CredentialDocument,
+        document: &RawDocument,
     ) -> Result<(), RuntimeError> {
         let bytes = encode_credential_document(document)?;
         replace_atomically_anchored(&parent.file(self.credential_leaf()?), &bytes)
@@ -478,23 +509,4 @@ fn authentication_required(provider_id: &str) -> RuntimeError {
     RuntimeError::AuthenticationRequired(format!(
         "{provider_id} authentication is required; run {login}"
     ))
-}
-
-/// The protected document: one slot per provider, each optional.
-#[derive(Serialize)]
-struct CredentialDocument {
-    #[serde(rename = "openai-codex", skip_serializing_if = "Option::is_none")]
-    openai_codex: Option<CredentialRecord>,
-    #[serde(rename = "openai-compatible", skip_serializing_if = "Option::is_none")]
-    openai_compatible: Option<EndpointCredential>,
-}
-
-/// The stored document as read: each slot kept raw until it is decoded and validated on its own.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StoredDocument {
-    #[serde(rename = "openai-codex", default)]
-    openai_codex: Option<serde_json::Value>,
-    #[serde(rename = "openai-compatible", default)]
-    openai_compatible: Option<serde_json::Value>,
 }
