@@ -232,6 +232,7 @@ fn auth_status_and_logout_are_redacted_store_operations() {
         AuthStatus {
             authenticated: false,
             expires_epoch_milliseconds: None,
+            base_url: None,
         }
     );
     let credential = parse_token_body(

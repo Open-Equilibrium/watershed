@@ -27,7 +27,9 @@ pub(crate) enum AuthCommand {
 pub(super) fn usage_commands() -> [String; 6] {
     [
         format!("flow auth login {OPENAI_CODEX_PROVIDER_ID} <--browser|--device>"),
-        format!("flow auth login {OPENAI_COMPATIBLE_PROVIDER_ID} --base-url <URL> --api-key"),
+        format!(
+            "flow auth login {OPENAI_COMPATIBLE_PROVIDER_ID} --base-url <URL> --api-key (the key is read from standard input)"
+        ),
         format!("flow auth status {OPENAI_CODEX_PROVIDER_ID}"),
         format!("flow auth status {OPENAI_COMPATIBLE_PROVIDER_ID}"),
         format!("flow auth logout {OPENAI_CODEX_PROVIDER_ID}"),
@@ -62,6 +64,17 @@ pub(crate) fn auth_args(args: &[String]) -> Result<AuthCommand, RuntimeError> {
             Ok(AuthCommand::Login(AuthLogin::ApiKey {
                 base_url: base_url.clone(),
             }))
+        }
+        [auth, login, provider, base_flag, _, key_flag, _]
+            if auth == "auth"
+                && login == "login"
+                && provider == OPENAI_COMPATIBLE_PROVIDER_ID
+                && base_flag == "--base-url"
+                && key_flag == "--api-key" =>
+        {
+            Err(RuntimeError::Usage(
+                "the API key is read from standard input, not from arguments".to_owned(),
+            ))
         }
         [auth, status, provider] if auth == "auth" && status == "status" => {
             Ok(AuthCommand::Status(auth_provider(provider)?))

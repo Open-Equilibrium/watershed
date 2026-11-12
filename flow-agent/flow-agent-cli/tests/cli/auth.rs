@@ -74,6 +74,12 @@ fn endpoint_login_reads_the_key_from_stdin_and_manages_only_its_slot() {
         serde_json::json!({"type": "api-key", "baseUrl": base_url, "key": "sk-cli-fixture"})
     );
 
+    let status = run_endpoint_auth(&config_root, &["status", "openai-compatible"], "");
+    assert_eq!(
+        status.stdout,
+        format!("openai-compatible authenticated; base URL {base_url}\n").as_bytes()
+    );
+
     let rejected = run_endpoint_auth(
         &config_root,
         &[
@@ -89,6 +95,29 @@ fn endpoint_login_reads_the_key_from_stdin_and_manages_only_its_slot() {
     assert!(
         !String::from_utf8_lossy(&rejected.stderr).contains("sk-rejected-fixture"),
         "{rejected:?}"
+    );
+
+    let argv_key = run_endpoint_auth(
+        &config_root,
+        &[
+            "login",
+            "openai-compatible",
+            "--base-url",
+            base_url,
+            "--api-key",
+            "sk-argv-fixture",
+        ],
+        "",
+    );
+    assert!(!argv_key.status.success(), "{argv_key:?}");
+    assert!(
+        String::from_utf8_lossy(&argv_key.stderr)
+            .contains("the API key is read from standard input, not from arguments"),
+        "{argv_key:?}"
+    );
+    assert!(
+        !String::from_utf8_lossy(&argv_key.stderr).contains("sk-argv-fixture"),
+        "{argv_key:?}"
     );
 
     let logout = run_endpoint_auth(&config_root, &["logout", "openai-compatible"], "");
@@ -110,7 +139,7 @@ fn auth_status_reports_an_undecodable_record_as_reauthentication_required() {
     assert!(status.stderr.is_empty(), "{status:?}");
     assert_eq!(
         status.stdout,
-        b"openai-codex authentication is required; run flow auth login openai-codex\n"
+        b"openai-codex authentication is required; run flow auth login openai-codex --browser (or --device)\n"
     );
 }
 

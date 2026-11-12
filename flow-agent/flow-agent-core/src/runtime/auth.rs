@@ -58,6 +58,8 @@ pub struct AuthStatus {
     pub authenticated: bool,
     /// Credential expiry as Unix epoch milliseconds, when authenticated.
     pub expires_epoch_milliseconds: Option<u64>,
+    /// The base URL of the stored OpenAI-compatible key, when one is stored; the key is never reported.
+    pub base_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -101,6 +103,7 @@ pub(crate) fn store_login_credential(
     Ok(AuthStatus {
         authenticated: true,
         expires_epoch_milliseconds: Some(credential.expires),
+        base_url: None,
     })
 }
 
@@ -114,6 +117,7 @@ pub(crate) fn auth_status_from_store(store: &CredentialStore) -> Result<AuthStat
     Ok(AuthStatus {
         authenticated: credential.is_some(),
         expires_epoch_milliseconds: credential.map(|record| record.expires),
+        base_url: None,
     })
 }
 
@@ -134,16 +138,17 @@ pub fn login_openai_compatible(base_url: &str, api_key: &str) -> Result<AuthStat
     Ok(AuthStatus {
         authenticated: true,
         expires_epoch_milliseconds: None,
+        base_url: None,
     })
 }
 
 /// Returns redacted OpenAI-compatible authentication status from Flow Agent's own store.
 pub fn openai_compatible_auth_status() -> Result<AuthStatus, RuntimeError> {
+    let endpoint = CredentialStore::platform_default()?.read_endpoint()?;
     Ok(AuthStatus {
-        authenticated: CredentialStore::platform_default()?
-            .read_endpoint()?
-            .is_some(),
+        authenticated: endpoint.is_some(),
         expires_epoch_milliseconds: None,
+        base_url: endpoint.map(|credential| credential.base_url),
     })
 }
 

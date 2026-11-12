@@ -504,7 +504,7 @@ fn authentication_required(provider_id: &str) -> RuntimeError {
     let login = if provider_id == OPENAI_COMPATIBLE_PROVIDER_ID {
         format!("flow auth login {provider_id} --base-url <URL> --api-key")
     } else {
-        format!("flow auth login {provider_id}")
+        format!("flow auth login {provider_id} --browser (or --device)")
     };
     RuntimeError::AuthenticationRequired(format!(
         "{provider_id} authentication is required; run {login}"

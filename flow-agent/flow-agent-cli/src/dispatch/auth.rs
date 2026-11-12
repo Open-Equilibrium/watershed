@@ -43,12 +43,12 @@ pub(super) fn authentication_command(command: AuthCommand) -> Result<(), Runtime
         }
         AuthCommand::Status(AuthProvider::OpenAiCompatible) => {
             match flow_agent_core::openai_compatible_auth_status() {
-                Ok(status) if status.authenticated => {
-                    write_stdout(&format!("{OPENAI_COMPATIBLE_PROVIDER_ID} authenticated\n"))
-                }
-                Ok(_) => write_stdout(&format!(
-                    "{OPENAI_COMPATIBLE_PROVIDER_ID} not authenticated\n"
-                )),
+                Ok(status) => match status.base_url {
+                    Some(base_url) => write_stdout(&endpoint_status_message(&base_url)),
+                    None => write_stdout(&format!(
+                        "{OPENAI_COMPATIBLE_PROVIDER_ID} not authenticated\n"
+                    )),
+                },
                 Err(RuntimeError::AuthenticationRequired(message)) => {
                     write_stdout(&format!("{message}\n"))
                 }
@@ -97,6 +97,11 @@ pub(super) fn api_key_from_input(mut input: String) -> String {
         input.pop();
     }
     input
+}
+
+/// The base URL is the one the key was issued for; the key is never shown.
+pub(super) fn endpoint_status_message(base_url: &str) -> String {
+    format!("{OPENAI_COMPATIBLE_PROVIDER_ID} authenticated; base URL {base_url}\n")
 }
 
 pub(super) fn authenticated_status_message(expiry: u64) -> String {
