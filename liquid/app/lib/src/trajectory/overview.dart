@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 
 import '../agent/input_lane.dart';
 import '../rust/api/history.dart';
@@ -104,6 +105,7 @@ class Overview extends StatefulWidget {
     this.onPan,
     this.onJump,
     this.onHandleStep,
+    this.handleStep,
     this.onLeave,
     this.matches,
     this.mark,
@@ -134,6 +136,10 @@ class Overview extends StatefulWidget {
 
   /// A range handle moved to the start (`true`) or the end of record `step`.
   final void Function(bool start, int step)? onHandleStep;
+
+  /// What a range handle says at record `index`, for the values assistive technology previews;
+  /// null past the records shown.
+  final HandleStep? Function(int index)? handleStep;
 
   /// Esc on a focused range handle, which hands the keyboard back to the list.
   final VoidCallback? onLeave;
@@ -286,6 +292,7 @@ class _OverviewState extends State<Overview> {
                           onPan: widget.onPan,
                           onJump: widget.onJump,
                           onHandleStep: widget.onHandleStep,
+                          handleStep: widget.handleStep,
                           onLeave: widget.onLeave,
                         ),
                 ),
@@ -391,6 +398,7 @@ class _BrushView extends StatefulWidget {
     required this.onPan,
     required this.onJump,
     required this.onHandleStep,
+    required this.handleStep,
     required this.onLeave,
   });
 
@@ -406,6 +414,7 @@ class _BrushView extends StatefulWidget {
   /// A click on the brush jumps as one on the tracks beneath it does.
   final ValueChanged<double>? onJump;
   final void Function(bool start, int step)? onHandleStep;
+  final HandleStep? Function(int index)? handleStep;
   final VoidCallback? onLeave;
 
   @override
@@ -442,16 +451,44 @@ class _BrushViewState extends State<_BrushView> {
   double _pointer(Offset global) =>
       (context.findRenderObject()! as RenderBox).globalToLocal(global).dx;
 
-  /// Moves a handle `delta` records, never past the other handle or the first and last record;
-  /// a handle at its limit stays where it is.
-  void _shift(bool start, int delta) {
+  /// The record a handle reaches by `delta` records, never past the other handle or the first and
+  /// last record; a handle at its limit stays where it is.
+  int _reach(bool start, int delta) {
     final brush = widget.brush;
     final own = (start ? brush.startStep : brush.endStep).index;
     final other = (start ? brush.endStep : brush.startStep).index;
     final low = start ? 0 : other;
     final high = start ? other : brush.startStep.count - 1;
-    final step = math.max(low, math.min(high, own + delta));
+    return math.max(low, math.min(high, own + delta));
+  }
+
+  /// Moves a handle `delta` records, as [_reach] allows.
+  void _shift(bool start, int delta) {
+    final own = (start ? widget.brush.startStep : widget.brush.endStep).index;
+    final step = _reach(start, delta);
     if (step != own) widget.onHandleStep?.call(start, step);
+  }
+
+  /// What a handle says after `delta` records, which assistive technology previews; what it says
+  /// now where that record is not known, as at a limit.
+  String _spoken(bool start, int delta, HandleStep now) =>
+      widget.handleStep?.call(_reach(start, delta))?.spoken ?? now.spoken;
+
+  /// A change of the range's steps announces them, as "Steps 12–31 of 48".
+  @override
+  void didUpdateWidget(_BrushView old) {
+    super.didUpdateWidget(old);
+    final brush = widget.brush;
+    final (first, last) = (brush.startStep, brush.endStep);
+    final moved =
+        first.index != old.brush.startStep.index ||
+        last.index != old.brush.endStep.index;
+    if (!brush.range || !moved) return;
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      'Steps ${first.index + 1}–${last.index + 1} of ${first.count}',
+      Directionality.of(context),
+    );
   }
 
   /// The keys of one handle: those of [Fixed.rangeHandle], and esc, which leaves the handle.
@@ -533,6 +570,10 @@ class _BrushViewState extends State<_BrushView> {
             slider: true,
             label: start ? 'Range start' : 'Range end',
             value: step.spoken,
+            onIncrease: () => _shift(start, 1),
+            increasedValue: _spoken(start, 1, step),
+            onDecrease: () => _shift(start, -1),
+            decreasedValue: _spoken(start, -1, step),
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               dragStartBehavior: DragStartBehavior.down,

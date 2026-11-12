@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:ui' show SemanticsFlag;
+import 'dart:ui' show SemanticsAction, SemanticsFlag;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -1087,6 +1087,70 @@ void main() {
       findsNothing,
       reason: 'backspace clears the range',
     );
+  });
+
+  testWidgets('assistive adjust moves a range handle one step and back', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      await show(tester, historyOf(long));
+      final owner = tester.binding.renderViews.single.owner!.semanticsOwner!;
+      final start = tester.getSemantics(find.byKey(const Key('range-start')));
+      expect(start.getSemanticsData().increasedValue, 'step 2 of 60, 1.0 s');
+      owner.performAction(start.id, SemanticsAction.increase);
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSemantics(find.byKey(const Key('range-start'))),
+        isSemantics(
+          label: 'Range start',
+          value: 'step 2 of 60, 1.0 s',
+          isSlider: true,
+        ),
+      );
+      owner.performAction(
+        tester.getSemantics(find.byKey(const Key('range-start'))).id,
+        SemanticsAction.decrease,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSemantics(find.byKey(const Key('range-start'))).value,
+        'step 1 of 60, 0 ms',
+      );
+    } finally {
+      semantics.dispose();
+    }
+  });
+
+  testWidgets('a range change is announced as the steps it covers', (
+    tester,
+  ) async {
+    final announced = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockDecodedMessageHandler<dynamic>(
+      SystemChannels.accessibility,
+      (message) async {
+        final event = message! as Map<Object?, Object?>;
+        if (event['type'] == 'announce') {
+          final data = event['data']! as Map<Object?, Object?>;
+          announced.add(data['message']! as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger
+          .setMockDecodedMessageHandler<dynamic>(
+            SystemChannels.accessibility,
+            null,
+          ),
+    );
+    await show(tester, historyOf(long));
+    await press(tester, LogicalKeyboardKey.tab);
+    await press(tester, LogicalKeyboardKey.arrowRight);
+    // The end stays where the visible steps end, so only the start and the total are fixed.
+    expect(announced, hasLength(1));
+    expect(announced.single, startsWith('Steps 2–'));
+    expect(announced.single, endsWith(' of 60'));
   });
 
   testWidgets('a click on the timeline jumps to the step there', (
