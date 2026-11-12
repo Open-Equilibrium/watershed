@@ -8,7 +8,14 @@ use crate::runtime::{
     },
     fs_guards::set_directory_sync_error_for_path_for_test,
 };
-use std::{fs, fs::OpenOptions, io, io::Write};
+use std::{
+    fs,
+    fs::OpenOptions,
+    io,
+    io::Write,
+    path::{Path, PathBuf},
+};
+
 #[test]
 fn conversation_status_rejects_invalid_bounded_transactions() {
     for (label, invalid_transaction, expected) in [
@@ -428,31 +435,158 @@ fn conversation_status_recovery_anchors_an_empty_rotated_segment_before_clearing
     assert!(!transaction.exists(), "the durable transaction is cleared");
 }
 
+fn history_path(workspace: &Path) -> PathBuf {
+    crate::tests::helpers::workspace_session_dir(workspace).join("review/history.jsonl")
+}
+
+fn status_transaction_path(workspace: &Path) -> PathBuf {
+    crate::tests::helpers::workspace_session_dir(workspace).join("review/.status-transaction.json")
+}
+
+/// Leaves a recorded history append whose transaction survives, as a crash after recording does.
+/// Returns the history length the committed prefix ends at.
+fn record_history_append_then_crash(workspace: &Path, point: StatusTransactionCrashPoint) -> u64 {
+    create_review_run(workspace);
+    commit_review_event(workspace);
+    append_conversation_entry(workspace, "review", &entry("prior", None, "review-1", 1))
+        .expect("the prior history entry commits");
+    let prior_len = fs::metadata(history_path(workspace))
+        .expect("history reads")
+        .len();
+    set_status_transaction_crash_point(point);
+    append_conversation_entry(
+        workspace,
+        "review",
+        &entry("root", Some("prior"), "review-1", 1),
+    )
+    .expect_err("the transaction remains after the crash point");
+    prior_len
+}
+
 #[test]
-fn conversation_status_rejects_a_torn_named_transaction_append() {
+fn conversation_status_rolls_back_a_torn_named_transaction_append() {
     let workspace = empty_workspace("conversation-status-torn-append");
     create_review_run(&workspace);
     commit_review_event(&workspace);
     set_status_transaction_crash_point(StatusTransactionCrashPoint::TransactionRecorded);
     append_conversation_entry(&workspace, "review", &entry("root", None, "review-1", 1))
         .expect_err("the transaction remains before its append");
+    let prior_len = fs::metadata(history_path(&workspace))
+        .expect("history reads")
+        .len();
     OpenOptions::new()
         .append(true)
-        .open(crate::tests::helpers::workspace_session_dir(&workspace).join("review/history.jsonl"))
+        .open(history_path(&workspace))
         .expect("history opens")
         .write_all(b"{")
         .expect("torn append writes");
 
+    conversation_status_page(&workspace, None).expect("a torn append rolls back");
+
+    assert_eq!(
+        fs::metadata(history_path(&workspace))
+            .expect("history reads")
+            .len(),
+        prior_len,
+        "the torn bytes are truncated to the recorded prior length"
+    );
+    assert!(
+        !status_transaction_path(&workspace).exists(),
+        "the rolled-back transaction is cleared"
+    );
+}
+
+#[test]
+fn conversation_status_rolls_back_an_append_that_lost_its_final_line_feed() {
+    let workspace = empty_workspace("conversation-status-cut-line-feed");
+    let prior_len = record_history_append_then_crash(
+        &workspace,
+        StatusTransactionCrashPoint::CanonicalMutationApplied,
+    );
+    let applied = fs::read(history_path(&workspace)).expect("applied history reads");
+    OpenOptions::new()
+        .write(true)
+        .open(history_path(&workspace))
+        .expect("history opens")
+        .set_len(applied.len() as u64 - 1)
+        .expect("the final line feed is cut");
+
+    let page = conversation_status_page(&workspace, None)
+        .expect("a power cut that loses the final line feed rolls back");
+
+    assert_eq!(
+        page.conversations[0].latest_entry_id.as_deref(),
+        Some("prior")
+    );
+    assert_eq!(
+        fs::metadata(history_path(&workspace))
+            .expect("history reads")
+            .len(),
+        prior_len,
+        "the cut record is removed to the recorded prior length"
+    );
+    assert!(!status_transaction_path(&workspace).exists());
+}
+
+#[test]
+fn conversation_status_refuses_a_target_longer_than_its_recorded_append() {
+    let workspace = empty_workspace("conversation-status-foreign-tail");
+    record_history_append_then_crash(&workspace, StatusTransactionCrashPoint::TransactionRecorded);
+    let foreign = vec![b'x'; 64 * 1024];
+    OpenOptions::new()
+        .append(true)
+        .open(history_path(&workspace))
+        .expect("history opens")
+        .write_all(&foreign)
+        .expect("foreign tail writes");
+    let len = fs::metadata(history_path(&workspace))
+        .expect("history reads")
+        .len();
+
     let error = conversation_status_page(&workspace, None)
-        .expect_err("a torn named append must fail closed");
+        .expect_err("a target longer than its recorded append is foreign");
+
     assert!(
         error.to_string().contains("torn or foreign append"),
         "{error}"
     );
-    assert!(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/.status-transaction.json")
-            .is_file(),
-        "the unresolved transaction must remain available for diagnosis"
+    assert_eq!(
+        fs::metadata(history_path(&workspace))
+            .expect("history reads")
+            .len(),
+        len,
+        "refused bytes are left in place for diagnosis"
     );
+    assert!(status_transaction_path(&workspace).is_file());
+}
+
+#[test]
+fn conversation_status_refuses_a_target_shorter_than_its_prior_length() {
+    let workspace = empty_workspace("conversation-status-truncated-prefix");
+    record_history_append_then_crash(&workspace, StatusTransactionCrashPoint::TransactionRecorded);
+    let len = fs::metadata(history_path(&workspace))
+        .expect("history reads")
+        .len();
+    OpenOptions::new()
+        .write(true)
+        .open(history_path(&workspace))
+        .expect("history opens")
+        .set_len(len - 1)
+        .expect("the committed prefix is shortened");
+
+    let error = conversation_status_page(&workspace, None)
+        .expect_err("a target shorter than its committed prefix is not a torn append");
+
+    assert!(
+        error.to_string().contains("torn or foreign append"),
+        "{error}"
+    );
+    assert_eq!(
+        fs::metadata(history_path(&workspace))
+            .expect("history reads")
+            .len(),
+        len - 1,
+        "the damaged prefix is not truncated further"
+    );
+    assert!(status_transaction_path(&workspace).is_file());
 }
