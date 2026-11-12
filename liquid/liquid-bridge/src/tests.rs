@@ -2760,6 +2760,14 @@ fn a_failed_export_leaves_no_folder_behind() {
 }
 
 #[test]
+fn a_long_multibyte_title_keeps_its_record_name_within_a_file_name() {
+    // File systems such as ext4 count bytes, and the temporary folder adds `.` and `.partial`.
+    let title = "語".repeat(80);
+    let name = crate::api::record::record_name(&title, "2026-11-11");
+    assert!(format!(".{name}.partial").len() <= 255, "{name}");
+}
+
+#[test]
 fn downloads_go_to_the_folder_the_system_names_or_to_downloads() {
     let home = std::path::Path::new("/home/ana");
     assert_eq!(

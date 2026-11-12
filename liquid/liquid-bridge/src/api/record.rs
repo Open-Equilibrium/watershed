@@ -23,8 +23,9 @@ The transcript is pi's own file. Nothing here is signed or proven complete.
 /// The name of the copied session file inside a record.
 pub(crate) const SESSION_FILE: &str = "session.jsonl";
 
-/// Longest title kept in a folder name, in characters.
-const TITLE_CHARS: usize = 100;
+/// Longest title kept in a folder name, in bytes. With ` – record <day>` (22 bytes), a numbered
+/// suffix and the temporary folder's `.` and `.partial`, every name stays within 255 bytes.
+const TITLE_BYTES: usize = 200;
 
 /// The Downloads folder: the one the Linux desktop names in `user-dirs.dirs`, else `~/Downloads`
 /// (macOS has no such file).
@@ -58,12 +59,16 @@ pub(crate) fn download_dir_in(home: &Path, user_dirs: Option<&str>) -> PathBuf {
 /// The folder name of a record: the session's title without characters a file name cannot hold,
 /// then the day it was exported, as `<title> – record <day>`.
 pub(crate) fn record_name(title: &str, day: &str) -> String {
+    let mut bytes = 0;
     let kept: String = title
         .chars()
         .filter(|c| {
             !c.is_control() && !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
         })
-        .take(TITLE_CHARS)
+        .map_while(|c| {
+            bytes += c.len_utf8();
+            (bytes <= TITLE_BYTES).then_some(c)
+        })
         .collect();
     let title = kept.trim().trim_start_matches('.').trim();
     let title = if title.is_empty() {
