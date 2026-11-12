@@ -67,6 +67,22 @@ pub(crate) async fn request_responses_with_client_async(
     deadlines: HttpDeadlines,
     cancelled: &AtomicBool,
 ) -> Result<ProviderTurn, RuntimeError> {
+    let turn = send_responses_request(client, endpoint, auth, body, deadlines, cancelled).await;
+    match auth {
+        // An endpoint may echo the key it received in an error; the key must not reach Run Logs.
+        ResponsesAuth::ApiKey(key) => turn.map_err(|error| error.without_secret(key)),
+        ResponsesAuth::Subscription(_) => turn,
+    }
+}
+
+async fn send_responses_request(
+    client: reqwest::Client,
+    endpoint: &str,
+    auth: ResponsesAuth<'_>,
+    body: &serde_json::Value,
+    deadlines: HttpDeadlines,
+    cancelled: &AtomicBool,
+) -> Result<ProviderTurn, RuntimeError> {
     let request = client
         .post(endpoint)
         .header(reqwest::header::ACCEPT, "text/event-stream")

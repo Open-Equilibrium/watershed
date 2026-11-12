@@ -828,6 +828,45 @@ fn endpoint_redirects_are_not_followed_and_rejections_omit_the_key() {
 }
 
 #[test]
+fn endpoint_failures_that_echo_the_key_keep_only_a_redacted_message() {
+    let (base_url, server) = spawn_endpoint(
+        "HTTP/1.1 401 Unauthorized",
+        "",
+        "{\"error\":{\"message\":\"invalid key sk-endpoint-fixture\"}}",
+    );
+    let error = OpenAiCodexProvider::default()
+        .turn(
+            &endpoint_credential(&base_url, "sk-endpoint-fixture"),
+            &serde_json::json!({"model":"fixture"}),
+        )
+        .expect_err("echoed key is still a definitive rejection");
+    let failure = error
+        .provider_failure()
+        .expect("rejection is a provider outcome");
+    assert_eq!(failure.message(), "invalid key <redacted>");
+    assert!(!error.to_string().contains("sk-endpoint-fixture"));
+    server.join().expect("fake endpoint completes");
+
+    let (base_url, server) = spawn_endpoint(
+        "HTTP/1.1 200 OK",
+        "",
+        "data:{\"type\":\"response.failed\",\"response\":{\"id\":\"resp_1\",\"error\":{\"message\":\"bad key sk-endpoint-fixture\"}}}\n\n",
+    );
+    let error = OpenAiCodexProvider::default()
+        .turn(
+            &endpoint_credential(&base_url, "sk-endpoint-fixture"),
+            &serde_json::json!({"model":"fixture"}),
+        )
+        .expect_err("failed terminal event fails the attempt");
+    let failure = error
+        .provider_failure()
+        .expect("failure is a provider outcome");
+    assert_eq!(failure.message(), "bad key <redacted>");
+    assert!(!error.to_string().contains("sk-endpoint-fixture"));
+    server.join().expect("fake endpoint completes");
+}
+
+#[test]
 fn endpoint_turn_completes_at_its_terminal_event_while_the_connection_stays_open() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("fake endpoint binds");
     let endpoint = format!(

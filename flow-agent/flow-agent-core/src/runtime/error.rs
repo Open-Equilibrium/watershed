@@ -294,6 +294,17 @@ impl RuntimeError {
         }
     }
 
+    /// Replaces every occurrence of `secret` in a provider failure message, keeping its bound.
+    pub(crate) fn without_secret(self, secret: &str) -> Self {
+        match self {
+            Self::Provider(failure) => Self::Provider(ProviderFailure {
+                message: bounded_provider_message(failure.message.replace(secret, "<redacted>")),
+                ..failure
+            }),
+            other => other,
+        }
+    }
+
     pub(crate) fn executor(code: proto::ExecutorErrorCodeV0, message: impl Into<String>) -> Self {
         Self::Executor(ExecutorFailure::new(code, message))
     }
