@@ -34,6 +34,7 @@ pub async fn session_record(
         Err(error) => return Err(error),
     };
     let record = json!({
+        "schema": "watershed-session-record-v1",
         "host": host,
         "harness": "pi",
         "project": project.display().to_string(),

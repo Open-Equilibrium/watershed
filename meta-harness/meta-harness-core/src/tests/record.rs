@@ -43,6 +43,7 @@ fn a_record_lists_each_turn_with_its_checkpoints_and_changed_files() {
     assert_eq!(
         record,
         json!({
+            "schema": "watershed-session-record-v1",
             "host": "test-host",
             "harness": "pi",
             "project": repo.path().display().to_string(),
