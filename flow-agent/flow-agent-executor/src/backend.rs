@@ -45,7 +45,7 @@ impl BackendError {
 
     pub(crate) fn setup(message: impl Into<String>) -> Self {
         Self {
-            code: ExecutorErrorCodeV0::SandboxSetupFailed,
+            code: ExecutorErrorCodeV0::FlowOwnedWriteProtectionSetupFailed,
             message: message.into(),
             definitive: true,
         }
@@ -78,7 +78,7 @@ pub(crate) fn probe() -> ProbeState {
         Ok(backend_version) => ProbeState {
             backend_version,
             ready: true,
-            features: vec![proto::EXECUTOR_FEATURE_SELF_PROTECTION_V0.to_owned()],
+            features: vec![proto::EXECUTOR_FEATURE_FLOW_OWNED_WRITE_PROTECTION_V0.to_owned()],
             readiness_error: None,
         },
         Err(error) => ProbeState {

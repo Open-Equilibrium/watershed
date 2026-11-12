@@ -146,7 +146,7 @@ impl ProductiveToolExecutor for FakeToolExecutor {
         }
         if matches!(self.fault, FakeToolExecutionFault::StartedExecutorError) {
             return Ok(ExecutorDispatchOutcome::Error(
-                proto::ExecutorErrorCodeV0::SandboxSetupFailed,
+                proto::ExecutorErrorCodeV0::FlowOwnedWriteProtectionSetupFailed,
             ));
         }
         Ok(ExecutorDispatchOutcome::Completed(Box::new(

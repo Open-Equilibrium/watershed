@@ -115,7 +115,7 @@ pub(crate) fn test_enforcement_receipt(
         backend_version: "test".to_owned(),
         executor: proto::EXECUTOR_NAME_V0.to_owned(),
         executor_version: "test".to_owned(),
-        self_protection_active: true,
+        flow_owned_write_protection_active: true,
         platform: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
     }
 }

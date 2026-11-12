@@ -45,7 +45,7 @@ struct Config {
 struct ChildMeasurement {
     schema: String,
     executor_elapsed_ns: u64,
-    self_protection_active: bool,
+    flow_owned_write_protection_active: bool,
 }
 
 impl ChildMeasurement {
@@ -53,7 +53,7 @@ impl ChildMeasurement {
         if self.schema != MEASUREMENT_CHILD_SCHEMA {
             return Err(io::Error::other("fresh measurement child schema did not match").into());
         }
-        if !self.self_protection_active {
+        if !self.flow_owned_write_protection_active {
             return Err(io::Error::other(
                 "fresh measurement child did not confirm active Flow-owned write protection",
             )
@@ -67,12 +67,12 @@ fn measure_once() -> Result<ChildMeasurement, DynError> {
     let workspace = TempRoot::create("flow-m12-startup")?;
     let M12ExecutorStartupMeasurement {
         executor_elapsed,
-        self_protection_active,
+        flow_owned_write_protection_active,
     } = run_m12_executor_startup(workspace.path()).map_err(io::Error::other)?;
     Ok(ChildMeasurement {
         schema: MEASUREMENT_CHILD_SCHEMA.to_owned(),
         executor_elapsed_ns: duration_ns(executor_elapsed),
-        self_protection_active,
+        flow_owned_write_protection_active,
     })
 }
 
@@ -230,7 +230,7 @@ mod tests {
         serde_json::from_value(serde_json::json!({
             "schema": MEASUREMENT_CHILD_SCHEMA,
             "executor_elapsed_ns": elapsed_ns,
-            "self_protection_active": true,
+            "flow_owned_write_protection_active": true,
         }))
         .expect(
             "child evidence binds the elapsed observation to active Flow-owned write protection",
@@ -326,13 +326,13 @@ mod tests {
                 all(target_os = "macos", target_arch = "aarch64")
             ))
         );
-        assert_eq!(metadata["self_protection_required"], true);
+        assert_eq!(metadata["flow_owned_write_protection_required"], true);
         let sample = records
             .iter()
             .find(|record| record["kind"] == "sample")
             .unwrap();
         assert_eq!(sample["executor_elapsed_ns"], 1);
-        assert_eq!(sample["self_protection_active"], true);
+        assert_eq!(sample["flow_owned_write_protection_active"], true);
         let aggregate = records
             .iter()
             .find(|record| record["kind"] == "aggregate")
@@ -344,7 +344,10 @@ mod tests {
         assert_eq!(aggregate["inputs"]["tool"], "/bin/echo");
         assert_eq!(aggregate["inputs"]["tool_arguments"], Value::Array(vec![]));
         assert_eq!(aggregate["inputs"]["tool_environment"], "empty");
-        assert_eq!(aggregate["inputs"]["self_protection_required"], true);
+        assert_eq!(
+            aggregate["inputs"]["flow_owned_write_protection_required"],
+            true
+        );
         assert_eq!(aggregate["inputs"]["tool_executions_per_child"], 1);
     }
 
@@ -359,7 +362,7 @@ mod tests {
                         if invalid_schema {
                             value["schema"] = "wrong-schema".into();
                         } else {
-                            value["self_protection_active"] = false.into();
+                            value["flow_owned_write_protection_active"] = false.into();
                         }
                     }
                     calls += 1;
@@ -412,7 +415,7 @@ mod tests {
         missing
             .as_object_mut()
             .unwrap()
-            .remove("self_protection_active");
+            .remove("flow_owned_write_protection_active");
         assert!(serde_json::from_value::<ChildMeasurement>(missing).is_err());
         for (field, value) in [
             ("max_concurrent_processes_and_threads", serde_json::json!(8)),

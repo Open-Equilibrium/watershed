@@ -111,7 +111,7 @@ pub(super) fn execute(prepared: PreparedExecution) -> Result<ExecutorResponseV0,
             backend_version,
             executor: proto::EXECUTOR_NAME_V0.to_owned(),
             executor_version: env!("CARGO_PKG_VERSION").to_owned(),
-            self_protection_active: true,
+            flow_owned_write_protection_active: true,
             platform: super::PLATFORM.to_owned(),
         },
     })

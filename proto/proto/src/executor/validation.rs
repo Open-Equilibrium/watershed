@@ -178,7 +178,7 @@ pub(super) fn validate_response(
             validate_tool_result(tool_result)?;
         }
         ExecutorResponseV0::Error { code, message, .. } => {
-            if *code != ExecutorErrorCodeV0::SandboxSetupFailed {
+            if *code != ExecutorErrorCodeV0::FlowOwnedWriteProtectionSetupFailed {
                 return Err(ExecutorProtocolError::new(
                     "Executor terminal error code is invalid",
                 ));
@@ -237,7 +237,7 @@ pub(super) fn validate_receipt(
             "Executor applied the wrong policy digest",
         ));
     }
-    if !receipt.self_protection_active {
+    if !receipt.flow_owned_write_protection_active {
         return Err(ExecutorProtocolError::new(
             "Executor did not confirm Flow-owned write protection",
         ));

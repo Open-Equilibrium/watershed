@@ -597,7 +597,7 @@ fn productive_recovery_rejects_tampered_tool_bindings_before_redispatch() {
         ),
         (
             "inactive-flow-owned-write-protection",
-            |output| output["enforcement"]["self_protection_active"] = false.into(),
+            |output| output["enforcement"]["flow_owned_write_protection_active"] = false.into(),
             "enforcement receipt does not match",
         ),
     ];

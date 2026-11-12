@@ -472,7 +472,7 @@ fn productive_session_uses_the_selected_executor_and_persists_its_receipt() {
     );
     assert_eq!(durable_output["enforcement"]["platform"], EXPECTED_PLATFORM);
     assert_eq!(
-        durable_output["enforcement"]["self_protection_active"],
+        durable_output["enforcement"]["flow_owned_write_protection_active"],
         true
     );
     let persisted_receipt: proto::EnforcementReceiptV0 =

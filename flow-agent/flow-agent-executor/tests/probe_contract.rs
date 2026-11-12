@@ -1,6 +1,6 @@
 use proto::{
-    EXECUTOR_FEATURE_SELF_PROTECTION_V0, EXECUTOR_NAME_V0, EXECUTOR_PROTOCOL_VERSION_V0,
-    parse_executor_probe_v0,
+    EXECUTOR_FEATURE_FLOW_OWNED_WRITE_PROTECTION_V0, EXECUTOR_NAME_V0,
+    EXECUTOR_PROTOCOL_VERSION_V0, parse_executor_probe_v0,
 };
 use std::process::Command;
 
@@ -29,7 +29,7 @@ fn sibling_probe_uses_the_canonical_protocol_identity() {
     assert_eq!(
         probe.supported_policy_features,
         if probe.ready {
-            vec![EXECUTOR_FEATURE_SELF_PROTECTION_V0.to_owned()]
+            vec![EXECUTOR_FEATURE_FLOW_OWNED_WRITE_PROTECTION_V0.to_owned()]
         } else {
             Vec::new()
         }

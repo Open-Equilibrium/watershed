@@ -315,7 +315,7 @@ impl Running {
             panic!("native execution must provide a definitive result: {response:?}");
         };
         proto::validate_enforcement_receipt_v0(&enforcement, &request.policy_digest).unwrap();
-        assert!(enforcement.self_protection_active);
+        assert!(enforcement.flow_owned_write_protection_active);
         tool_result
     }
 }

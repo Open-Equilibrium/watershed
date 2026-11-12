@@ -197,7 +197,7 @@ fn native_executor_protects_own_files_and_leaves_project_work_available() {
             || terminal["tool_result"]["status"] != "completed"
             || terminal["tool_result"]["exit_code"] != 0
             || terminal["tool_result"]["stdout_base64"] != "Y29tcGxldGU="
-            || terminal["enforcement"]["self_protection_active"] != true
+            || terminal["enforcement"]["flow_owned_write_protection_active"] != true
             || terminal["enforcement"]["applied_policy_digest"] != digest
         {
             return Err(format!(

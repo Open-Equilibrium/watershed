@@ -264,7 +264,7 @@ fn validate_probe(
     if !probe
         .supported_policy_features
         .iter()
-        .any(|feature| feature == proto::EXECUTOR_FEATURE_SELF_PROTECTION_V0)
+        .any(|feature| feature == proto::EXECUTOR_FEATURE_FLOW_OWNED_WRITE_PROTECTION_V0)
     {
         return Err(executor_unavailable(
             "Executor does not support mandatory Flow-owned write protection",
@@ -487,7 +487,9 @@ mod diagnostic_tests {
             protocol_versions: vec![proto::EXECUTOR_PROTOCOL_VERSION_V0.to_owned()],
             ready: true,
             schema: proto::EXECUTOR_PROBE_SCHEMA_V0.to_owned(),
-            supported_policy_features: vec![proto::EXECUTOR_FEATURE_SELF_PROTECTION_V0.to_owned()],
+            supported_policy_features: vec![
+                proto::EXECUTOR_FEATURE_FLOW_OWNED_WRITE_PROTECTION_V0.to_owned(),
+            ],
         }
     }
 

@@ -723,7 +723,7 @@ class CiWorkflowContractTest(unittest.TestCase):
                                 "enforcement": {
                                     "executor": "flow-executor", "executor_version": "test",
                                     "platform": platform, "backend": backend, "backend_version": "test",
-                                    "self_protection_active": active, "applied_policy_digest": "b" * 64,
+                                    "flow_owned_write_protection_active": active, "applied_policy_digest": "b" * 64,
                                 },
                             },
                         })

@@ -198,7 +198,7 @@ fn productive_policy_rejection_precedes_tool_lifecycle_and_replays_without_start
         ),
         (
             FakeToolExecutionFault::StartedExecutorError,
-            "sandbox_setup_failed",
+            "flow_owned_write_protection_setup_failed",
             "started",
             true,
         ),

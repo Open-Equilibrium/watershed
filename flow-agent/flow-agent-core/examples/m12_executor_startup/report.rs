@@ -18,7 +18,7 @@ struct Metadata {
     warmup_samples: usize,
     measured_samples: usize,
     tool_executions_per_fresh_child: usize,
-    self_protection_required: bool,
+    flow_owned_write_protection_required: bool,
     environment: Environment,
 }
 
@@ -29,7 +29,7 @@ struct RawSample {
     benchmark: &'static str,
     sample: usize,
     executor_elapsed_ns: u64,
-    self_protection_active: bool,
+    flow_owned_write_protection_active: bool,
 }
 
 #[derive(Serialize)]
@@ -69,7 +69,7 @@ fn inputs() -> Value {
         "tool": "/bin/echo",
         "tool_arguments": [],
         "tool_environment": "empty",
-        "self_protection_required": true,
+        "flow_owned_write_protection_required": true,
         "executor_interval": [
             "selected Executor preparation and readiness",
             "canonical invocation and Flow-owned write protection preparation",
@@ -122,7 +122,7 @@ pub(super) fn write_report_with_measurement(
             warmup_samples: config.warmups,
             measured_samples: config.samples,
             tool_executions_per_fresh_child: 1,
-            self_protection_required: true,
+            flow_owned_write_protection_required: true,
             environment: current_environment(),
         },
     )?;
@@ -169,7 +169,7 @@ pub(super) fn write_report_with_measurement(
                 benchmark: BENCHMARK,
                 sample,
                 executor_elapsed_ns: measurement.executor_elapsed_ns,
-                self_protection_active: measurement.self_protection_active,
+                flow_owned_write_protection_active: measurement.flow_owned_write_protection_active,
             },
         )?;
         executor_samples.push(measurement.executor_elapsed_ns);

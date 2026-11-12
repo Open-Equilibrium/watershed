@@ -497,7 +497,7 @@ mod tests {
                 executor: proto::EXECUTOR_NAME_V0.to_owned(),
                 executor_version: "test".to_owned(),
                 platform: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
-                self_protection_active: true,
+                flow_owned_write_protection_active: true,
             },
             request_id: request.request_id.clone(),
             schema: proto::EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
@@ -759,7 +759,9 @@ mod tests {
             protocol_versions: vec![proto::EXECUTOR_PROTOCOL_VERSION_V0.to_owned()],
             ready: true,
             schema: proto::EXECUTOR_PROBE_SCHEMA_V0.to_owned(),
-            supported_policy_features: vec![proto::EXECUTOR_FEATURE_SELF_PROTECTION_V0.to_owned()],
+            supported_policy_features: vec![
+                proto::EXECUTOR_FEATURE_FLOW_OWNED_WRITE_PROTECTION_V0.to_owned(),
+            ],
         };
         let receipt = proto::EnforcementReceiptV0 {
             applied_policy_digest: "0".repeat(64),
@@ -768,7 +770,7 @@ mod tests {
             executor: probe.executor.clone(),
             executor_version: probe.executor_version.clone(),
             platform: probe.platform.clone(),
-            self_protection_active: true,
+            flow_owned_write_protection_active: true,
         };
         assert!(validate_receipt_identity(&receipt, &probe).is_ok());
         for field in [

@@ -161,7 +161,7 @@ fn waiting_executor(
                 executor: proto::EXECUTOR_NAME_V0.to_owned(),
                 executor_version: "test".to_owned(),
                 platform: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
-                self_protection_active: true,
+                flow_owned_write_protection_active: true,
             },
             request_id: request.request_id.clone(),
             schema: proto::EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),

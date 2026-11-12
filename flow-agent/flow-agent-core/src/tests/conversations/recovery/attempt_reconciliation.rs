@@ -249,7 +249,7 @@ fn tool_reconciliation_rejects_invalid_outer_evidence_without_mutation() {
         proto::canonical_json(&wrong_policy).expect("wrong policy evidence canonicalizes");
     let mut inactive_protection: serde_json::Value =
         serde_json::from_str(&valid).expect("valid reconciliation parses");
-    inactive_protection["enforcement"]["self_protection_active"] = false.into();
+    inactive_protection["enforcement"]["flow_owned_write_protection_active"] = false.into();
     let inactive_protection =
         proto::canonical_json(&inactive_protection).expect("inactive protection canonicalizes");
     let mut missing_protection: serde_json::Value =
@@ -257,7 +257,7 @@ fn tool_reconciliation_rejects_invalid_outer_evidence_without_mutation() {
     missing_protection["enforcement"]
         .as_object_mut()
         .expect("receipt is an object")
-        .remove("self_protection_active");
+        .remove("flow_owned_write_protection_active");
     let missing_protection =
         proto::canonical_json(&missing_protection).expect("missing protection canonicalizes");
 
@@ -303,7 +303,7 @@ fn tool_reconciliation_rejects_invalid_outer_evidence_without_mutation() {
         (
             "missing-flow-owned-write-protection",
             missing_protection,
-            "missing field `self_protection_active`",
+            "missing field `flow_owned_write_protection_active`",
         ),
         (
             "invalid-flow-value",

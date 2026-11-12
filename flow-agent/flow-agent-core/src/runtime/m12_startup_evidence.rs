@@ -48,7 +48,7 @@ pub struct M12ExecutorStartupMeasurement {
     /// Preparation and readiness through validated Tool result and enforcement receipt.
     pub executor_elapsed: Duration,
     /// Mandatory Flow-owned write protection confirmed by the validated Executor receipt.
-    pub self_protection_active: bool,
+    pub flow_owned_write_protection_active: bool,
 }
 
 fn is_prefixed_lower_sha256(value: &str) -> bool {
@@ -119,7 +119,9 @@ pub fn run_m12_executor_startup(workspace: &Path) -> Result<M12ExecutorStartupMe
 
     Ok(M12ExecutorStartupMeasurement {
         executor_elapsed,
-        self_protection_active: execution.enforcement.self_protection_active,
+        flow_owned_write_protection_active: execution
+            .enforcement
+            .flow_owned_write_protection_active,
     })
 }
 

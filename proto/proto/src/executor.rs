@@ -28,7 +28,7 @@ pub const EXECUTOR_NAME_V0: &str = "flow-executor";
 /// Productive executable used for POSIX own-script Tools.
 pub const EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0: &str = "/bin/sh";
 /// Required feature for write protection of this Flow Agent installation's objects.
-pub const EXECUTOR_FEATURE_SELF_PROTECTION_V0: &str = "flow-owned-write-protection";
+pub const EXECUTOR_FEATURE_FLOW_OWNED_WRITE_PROTECTION_V0: &str = "flow-owned-write-protection";
 /// Maximum canonical request document bytes, including its final line feed.
 pub const MAX_EXECUTOR_REQUEST_BYTES_V0: usize = 1024 * 1024;
 /// Maximum canonical bytes in either preflight or start control record.

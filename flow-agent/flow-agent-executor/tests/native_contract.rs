@@ -116,7 +116,7 @@ fn a_tool_that_cannot_launch_is_a_setup_failure_not_an_uncertain_attempt() {
         matches!(
             response,
             ExecutorResponseV0::Error {
-                code: proto::ExecutorErrorCodeV0::SandboxSetupFailed,
+                code: proto::ExecutorErrorCodeV0::FlowOwnedWriteProtectionSetupFailed,
                 ..
             }
         ),

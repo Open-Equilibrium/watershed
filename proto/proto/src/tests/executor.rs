@@ -1,11 +1,11 @@
 use crate::{
-    EXECUTOR_FEATURE_SELF_PROTECTION_V0, EXECUTOR_PREFLIGHT_SCHEMA_V0, EXECUTOR_PROBE_SCHEMA_V0,
-    EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0, EXECUTOR_REQUEST_SCHEMA_V0, EXECUTOR_RESPONSE_SCHEMA_V0,
-    EXECUTOR_START_SCHEMA_V0, EnforcementReceiptV0, ExecutorErrorCodeV0, ExecutorLimitsV0,
-    ExecutorObjectKindV0, ExecutorPreflightV0, ExecutorProbeV0, ExecutorProtectedObjectV0,
-    ExecutorRequestV0, ExecutorResolvedPolicyV0, ExecutorResponseV0, ExecutorStartV0,
-    ExecutorToolClassificationV0, ExecutorToolResultV0, ExecutorToolStatusV0,
-    MAX_EXECUTOR_CONTROL_BYTES_V0, MAX_EXECUTOR_EXEC_VECTOR_BYTES_V0,
+    EXECUTOR_FEATURE_FLOW_OWNED_WRITE_PROTECTION_V0, EXECUTOR_PREFLIGHT_SCHEMA_V0,
+    EXECUTOR_PROBE_SCHEMA_V0, EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0, EXECUTOR_REQUEST_SCHEMA_V0,
+    EXECUTOR_RESPONSE_SCHEMA_V0, EXECUTOR_START_SCHEMA_V0, EnforcementReceiptV0,
+    ExecutorErrorCodeV0, ExecutorLimitsV0, ExecutorObjectKindV0, ExecutorPreflightV0,
+    ExecutorProbeV0, ExecutorProtectedObjectV0, ExecutorRequestV0, ExecutorResolvedPolicyV0,
+    ExecutorResponseV0, ExecutorStartV0, ExecutorToolClassificationV0, ExecutorToolResultV0,
+    ExecutorToolStatusV0, MAX_EXECUTOR_CONTROL_BYTES_V0, MAX_EXECUTOR_EXEC_VECTOR_BYTES_V0,
     MAX_EXECUTOR_EXEC_VECTOR_ENTRIES_V0, MAX_EXECUTOR_PROBE_BYTES_V0,
     MAX_EXECUTOR_PROTECTED_OBJECTS_V0, MAX_EXECUTOR_REQUEST_BYTES_V0,
     MAX_EXECUTOR_RESPONSE_BYTES_V0, MAX_EXECUTOR_TOOL_STREAM_BYTES_V0,
@@ -95,7 +95,7 @@ fn executor_request_binds_host_invocation_and_own_file_protection_once() {
 }
 
 #[test]
-fn executor_receipt_wire_attests_only_bound_self_protection() {
+fn executor_receipt_wire_attests_only_bound_flow_owned_write_protection() {
     let document = serde_json::json!({
         "applied_policy_digest": "a".repeat(64),
         "backend": "native-protection",
@@ -103,7 +103,7 @@ fn executor_receipt_wire_attests_only_bound_self_protection() {
         "executor": "flow-executor",
         "executor_version": "0.1.0",
         "platform": "test-platform",
-        "self_protection_active": true
+        "flow_owned_write_protection_active": true
     });
     let receipt: EnforcementReceiptV0 = serde_json::from_value(document.clone())
         .expect("receipt requires only the bound Flow-owned write protection evidence");
@@ -127,7 +127,7 @@ fn executor_receipt_wire_attests_only_bound_self_protection() {
     missing
         .as_object_mut()
         .unwrap()
-        .remove("self_protection_active");
+        .remove("flow_owned_write_protection_active");
     assert!(serde_json::from_value::<EnforcementReceiptV0>(missing).is_err());
 }
 
@@ -216,7 +216,7 @@ fn probe() -> ExecutorProbeV0 {
         protocol_versions: vec!["0".to_owned()],
         ready: true,
         schema: EXECUTOR_PROBE_SCHEMA_V0.to_owned(),
-        supported_policy_features: vec![EXECUTOR_FEATURE_SELF_PROTECTION_V0.to_owned()],
+        supported_policy_features: vec![EXECUTOR_FEATURE_FLOW_OWNED_WRITE_PROTECTION_V0.to_owned()],
     }
 }
 
@@ -227,7 +227,7 @@ fn receipt() -> EnforcementReceiptV0 {
         backend_version: "1".to_owned(),
         executor: "flow-executor".to_owned(),
         executor_version: "0.1.0".to_owned(),
-        self_protection_active: true,
+        flow_owned_write_protection_active: true,
         platform: "test-platform".to_owned(),
     }
 }
@@ -306,7 +306,7 @@ fn executor_generated_records_bind_normalized_ids_to_the_original_request() {
         (
             "response",
             canonical_executor_response_v0(&ExecutorResponseV0::Error {
-                code: ExecutorErrorCodeV0::SandboxSetupFailed,
+                code: ExecutorErrorCodeV0::FlowOwnedWriteProtectionSetupFailed,
                 message: "setup failed".to_owned(),
                 request_id,
                 schema: EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
@@ -330,7 +330,7 @@ fn executor_generated_diagnostics_enforce_the_normalized_character_bound() {
             schema: EXECUTOR_PREFLIGHT_SCHEMA_V0.to_owned(),
         };
         let response = ExecutorResponseV0::Error {
-            code: ExecutorErrorCodeV0::SandboxSetupFailed,
+            code: ExecutorErrorCodeV0::FlowOwnedWriteProtectionSetupFailed,
             message: "e\u{301}".repeat(count),
             request_id: "request-1".to_owned(),
             schema: EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
@@ -432,7 +432,7 @@ fn executor_response_is_closed_and_bound_to_request_and_policy() {
     let ExecutorResponseV0::Completed { enforcement, .. } = &mut inactive else {
         unreachable!("fixture is a completed response");
     };
-    enforcement.self_protection_active = false;
+    enforcement.flow_owned_write_protection_active = false;
     let error =
         parse_executor_response_v0(&canonical_wire(&inactive), "run-1-tool-1", &"a".repeat(64))
             .unwrap_err();
@@ -480,7 +480,7 @@ fn executor_wire_framing_matrix_is_platform_neutral() {
         "outcome": "error",
         "schema": EXECUTOR_RESPONSE_SCHEMA_V0,
         "request_id": "request-1",
-        "code": ExecutorErrorCodeV0::SandboxSetupFailed,
+        "code": ExecutorErrorCodeV0::FlowOwnedWriteProtectionSetupFailed,
         "message": "unsupported capability"
     });
     let canonical = crate::canonical_json(&response).unwrap();
@@ -1080,13 +1080,13 @@ fn executor_request_rejects_legacy_and_duplicate_security_fields() {
 }
 
 #[test]
-fn executor_receipt_proves_requested_policy_and_active_self_protection() {
+fn executor_receipt_proves_requested_policy_and_active_flow_owned_write_protection() {
     let valid = receipt();
     validate_enforcement_receipt_v0(&valid, &"a".repeat(64)).expect("matching active receipt");
 
     let mut cases = Vec::new();
     let mut candidate = valid.clone();
-    candidate.self_protection_active = false;
+    candidate.flow_owned_write_protection_active = false;
     cases.push(("inactive Flow-owned write protection", candidate));
     let mut candidate = valid.clone();
     candidate.applied_policy_digest = "b".repeat(64);
@@ -1109,7 +1109,7 @@ fn executor_receipt_proves_requested_policy_and_active_self_protection() {
 #[test]
 fn executor_setup_error_is_terminal_without_a_policy_receipt() {
     let response = ExecutorResponseV0::Error {
-        code: ExecutorErrorCodeV0::SandboxSetupFailed,
+        code: ExecutorErrorCodeV0::FlowOwnedWriteProtectionSetupFailed,
         message: "sandbox setup failed".to_owned(),
         request_id: "request-1".to_owned(),
         schema: EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
@@ -1181,7 +1181,7 @@ fn executor_paths_are_canonical_object_identities() {
 #[test]
 fn executor_probe_round_trips_readiness_and_features() {
     assert_eq!(
-        EXECUTOR_FEATURE_SELF_PROTECTION_V0,
+        EXECUTOR_FEATURE_FLOW_OWNED_WRITE_PROTECTION_V0,
         "flow-owned-write-protection"
     );
     for ready in [false, true] {

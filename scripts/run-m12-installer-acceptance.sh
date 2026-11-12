@@ -230,8 +230,8 @@ assert durable["request_hash"].startswith("sha256:"), durable
 receipt = durable["enforcement"]
 assert receipt["executor"] == "flow-executor", receipt
 assert set(receipt) == {"applied_policy_digest", "backend", "backend_version",
-                        "executor", "executor_version", "self_protection_active", "platform"}, receipt
-assert receipt["self_protection_active"] is True, receipt
+                        "executor", "executor_version", "flow_owned_write_protection_active", "platform"}, receipt
+assert receipt["flow_owned_write_protection_active"] is True, receipt
 assert receipt["platform"] == sys.argv[2], receipt
 assert receipt["backend"] == sys.argv[3], receipt
 assert re.fullmatch(r"[0-9a-f]{64}", receipt["applied_policy_digest"]), receipt

@@ -133,7 +133,7 @@ pub struct EnforcementReceiptV0 {
     /// Executor version.
     pub executor_version: String,
     /// Whether the requested Flow Agent objects were protected from Tool writes.
-    pub self_protection_active: bool,
+    pub flow_owned_write_protection_active: bool,
     /// Exact supported platform tuple.
     pub platform: String,
 }
@@ -155,7 +155,7 @@ pub enum ExecutorErrorCodeV0 {
     #[serde(rename = "executor_policy_unsupported")]
     PolicyUnsupported,
     /// Flow-owned write protection setup failed before a proven Tool launch.
-    SandboxSetupFailed,
+    FlowOwnedWriteProtectionSetupFailed,
 }
 
 /// Terminal status reported for the Tool root process and bounded output collection.
