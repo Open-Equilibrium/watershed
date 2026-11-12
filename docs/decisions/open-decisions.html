@@ -111,7 +111,7 @@
           <tr><td>Agents steering agents (MCP tools), handoff between harnesses</td><td>Planned (ADR-0231, ADR-0253 copy T3)</td><td>Shipped</td></tr>
           <tr><td>Scheduled tasks</td><td>Planned</td><td>Shipped (interval, time, webhook)</td></tr>
           <tr><td>Linked hosts, mobile and web access</td><td>Planned; Liquid ships native apps only (ADR-0228)</td><td>Linked environments in beta; web, mobile and desktop clients; internet reach through T3's hosted relay</td></tr>
-          <tr><td>Durability: attach, crash resume, continue on another host</td><td>Planned (ADR-0229)</td><td>Clients attach to the server; the work of a lost agent process is retired, not resumed; a thread never leaves its machine</td></tr>
+          <tr><td>Durability: attach, crash resume, continue on another host</td><td>Planned (ADR-0229)</td><td>Clients attach to the server; after a crash, restart or update it resumes the harness's own session with a prompt to continue that asks the agent to confirm a cut-off action did not take effect before repeating it (at most three times in a row), and it continues after a usage limit resets; a thread never leaves its machine</td></tr>
           <tr><td>Central harness configurations with approval and audit</td><td>Planned (ADR-0225, ADR-0227)</td><td>Per machine only; admin locks, no proposal or audit flow</td></tr>
           <tr><td>Git: checkpoints, revert, commit, PRs, worktrees</td><td>Shipped, except creating worktrees</td><td>Shipped, more forges; but models write commit messages, which the V-Spec rules out</td></tr>
           <tr><td>Runtime</td><td>Rust, about 29k lines with tests</td><td>TypeScript on Node 26 with Effect, about 570k lines; clients speak Effect RPC with JSON over WebSocket</td></tr>
