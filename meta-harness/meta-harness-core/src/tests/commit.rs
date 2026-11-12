@@ -860,6 +860,8 @@ fn a_turn_without_its_start_leaves_only_its_stretch_unattributed() {
                 prompt_entry: None,
                 prompt: String::new(),
                 started_ms: None,
+                stop_reason: None,
+                stop_error: None,
                 ended_ms: None,
                 ended: true,
                 failure: None,
