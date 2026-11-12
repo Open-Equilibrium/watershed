@@ -12,9 +12,10 @@ use crate::runtime::{
         ConversationEntryType, ProductiveRecoveryWriter, StatusTransactionCrashPoint,
         append_conversation_entry, append_productive_run_checkpoint, conversation_status_page,
         create_conversation_run, create_unpublished_productive_conversation_run,
-        read_conversation_history, reclaim_unpublished_productive_run,
-        reserve_conversation_continuation, reserve_conversation_run_recovery,
-        reserve_new_conversation_run, set_status_transaction_crash_point,
+        read_conversation_continuation_definition, read_conversation_history,
+        reclaim_unpublished_productive_run, reserve_conversation_continuation,
+        reserve_conversation_run_recovery, reserve_new_conversation_run,
+        set_status_transaction_crash_point,
     },
     session_authority::set_session_ownership_release_failure_for_test,
     types::RuntimeError,
@@ -88,6 +89,66 @@ fn active_continuation_serializes_run_publication() {
     assert_eq!(second.parent_entry_id(), Some("continued"));
     assert_eq!(second.run_session_id(), "review-3");
     second.release().expect("second continuation releases");
+}
+
+#[test]
+fn one_id_continuation_rolls_back_a_cut_history_append_and_continues_from_its_predecessor() {
+    let workspace = empty_workspace("conversation-continuation-cut-history");
+    create_conversation_run(
+        &workspace,
+        "review",
+        "review",
+        "review-flow",
+        REGISTRY_HASH,
+        FLOW_HASH,
+    )
+    .expect("root Run is created");
+    write_terminal_run(&workspace, "review", "review");
+    write_terminal_recovery_fixture(&workspace, "review", "review", "root");
+    create_conversation_run(
+        &workspace,
+        "review",
+        "review-2",
+        "review-flow",
+        REGISTRY_HASH,
+        FLOW_HASH,
+    )
+    .expect("continued Run is created");
+    write_terminal_run(&workspace, "review", "review-2");
+    let mut continued = entry("continued", Some("root"), "review-2", 2);
+    continued.recovery_snapshot_hash =
+        write_terminal_recovery_snapshot_with_parent_and_prior_event_count(
+            &workspace,
+            "review",
+            "review-2",
+            Some("root"),
+            2,
+        );
+    set_status_transaction_crash_point(StatusTransactionCrashPoint::CanonicalMutationApplied);
+    append_conversation_entry(&workspace, "review", &continued)
+        .expect_err("the crash point leaves the history append recorded");
+    let history =
+        crate::tests::helpers::workspace_session_dir(&workspace).join("review/history.jsonl");
+    let len = fs::metadata(&history).expect("history reads").len();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&history)
+        .expect("history opens")
+        .set_len(len - 1)
+        .expect("the final line feed is cut");
+
+    let (predecessor_run, _) =
+        read_conversation_continuation_definition(&workspace, "review", None)
+            .expect("one-id Resume rolls back the cut entry before reading its predecessor");
+    assert_eq!(predecessor_run, "review");
+    let reservation = reserve_conversation_continuation(&workspace, "review", None)
+        .expect("one-id Resume reserves after the rollback");
+    assert_eq!(
+        reservation.parent_entry_id(),
+        Some("root"),
+        "the rolled-back entry is not a predecessor"
+    );
+    reservation.release().expect("continuation releases");
 }
 
 #[test]

@@ -12,6 +12,7 @@ use super::super::{
     prefix_reader::{RecoveryPrefixReader, canonical_jsonl_record},
     recovery_record::ProductiveRecoveryRecord,
     run_log::inspect_run_attempts,
+    status::{recover_status_transaction, status_recovery_is_required},
     storage::{
         ensure_runtime_roots, existing_anchored_conversation, existing_anchored_run, required_child,
     },
@@ -23,7 +24,7 @@ use crate::runtime::{
     session_authority::{SessionOwnershipLease, conversation_ownership_key, run_ownership_key},
     session_candidates::{MAX_UNIQUE_SESSION_CANDIDATES, suffixed_session_id},
     session_definition::SessionLogMetadata,
-    stage_results::reconcile_operation_and_cleanup,
+    stage_results::{reconcile_controlled_stages, reconcile_operation_and_cleanup},
     types::{
         CONTEXT_MANIFEST_STREAM_LIMITS, EVENT_STREAM_LIMITS, MAX_CANONICAL_EVENT_BYTES,
         MAX_SESSION_SEGMENT_BYTES, RuntimeError,
@@ -217,6 +218,9 @@ pub(crate) fn reserve_conversation_continuation(
         .join(RUN_SESSION_LOCK_LEAF);
     let conversation_key = conversation_ownership_key(conversation_id);
     let conversation_lease = SessionOwnershipLease::acquire(workspace, &conversation_key, &marker)?;
+    if let Err(error) = recover_status_transaction(&conversation, conversation_id) {
+        return reconcile_operation_and_cleanup(Err(error), conversation_lease.release());
+    }
 
     let operation = with_conversation_history_index(
         workspace,
@@ -329,6 +333,19 @@ pub(crate) fn reserve_conversation_continuation(
     }
 }
 
+/// Recovers a pending status transaction under the Conversation lease before a read that precedes
+/// the reservations, so that the torn append the transaction records does not refuse the read.
+fn recover_status_before_read(workspace: &Path, conversation_id: &str) -> Result<(), RuntimeError> {
+    let conversation = existing_anchored_conversation(workspace, conversation_id)?;
+    if !status_recovery_is_required(&conversation)? {
+        return Ok(());
+    }
+    let key = conversation_ownership_key(conversation_id);
+    let lease = SessionOwnershipLease::acquire(workspace, &key, &conversation.path)?;
+    let operation = recover_status_transaction(&conversation, conversation_id);
+    reconcile_controlled_stages(operation, Ok(()), lease.release())
+}
+
 pub(crate) fn read_conversation_continuation_definition(
     workspace: &Path,
     conversation_id: &str,
@@ -338,6 +355,7 @@ pub(crate) fn read_conversation_continuation_definition(
     if let Some(entry_id) = from_entry_id {
         validate_id(entry_id, "conversation entry")?;
     }
+    recover_status_before_read(workspace, conversation_id)?;
     with_conversation_history_index(
         workspace,
         conversation_id,
@@ -372,6 +390,7 @@ pub(crate) fn read_conversation_recovery_definition(
 ) -> Result<SessionLogMetadata, RuntimeError> {
     validate_id(conversation_id, "conversation")?;
     validate_id(run_session_id, "run session")?;
+    recover_status_before_read(workspace, conversation_id)?;
     conversation_run_definition(workspace, conversation_id, run_session_id)
 }
 
@@ -396,6 +415,8 @@ pub(crate) fn reserve_conversation_run_recovery(
     )?;
 
     let operation = (|| {
+        let conversation = existing_anchored_conversation(workspace, conversation_id)?;
+        recover_status_transaction(&conversation, conversation_id)?;
         let terminal = with_conversation_history_index(
             workspace,
             conversation_id,

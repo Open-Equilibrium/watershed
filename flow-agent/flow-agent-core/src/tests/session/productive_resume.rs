@@ -7,9 +7,10 @@ use crate::{
         },
         conversations::{
             ConversationAttemptLog, ConversationEventWriter, ProductiveRecoveryWriter,
-            append_run_attempt_intent, create_conversation_run_with_model_profile,
-            read_conversation_history, reserve_conversation_run_recovery,
-            set_conversation_file_sync_error_for_path_for_test,
+            StatusTransactionCrashPoint, append_run_attempt_intent,
+            create_conversation_run_with_model_profile, read_conversation_history,
+            reserve_conversation_run_recovery, set_conversation_file_sync_error_for_path_for_test,
+            set_status_transaction_crash_point,
         },
         live_events::live_event_channel,
         productive::{ProductiveExecution, execute_productive_flow_with_recovery},
@@ -36,7 +37,7 @@ use crate::{
     },
 };
 use proto::EventType;
-use std::{collections::BTreeMap, fs, time::Duration};
+use std::{collections::BTreeMap, fs, io::Write as _, path::Path, time::Duration};
 
 struct ProductiveResumeFixture {
     clock: EventClock,
@@ -571,4 +572,111 @@ fn exact_productive_resume_announces_committed_failure_before_returning_error() 
         events.last().expect("terminal event exists").sequence
     );
     assert_eq!(recovery_provider.calls, 0, "provider must not redispatch");
+}
+
+/// Truncates the final byte of a durable file, as a power cut that loses its line feed does.
+fn cut_final_byte(path: &Path) {
+    let len = fs::metadata(path).expect("durable file reads").len();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .expect("durable file opens")
+        .set_len(len - 1)
+        .expect("final byte is cut");
+}
+
+fn conversation_history_path(fixture: &ProductiveResumeFixture) -> std::path::PathBuf {
+    crate::tests::helpers::workspace_session_dir(&fixture.workspace)
+        .join("conversation/history.jsonl")
+}
+
+#[test]
+fn exact_productive_resume_rolls_back_a_cut_run_log_intent_and_issues_its_attempt() {
+    let workspace = workspace_copy("smoke-flow");
+    disable_smoke_echo_tool(&workspace);
+    let fixture = ProductiveResumeFixture::new(workspace);
+    drop(fixture.create_recovery(&ContextHistory::default()));
+    set_status_transaction_crash_point(StatusTransactionCrashPoint::CanonicalMutationApplied);
+    append_run_attempt_intent(
+        &fixture.workspace,
+        "conversation",
+        "run",
+        &RunAttemptIntent {
+            attempt_id: "provider-001".to_owned(),
+            attempt_kind: RunAttemptKind::Provider,
+            expected_enforcement: None,
+            request_hash: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                .to_owned(),
+            tool_id: None,
+            timestamp: "2026-07-30T12:00:00Z".to_owned(),
+        },
+    )
+    .expect_err("the crash point leaves the intent's status transaction recorded");
+    let run_log = crate::tests::helpers::workspace_session_dir(&fixture.workspace)
+        .join("conversation/runs/run/run-log.jsonl");
+    cut_final_byte(&run_log);
+    let mut provider = SessionProvider::default();
+
+    let output = resume_conversation_run_with_provider(
+        &fixture.workspace,
+        "conversation",
+        "run",
+        EmitMode::Human,
+        || Ok(fixture.execution_fixture.credential().clone()),
+        &mut provider,
+    )
+    .expect("exact Resume rolls back the cut intent and resumes the Run");
+
+    assert!(!output.failed);
+    assert_eq!(
+        provider.calls, 1,
+        "the rolled-back attempt never started, so it is issued once"
+    );
+}
+
+#[test]
+fn exact_productive_resume_rolls_back_a_cut_history_append_and_completes_the_run() {
+    let fixture = interrupted_before_terminal_snapshot();
+    set_status_transaction_crash_point(StatusTransactionCrashPoint::CanonicalMutationApplied);
+    resume_exact_run(&fixture).expect_err("the crash point leaves the history append recorded");
+    cut_final_byte(&conversation_history_path(&fixture));
+
+    assert_eq!(
+        resume_exact_run(&fixture).map_err(|error| error.to_string()),
+        Ok(false)
+    );
+    assert_eq!(
+        read_conversation_history(&fixture.workspace, "conversation")
+            .expect("conversation history")
+            .len(),
+        1,
+        "the rolled-back entry is appended again exactly once"
+    );
+}
+
+#[test]
+fn exact_productive_resume_refuses_a_cut_history_tail_without_a_recorded_transaction() {
+    let fixture = interrupted_before_terminal_snapshot();
+    assert_eq!(
+        resume_exact_run(&fixture).map_err(|error| error.to_string()),
+        Ok(false)
+    );
+    let history = conversation_history_path(&fixture);
+    fs::OpenOptions::new()
+        .append(true)
+        .open(&history)
+        .expect("history opens")
+        .write_all(b"{\"entry_id\"")
+        .expect("unrecorded torn tail writes");
+    let before = fs::read(&history).expect("history reads before Resume");
+
+    let error = resume_exact_run(&fixture).expect_err("an unrecorded torn tail fails closed");
+
+    assert_eq!(error.exit_code(), 65);
+    assert!(error.to_string().contains("LF framing"), "{error}");
+    assert_eq!(
+        fs::read(&history).expect("history reads after Resume"),
+        before,
+        "refused bytes are left in place"
+    );
 }
