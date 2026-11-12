@@ -26,7 +26,7 @@ This file owns the integrated platform model. Per-product internals live in the 
 
 Each product works without the layers above it. Together they add normalized sessions, permissioned agent actions, cross-device workspace access and reversible human/agent collaboration.
 
-Flow Agent builds on deterministic orchestration and practical provider/Tool execution. It trusts Tool implementations while requiring native protection of this installation's Flow-owned files; it does not promise containment of arbitrary hostile Tools. The [execution/security architecture](docs/concept/flow-agent-executor-architecture.md) explains configuration authority, manual administration and delegated effects. [PLAN.md](PLAN.md#m12--flow-agent-os-isolation) owns implementation and verification status.
+Flow Agent builds on deterministic orchestration and practical provider/Tool execution. It trusts Tool implementations while requiring Flow-owned write protection of this installation's Flow-owned files; it does not promise containment of arbitrary hostile Tools. The [execution/security architecture](docs/concept/flow-agent-executor-architecture.md) explains configuration authority, manual administration and delegated effects. [PLAN.md](PLAN.md#m12--flow-owned-write-protection) owns implementation and verification status.
 
 Watershed is AGPL/free software: users can inspect, run, self-host, fork and verify its behavior. This is a public-good and community-trust posture, not an open-core monetization model.
 
@@ -58,7 +58,7 @@ flowchart TD
   subgraph FLOW["Flow Agent-owned execution boundary"]
     FA["Flow Agent process on the same host"] <--> PROVIDER["Provider or local model endpoint"]
     FA --> EXECUTOR["Configured Executor"]
-    EXECUTOR --> TOOL["Tool under native Flow-file protection"]
+    EXECUTOR --> TOOL["Tool under Flow-owned write protection"]
   end
 ```
 

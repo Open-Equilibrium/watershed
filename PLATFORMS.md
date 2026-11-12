@@ -2,14 +2,14 @@
 
 Support is a product-and-capability contract, not a workspace-wide compilation claim. Release 1 requires native execution and verification on the targets below; a target in this table is not evidence that its implementation is available today.
 
-Flow Agent's accepted replacement boundary is [trusted Tools with mandatory native self-protection](SECURITY.md#flow-agent-security-contract) (ADR-0166), not general hostile-Tool containment. ADR-0174 limits first-release protection to this installation's required objects, not additional independent Flow homes. The replacement is integrated; [TESTING.md](TESTING.md#native-verification-status) owns native results and remaining acceptance gaps. Implementation alone is not support proof.
+Flow Agent's accepted replacement boundary is [trusted Tools with mandatory Flow-owned write protection](SECURITY.md#flow-agent-security-contract) (ADR-0166), not general hostile-Tool containment. ADR-0174 limits first-release protection to this installation's required objects, not additional independent Flow homes. The replacement is integrated; [TESTING.md](TESTING.md#native-verification-status) owns native results and remaining acceptance gaps. Implementation alone is not support proof.
 
-Linux and macOS share the same [public installation guarantee and maintenance limits](SECURITY.md#native-self-protection-and-its-limits) (ADR-0176). Their different [launch mechanics](PROTOCOL.md#process-and-framing-contract) do not establish stronger Linux protection against unconfined host-authority writers.
+Linux and macOS share the same [public installation guarantee and maintenance limits](SECURITY.md#flow-owned-write-protection-and-its-limits) (ADR-0176). Their different [launch mechanics](PROTOCOL.md#process-and-framing-contract) do not establish stronger Linux protection against unconfined host-authority writers.
 
 | Product / capability | Release 1 native targets | Current implementation |
 |---|---|---|
 | Flow Agent authoring, Fixture execution and provider-only Flows | Linux x86_64; macOS ARM64 | Implemented; productive provider execution is restricted to Ubuntu 24.04 and macOS 27. |
-| Flow Agent Tool execution with mandatory self-protection | Linux x86_64; macOS ARM64 | Linux Bubblewrap/seccomp and Mac Seatbelt replacements integrated; native evidence is linked above. Failed admission/readiness prevents launch without fallback. |
+| Flow Agent Tool execution with mandatory Flow-owned write protection | Linux x86_64; macOS ARM64 | Linux Bubblewrap/seccomp and Mac Seatbelt replacements integrated; native evidence is linked above. Failed admission/readiness prevents launch without fallback. |
 | Meta-Harness CLI, service and host-local agent control | Linux x86_64; macOS ARM64; Windows 11 x86_64 in WSL (ADR-0226) | In development on macOS ARM64: the core embedded in Liquid for its agent surface, not released (ADR-0184). CLI, service, Linux and WSL are not implemented. |
 | Liquid desktop client | Linux x86_64; macOS ARM64; Windows 11 x86_64 and ARM64 | In development on macOS ARM64: the agent surface for one pi session and the local Workspace, not released. Linux and Windows are not implemented. |
 | Liquid mobile client | Android ARM64 | Not implemented. |

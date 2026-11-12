@@ -14,7 +14,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 
 ## Milestones
 
-### M1.2 — Flow Agent OS isolation
+### M1.2 — Flow-owned write protection
 
 **Open:** verify the accepted boundary natively, prove the prebuilt installation contract and complete [repository review and closeout](AGENTS.md#session-workflow). [TESTING.md](TESTING.md#native-verification-status) owns native and downloaded-bundle acceptance results, [PERFORMANCE.md](PERFORMANCE.md#flow-agent) native measurements, [SECURITY.md](SECURITY.md#flow-agent-security-contract) the security and installation decisions and [PROTOCOL.md](PROTOCOL.md#m12-executor-protocol) the wire contract. Configuration administration stays manual for the first Flow Agent release; deferred work is in the [later roadmap](#later-flow-agent-roadmap).
 
@@ -143,7 +143,7 @@ Accepted targets ([Flow Agent V-Spec](docs/concept/V-Spec_FlowAgent.html#accepte
 
 ### Protection of other independent Flow installations
 
-**Discussion only; no feature commitment (ADR-0174).** The first release protects this installation's required objects under [SECURITY.md](SECURITY.md#native-self-protection-and-its-limits). Multiple Runs can share that home. Earlier discussion considered an administrator-listed set of other homes: it could protect deliberately separate installations from each other's Tools, but adds discovery, publication coordination and maintenance complexity. First establish whether users need separate homes instead of shared-home Runs; decide whether to add this protection before specifying it. No automatic whole-disk discovery or future delivery is approved.
+**Discussion only; no feature commitment (ADR-0174).** The first release protects this installation's required objects under [SECURITY.md](SECURITY.md#flow-owned-write-protection-and-its-limits). Multiple Runs can share that home. Earlier discussion considered an administrator-listed set of other homes: it could protect deliberately separate installations from each other's Tools, but adds discovery, publication coordination and maintenance complexity. First establish whether users need separate homes instead of shared-home Runs; decide whether to add this protection before specifying it. No automatic whole-disk discovery or future delivery is approved.
 
 ## AgentPulse — last roadmap item
 

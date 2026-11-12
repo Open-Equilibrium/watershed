@@ -12,12 +12,12 @@ flowchart TD
   Global["Protected global AGENTS.md: context, not authority"] --> Input
   Input["Model requests Tool with parameters"] --> Check{"Available here and valid?"}
   Check -->|No| Reject["Reject before Tool effects"]
-  Check -->|Yes| Ready{"Mandatory native boundary ready?"}
+  Check -->|Yes| Ready{"Mandatory Flow-owned write protection ready?"}
   Ready -->|No| Stop["Fail before launch"]
   Ready -->|Yes| Intent["Persist intent; retain same Executor after Ready"]
   Intent --> Start["Commit tool.started; send matching Start"]
   Start --> Run["Establish protection; execute trusted Tool"]
-  Run --> Result["Validate self-protection receipt; persist bounded result"]
+  Run --> Result["Validate enforcement receipt; persist bounded result"]
 ```
 
 ## 2. Direct protected write
@@ -27,7 +27,7 @@ Native denial, including children; no prompt, escalation or retry.
 ```mermaid
 sequenceDiagram
   participant T as Tool or new helper
-  participant G as Native boundary
+  participant G as Flow-owned write protection
   participant P as Protected Flow files
   participant F as Flow Agent
   T->>G: Write, delete or replace protected object
@@ -43,8 +43,8 @@ Direct protected writes stay blocked; other host effects and false results are n
 
 ```mermaid
 flowchart TD
-  Tool["Compromised Tool inside native boundary"] --> FlowWrite["Direct write to protected Flow file"]
-  FlowWrite --> Denied["Blocked by mandatory native protection"]
+  Tool["Compromised Tool under Flow-owned write protection"] --> FlowWrite["Direct write to protected Flow file"]
+  FlowWrite --> Denied["Blocked by mandatory Flow-owned write protection"]
   Tool --> Project["Other host files or network effects"]
   Project --> Authority["Possible within available OS authority"]
   Tool --> Lie["False result returned to Flow"]
@@ -124,7 +124,7 @@ flowchart TD
   Outer["Optional deployment-owned sandbox"] --> Flow["Flow Agent and its Executor"]
   Flow --> Ready{"Required inner protection and runtime access available?"}
   Ready -->|No| Refuse["Reject unsupported deployment; no unprotected fallback"]
-  Ready -->|Yes| Inner["Native Flow-file protection"]
+  Ready -->|Yes| Inner["Flow-owned write protection"]
   Inner --> Tool["Tool operates under both sets of restrictions"]
 ```
 
