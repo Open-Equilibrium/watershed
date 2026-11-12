@@ -24,6 +24,15 @@ impl ResponsesAuth<'_> {
     fn requires_done_sentinel(self) -> bool {
         matches!(self, Self::Subscription(_))
     }
+
+    /// The subscription reply runs to its `[DONE]` sentinel; an endpoint reply ends at its terminal event.
+    fn decoder(self) -> SseDecoder {
+        if self.requires_done_sentinel() {
+            SseDecoder::default()
+        } else {
+            SseDecoder::ending_at_terminal_event()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -107,7 +116,7 @@ pub(crate) async fn request_responses_with_client_async(
             "Responses reply is not text/event-stream",
         ));
     }
-    let mut decoder = SseDecoder::default();
+    let mut decoder = auth.decoder();
     while let Some(chunk) =
         await_deadline_or_cancellation(deadlines.read, cancelled, response.chunk())
             .await
@@ -122,7 +131,7 @@ pub(crate) async fn request_responses_with_client_async(
         decoder
             .push(&chunk)
             .map_err(|error| RuntimeError::uncertain_provider_error(error.to_string()))?;
-        if decoder.terminal_sentinel() {
+        if decoder.reply_ended() {
             break;
         }
     }

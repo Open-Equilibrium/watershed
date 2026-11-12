@@ -14,6 +14,7 @@ pub(crate) struct ParsedSseStream {
     pub(crate) decoded_stream_bytes: usize,
     pub(crate) dispatched_events: usize,
     pub(crate) terminal_sentinel: bool,
+    pub(crate) terminal_event: bool,
 }
 
 pub(crate) struct SseDecoder {
@@ -21,6 +22,8 @@ pub(crate) struct SseDecoder {
     event_data: Vec<u8>,
     wire_stream_bytes: usize,
     parsed: ParsedSseStream,
+    /// Whether the first terminal Responses event ends the reply; later bytes are then ignored.
+    stop_at_terminal_event: bool,
 }
 
 impl Default for SseDecoder {
@@ -34,25 +37,43 @@ impl Default for SseDecoder {
                 decoded_stream_bytes: 0,
                 dispatched_events: 0,
                 terminal_sentinel: false,
+                terminal_event: false,
             },
+            stop_at_terminal_event: false,
         }
     }
 }
 
 impl SseDecoder {
+    /// A decoder for a reply that ends at its first terminal event, without a `[DONE]` sentinel.
+    pub(crate) fn ending_at_terminal_event() -> Self {
+        Self {
+            stop_at_terminal_event: true,
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn push(&mut self, bytes: &[u8]) -> Result<(), RuntimeError> {
+        if self.parsed.terminal_event {
+            return Ok(());
+        }
         self.wire_stream_bytes = validate_wire_stream_bytes(self.wire_stream_bytes, bytes.len())?;
         let mut remaining = bytes;
         while let Some(newline) = remaining.iter().position(|byte| *byte == b'\n') {
             self.append_line_fragment(&remaining[..newline])?;
             self.finish_line()?;
+            if self.parsed.terminal_event {
+                return Ok(());
+            }
             remaining = &remaining[newline + 1..];
         }
         self.append_line_fragment(remaining)
     }
 
     pub(crate) fn finish(self) -> Result<ParsedSseStream, RuntimeError> {
-        if !self.pending_line.is_empty() || !self.event_data.is_empty() {
+        if !self.parsed.terminal_event
+            && (!self.pending_line.is_empty() || !self.event_data.is_empty())
+        {
             return Err(response_protocol(
                 "response stream ended before an SSE event was terminated".to_owned(),
             ));
@@ -60,8 +81,10 @@ impl SseDecoder {
         Ok(self.parsed)
     }
 
-    pub(crate) fn terminal_sentinel(&self) -> bool {
-        self.parsed.terminal_sentinel
+    /// Whether the reply has reached its end: the `[DONE]` sentinel, or a terminal event when the
+    /// decoder stops there.
+    pub(crate) fn reply_ended(&self) -> bool {
+        self.parsed.terminal_sentinel || self.parsed.terminal_event
     }
 
     #[cfg(test)]
@@ -98,7 +121,11 @@ impl SseDecoder {
         strip_carriage_return(&mut self.pending_line);
         enforce_line_budget(self.pending_line.len())?;
         if self.pending_line.is_empty() {
-            dispatch_event(&mut self.event_data, &mut self.parsed)?;
+            dispatch_event(
+                &mut self.event_data,
+                &mut self.parsed,
+                self.stop_at_terminal_event,
+            )?;
         } else if !self.pending_line.starts_with(b":")
             && let Some(data) = self.pending_line.strip_prefix(b"data:")
         {
@@ -182,6 +209,7 @@ fn append_event_data(event_data: &mut Vec<u8>, bytes: &[u8]) -> Result<(), Runti
 fn dispatch_event(
     event_data: &mut Vec<u8>,
     parsed: &mut ParsedSseStream,
+    stop_at_terminal_event: bool,
 ) -> Result<(), RuntimeError> {
     if event_data.is_empty() {
         return Ok(());
@@ -213,9 +241,26 @@ fn dispatch_event(
     let item_bytes = decoded_item_bytes(&value)?;
     parsed.decoded_stream_bytes =
         validate_decoded_stream_bytes(parsed.decoded_stream_bytes, item_bytes)?;
+    if stop_at_terminal_event && is_terminal_event(&value) {
+        parsed.terminal_event = true;
+    }
     parsed.values.push(value);
     event_data.clear();
     Ok(())
+}
+
+/// The events that end a reply: a completion, a failure, or an error.
+fn is_terminal_event(event: &serde_json::Value) -> bool {
+    matches!(
+        event.get("type").and_then(serde_json::Value::as_str),
+        Some(
+            "response.completed"
+                | "response.failed"
+                | "response.incomplete"
+                | "response.error"
+                | "error"
+        )
+    )
 }
 
 fn response_protocol(message: String) -> RuntimeError {

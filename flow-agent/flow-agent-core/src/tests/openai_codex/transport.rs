@@ -2,7 +2,9 @@ use super::super::deadlines::{
     assert_pending, block_on_paused_network, expect_ready, send_scripted_http_bytes,
     settle_pending, spawn_scripted_http_server,
 };
-use crate::runtime::deadlines::{HttpDeadlines, RESPONSES_HTTP_DEADLINES, build_http_client};
+use crate::runtime::deadlines::{
+    HttpDeadlines, RESPONSES_HTTP_DEADLINES, block_on_network, build_http_client,
+};
 use crate::runtime::endpoint_credential::EndpointCredential;
 use crate::runtime::error::ProviderFailureKind;
 use crate::runtime::openai_codex::{
@@ -822,5 +824,107 @@ fn endpoint_redirects_are_not_followed_and_rejections_omit_the_key() {
     assert_eq!(failure.http_status(), Some(401));
     assert_eq!(failure.message(), "invalid api key");
     assert!(!error.to_string().contains("sk-endpoint-fixture"));
+    server.join().expect("fake endpoint completes");
+}
+
+#[test]
+fn endpoint_turn_completes_at_its_terminal_event_while_the_connection_stays_open() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("fake endpoint binds");
+    let endpoint = format!(
+        "http://{}/v1/responses",
+        listener.local_addr().expect("fake endpoint address")
+    );
+    let (release, released) = mpsc::channel::<()>();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("one endpoint request");
+        let mut request = vec![0_u8; 16 * 1024];
+        let read = stream.read(&mut request).expect("request reads");
+        assert!(read > 0, "request arrives");
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: keep-alive\r\n\r\n{}",
+            concat!(
+                "data:{\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n",
+                "data:{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\"}}\n\n",
+            )
+        )
+        .expect("endpoint reply writes");
+        // The connection stays open after the terminal event; the client must not wait for it to close.
+        let _ = released.recv_timeout(Duration::from_secs(20));
+    });
+    let deadlines = HttpDeadlines {
+        connect: Duration::from_secs(5),
+        header: Duration::from_secs(5),
+        read: Duration::from_millis(500),
+        overall: Duration::from_secs(10),
+    };
+    let cancelled = AtomicBool::new(false);
+    let body = serde_json::json!({"model":"fixture"});
+    let turn = block_on_network(async {
+        let client = build_http_client(deadlines).expect("HTTP client builds");
+        request_responses_with_client_async(
+            client,
+            &endpoint,
+            ResponsesAuth::ApiKey("sk-endpoint-fixture"),
+            &body,
+            deadlines,
+            &cancelled,
+        )
+        .await
+    })
+    .expect("network runtime runs")
+    .expect("a reply that reached its terminal event is a finished turn");
+    let _ = release.send(());
+    assert_eq!(turn.response_id, "resp_1");
+    server.join().expect("fake endpoint completes");
+}
+
+#[test]
+fn endpoint_ignores_data_after_its_terminal_event() {
+    let (base_url, server) = spawn_endpoint(
+        "HTTP/1.1 200 OK",
+        "",
+        concat!(
+            "data:{\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n",
+            "data:{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\"}}\n\n",
+            "data:{\"type\":\"response.output_text.delta\",\"delta\":\"late\"}\n\n",
+            "data: not json at all\n\n",
+        ),
+    );
+    let turn = OpenAiCodexProvider::default()
+        .turn(
+            &endpoint_credential(&base_url, "sk-endpoint-fixture"),
+            &serde_json::json!({"model":"fixture"}),
+        )
+        .expect("data after the terminal event is ignored");
+    assert_eq!(turn.response_id, "resp_1");
+    assert_eq!(
+        turn.output_text, "",
+        "data after the terminal event is not applied"
+    );
+    server.join().expect("fake endpoint completes");
+}
+
+#[test]
+fn endpoint_terminal_failure_ignores_data_after_it() {
+    let (base_url, server) = spawn_endpoint(
+        "HTTP/1.1 200 OK",
+        "",
+        concat!(
+            "data:{\"type\":\"response.failed\",\"response\":{\"id\":\"resp_1\",\"error\":{\"message\":\"quota exhausted\"}}}\n\n",
+            "data: not json at all\n\n",
+        ),
+    );
+    let error = OpenAiCodexProvider::default()
+        .turn(
+            &endpoint_credential(&base_url, "sk-endpoint-fixture"),
+            &serde_json::json!({"model":"fixture"}),
+        )
+        .expect_err("failed terminal event fails the attempt");
+    let failure = error
+        .provider_failure()
+        .expect("failure is a provider outcome");
+    assert!(failure.is_definitive(), "{failure:?}");
+    assert_eq!(failure.message(), "quota exhausted");
     server.join().expect("fake endpoint completes");
 }
