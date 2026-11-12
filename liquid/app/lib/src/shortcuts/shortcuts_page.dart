@@ -60,11 +60,11 @@ const List<_Group> _left = [
       _Entry(Command.send),
       _Entry(Command.queue),
       _Entry.fixed(Fixed.newLine),
-      _Entry(Command.toggleToDo),
       _Entry(Command.stop),
       _Entry(Command.dismissNotice),
     ],
   ),
+  ('Page', null, [_Entry(Command.toggleToDo)]),
 ];
 
 const List<_Group> _right = [

@@ -90,6 +90,25 @@ void main() {
     expect(taken.conflict(Command.focusInput, commandN), Command.diff);
   });
 
+  test('a Page to-do does not compete with the agent Send command', () {
+    const commandEnter = Keys(LogicalKeyboardKey.enter, meta: true);
+    final keys = ShortcutSettings.liquidKey();
+
+    expect(keys.conflict(Command.send, commandEnter), isNull);
+    expect(
+      keys.change(Command.send, commandEnter).bindings(Command.toggleToDo),
+      keys.bindings(Command.toggleToDo),
+      reason: 'the to-do keeps ⌘⏎',
+    );
+  });
+
+  test('a to-do shortcut cannot take a key that types in the page', () {
+    expect(
+      reserved(Command.toggleToDo, const Keys(LogicalKeyboardKey.keyA)),
+      'typing',
+    );
+  });
+
   test('a ⌘ chord of the app area conflicts in every area, both ways', () {
     const commandF = Keys(LogicalKeyboardKey.keyF, meta: true);
     const commandOne = Keys(LogicalKeyboardKey.digit1, meta: true);

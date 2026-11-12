@@ -205,7 +205,7 @@ class _KeysActivator extends ShortcutActivator {
 
 /// Where a command's keys work. Keys conflict within one area, and the ⌘ keys of the app area,
 /// which the menu bar runs, in every area.
-enum Area { app, input, question, trajectory, diff }
+enum Area { app, input, question, trajectory, diff, page }
 
 /// Keys that never change, as Settings → Shortcuts lists them per area; no command may take
 /// them there.
@@ -344,7 +344,7 @@ enum Command {
   ),
   toggleToDo(
     'Tick or untick a to-do',
-    Area.input,
+    Area.page,
     Keys(LogicalKeyboardKey.enter, meta: true),
     liquid: true,
   ),
@@ -425,7 +425,12 @@ String? reserved(Command command, Keys keys) {
       return use;
     }
   }
-  final typing = {Area.app, Area.input, Area.question}.contains(command.area);
+  final typing = {
+    Area.app,
+    Area.input,
+    Area.question,
+    Area.page,
+  }.contains(command.area);
   return typing && keys.types ? 'typing' : null;
 }
 
