@@ -125,6 +125,20 @@
         <p><strong>Recommendation:</strong> A for the core. Keep C open as a later adapter if people ask for T3's harnesses, since it fits the adapter boundary without changing any ADR.</p>
         <p><strong>Acceptance criterion:</strong> the ADR log records the choice; for B or C, the conflicting ADRs are amended through the decision flow before code changes.</p>
       </details>
+      <details id="d-092" class="decision">
+        <summary><h3>D-092 - Reaching The Person's Agent Hosts With One Sign-In</h3></summary>
+        <p><strong>Status:</strong> Open before M2's remote connection; independent of <a href="#d-091">D-091</a>. ADR-0185 gives Meta-Harness an authenticated remote connection, and ADR-0229 and ADR-0253 assume the person's hosts reach each other, but nothing decides how a phone or another host reaches an agent host outside the local network, or how hosts learn of each other.</p>
+        <p><strong>Goal (maintainer, 2026-11-12):</strong> a person without technical knowledge signs in once on each agent host. Afterwards Liquid on every device shows all of them, and the hosts provide the four durability levels of ADR-0229 and start each other's agents (ADR-0253), without entering an address, port, pairing code or VPN.</p>
+        <p><strong>How T3 Code does it:</strong> with T3 Connect, each host signs in once to a T3 account and gets a tunnel that T3 operates on Cloudflare; other devices sign in to the same account and list the hosts. Without the account it offers the local network, Tailscale or SSH, with a pairing code per device. Linking two hosts for agents needs a pairing code per link either way.</p>
+        <ul>
+          <li><strong>A: The Liquid account (ADR-0224) also registers agent hosts.</strong> A host signs in once, through a browser link with a short code as T3's CLI does. The Sync Server gives the person's devices and hosts each other's identities and keys. They connect directly where they can, otherwise through a relay that forwards only end-to-end encrypted traffic, using an existing NAT-traversal and relay library (for example iroh) rather than our own. Pro: one account for the Workspace and the hosts; self-hostable; no vendor cloud. Con: a relay to build and run beside the Sync Server, whose operator pays its traffic; every host trusts the Sync Server as broker, so its compromise matters as T3's relay signing key does.</li>
+          <li><strong>B: Tailscale, or self-hosted Headscale.</strong> Hosts and devices join the person's tailnet; the Sync Server only lists the hosts. Pro: proven encryption and NAT traversal, nothing to build. Con: a second account and app; Tailscale's coordination server unless Headscale is self-hosted; iOS runs one VPN at a time.</li>
+          <li><strong>C: T3 Connect</strong>, only with D-091 B. Pro: exists. Con: a second account at T3; traffic through T3's and Cloudflare's cloud, against self-hosting; agent links still need pairing codes.</li>
+          <li><strong>D: Local network and pairing codes only</strong>; internet access through the person's own VPN. Pro: nothing to build. Con: misses the goal.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> A, with B as the interim for engineers until the relay works.</p>
+        <p><strong>Acceptance criterion:</strong> with a laptop and a second computer on different networks, the person signs in once on each; Liquid on a phone lists both hosts and attaches to a session on each; a session continues from one host on the other at a turn boundary; an agent on one host starts a thread on the other; no address, port, code or VPN is entered; removing a host in Liquid ends its access; the relay cannot read session content.</p>
+      </details>
     </div>
   </section>
 
