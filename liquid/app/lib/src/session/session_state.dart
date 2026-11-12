@@ -905,9 +905,13 @@ class SessionState {
 
   /// Applies an event from the bridge, then confirms it (ADR-0272).
   void _receive(BridgeEvent event) {
-    _apply(event);
-    _applied++;
-    if (!_confirming) unawaited(_confirm());
+    try {
+      _apply(event);
+    } finally {
+      // Counted even when applying throws, so the bridge gets the place back.
+      _applied++;
+      if (!_confirming) unawaited(_confirm());
+    }
   }
 
   /// Confirms what has been applied, one call at a time; a count that grows meanwhile goes in

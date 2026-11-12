@@ -1454,7 +1454,31 @@ void main() {
     await state.dispose().timeout(const Duration(seconds: 2));
     expect(backend.cancelled, isTrue);
     expect(backend.calls, ['shutdown']);
+    expect(backend.confirmed.last, 1 << 53);
   });
+
+  test(
+    'an event whose handler throws still frees its place in the window',
+    () async {
+      final failing = FakeBackend();
+      final errors = <Object>[];
+      // The listener belongs to the zone that creates the state, so its error is caught here.
+      runZonedGuarded(
+        () => SessionState(failing),
+        (error, _) => errors.add(error),
+      );
+      // A content change without its item makes the handler throw.
+      failing.controller.add(event(BridgeEventKind.contentDelta));
+      failing.controller.add(event(BridgeEventKind.turnStarted));
+      await pumpEventQueue();
+      expect(errors, hasLength(1));
+      expect(
+        failing.confirmed.last,
+        2,
+        reason: 'the bridge waits for a confirmation of every event it sent',
+      );
+    },
+  );
 
   test('confirms each applied event, so the bridge may send more', () async {
     await emit(event(BridgeEventKind.turnStarted));
