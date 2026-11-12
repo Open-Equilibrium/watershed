@@ -64,7 +64,11 @@ const List<_Group> _left = [
       _Entry(Command.dismissNotice),
     ],
   ),
-  ('Page', null, [_Entry(Command.toggleToDo)]),
+  (
+    'Page',
+    null,
+    [_Entry(Command.toggleToDo), _Entry.fixed(Fixed.newBlockOrLine)],
+  ),
 ];
 
 const List<_Group> _right = [

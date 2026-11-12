@@ -213,6 +213,10 @@ enum Fixed {
   newLine('New line', Area.input, '⇧⏎', [
     Keys(LogicalKeyboardKey.enter, shift: true),
   ]),
+  newBlockOrLine('New block or line', Area.page, '⏎ ⇧⏎', [
+    Keys(LogicalKeyboardKey.enter),
+    Keys(LogicalKeyboardKey.enter, shift: true),
+  ]),
   moveThroughOptions('Move through options', Area.question, '↑↓', [
     Keys(LogicalKeyboardKey.arrowUp),
     Keys(LogicalKeyboardKey.arrowDown),

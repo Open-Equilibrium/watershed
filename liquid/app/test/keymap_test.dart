@@ -109,6 +109,23 @@ void main() {
     );
   });
 
+  test(
+    'a to-do shortcut cannot take the keys that break a line in the page',
+    () {
+      expect(
+        reserved(Command.toggleToDo, const Keys(LogicalKeyboardKey.enter)),
+        'New block or line',
+      );
+      expect(
+        reserved(
+          Command.toggleToDo,
+          const Keys(LogicalKeyboardKey.enter, shift: true),
+        ),
+        'New block or line',
+      );
+    },
+  );
+
   test('a ⌘ chord of the app area conflicts in every area, both ways', () {
     const commandF = Keys(LogicalKeyboardKey.keyF, meta: true);
     const commandOne = Keys(LogicalKeyboardKey.digit1, meta: true);
