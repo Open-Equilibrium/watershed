@@ -52,11 +52,11 @@ fn productive_tool_preflight_rejects_an_executor_that_cannot_honor_the_flow_poli
 
 #[test]
 fn productive_tool_preflight_rejects_fixture_only_commands_before_provider_dispatch() {
-    let workspace = workspace_copy("sandbox-negative");
-    let fixture = load_productive_execution_fixture_for_flow(&workspace, "sandbox-negative-write");
+    let workspace = workspace_copy("negative");
+    let fixture = load_productive_execution_fixture_for_flow(&workspace, "negative-write");
     let flow = fixture
         .registry
-        .flow_block("sandbox-negative-write")
+        .flow_block("negative-write")
         .expect("root Flow");
     let mut provider = FakeProvider::default();
     let mut attempts = MemoryAttempts::default();

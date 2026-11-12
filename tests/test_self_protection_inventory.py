@@ -1,4 +1,4 @@
-"""Synthetic admission behavior for the dev-only native protection experiment."""
+"""Synthetic admission behavior for the dev-only Flow-owned write protection experiment."""
 
 import importlib.util
 import os

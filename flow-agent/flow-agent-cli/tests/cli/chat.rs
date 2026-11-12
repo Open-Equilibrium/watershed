@@ -68,7 +68,7 @@ fn chat_skips_blank_lines_before_a_registered_slash_reference() {
 
 #[test]
 fn chat_failed_flow_exits_with_failed_status() {
-    let workspace = workspace_copy("sandbox-negative");
+    let workspace = workspace_copy("negative");
     fs::write(
         session_home_path().join("registry/flows/hello-flow.yaml"),
         "flow:\n  id: hello-flow\n  name: HelloFlow\n  phase_refs: [negative-write]\n  subflow_refs: []\n",

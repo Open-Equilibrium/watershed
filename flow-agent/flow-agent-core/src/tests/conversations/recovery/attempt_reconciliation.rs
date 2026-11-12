@@ -296,12 +296,12 @@ fn tool_reconciliation_rejects_invalid_outer_evidence_without_mutation() {
             "enforcement receipt does not match the uncertain attempt",
         ),
         (
-            "inactive-self-protection",
+            "inactive-flow-owned-write-protection",
             inactive_protection,
             "enforcement receipt does not match the uncertain attempt",
         ),
         (
-            "missing-self-protection",
+            "missing-flow-owned-write-protection",
             missing_protection,
             "missing field `self_protection_active`",
         ),

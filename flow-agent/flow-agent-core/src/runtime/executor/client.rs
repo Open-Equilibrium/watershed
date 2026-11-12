@@ -25,7 +25,7 @@ pub(crate) enum ExecutorPreflightOutcome {
     Rejected(proto::ExecutorErrorCodeV0),
 }
 
-/// Validated result and self-protection evidence from one Tool execution.
+/// Validated result and Flow-owned write protection evidence from one Tool execution.
 pub(crate) struct ExecutorToolExecution {
     pub(crate) enforcement: proto::EnforcementReceiptV0,
     pub(crate) outcome: ToolExecutionOutcome,

@@ -1,0 +1,4 @@
+instruction:
+  id: deny-attempt
+  name: DenyAttempt
+  prompt: "Attempt the negative action selected by the fixture."

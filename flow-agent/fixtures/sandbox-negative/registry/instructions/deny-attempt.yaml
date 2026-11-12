@@ -1,4 +1,0 @@
-instruction:
-  id: deny-attempt
-  name: DenyAttempt
-  prompt: "Attempt the sandbox-negative action selected by the fixture."

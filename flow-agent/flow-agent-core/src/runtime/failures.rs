@@ -142,7 +142,7 @@ pub fn sandbox_tool_dispatch_failure(
     if !stub_model_fixture_profile {
         return Ok(None);
     }
-    let Some(reason_code) = sandbox_negative_reason_for_tool(tool)? else {
+    let Some(reason_code) = negative_reason_for_tool(tool)? else {
         return Ok(None);
     };
     Ok(Some(runtime_failure_for_reason(
@@ -174,10 +174,10 @@ pub fn sandbox_out_of_phase_failure(
     ))
 }
 
-pub fn sandbox_negative_reason_for_tool(
+pub fn negative_reason_for_tool(
     tool: &core_script::ToolBlock,
 ) -> Result<Option<core_policy::DenyReasonCode>, RuntimeError> {
-    let Some(arguments) = sandbox_negative_arguments(tool) else {
+    let Some(arguments) = negative_arguments(tool) else {
         return Ok(None);
     };
     let [operation] = arguments else {
@@ -186,17 +186,17 @@ pub fn sandbox_negative_reason_for_tool(
             tool.identity.id
         )));
     };
-    sandbox_negative_reason_for_operation(operation)
+    negative_reason_for_operation(operation)
         .map(Some)
         .ok_or_else(|| {
             RuntimeError::Protocol(format!(
-                "tool {} declares unsupported sandbox-negative operation {operation:?}",
+                "tool {} declares unsupported negative operation {operation:?}",
                 tool.identity.id
             ))
         })
 }
 
-pub fn sandbox_negative_arguments(tool: &core_script::ToolBlock) -> Option<&[String]> {
+pub fn negative_arguments(tool: &core_script::ToolBlock) -> Option<&[String]> {
     match (&tool.tool_kind, &tool.command) {
         (
             core_script::ToolKind::PredefinedCommand,
@@ -210,9 +210,7 @@ pub fn sandbox_negative_arguments(tool: &core_script::ToolBlock) -> Option<&[Str
     }
 }
 
-pub fn sandbox_negative_reason_for_operation(
-    operation: &str,
-) -> Option<core_policy::DenyReasonCode> {
+pub fn negative_reason_for_operation(operation: &str) -> Option<core_policy::DenyReasonCode> {
     match operation {
         "environment" => Some(core_policy::DenyReasonCode::EnvironmentDenied),
         "interpreter" => Some(core_policy::DenyReasonCode::InterpreterEscapeDenied),

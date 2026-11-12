@@ -232,7 +232,9 @@ mod tests {
             "executor_elapsed_ns": elapsed_ns,
             "self_protection_active": true,
         }))
-        .expect("child evidence binds the elapsed observation to active own-file protection")
+        .expect(
+            "child evidence binds the elapsed observation to active Flow-owned write protection",
+        )
     }
 
     #[test]

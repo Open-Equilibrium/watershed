@@ -158,7 +158,7 @@ fn productive_executor_boundary_failure_closes_tool_event_and_leaves_attempt_unc
         |_| {},
         |tools| tools.fault = FakeToolExecutionFault::ExecutorError,
     )
-    .expect("Executor boundary failure remains a terminal failed session");
+    .expect("Executor failure remains a terminal failed session");
 
     assert!(execution.failed);
     assert_eq!(tools.invocations.len(), 1);

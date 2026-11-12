@@ -67,13 +67,13 @@ fn human_run_reports_terminal_status() {
         "flow smoke-flow (session smoke-flow) completed\n"
     );
 
-    let failed_workspace = workspace_copy("sandbox-negative");
-    let failed = run_flow(&failed_workspace, "sandbox-negative-write", EmitMode::Human)
+    let failed_workspace = workspace_copy("negative");
+    let failed = run_flow(&failed_workspace, "negative-write", EmitMode::Human)
         .expect("negative fixture reaches its deterministic terminal state");
     assert!(failed.failed);
     assert_eq!(
         failed.stdout,
-        "flow sandbox-negative-write (session sandbox-negative-write) failed (write_denied): write outside declared roots denied\n"
+        "flow negative-write (session negative-write) failed (write_denied): write outside declared roots denied\n"
     );
 }
 

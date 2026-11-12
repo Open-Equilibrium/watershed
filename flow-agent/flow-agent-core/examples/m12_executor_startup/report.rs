@@ -72,7 +72,7 @@ fn inputs() -> Value {
         "self_protection_required": true,
         "executor_interval": [
             "selected Executor preparation and readiness",
-            "canonical invocation and own-file protection preparation",
+            "canonical invocation and Flow-owned write protection preparation",
             "one-shot Executor and Tool lifecycle",
             "validated terminal Tool result and enforcement receipt"
         ],

@@ -180,7 +180,9 @@ fn native_executor_protects_own_files_and_leaves_project_work_available() {
         };
         let ready = read_record()?;
         if ready["outcome"] != "ready" {
-            return Err(format!("native self-protection was not ready: {ready}"));
+            return Err(format!(
+                "Flow-owned write protection was not ready: {ready}"
+            ));
         }
         input
             .write_all(&wire(&serde_json::json!({

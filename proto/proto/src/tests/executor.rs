@@ -65,7 +65,7 @@ fn executor_request_binds_host_invocation_and_own_file_protection_once() {
     });
     let bytes = canonical_wire(&document);
     let request = parse_executor_request_v0(&bytes)
-        .expect("host invocation with mandatory own-file protection is supported");
+        .expect("host invocation with mandatory Flow-owned write protection is supported");
     assert_eq!(canonical_executor_request_v0(&request).unwrap(), bytes);
 
     for field in [
@@ -106,7 +106,7 @@ fn executor_receipt_wire_attests_only_bound_self_protection() {
         "self_protection_active": true
     });
     let receipt: EnforcementReceiptV0 = serde_json::from_value(document.clone())
-        .expect("receipt requires only the bound self-protection evidence");
+        .expect("receipt requires only the bound Flow-owned write protection evidence");
     assert_eq!(serde_json::to_value(receipt).unwrap(), document);
     for (field, value) in [
         ("isolation_active", serde_json::json!(true)),
@@ -1087,7 +1087,7 @@ fn executor_receipt_proves_requested_policy_and_active_self_protection() {
     let mut cases = Vec::new();
     let mut candidate = valid.clone();
     candidate.self_protection_active = false;
-    cases.push(("inactive self-protection", candidate));
+    cases.push(("inactive Flow-owned write protection", candidate));
     let mut candidate = valid.clone();
     candidate.applied_policy_digest = "b".repeat(64);
     cases.push(("wrong policy", candidate));

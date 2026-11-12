@@ -3,7 +3,7 @@ use super::{
     test_support::{session_home_path, workspace_copy},
 };
 use crate::runtime::{
-    failures::{runtime_failure_for_tool_error, sandbox_negative_reason_for_tool},
+    failures::{negative_reason_for_tool, runtime_failure_for_tool_error},
     session::run_flow,
     types::{EmitMode, RuntimeError, terminal_failure_reason},
     validate::validate_session_log_text,
@@ -16,14 +16,14 @@ use std::{
 
 #[test]
 fn sandbox_denial_follows_resolved_operation_not_flow_identity() {
-    let workspace = workspace_copy("sandbox-negative");
-    let flow_path = session_home_path().join("registry/flows/sandbox-negative-write.yaml");
+    let workspace = workspace_copy("negative");
+    let flow_path = session_home_path().join("registry/flows/negative-write.yaml");
     let source = fs::read_to_string(&flow_path).expect("flow fixture readable");
     fs::write(
         &flow_path,
         source
-            .replace("id: sandbox-negative-write", "id: custom-denied-write")
-            .replace("name: SandboxNegativeWrite", "name: RenamedNegativeWrite"),
+            .replace("id: negative-write", "id: custom-denied-write")
+            .replace("name: NegativeWrite", "name: RenamedNegativeWrite"),
     )
     .expect("flow fixture rewritten");
 
@@ -45,20 +45,20 @@ fn sandbox_denial_follows_resolved_operation_not_flow_identity() {
 }
 
 #[test]
-fn sandbox_negative_write_reaches_tool_dispatch_before_denial() {
-    let workspace = workspace_copy("sandbox-negative");
+fn negative_write_reaches_tool_dispatch_before_denial() {
+    let workspace = workspace_copy("negative");
 
-    let output = run_flow(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
+    let output = run_flow(&workspace, "negative-write", EmitMode::Jsonl)
         .expect("sandbox denial produces a valid stream");
 
     assert!(output.failed);
     assert!(!workspace.join("out/forbidden.txt").exists());
     let events = validate_session_log_text(
-        Path::new("sandbox-negative-write.jsonl"),
+        Path::new("negative-write.jsonl"),
         &output.session_id,
         &output.stdout,
     )
-    .expect("sandbox negative stream validates");
+    .expect("negative stream validates");
     let event_index = |event_type| {
         events
             .iter()
@@ -93,26 +93,22 @@ fn sandbox_negative_write_reaches_tool_dispatch_before_denial() {
 }
 
 #[test]
-fn sandbox_negative_policy_fixtures_reach_dispatch_with_their_declared_reason() {
+fn negative_policy_fixtures_reach_dispatch_with_their_declared_reason() {
     for (flow, tool_id, reason) in [
         (
-            "sandbox-negative-environment",
+            "negative-environment",
             "environment-tool",
             "environment_denied",
         ),
         (
-            "sandbox-negative-interpreter",
+            "negative-interpreter",
             "interpreter-tool",
             "interpreter_escape_denied",
         ),
-        ("sandbox-negative-network", "network-tool", "network_denied"),
-        (
-            "sandbox-negative-symlink",
-            "symlink-tool",
-            "symlink_escape_denied",
-        ),
+        ("negative-network", "network-tool", "network_denied"),
+        ("negative-symlink", "symlink-tool", "symlink_escape_denied"),
     ] {
-        let workspace = workspace_copy("sandbox-negative");
+        let workspace = workspace_copy("negative");
         let output = run_flow(&workspace, flow, EmitMode::Jsonl)
             .expect("sandbox denial produces a valid stream");
         let events = validate_session_log_text(
@@ -120,7 +116,7 @@ fn sandbox_negative_policy_fixtures_reach_dispatch_with_their_declared_reason() 
             &output.session_id,
             &output.stdout,
         )
-        .expect("sandbox negative stream validates");
+        .expect("negative stream validates");
 
         assert!(output.failed, "{flow} fails");
         assert_eq!(terminal_failure_reason(&events), Some(reason), "{flow}");
@@ -159,16 +155,16 @@ fn sandbox_negative_policy_fixtures_reach_dispatch_with_their_declared_reason() 
 
 #[test]
 fn sandbox_write_denial_keeps_one_reason_across_terminal_events() {
-    let workspace = workspace_copy("sandbox-negative");
+    let workspace = workspace_copy("negative");
 
-    let output = run_flow(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
+    let output = run_flow(&workspace, "negative-write", EmitMode::Jsonl)
         .expect("sandbox denial produces a valid stream");
     let events = validate_session_log_text(
-        Path::new("sandbox-negative-reason.jsonl"),
+        Path::new("negative-reason.jsonl"),
         &output.session_id,
         &output.stdout,
     )
-    .expect("sandbox negative stream validates");
+    .expect("negative stream validates");
 
     assert!(output.failed);
     assert_eq!(terminal_failure_reason(&events), Some("write_denied"));
@@ -197,10 +193,10 @@ fn sandbox_write_denial_keeps_one_reason_across_terminal_events() {
 
 #[test]
 fn nested_sandbox_denial_emits_child_tool_failure_only() {
-    let workspace = workspace_copy("sandbox-negative");
+    let workspace = workspace_copy("negative");
     fs::write(
-        session_home_path().join("registry/flows/sandbox-negative-write.yaml"),
-        "flow:\n  id: sandbox-negative-write\n  name: SandboxNegativeWrite\n  phase_refs: [benign-parent]\n  subflow_refs: [nested-negative-write]\n",
+        session_home_path().join("registry/flows/negative-write.yaml"),
+        "flow:\n  id: negative-write\n  name: NegativeWrite\n  phase_refs: [benign-parent]\n  subflow_refs: [nested-negative-write]\n",
     )
     .expect("parent flow fixture rewritten");
     fs::write(
@@ -214,7 +210,7 @@ fn nested_sandbox_denial_emits_child_tool_failure_only() {
     )
     .expect("nested flow fixture written");
 
-    let output = run_flow(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
+    let output = run_flow(&workspace, "negative-write", EmitMode::Jsonl)
         .expect("nested negative operation produces a valid stream");
 
     assert!(output.failed);
@@ -224,7 +220,7 @@ fn nested_sandbox_denial_emits_child_tool_failure_only() {
         &output.stdout,
     )
     .expect("nested negative stream validates");
-    let parent_flow_id = flow_id_for_definition(&events, "sandbox-negative-write");
+    let parent_flow_id = flow_id_for_definition(&events, "negative-write");
     let child_flow_id = flow_id_for_definition(&events, "nested-negative-write");
     let tool_failed = events
         .iter()
@@ -271,11 +267,11 @@ fn nested_sandbox_denial_emits_child_tool_failure_only() {
 
 #[test]
 fn sandbox_out_of_phase_denial_follows_registry_shape_not_flow_id() {
-    let workspace = workspace_copy("sandbox-negative");
+    let workspace = workspace_copy("negative");
     replace_registry_text(
         &workspace,
-        "flows/sandbox-negative-tool-out-of-phase.yaml",
-        "id: sandbox-negative-tool-out-of-phase",
+        "flows/negative-tool-out-of-phase.yaml",
+        "id: negative-tool-out-of-phase",
         "id: custom-tool-out-of-phase",
     );
     let output = run_flow(&workspace, "custom-tool-out-of-phase", EmitMode::Jsonl)
@@ -292,18 +288,14 @@ fn sandbox_out_of_phase_denial_follows_registry_shape_not_flow_id() {
 
 #[test]
 fn sandbox_out_of_phase_denial_reports_attempt_context() {
-    let workspace = workspace_copy("sandbox-negative");
+    let workspace = workspace_copy("negative");
 
-    let output = run_flow(
-        &workspace,
-        "sandbox-negative-tool-out-of-phase",
-        EmitMode::Jsonl,
-    )
-    .expect("out-of-phase sandbox denial produces a valid stream");
+    let output = run_flow(&workspace, "negative-tool-out-of-phase", EmitMode::Jsonl)
+        .expect("out-of-phase sandbox denial produces a valid stream");
 
     assert!(output.failed);
     let events = validate_session_log_text(
-        Path::new("sandbox-negative-tool-out-of-phase.jsonl"),
+        Path::new("negative-tool-out-of-phase.jsonl"),
         &output.session_id,
         &output.stdout,
     )
@@ -344,14 +336,10 @@ fn sandbox_out_of_phase_denial_reports_attempt_context() {
 
 #[test]
 fn sandbox_out_of_phase_denial_precedes_tool_lifecycle_events() {
-    let workspace = workspace_copy("sandbox-negative");
+    let workspace = workspace_copy("negative");
 
-    let output = run_flow(
-        &workspace,
-        "sandbox-negative-tool-out-of-phase",
-        EmitMode::Jsonl,
-    )
-    .expect("out-of-phase denial produces a valid stream");
+    let output = run_flow(&workspace, "negative-tool-out-of-phase", EmitMode::Jsonl)
+        .expect("out-of-phase denial produces a valid stream");
     let events = validate_session_log_text(
         Path::new("sandbox-out-of-phase-preflight.jsonl"),
         &output.session_id,
@@ -371,19 +359,15 @@ fn sandbox_out_of_phase_denial_precedes_tool_lifecycle_events() {
 
 #[test]
 fn sandbox_out_of_phase_denial_ignores_instruction_prompt_text() {
-    let workspace = workspace_copy("sandbox-negative");
+    let workspace = workspace_copy("negative");
     fs::write(
         session_home_path().join("registry/instructions/deny-attempt.yaml"),
         "instruction:\n  id: deny-attempt\n  name: DenyAttempt\n  prompt: \"Try the selected action.\"\n",
     )
     .expect("instruction fixture rewritten");
 
-    let output = run_flow(
-        &workspace,
-        "sandbox-negative-tool-out-of-phase",
-        EmitMode::Jsonl,
-    )
-    .expect("out-of-phase sandbox denial produces a valid stream");
+    let output = run_flow(&workspace, "negative-tool-out-of-phase", EmitMode::Jsonl)
+        .expect("out-of-phase sandbox denial produces a valid stream");
 
     assert!(output.failed);
     assert!(output.stdout.contains("\"reason\":\"tool_out_of_phase\""));
@@ -391,10 +375,10 @@ fn sandbox_out_of_phase_denial_ignores_instruction_prompt_text() {
 
 #[test]
 fn sandbox_denial_requires_negative_registry_shape_not_fixture_id() {
-    let workspace = workspace_copy("sandbox-negative");
+    let workspace = workspace_copy("negative");
     replace_registry_text(
         &workspace,
-        "flows/sandbox-negative-write.yaml",
+        "flows/negative-write.yaml",
         "phase_refs: [negative-write]",
         "phase_refs: [benign]",
     );
@@ -404,7 +388,7 @@ fn sandbox_denial_requires_negative_registry_shape_not_fixture_id() {
         )
         .expect("benign phase written");
 
-    let output = run_flow(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
+    let output = run_flow(&workspace, "negative-write", EmitMode::Jsonl)
         .expect("flow with reused fixture id runs");
 
     assert!(!output.failed);
@@ -450,9 +434,9 @@ fn out_of_phase_fixture_denial_does_not_apply_to_other_flows_by_phase_id() {
 }
 
 #[test]
-fn sandbox_negative_command_grammar_rejects_extra_and_unknown_operations() {
-    let workspace = workspace_copy("sandbox-negative");
-    let registry = super::helpers::load_test_registry(&workspace, "sandbox-negative-write");
+fn negative_command_grammar_rejects_extra_and_unknown_operations() {
+    let workspace = workspace_copy("negative");
+    let registry = super::helpers::load_test_registry(&workspace, "negative-write");
     let mut extra_arg_tool = registry
         .tool_block("negative-tool")
         .expect("negative tool exists")
@@ -462,7 +446,7 @@ fn sandbox_negative_command_grammar_rejects_extra_and_unknown_operations() {
         argv: vec!["write".to_owned(), "network".to_owned()],
     };
     assert!(matches!(
-        sandbox_negative_reason_for_tool(&extra_arg_tool),
+        negative_reason_for_tool(&extra_arg_tool),
         Err(RuntimeError::Protocol(message)) if message.contains("one denied operation")
     ));
 
@@ -472,13 +456,13 @@ fn sandbox_negative_command_grammar_rejects_extra_and_unknown_operations() {
         argv: vec!["process".to_owned()],
     };
     assert!(matches!(
-        sandbox_negative_reason_for_tool(&unsupported_operation_tool),
-        Err(RuntimeError::Protocol(message)) if message.contains("unsupported sandbox-negative")
+        negative_reason_for_tool(&unsupported_operation_tool),
+        Err(RuntimeError::Protocol(message)) if message.contains("unsupported negative")
     ));
 }
 
 #[test]
-fn runtime_failure_and_sandbox_negative_helpers_cover_edge_paths() {
+fn runtime_failure_and_negative_helpers_cover_edge_paths() {
     assert_eq!(
         runtime_failure_for_tool_error(
             &RuntimeError::Denied {

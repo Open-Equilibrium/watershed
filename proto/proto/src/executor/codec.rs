@@ -10,7 +10,7 @@ use super::{
 use crate::{canonical::nfc_json_string_values, canonical_json, parse_unique_json};
 use serde::{Serialize, de::DeserializeOwned};
 
-/// Validates active self-protection and the digest of the complete policy Flow requested.
+/// Validates active Flow-owned write protection and the digest of the complete policy Flow requested.
 pub fn validate_enforcement_receipt_v0(
     receipt: &EnforcementReceiptV0,
     expected_policy_digest: &str,
