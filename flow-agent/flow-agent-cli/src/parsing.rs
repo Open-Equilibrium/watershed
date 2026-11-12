@@ -6,7 +6,7 @@ mod run;
 mod sessions;
 mod tail;
 
-pub(crate) use auth::{AuthCommand, auth_args};
+pub(crate) use auth::{AuthCommand, AuthLogin, AuthProvider, auth_args};
 pub(crate) use executor::{ExecutorCommand, executor_args};
 pub(crate) use reconcile::reconcile_tool_args;
 pub(crate) use resume::{ResumeCommand, resume_args};

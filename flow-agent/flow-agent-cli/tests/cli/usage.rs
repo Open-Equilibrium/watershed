@@ -64,7 +64,7 @@ fn assert_global_usage_error(args: &[&str]) {
     assert!(help.status.success());
     assert!(help.stderr.is_empty());
     let usage = String::from_utf8(help.stdout).expect("help should be UTF-8");
-    assert_eq!(usage.lines().count(), 19);
+    assert_eq!(usage.lines().count(), 22);
 
     let output = flow_command()
         .args(args)
