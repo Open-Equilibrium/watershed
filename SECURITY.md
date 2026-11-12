@@ -107,6 +107,8 @@ Conversation storage maintenance and internal failed-creation rollback are defin
 
 The exact Flow-owned OAuth wire, cache, refresh and local-logout lifecycle is canonical in [`PROTOCOL.md`](PROTOCOL.md#m11-codex-subscription-provider). Flow Agent owns that current-user-protected cache, never imports another client's credentials, and never inserts its own provider credentials, account ids or authentication bodies into events, conversation history, Run Logs, diagnostics, exports or Tool environments. A definitive provider failure may persist and display the provider's direct message under the bounded contract in `PROTOCOL.md`; provider-supplied content remains the provider's responsibility. The [M1.1 budget matrix](flow-agent/benchmarks/M1_1_BUDGETS.md) selects the provider parser and temporal bounds, whose evidence must pass before productive behavior is enabled.
 
+The OpenAI-compatible endpoint provider ([ADR-0263](docs/adr/ADR-LOG.md), [PROTOCOL.md](PROTOCOL.md#m11-openai-compatible-endpoint-provider)) keeps its API key in the same owner-only credential store as the subscription record, in its own slot beside the base URL it was issued for, so the key is sent only to that host. The base URL must be `https`, or `http` only for a loopback IP literal, and the key is never sent to a redirect target. The endpoint operator receives the prompts and Tool results of every Run it serves; this is accepted because the operator chose the endpoint. The key never appears in events, Run Logs, diagnostics or errors, and its `Debug` output is redacted.
+
 Local inference and portable continuation are [accepted targets](docs/concept/V-Spec_FlowAgent.html#accepted-target) with no current guarantee.
 
 ## MVP VCS boundary
