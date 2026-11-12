@@ -1455,4 +1455,74 @@ void main() {
     expect(backend.cancelled, isTrue);
     expect(backend.calls, ['shutdown']);
   });
+
+  test('confirms each applied event, so the bridge may send more', () async {
+    await emit(event(BridgeEventKind.turnStarted));
+    await emit(event(BridgeEventKind.notification, text: 'Working'));
+    await emit(event(BridgeEventKind.turnCompleted));
+    expect(backend.confirmed, [1, 2, 3]);
+  });
+
+  test('a fell-behind event reads the chat back from the session file, which then shows the text of the stream without overflow', () async {
+    final whole = FakeBackend();
+    final wholeState = SessionState(whole);
+    final overflowed = FakeBackend();
+    final overflowedState = SessionState(overflowed);
+    overflowed.transcripts[''] = BridgeTranscript(
+      items: [chatItem('e1', BridgeItemKind.assistantMessage, text: 'Hello')],
+      more: false,
+    );
+    BridgeEvent completed() => event(
+      BridgeEventKind.itemCompleted,
+      item: item(1, kind: BridgeItemKind.assistantMessage),
+      text: 'Hello',
+    );
+    // The partial output "llo" went in the overflow; the first turn's end and the second turn
+    // come after the fell-behind event.
+    final turns = [
+      event(BridgeEventKind.turnStarted),
+      event(
+        BridgeEventKind.itemStarted,
+        item: item(1, kind: BridgeItemKind.assistantMessage),
+      ),
+      event(BridgeEventKind.contentDelta, item: item(1), text: 'He'),
+      event(BridgeEventKind.contentDelta, item: item(1), text: 'llo'),
+      completed(),
+      event(BridgeEventKind.turnCompleted),
+      event(BridgeEventKind.turnStarted),
+      event(
+        BridgeEventKind.itemStarted,
+        item: item(2, kind: BridgeItemKind.assistantMessage),
+      ),
+      event(BridgeEventKind.contentDelta, item: item(2), text: 'Bye'),
+      event(BridgeEventKind.turnCompleted),
+    ];
+    final dropped = [
+      ...turns.take(3),
+      event(BridgeEventKind.fellBehind),
+      ...turns.skip(4),
+    ];
+    Future<void> feed(FakeBackend to, List<BridgeEvent> events) async {
+      for (final each in events) {
+        to.controller.add(each);
+        await pumpEventQueue();
+      }
+    }
+
+    await feed(whole, turns);
+    await feed(overflowed, dropped);
+    expect(await assistantTexts(wholeState), ['Hello', 'Bye']);
+    expect(await assistantTexts(overflowedState), ['Hello', 'Bye']);
+    expect(
+      overflowed.calls.where((call) => call.startsWith('transcript')),
+      hasLength(2),
+      reason: 'read at the fell-behind event, and again when the turn that was running ends',
+    );
+  });
 }
+
+/// The text of each assistant message the chat shows, in order.
+Future<List<String>> assistantTexts(SessionState state) async => [
+  for (final view in state.items.value)
+    if (view.kind == BridgeItemKind.assistantMessage) view.text.value,
+];

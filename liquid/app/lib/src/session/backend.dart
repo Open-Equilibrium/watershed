@@ -13,6 +13,10 @@ const recentLimit = 8;
 /// What [SessionState] needs from a running agent session; tests substitute a fake.
 abstract interface class SessionBackend {
   Stream<BridgeEvent> events();
+
+  /// Confirms that the first [applied] events of [events] were applied, so the bridge may send
+  /// that many more (ADR-0272).
+  Future<void> confirmApplied(int applied);
   Future<void> send(String message, {required bool followUp});
   Future<BridgeQueue> clearQueue();
   Future<void> abort();
@@ -228,6 +232,9 @@ class RustSessionBackend implements SessionBackend {
 
   @override
   Stream<BridgeEvent> events() => _session.events();
+  @override
+  Future<void> confirmApplied(int applied) =>
+      _session.confirmApplied(applied: applied);
   @override
   Future<void> send(String message, {required bool followUp}) =>
       _session.send(message: message, followUp: followUp);

@@ -21,7 +21,7 @@ use crate::api::session::{
     AgentSession, BridgeCheckpointSession, BridgeModel, BridgeStoredSession, SessionConfig,
 };
 use crate::convert::describe;
-use crate::stream::{forward, gather, push};
+use crate::stream::{Credit, Outbox, WINDOW, forward, gather, push};
 
 /// The extension path the fake agents are started with.
 const EXTENSION: &str = "/w/meta-harness/pi-extension/watershed.ts";
@@ -572,12 +572,14 @@ fn gathers_streaming_text_until_its_window_passes() {
             tokio::task::yield_now().await;
             sender.send(delta("late")).await.expect("sent");
         });
-        let mut batch = vec![BridgeEvent::from(delta("0"))];
-        gather(&mut batch, &mut receiver, async {
+        let mut outbox = Outbox::default();
+        outbox.admit(BridgeEvent::from(delta("0")));
+        gather(&mut outbox, &mut receiver, async {
             let _ = window.await;
         })
         .await;
-        let text: Vec<_> = batch
+        let text: Vec<_> = outbox
+            .pending
             .iter()
             .filter_map(|event| event.text.as_deref())
             .collect();
@@ -587,7 +589,7 @@ fn gathers_streaming_text_until_its_window_passes() {
             "everything until the window passed"
         );
         assert_eq!(
-            batch.len(),
+            outbox.pending.len(),
             1,
             "deltas merge as they arrive, so the batch stays small"
         );
@@ -602,9 +604,10 @@ fn gathers_streaming_text_until_its_window_passes() {
             }))
             .await
             .expect("sent");
-        let mut batch = vec![BridgeEvent::from(delta("0"))];
-        gather(&mut batch, &mut receiver, std::future::pending()).await;
-        assert_eq!(batch.len(), 2);
+        let mut outbox = Outbox::default();
+        outbox.admit(BridgeEvent::from(delta("0")));
+        gather(&mut outbox, &mut receiver, std::future::pending()).await;
+        assert_eq!(outbox.pending.len(), 2);
     });
 }
 
@@ -626,11 +629,16 @@ fn forwards_streaming_text_once_its_window_passed() {
             let (events, receiver) = tokio::sync::mpsc::channel(16);
             let (delivered, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
             let start = tokio::time::Instant::now();
-            tokio::spawn(forward(Vec::new(), receiver, move |event| {
-                delivered
-                    .send((start.elapsed(), event.kind, event.text))
-                    .is_ok()
-            }));
+            tokio::spawn(forward(
+                Vec::new(),
+                receiver,
+                Arc::default(),
+                move |event| {
+                    delivered
+                        .send((start.elapsed(), event.kind, event.text))
+                        .is_ok()
+                },
+            ));
             let streamed =
                 |at, text: &str| Some((at, BridgeEventKind::ContentDelta, Some(text.to_owned())));
             events.send(delta("Hel")).await.expect("sent");
@@ -765,11 +773,16 @@ fn forwards_partial_output_once_its_window_passed() {
             let (events, receiver) = tokio::sync::mpsc::channel(16);
             let (delivered, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
             let start = tokio::time::Instant::now();
-            tokio::spawn(forward(Vec::new(), receiver, move |event| {
-                delivered
-                    .send((start.elapsed(), event.kind, event.text))
-                    .is_ok()
-            }));
+            tokio::spawn(forward(
+                Vec::new(),
+                receiver,
+                Arc::default(),
+                move |event| {
+                    delivered
+                        .send((start.elapsed(), event.kind, event.text))
+                        .is_ok()
+                },
+            ));
             // Two updates within one window reach Dart as the latest output only.
             events.send(output("a")).await.expect("sent");
             tokio::time::sleep(ms(30)).await;
@@ -796,6 +809,243 @@ fn forwards_partial_output_once_its_window_passed() {
                 Some((ms(60), BridgeEventKind::TurnCompleted, None))
             );
         });
+}
+
+/// A session event that starts item `item`, which no later event merges with.
+fn started(item: u64) -> SessionEvent {
+    SessionEvent::Agent(AgentEvent::ItemStarted {
+        turn: TurnId(1),
+        item: ItemId(item),
+        kind: ItemKind::CommandExecution,
+        detail: ItemDetail::None,
+    })
+}
+
+/// A session event that finishes item `item` with `text`.
+fn finished(item: u64, text: &str) -> SessionEvent {
+    SessionEvent::Agent(AgentEvent::ItemCompleted {
+        turn: TurnId(1),
+        item: ItemId(item),
+        kind: ItemKind::CommandExecution,
+        text: text.to_owned(),
+        status: ItemStatus::Completed,
+        duration_ms: None,
+        lines: None,
+    })
+}
+
+/// A session event that appends `delta` to item `item`.
+fn delta(item: u64, delta: &str) -> SessionEvent {
+    SessionEvent::Agent(AgentEvent::ContentDelta {
+        item: ItemId(item),
+        delta: delta.to_owned(),
+    })
+}
+
+/// Starts forwarding a session's events under `credit`; the events are sent in, and what the
+/// sink receives comes out.
+fn start_forwarding(
+    credit: Arc<Credit>,
+) -> (
+    tokio::sync::mpsc::Sender<SessionEvent>,
+    tokio::sync::mpsc::UnboundedReceiver<BridgeEvent>,
+) {
+    let (events, receiver) = tokio::sync::mpsc::channel(4096);
+    let (delivered, deliveries) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(forward(Vec::new(), receiver, credit, move |event| {
+        delivered.send(event).is_ok()
+    }));
+    (events, deliveries)
+}
+
+/// What the sink received since the last call, in order.
+fn taken(deliveries: &mut tokio::sync::mpsc::UnboundedReceiver<BridgeEvent>) -> Vec<BridgeEvent> {
+    std::iter::from_fn(|| deliveries.try_recv().ok()).collect()
+}
+
+/// Lets the forwarder run until it waits for an event or for Liquid, past any gathering window.
+async fn settle() {
+    tokio::time::sleep(Duration::from_millis(100)).await;
+}
+
+fn paused_runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .start_paused(true)
+        .build()
+        .expect("runtime starts")
+}
+
+#[test]
+fn holds_events_beyond_the_window_until_liquid_confirms() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let (events, mut deliveries) = start_forwarding(credit.clone());
+        for item in 1..=WINDOW as u64 + 44 {
+            events.send(started(item)).await.expect("sent");
+        }
+        settle().await;
+        assert_eq!(
+            taken(&mut deliveries).len(),
+            WINDOW,
+            "the sink never holds more than the window unconfirmed"
+        );
+        credit.confirm(WINDOW as u64);
+        settle().await;
+        assert_eq!(
+            taken(&mut deliveries).len(),
+            44,
+            "a confirmation reopens the window for what waits"
+        );
+    });
+}
+
+#[test]
+fn falling_behind_keeps_finished_items_and_sends_one_fell_behind_event() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let (events, mut deliveries) = start_forwarding(credit.clone());
+        for item in 1..=WINDOW as u64 {
+            events.send(started(item)).await.expect("sent");
+        }
+        // Liquid applies nothing: finished items queue, then more partial output than the bound
+        // allows, and events after that overflow come behind it.
+        for item in 1000..1100 {
+            events.send(finished(item, "done")).await.expect("sent");
+        }
+        for item in 3000..3200 {
+            events.send(delta(item, "partial")).await.expect("sent");
+        }
+        for item in 5000..5010 {
+            events.send(started(item)).await.expect("sent");
+        }
+        settle().await;
+        assert_eq!(taken(&mut deliveries).len(), WINDOW);
+        credit.confirm(WINDOW as u64);
+        settle().await;
+        let sent: Vec<_> = taken(&mut deliveries)
+            .iter()
+            .map(|event| (event.kind, event.item.as_ref().map(|item| item.id)))
+            .collect();
+        let finished_items =
+            (1000i64..1100).map(|item| (BridgeEventKind::ItemCompleted, Some(item)));
+        // The partial output queued before the overflow is gone; what came after the fell-behind
+        // event is live and stays.
+        let live_after = (3157i64..3200).map(|item| (BridgeEventKind::ContentDelta, Some(item)));
+        let started_after = (5000i64..5010).map(|item| (BridgeEventKind::ItemStarted, Some(item)));
+        let expected: Vec<_> = finished_items
+            .chain([(BridgeEventKind::FellBehind, None)])
+            .chain(live_after)
+            .chain(started_after)
+            .collect();
+        assert_eq!(
+            sent, expected,
+            "the finished items stay in order, one fell-behind event follows the partial output that went, and what comes after is live"
+        );
+    });
+}
+
+#[test]
+fn events_other_than_partial_output_wait_for_liquid_and_are_never_dropped() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let (events, mut deliveries) = start_forwarding(credit.clone());
+        for item in 1..=1000 {
+            events.send(started(item)).await.expect("sent");
+        }
+        settle().await;
+        let mut delivered = taken(&mut deliveries);
+        for applied in [256u64, 512, 768] {
+            credit.confirm(applied);
+            settle().await;
+            delivered.extend(taken(&mut deliveries));
+        }
+        let items: Vec<_> = delivered
+            .iter()
+            .map(|event| (event.kind, event.item.as_ref().map(|item| item.id)))
+            .collect();
+        let expected: Vec<_> = (1..=1000i64)
+            .map(|item| (BridgeEventKind::ItemStarted, Some(item)))
+            .collect();
+        assert_eq!(
+            items, expected,
+            "a queue past its bound waits for confirmations, in order, and drops nothing"
+        );
+    });
+}
+
+#[test]
+fn a_second_overflow_while_the_fell_behind_event_waits_adds_no_second_one() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let (events, mut deliveries) = start_forwarding(credit.clone());
+        for item in 1..=WINDOW as u64 {
+            events.send(started(item)).await.expect("sent");
+        }
+        // Two overflows before Liquid confirms anything.
+        for item in 3000..3700 {
+            events.send(delta(item, "partial")).await.expect("sent");
+        }
+        settle().await;
+        let mut delivered = taken(&mut deliveries);
+        for applied in [512u64, 768, 1024, 1280] {
+            credit.confirm(applied);
+            settle().await;
+            delivered.extend(taken(&mut deliveries));
+        }
+        let fell_behind = delivered
+            .iter()
+            .filter(|event| event.kind == BridgeEventKind::FellBehind)
+            .count();
+        assert_eq!(fell_behind, 1, "one fell-behind event per stall");
+    });
+}
+
+#[test]
+fn merges_text_and_partial_output_while_the_window_is_full() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let (events, mut deliveries) = start_forwarding(credit.clone());
+        for item in 1..=WINDOW as u64 {
+            events.send(started(item)).await.expect("sent");
+        }
+        settle().await;
+        assert_eq!(taken(&mut deliveries).len(), WINDOW);
+        events.send(delta(1, "He")).await.expect("sent");
+        events.send(delta(1, "llo")).await.expect("sent");
+        events
+            .send(SessionEvent::Agent(AgentEvent::ItemUpdated {
+                item: ItemId(2),
+                output: "a".to_owned(),
+            }))
+            .await
+            .expect("sent");
+        events
+            .send(SessionEvent::Agent(AgentEvent::ItemUpdated {
+                item: ItemId(2),
+                output: "ab".to_owned(),
+            }))
+            .await
+            .expect("sent");
+        events.send(delta(1, "!")).await.expect("sent");
+        settle().await;
+        assert!(taken(&mut deliveries).is_empty(), "the window is full");
+        credit.confirm(WINDOW as u64);
+        settle().await;
+        let texts: Vec<_> = taken(&mut deliveries)
+            .into_iter()
+            .map(|event| (event.kind, event.text))
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                (BridgeEventKind::ContentDelta, Some("Hello".to_owned())),
+                (BridgeEventKind::ItemUpdated, Some("ab".to_owned())),
+                (BridgeEventKind::ContentDelta, Some("!".to_owned())),
+            ],
+            "deltas concatenate and the latest partial output wins, in order"
+        );
+    });
 }
 
 /// A new Git repository with `a.txt` committed as `old`.
@@ -1782,7 +2032,13 @@ fn starts_after_an_agent_says_much_before_it_is_ready() {
     session
         .forward(move |event| sender.send(event).is_ok())
         .expect("first subscriber");
+    // The consumer confirms each event it applied, as Liquid does; the window waits otherwise.
+    let mut applied = 0;
     let last = std::iter::from_fn(|| receiver.recv_timeout(Duration::from_secs(5)).ok())
+        .inspect(|_| {
+            applied += 1;
+            session.confirm_applied(applied);
+        })
         .find(|event| event.text.as_deref() == Some("299"));
     assert!(last.is_some(), "every early event reaches Dart");
     assert!(call(session.shutdown()));

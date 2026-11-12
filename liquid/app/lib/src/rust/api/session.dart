@@ -52,6 +52,10 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Every uncommitted file with attribution from the current session branch's checkpoints.
   Future<BridgeCommitPlan> commitPlan();
 
+  /// Confirms that Liquid applied the stream's first `applied` events, which lets the stream
+  /// send that many more. Liquid calls it after applying each batch it received (ADR-0272).
+  Future<void> confirmApplied({required PlatformInt64 applied});
+
   /// Everything the model saw for the request behind the response `entry`; `None` unless
   /// `entry` is a response.
   Future<BridgeContextDetail?> context({required String entry});

@@ -42,7 +42,7 @@ const _noticeFades = Duration(seconds: 6);
 class SessionState {
   SessionState(this._backend, {BranchBases? bases})
     : _bases = bases ?? BranchBases() {
-    _subscription = _backend.events().listen(_apply);
+    _subscription = _backend.events().listen(_receive);
     hideWhitespace.addListener(() => unawaited(readChanges()));
     git.refreshed.addListener(() {
       if (diffScope.value is UncommittedChanges) unawaited(readChanges());
@@ -887,11 +887,49 @@ class SessionState {
     git.stop();
     _pulls?.dispose();
     // The bridge's stream finishes cancelling only with its next event, which an idle agent
-    // sends once it is shut down, so the agent stops first.
+    // sends once it is shut down, so the agent stops first. Nothing confirms events any more, so
+    // a count this large releases the window: the bridge's next send then finds the stream closed.
     final cancelled = _subscription.cancel();
+    unawaited(_backend.confirmApplied(_released).catchError((Object _) {}));
     await _backend.shutdown();
     await cancelled;
   }
+
+  /// A count no session reaches, which releases the bridge's window on dispose.
+  static const _released = 1 << 53;
+
+  /// Events applied so far, and the count Liquid last confirmed to the bridge.
+  int _applied = 0;
+  int _confirmed = 0;
+  bool _confirming = false;
+
+  /// Applies an event from the bridge, then confirms it (ADR-0272).
+  void _receive(BridgeEvent event) {
+    _apply(event);
+    _applied++;
+    if (!_confirming) unawaited(_confirm());
+  }
+
+  /// Confirms what has been applied, one call at a time; a count that grows meanwhile goes in
+  /// the next call, so calls batch while the bridge answers slowly.
+  Future<void> _confirm() async {
+    _confirming = true;
+    try {
+      while (_confirmed < _applied) {
+        final applied = _applied;
+        await _backend.confirmApplied(applied);
+        _confirmed = applied;
+      }
+    } on Object {
+      // The session is gone, so nothing waits for the count.
+    } finally {
+      _confirming = false;
+    }
+  }
+
+  /// Whether a fell-behind event came during a running turn, whose end then reads the chat again,
+  /// because its finished items may not have been stored when the earlier read ran.
+  bool _readAgainAtEnd = false;
 
   void _apply(BridgeEvent event) {
     switch (event.kind) {
@@ -903,7 +941,13 @@ class SessionState {
         _stopping = false;
         stored.value++;
         unawaited(loadTitle());
-        unawaited(_endTurn(_chat.turnCompleted()));
+        final readAgain = _readAgainAtEnd;
+        _readAgainAtEnd = false;
+        unawaited(
+          _endTurn(_chat.turnCompleted()).then((_) {
+            if (readAgain) return loadChat();
+          }),
+        );
       case BridgeEventKind.itemStarted:
         final started = event.item!;
         final view = ItemView(
@@ -971,7 +1015,17 @@ class SessionState {
         notify(event.display?.level ?? BridgeLevel.info, event.text ?? '');
       case BridgeEventKind.failed:
         _failed(event.text);
+      case BridgeEventKind.fellBehind:
+        // Partial output was dropped, so the chat is read back from the session file, which holds
+        // the finished items; a turn still running reads it again when it ends.
+        _readAgainAtEnd = _turnActive;
+        unawaited(loadChat());
       case BridgeEventKind.exited:
+        // A turn that ends with the agent has no end event to read the chat again at.
+        if (_readAgainAtEnd) {
+          _readAgainAtEnd = false;
+          unawaited(loadChat());
+        }
         // Nothing an exited agent started is still running.
         for (final view in _byId.values) {
           if (view.outcome.value == null &&

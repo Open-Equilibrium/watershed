@@ -38,6 +38,12 @@ class FakeBackend implements SessionBackend {
     return controller.stream;
   }
 
+  /// The counts the stream's events were confirmed up to, in order.
+  final confirmed = <int>[];
+
+  @override
+  Future<void> confirmApplied(int applied) async => confirmed.add(applied);
+
   /// What the agent rejects sends with, like the bridge does.
   String? sendError;
 

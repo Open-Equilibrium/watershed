@@ -162,6 +162,10 @@ enum BridgeEventKind {
 
   /// `queue` with the messages waiting for the running agent.
   queueChanged,
+
+  /// No parts; the stream dropped partial output that Liquid could not keep up with, so Liquid
+  /// reloads the chat from the session file and continues live (ADR-0272).
+  fellBehind,
 }
 
 /// One file a run changed.

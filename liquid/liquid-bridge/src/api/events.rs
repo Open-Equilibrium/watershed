@@ -38,6 +38,9 @@ pub enum BridgeEventKind {
     Exited,
     /// `queue` with the messages waiting for the running agent.
     QueueChanged,
+    /// No parts; the stream dropped partial output that Liquid could not keep up with, so Liquid
+    /// reloads the chat from the session file and continues live (ADR-0272).
+    FellBehind,
 }
 
 /// One session event for Dart.

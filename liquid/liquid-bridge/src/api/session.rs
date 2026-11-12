@@ -101,6 +101,8 @@ pub struct AgentSession {
     pub(crate) pi_args: Vec<std::ffi::OsString>,
     /// Stops waiting for the latest pull request text; left in place once that text arrived.
     pub(crate) writing: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    /// How many of the stream's events Liquid applied, which reopens the window (ADR-0272).
+    credit: std::sync::Arc<stream::Credit>,
 }
 
 impl AgentSession {
@@ -161,6 +163,7 @@ impl AgentSession {
             pi_program: command.program,
             pi_args: command.args,
             writing: std::sync::Mutex::new(None),
+            credit: std::sync::Arc::default(),
         };
         RUNTIME
             .block_on(window.checkpoints.show_session(resumed.as_deref()))
@@ -187,8 +190,19 @@ impl AgentSession {
             .take()
             .ok_or_else(|| "the session's events already have a subscriber".to_owned())?;
         let early = std::mem::take(&mut *self.early.lock().unwrap_or_else(PoisonError::into_inner));
-        RUNTIME.spawn(stream::forward(early, receiver, deliver));
+        RUNTIME.spawn(stream::forward(
+            early,
+            receiver,
+            self.credit.clone(),
+            deliver,
+        ));
         Ok(())
+    }
+
+    /// Confirms that Liquid applied the stream's first `applied` events, which lets the stream
+    /// send that many more. Liquid calls it after applying each batch it received (ADR-0272).
+    pub fn confirm_applied(&self, applied: i64) {
+        self.credit.confirm(u64::try_from(applied).unwrap_or(0));
     }
 
     /// Sends a message: an idle agent starts a run with it, a running one takes it before its

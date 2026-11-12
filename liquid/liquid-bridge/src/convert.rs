@@ -308,7 +308,7 @@ impl From<ItemKind> for BridgeItemKind {
     }
 }
 
-fn event(kind: BridgeEventKind) -> BridgeEvent {
+pub(crate) fn event(kind: BridgeEventKind) -> BridgeEvent {
     BridgeEvent {
         kind,
         item: None,
