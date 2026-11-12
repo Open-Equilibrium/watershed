@@ -308,7 +308,16 @@ struct CrashRecord {
 ///
 /// Every published Run dispatches at most one provider effect in total, so the effects added
 /// since the scenario started never exceed the Runs added since then.
-fn assert_recovery_invariants(store: &Store, crashed: &CrashRecord, run: Option<&str>, step: &str) {
+///
+/// `must_resume` marks a power cut that lost a final line feed of an event or context log: ADR-0259
+/// requires exact Resume to drop it and resume, not merely to fail closed.
+fn assert_recovery_invariants(
+    store: &Store,
+    crashed: &CrashRecord,
+    run: Option<&str>,
+    step: &str,
+    must_resume: bool,
+) {
     let added_runs = |store: &Store| store.published_runs().len() - crashed.runs.len();
     let effects = || store.effects.load(Ordering::SeqCst);
     let base = crashed.baseline_effects;
@@ -327,6 +336,10 @@ fn assert_recovery_invariants(store: &Store, crashed: &CrashRecord, run: Option<
             );
         }
         Some(Err(error)) => {
+            assert!(
+                !must_resume,
+                "{step}: exact Resume of a cut last line must resume: {error}"
+            );
             assert_eq!(
                 error.exit_code(),
                 65,
@@ -569,7 +582,15 @@ fn run_crash_matrix(
                     .difference(&crashed.runs)
                     .next()
                     .cloned();
-                assert_recovery_invariants(&store, &crashed, run.as_deref(), &label);
+                assert_recovery_invariants(
+                    &store,
+                    &crashed,
+                    run.as_deref(),
+                    &label,
+                    matches!(death, Death::Power(PowerLoss::CutLastWrite))
+                        && index > 0
+                        && adr_0259_stream_write(&reference[index - 1]),
+                );
                 next_reservation(&store, &label);
             }));
             if checked.is_err() {
@@ -584,6 +605,18 @@ fn run_crash_matrix(
         failures.join("; ")
     );
     reference
+}
+
+/// Whether a traced `write` step appended to an event or context log, the streams ADR-0259 covers.
+fn adr_0259_stream_write(step: &str) -> bool {
+    let Some(path) = step.strip_prefix("write ") else {
+        return false;
+    };
+    let leaf = Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    leaf.starts_with("events") || leaf.starts_with("contexts")
 }
 
 /// A Conversation's staged Run left by a crash is gone after the next reservation.
@@ -631,26 +664,29 @@ fn root_run_survives_a_process_death_at_every_durable_step() {
     }
 }
 
+/// Builds the twelve-Run chain that the depth-twelve matrices start from.
+fn build_twelve_run_chain(store: &Store) {
+    store.start_root().expect("root Run completes");
+    for depth in 1..=11 {
+        let output = store
+            .continue_newest()
+            .unwrap_or_else(|error| panic!("continuation {depth} completes: {error}"));
+        assert!(!output.failed, "continuation {depth} completes");
+    }
+    assert_eq!(
+        store.published_runs().len(),
+        12,
+        "the chain holds twelve Runs"
+    );
+}
+
 #[test]
 fn continuation_run_at_depth_twelve_survives_a_process_death_at_every_durable_step() {
     // WHY: each child replays the twelve-Run prefix, so the chain's matrix samples its steps to
     // bound the runtime: every fourth step of the Run creation prefix, then every twentieth step
     // of the attempt and recovery records that follow.
     let reference = run_crash_matrix(
-        |store: &Store| {
-            store.start_root().expect("root Run completes");
-            for depth in 1..=11 {
-                let output = store
-                    .continue_newest()
-                    .unwrap_or_else(|error| panic!("continuation {depth} completes: {error}"));
-                assert!(!output.failed, "continuation {depth} completes");
-            }
-            assert_eq!(
-                store.published_runs().len(),
-                12,
-                "the chain holds twelve Runs"
-            );
-        },
+        build_twelve_run_chain,
         Store::continue_newest,
         |index| (index < 40 && index % 4 == 0) || index % 20 == 0,
         assert_no_staged_run,
@@ -675,8 +711,21 @@ fn root_run_survives_a_power_loss_at_every_durable_step() {
         reference.iter().any(|step| step.starts_with("sync ")),
         "a power-loss trace records file syncs as durable steps"
     );
+}
+
+#[test]
+fn continuation_run_at_depth_twelve_survives_a_power_loss_at_sampled_durable_steps() {
+    // WHY: a power trace also records file syncs, so it has about twice the steps of the process
+    // trace. This sample covers the first eighty steps every eighth step, then every fortieth.
+    let reference = run_crash_matrix(
+        build_twelve_run_chain,
+        Store::continue_newest,
+        |index| (index < 80 && index % 8 == 0) || index % 40 == 0,
+        assert_no_staged_run,
+        true,
+    );
     assert!(
-        reference.iter().any(|step| step.starts_with("truncate ")),
-        "a power-loss trace records truncations as durable steps"
+        reference.iter().any(|step| step.starts_with("sync ")),
+        "a power-loss trace records file syncs as durable steps"
     );
 }
