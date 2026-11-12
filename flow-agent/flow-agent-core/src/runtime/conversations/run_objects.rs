@@ -9,14 +9,15 @@ use crate::runtime::{
     digest::sha256_hex,
     fs_guards::{
         AnchoredDir, AnchoredFile, create_anchored_file, open_anchored_file_for_read,
-        open_anchored_file_for_update, path_io_error, sync_anchored_directory,
+        open_anchored_file_for_update, path_io_error, sync_anchored_directory, sync_durable,
+        write_durable,
     },
     session_bundle::ensure_session_object_total,
     types::{MAX_SESSION_OBJECT_BYTES, MAX_SESSION_OBJECTS, RuntimeError},
 };
 use std::{
     collections::BTreeMap,
-    io::{Read, Write},
+    io::Read,
     path::Path,
     sync::{Arc, Mutex},
 };
@@ -330,15 +331,17 @@ impl RunObjectWriter {
             }
             // WHY: a strict prefix is an interrupted write; records reference an object only
             // after it is synchronized, so completing it cannot change committed state.
-            #[cfg(test)]
-            crate::runtime::fs_guards::durable_step(path.diagnostic_path(), "write");
-            if let Err(source) = file.write_all(&object.bytes[bytes.len()..]) {
+            if let Err(source) = write_durable(
+                &mut file,
+                path.diagnostic_path(),
+                &object.bytes[bytes.len()..],
+            ) {
                 return self.fail(path_io_error(path.diagnostic_path(), source));
             }
             if let Err(error) = conversation_file_sync_checkpoint(path.diagnostic_path()) {
                 return self.fail(error);
             }
-            if let Err(source) = file.sync_all() {
+            if let Err(source) = sync_durable(&file, path.diagnostic_path()) {
                 return self.fail(path_io_error(path.diagnostic_path(), source));
             }
             let length =
@@ -365,9 +368,9 @@ impl RunObjectWriter {
                 Ok(file) => file,
                 Err(error) => return self.fail(error),
             };
-            #[cfg(test)]
-            crate::runtime::fs_guards::durable_step(path.diagnostic_path(), "write");
-            if let Err(source) = file.write_all(&object.bytes).and_then(|()| file.sync_all()) {
+            if let Err(source) = write_durable(&mut file, path.diagnostic_path(), &object.bytes)
+                .and_then(|()| sync_durable(&file, path.diagnostic_path()))
+            {
                 drop(file);
                 return self.fail_created(path_io_error(path.diagnostic_path(), source), &path);
             }

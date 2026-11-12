@@ -4,12 +4,13 @@ use super::super::{
 };
 use crate::runtime::{
     fs_guards::{
-        AnchoredDir, AnchoredFile, create_anchored_file, open_anchored_file_for_read, path_io_error,
+        AnchoredDir, AnchoredFile, create_anchored_file, open_anchored_file_for_read,
+        path_io_error, sync_durable, write_durable,
     },
     types::RuntimeError,
 };
 use serde::{Deserialize, Serialize};
-use std::io::{Read, Write};
+use std::io::Read;
 
 pub(crate) const MAX_CONVERSATION_STATUS_SUMMARY_BYTES: usize = 4 * 1024;
 pub(crate) const STATUS_SUMMARY_SCHEMA: &str = "flow-conversation-status-summary-v0";
@@ -79,10 +80,8 @@ pub(in crate::runtime::conversations) fn create_bounded_canonical_json_file(
 ) -> Result<(), RuntimeError> {
     let bytes = bounded_canonical_json_bytes(value, label)?;
     let mut file = create_anchored_file(path)?;
-    #[cfg(test)]
-    crate::runtime::fs_guards::durable_step(path.diagnostic_path(), "write");
-    file.write_all(&bytes)
-        .and_then(|()| file.sync_all())
+    write_durable(&mut file, path.diagnostic_path(), &bytes)
+        .and_then(|()| sync_durable(&file, path.diagnostic_path()))
         .map_err(|source| path_io_error(path.diagnostic_path(), source))
 }
 

@@ -19,7 +19,8 @@ use crate::runtime::{
     digest::sha256_hex,
     fs_guards::{
         AnchoredFile, open_anchored_file_for_update, open_anchored_session_log_append_file,
-        path_io_error, read_anchored_file_with_limit,
+        path_io_error, read_anchored_file_with_limit, sync_durable, truncate_durable,
+        write_durable,
     },
     run_attempts::{RunAttemptLifecycle, RunAttemptResult},
     types::{MAX_SESSION_METADATA_BYTES, MAX_SESSION_OBJECT_BYTES, RuntimeError},
@@ -28,7 +29,7 @@ mod replay;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    io::{Seek, SeekFrom, Write},
+    io::{Seek, SeekFrom},
     path::Path,
 };
 
@@ -159,15 +160,14 @@ impl ProductiveRecoveryWriter {
             let committed_len_u64 = u64::try_from(committed_len)
                 .map_err(|_| protocol("productive recovery snapshot length exceeds u64"))?;
             let (file, _) = open_anchored_file_for_update(&path)?;
-            file.set_len(committed_len_u64)
-                .and_then(|()| file.sync_all())
+            truncate_durable(&file, path.diagnostic_path(), committed_len_u64)
+                .and_then(|()| sync_durable(&file, path.diagnostic_path()))
                 .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
             bytes.truncate(committed_len);
         }
         conversation_file_sync_checkpoint(path.diagnostic_path())?;
-        open_anchored_file_for_update(&path)?
-            .0
-            .sync_all()
+        let (file, _) = open_anchored_file_for_update(&path)?;
+        sync_durable(&file, path.diagnostic_path())
             .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
         let mut records = parse_productive_recovery_records(&bytes)?;
         let header = records
@@ -271,12 +271,10 @@ impl ProductiveRecoveryWriter {
         file.seek(SeekFrom::End(0))
             .map_err(|source| path_io_error(self.path.diagnostic_path(), source))?;
         let result = (|| {
-            #[cfg(test)]
-            crate::runtime::fs_guards::durable_step(self.path.diagnostic_path(), "write");
-            file.write_all(line.as_bytes())
+            write_durable(&mut file, self.path.diagnostic_path(), line.as_bytes())
                 .map_err(|source| path_io_error(self.path.diagnostic_path(), source))?;
             conversation_file_sync_checkpoint(self.path.diagnostic_path())?;
-            file.sync_all()
+            sync_durable(&file, self.path.diagnostic_path())
                 .map_err(|source| path_io_error(self.path.diagnostic_path(), source))
         })();
         self.failed |= result.is_err();

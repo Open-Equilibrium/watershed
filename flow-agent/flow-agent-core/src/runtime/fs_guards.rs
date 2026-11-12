@@ -55,13 +55,17 @@ pub(crate) use durability::{
     set_directory_sync_error_for_path_for_test, set_directory_sync_error_for_test,
     start_directory_sync_trace_for_test, take_directory_sync_trace_for_test,
 };
-pub(crate) use durability::{sync_directory, sync_retained_directory as sync_anchored_directory};
+pub(crate) use durability::{
+    sync_directory, sync_durable, sync_retained_directory as sync_anchored_directory,
+    truncate_durable, write_durable,
+};
 
 #[cfg(test)]
 mod durable_steps;
 #[cfg(test)]
 pub(crate) use durable_steps::{
-    CRASH_EXIT_CODE, CrashPoint, durable_step, finish_durable_trace, start_durable_trace,
+    CRASH_EXIT_CODE, CrashPoint, PowerLoss, apply_power_loss, durable_step, finish_durable_trace,
+    start_durable_trace, start_power_loss_trace,
 };
 
 #[cfg(test)]

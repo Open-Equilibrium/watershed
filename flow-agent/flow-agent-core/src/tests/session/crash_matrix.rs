@@ -10,7 +10,10 @@ use crate::{
         config_io::{GlobalConfig, load_global_config},
         context::{CONTEXT_SAFETY_MARGIN, ContextModelProfile, OPERATOR_MODEL_PROFILE_ID},
         conversations::conversation_status_page,
-        fs_guards::{CRASH_EXIT_CODE, CrashPoint, finish_durable_trace, start_durable_trace},
+        fs_guards::{
+            CRASH_EXIT_CODE, CrashPoint, PowerLoss, finish_durable_trace, start_durable_trace,
+            start_power_loss_trace,
+        },
         openai_codex::ProviderTurn,
         productive::{ProductiveProvider, ProviderCredential},
         session::{
@@ -30,7 +33,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
-    fs,
+    fs, panic,
     path::{Path, PathBuf},
     process::Command,
     sync::{
@@ -41,6 +44,7 @@ use std::{
 
 const CRASH_CHILD_WORKSPACE: &str = "WATERSHED_CRASH_MATRIX_WORKSPACE";
 const CRASH_CHILD_STEP: &str = "WATERSHED_CRASH_MATRIX_STEP";
+const CRASH_CHILD_DEATH: &str = "WATERSHED_CRASH_MATRIX_DEATH";
 const CRASH_RECORD: &str = "crash-record.json";
 
 const CONVERSATION_ID: &str = "smoke-flow";
@@ -399,22 +403,67 @@ fn normalized(steps: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// The child role of a matrix: the workspace and durable step its parent assigned, if any.
-fn crash_child_role() -> Option<(PathBuf, usize)> {
+/// How a child dies at its crash point: a process death keeps every byte it wrote, while a power
+/// loss drops the bytes each file had not synced. `Cut` also keeps all but the last byte of the
+/// last unsynced write, so a JSONL record survives without its line feed (ADR-0259).
+#[derive(Clone, Copy, Debug)]
+enum Death {
+    Process,
+    Power(PowerLoss),
+}
+
+impl Death {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Process => "process",
+            Self::Power(PowerLoss::Drop) => "drop",
+            Self::Power(PowerLoss::CutLastWrite) => "cut",
+        }
+    }
+
+    fn parse(label: &str) -> Self {
+        match label {
+            "process" => Self::Process,
+            "drop" => Self::Power(PowerLoss::Drop),
+            "cut" => Self::Power(PowerLoss::CutLastWrite),
+            other => panic!("unknown crash death {other}"),
+        }
+    }
+}
+
+/// The deaths a parent checks at durable step `index` of a reference with `steps`.
+fn deaths_at(power: bool, steps: &[String], index: usize) -> Vec<Death> {
+    if !power {
+        return vec![Death::Process];
+    }
+    let mut deaths = vec![Death::Power(PowerLoss::Drop)];
+    // WHY: a cut takes bytes only from an unsynced write, so it differs from a drop only when the
+    // step before the crash point is a write that no sync has covered.
+    if index > 0 && steps[index - 1].starts_with("write ") {
+        deaths.push(Death::Power(PowerLoss::CutLastWrite));
+    }
+    deaths
+}
+
+/// The child role of a matrix: the workspace, durable step and death its parent assigned, if any.
+fn crash_child_role() -> Option<(PathBuf, usize, Death)> {
     let workspace = std::env::var_os(CRASH_CHILD_WORKSPACE)?;
     let index = std::env::var(CRASH_CHILD_STEP)
         .expect("crash child step is configured")
         .parse()
         .expect("crash child step is an index");
-    Some((PathBuf::from(workspace), index))
+    let death =
+        Death::parse(&std::env::var(CRASH_CHILD_DEATH).expect("crash child death is configured"));
+    Some((PathBuf::from(workspace), index, death))
 }
 
 /// Runs the setup and scenario in a child process that dies at durable step `index`.
-fn die_at_step(workspace: &Path, index: usize) -> CrashRecord {
+fn die_at_step(workspace: &Path, index: usize, death: Death) -> CrashRecord {
     let output = Command::new(std::env::current_exe().expect("test executable resolves"))
         .args(["--exact", &current_test_name(), "--nocapture"])
         .env(CRASH_CHILD_WORKSPACE, workspace)
         .env(CRASH_CHILD_STEP, index.to_string())
+        .env(CRASH_CHILD_DEATH, death.label())
         .env("FLOW_AGENT_HOME", session_home_path())
         .output()
         .expect("crash child starts");
@@ -433,38 +482,47 @@ fn die_at_step(workspace: &Path, index: usize) -> CrashRecord {
 ///
 /// `setup` runs untraced in every process before the traced scenario. Returns the reference step
 /// list of an unfaulted run.
+///
+/// A power-loss matrix traces file syncs as steps too, and checks each step with a drop and, after
+/// an unsynced write, a cut.
 fn run_crash_matrix(
     setup: impl Fn(&Store),
     scenario: impl Fn(&Store) -> Result<RunOutput, RuntimeError>,
     selected: impl Fn(usize) -> bool,
     next_reservation: impl Fn(&Store, &str),
+    power: bool,
 ) -> Vec<String> {
-    if let Some((workspace, index)) = crash_child_role() {
+    if let Some((workspace, index, death)) = crash_child_role() {
         let store = Store::at(&workspace);
         setup(&store);
         let record = workspace.join(CRASH_RECORD);
         let effects = store.effects.clone();
         let baseline_effects = effects.load(Ordering::SeqCst);
         let runs = store.published_runs();
-        start_durable_trace(
-            &store.root,
-            Some(CrashPoint {
-                index,
-                on_crash: Box::new(move |steps| {
-                    let crashed = CrashRecord {
-                        baseline_effects,
-                        effects: effects.load(Ordering::SeqCst),
-                        runs,
-                        steps: steps.to_vec(),
-                    };
-                    fs::write(
-                        &record,
-                        serde_json::to_vec(&crashed).expect("crash record serializes"),
-                    )
-                    .expect("crash record is written");
-                }),
+        let crash = Some(CrashPoint {
+            index,
+            power: match death {
+                Death::Process => None,
+                Death::Power(loss) => Some(loss),
+            },
+            on_crash: Box::new(move |steps| {
+                let crashed = CrashRecord {
+                    baseline_effects,
+                    effects: effects.load(Ordering::SeqCst),
+                    runs,
+                    steps: steps.to_vec(),
+                };
+                fs::write(
+                    &record,
+                    serde_json::to_vec(&crashed).expect("crash record serializes"),
+                )
+                .expect("crash record is written");
             }),
-        );
+        });
+        match death {
+            Death::Process => start_durable_trace(&store.root, crash),
+            Death::Power(_) => start_power_loss_trace(&store.root, crash),
+        }
         let outcome = scenario(&store);
         panic!("durable step {index} is not reached: {:?}", outcome.err());
     }
@@ -472,7 +530,11 @@ fn run_crash_matrix(
     let reference = {
         let (_workspace, store) = Store::fresh();
         setup(&store);
-        start_durable_trace(&store.root, None);
+        if power {
+            start_power_loss_trace(&store.root, None);
+        } else {
+            start_durable_trace(&store.root, None);
+        }
         let completed = scenario(&store);
         let steps = finish_durable_trace(&store.root);
         assert!(
@@ -484,28 +546,43 @@ fn run_crash_matrix(
         steps
     };
 
+    // WHY: every failing crash point is reported together, so one run shows the whole picture.
+    let mut failures = Vec::new();
     for (index, step) in reference
         .iter()
         .enumerate()
         .filter(|(index, _)| selected(*index))
     {
-        let label = format!("step {index} ({step})");
-        let (_workspace, store) = Store::fresh();
-        let crashed = die_at_step(&store.workspace, index);
-        assert_eq!(
-            normalized(&crashed.steps),
-            normalized(&reference[..=index]),
-            "{label} replays the same steps"
-        );
-        store.effects.store(crashed.effects, Ordering::SeqCst);
-        let run = store
-            .published_runs()
-            .difference(&crashed.runs)
-            .next()
-            .cloned();
-        assert_recovery_invariants(&store, &crashed, run.as_deref(), &label);
-        next_reservation(&store, &label);
+        for death in deaths_at(power, &reference, index) {
+            let label = format!("step {index} ({step}, {})", death.label());
+            let checked = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+                let (_workspace, store) = Store::fresh();
+                let crashed = die_at_step(&store.workspace, index, death);
+                assert_eq!(
+                    normalized(&crashed.steps),
+                    normalized(&reference[..=index]),
+                    "{label} replays the same steps"
+                );
+                store.effects.store(crashed.effects, Ordering::SeqCst);
+                let run = store
+                    .published_runs()
+                    .difference(&crashed.runs)
+                    .next()
+                    .cloned();
+                assert_recovery_invariants(&store, &crashed, run.as_deref(), &label);
+                next_reservation(&store, &label);
+            }));
+            if checked.is_err() {
+                failures.push(label);
+            }
+        }
     }
+    assert!(
+        failures.is_empty(),
+        "{} crash points fail recovery: {}",
+        failures.len(),
+        failures.join("; ")
+    );
     reference
 }
 
@@ -520,21 +597,23 @@ fn assert_no_staged_run(store: &Store, step: &str) {
     );
 }
 
+/// The next reservation after a root Run's crash: a fresh root reclaims the Run the crash staged.
+fn next_root_reservation(store: &Store, step: &str) {
+    let output = store
+        .start_root()
+        .unwrap_or_else(|error| panic!("{step}: fresh root Run fails: {error}"));
+    assert!(!output.failed, "{step}: fresh root Run completes");
+    assert_no_staged_run(store, step);
+}
+
 #[test]
 fn root_run_survives_a_process_death_at_every_durable_step() {
     let reference = run_crash_matrix(
         |_| {},
         Store::start_root,
         |_| true,
-        |store, step| {
-            // WHY: a fresh root after the crash is the next reservation of the Conversation; it
-            // reclaims a Run staged by the crash.
-            let output = store
-                .start_root()
-                .unwrap_or_else(|error| panic!("{step}: fresh root Run fails: {error}"));
-            assert!(!output.failed, "{step}: fresh root Run completes");
-            assert_no_staged_run(store, step);
-        },
+        next_root_reservation,
+        false,
     );
 
     for family in [
@@ -575,6 +654,7 @@ fn continuation_run_at_depth_twelve_survives_a_process_death_at_every_durable_st
         Store::continue_newest,
         |index| (index < 40 && index % 4 == 0) || index % 20 == 0,
         assert_no_staged_run,
+        false,
     );
     assert!(
         reference.iter().any(|step| step.contains("history.jsonl")),

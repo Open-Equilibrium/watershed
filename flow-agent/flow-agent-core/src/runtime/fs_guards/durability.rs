@@ -1,8 +1,42 @@
 #[cfg(test)]
-use super::io;
+use super::durable_steps::{durable_step, record_sync, record_truncate, record_write};
 use super::{AnchoredDir, Path, RuntimeError, fs, path_io_error};
+use std::io::{self, Write as _};
 #[cfg(test)]
 use std::{cell::RefCell, path::PathBuf};
+
+/// Writes all of `bytes` to `file`, opened at `path`: one durable write step (ADR-0266).
+pub(crate) fn write_durable(file: &mut fs::File, path: &Path, bytes: &[u8]) -> io::Result<()> {
+    #[cfg(test)]
+    durable_step(path, "write");
+    file.write_all(bytes)?;
+    #[cfg(test)]
+    record_write(path, file, bytes.len() as u64);
+    let _ = path;
+    Ok(())
+}
+
+/// Truncates `file`, opened at `path`, to `len` bytes; the truncation is durable at the next sync.
+pub(crate) fn truncate_durable(file: &fs::File, path: &Path, len: u64) -> io::Result<()> {
+    #[cfg(test)]
+    durable_step(path, "truncate");
+    file.set_len(len)?;
+    #[cfg(test)]
+    record_truncate(path, file, len);
+    let _ = path;
+    Ok(())
+}
+
+/// Syncs the data and metadata of `file`, opened at `path`.
+pub(crate) fn sync_durable(file: &fs::File, path: &Path) -> io::Result<()> {
+    #[cfg(test)]
+    durable_step(path, "sync");
+    file.sync_all()?;
+    #[cfg(test)]
+    record_sync(path, file);
+    let _ = path;
+    Ok(())
+}
 
 #[cfg(test)]
 std::thread_local! {

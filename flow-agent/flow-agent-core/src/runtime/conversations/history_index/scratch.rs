@@ -5,8 +5,8 @@ use crate::runtime::{
     fs_guards::{
         AnchoredDir, AnchoredDirectoryIdentity, AnchoredFile, DirectoryErrorMode,
         create_anchored_file_for_update, open_anchored_file_for_read,
-        open_anchored_file_for_update, path_io_error, read_anchored_file_with_limit,
-        verify_owned_anchored_file,
+        open_anchored_file_for_update, path_io_error, read_anchored_file_with_limit, sync_durable,
+        verify_owned_anchored_file, write_durable,
     },
     session_authority::conversation_history_validation_dir,
     stage_results::reconcile_operation_and_cleanup,
@@ -155,10 +155,13 @@ impl HistoryScratch {
             );
             let marker_path = dir.file(MARKER_LEAF);
             let mut marker_file = create_scratch_file(&dir, MARKER_LEAF)?;
-            marker_file
-                .write_all(marker_text.as_bytes())
-                .and_then(|()| marker_file.sync_all())
-                .map_err(|source| path_io_error(marker_path.diagnostic_path(), source))?;
+            write_durable(
+                &mut marker_file,
+                marker_path.diagnostic_path(),
+                marker_text.as_bytes(),
+            )
+            .and_then(|()| sync_durable(&marker_file, marker_path.diagnostic_path()))
+            .map_err(|source| path_io_error(marker_path.diagnostic_path(), source))?;
             #[cfg(test)]
             history_scratch_fault(HistoryScratchFault::InitializationAfterMarker, &dir.path)?;
             let lease = create_scratch_file(&dir, LEASE_LEAF)?;
@@ -310,7 +313,7 @@ pub(super) fn finish_scratch_run(
 ) -> Result<(), RuntimeError> {
     writer
         .flush()
-        .and_then(|()| writer.get_ref().sync_all())
+        .and_then(|()| sync_durable(writer.get_ref(), path.diagnostic_path()))
         .map_err(|source| path_io_error(path.diagnostic_path(), source))
 }
 

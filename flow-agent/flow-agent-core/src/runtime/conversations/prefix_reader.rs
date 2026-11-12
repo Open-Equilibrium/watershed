@@ -6,7 +6,7 @@ use crate::runtime::{
     fs_guards::{
         AnchoredDir, AnchoredFile, AnchoredFileIdentity, anchored_file_identity,
         open_anchored_file_for_read, open_anchored_file_for_update, path_io_error,
-        segmented_jsonl_files,
+        segmented_jsonl_files, sync_durable, truncate_durable,
     },
     types::{MAX_SESSION_SEGMENT_BYTES, RuntimeError, SessionStreamLimits},
 };
@@ -46,9 +46,8 @@ fn drop_incomplete_final_line(
     let committed = committed_prefix_len(file, bytes)
         .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
     let (writable, _) = open_anchored_file_for_update(path)?;
-    writable
-        .set_len(committed)
-        .and_then(|()| writable.sync_all())
+    truncate_durable(&writable, path.diagnostic_path(), committed)
+        .and_then(|()| sync_durable(&writable, path.diagnostic_path()))
         .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
     Ok(committed)
 }

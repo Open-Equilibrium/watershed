@@ -13,7 +13,7 @@ use crate::runtime::{
     digest::sha256_hex,
     fs_guards::{
         AnchoredDir, AnchoredFile, open_anchored_file_for_read, path_io_error,
-        segmented_jsonl_path, segmented_jsonl_segment_count,
+        segmented_jsonl_path, segmented_jsonl_segment_count, sync_durable,
     },
     stage_results::reconcile_operation_and_cleanup,
     types::{RuntimeError, SessionStreamLimits},
@@ -370,7 +370,7 @@ impl ConversationHistoryIndex {
             let index_leaf = if final_count == 0 {
                 let leaf = index_run_leaf(0, 0);
                 let file = create_scratch_file(&scratch.dir, &leaf)?;
-                file.sync_all()
+                sync_durable(&file, &scratch.dir.file(&leaf).path)
                     .map_err(|source| path_io_error(&scratch.dir.file(&leaf).path, source))?;
                 leaf
             } else {
