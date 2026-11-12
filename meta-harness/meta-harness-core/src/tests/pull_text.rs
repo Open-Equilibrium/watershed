@@ -260,11 +260,18 @@ fn a_caller_that_stops_waiting_lets_pi_end_by_itself() {
         )
         .unwrap();
 
-        let stopped =
-            tokio::time::timeout(Duration::from_millis(300), branch.write(&checkpoints)).await;
-        assert!(stopped.is_err());
-        let ended = branch.pi.join("ended");
+        // The caller stops waiting once pi runs; a fixed timeout could fire before pi starts.
+        let started = branch.pi.join("cwd");
         let waited = std::time::Instant::now();
+        {
+            let mut write = std::pin::pin!(branch.write(&checkpoints));
+            while !started.exists() && waited.elapsed() < Duration::from_secs(10) {
+                let stopped = tokio::time::timeout(Duration::from_millis(20), write.as_mut()).await;
+                assert!(stopped.is_err(), "the write ended before pi did");
+            }
+        }
+        assert!(started.exists(), "pi started");
+        let ended = branch.pi.join("ended");
         while !ended.exists() && waited.elapsed() < Duration::from_secs(10) {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
