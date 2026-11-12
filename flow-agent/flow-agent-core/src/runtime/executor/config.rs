@@ -1,7 +1,7 @@
 use crate::runtime::fs_guards::{
     AnchoredDir, AnchoredFile, DirectoryErrorMode, ProtectedStateLock, ProtectedStateLockError,
-    canonical_decimal, open_anchored_file_for_read, sync_anchored_directory,
-    unix_access_is_private,
+    canonical_decimal, open_anchored_file_for_read, sync_anchored_directory, sync_durable,
+    unix_access_is_private, write_durable,
 };
 use crate::runtime::types::RuntimeError;
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt as _};
@@ -11,7 +11,7 @@ use std::{
     ffi::OsStr,
     fs,
     fs::File,
-    io::{self, Read as _, Write as _},
+    io::{self, Read as _},
     path::{Component, Path, PathBuf},
     sync::{
         OnceLock,
@@ -245,8 +245,8 @@ impl ExecutorConfigStore {
         ));
         let operation = (|| {
             let mut file = create_private_file(&stage)?;
-            file.write_all(bytes)
-                .and_then(|()| file.sync_all())
+            write_durable(&mut file, stage.diagnostic_path(), bytes)
+                .and_then(|()| sync_durable(&file, stage.diagnostic_path()))
                 .map_err(|error| config_io(stage.diagnostic_path(), error))?;
             stage.rename_to(&path.leaf)?;
             verify_anchored_file(&path)?;

@@ -5,6 +5,7 @@ use crate::runtime::{
         AnchoredWorkspace, anchored_file_identity, canonical_segmented_jsonl_sibling,
         create_anchored_file, ensure_anchored_non_hardlinked_file, for_each_segmented_jsonl_member,
         open_anchored_file_for_read, path_io_error, reserve_new_anchored_file, sync_directory,
+        sync_durable, truncate_durable, write_durable,
     },
     session_authority::SessionOwnershipLease,
     session_bundle::SessionBundlePaths,
@@ -22,10 +23,7 @@ use crate::runtime::{
 };
 #[cfg(test)]
 use std::cell::RefCell;
-use std::{
-    io,
-    io::{Seek, Write},
-};
+use std::{io, io::Seek};
 
 #[cfg(test)]
 std::thread_local! {
@@ -440,13 +438,17 @@ pub fn write_reserved_session_metadata(
     let metadata = session_log_metadata_text(definition_metadata);
     reservation.with_reserved_log_file(|file, identity| {
         ensure_anchored_file_identity(&reservation.log_path, identity)?;
-        file.set_len(0)
+        truncate_durable(file, reservation.log_path.diagnostic_path(), 0)
             .map_err(|source| path_io_error(reservation.log_path.diagnostic_path(), source))?;
         file.seek(io::SeekFrom::Start(0))
             .map_err(|source| path_io_error(reservation.log_path.diagnostic_path(), source))?;
-        file.write_all(metadata.as_bytes())
-            .map_err(|source| path_io_error(reservation.log_path.diagnostic_path(), source))?;
-        file.sync_all()
+        write_durable(
+            file,
+            reservation.log_path.diagnostic_path(),
+            metadata.as_bytes(),
+        )
+        .map_err(|source| path_io_error(reservation.log_path.diagnostic_path(), source))?;
+        sync_durable(file, reservation.log_path.diagnostic_path())
             .map_err(|source| path_io_error(reservation.log_path.diagnostic_path(), source))?;
         ensure_anchored_file_identity(&reservation.log_path, identity)?;
         Ok(())

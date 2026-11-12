@@ -7,8 +7,9 @@ use crate::runtime::{
         AnchoredDir, AnchoredFile, AnchoredFileIdentity, anchored_file_identity,
         open_anchored_file_for_read, open_anchored_session_log_append_file, path_io_error,
         reserve_new_anchored_file, segmented_jsonl_files, segmented_jsonl_path,
-        sync_anchored_directory, validate_open_session_log_append_file, verify_owned_anchored_file,
-        verify_segmented_jsonl_inventory,
+        sync_anchored_directory, sync_durable, truncate_durable,
+        validate_open_session_log_append_file, verify_owned_anchored_file,
+        verify_segmented_jsonl_inventory, write_durable,
     },
     types::{EVENT_STREAM_LIMITS, MAX_SESSION_SEGMENT_BYTES, RuntimeError, SessionStreamLimits},
 };
@@ -21,7 +22,7 @@ use rustix::{
 use std::{collections::BTreeMap, path::PathBuf, sync::Mutex};
 use std::{
     fs,
-    io::{self, Read, Seek, SeekFrom, Write},
+    io::{self, Read, Seek, SeekFrom},
     path::Path,
 };
 #[cfg(target_os = "linux")]
@@ -529,9 +530,11 @@ impl SessionLogAppender {
         )? {
             return Ok(current_path);
         }
-        self.file.sync_all().map_err(|source| RuntimeError::Io {
-            path: current_path.diagnostic_path().to_owned(),
-            source,
+        sync_durable(&self.file, current_path.diagnostic_path()).map_err(|source| {
+            RuntimeError::Io {
+                path: current_path.diagnostic_path().to_owned(),
+                source,
+            }
         })?;
         self.verify_current_segment()?;
         let next_ordinal = self.current_ordinal.saturating_add(1);
@@ -694,13 +697,12 @@ impl EventLogAppender for SessionLogAppender {
 
             debug_assert!(batch_end > committed_events);
             let batch = &events[committed_events..batch_end];
-            #[cfg(test)]
-            crate::runtime::fs_guards::durable_step(current_path.diagnostic_path(), "append");
+            let path = current_path.diagnostic_path();
             if let Err(failure) = self.append_native_batch_to_current_with(
                 &current_path,
                 batch,
-                |file, bytes| file.write_all(bytes),
-                cleanup_incomplete_suffix,
+                |file, bytes| write_durable(file, path, bytes),
+                |file, retained_len| cleanup_incomplete_suffix(file, path, retained_len),
             ) {
                 let Some(batch_committed_events) = failure.committed_events else {
                     return Err(failure);
@@ -726,7 +728,7 @@ impl EventLogAppender for SessionLogAppender {
     fn sync(&mut self, _path: &Path) -> Result<(), RuntimeError> {
         let current = self.verify_current_segment()?;
         let path = current.diagnostic_path();
-        self.file.sync_all().map_err(|source| RuntimeError::Io {
+        sync_durable(&self.file, path).map_err(|source| RuntimeError::Io {
             path: path.to_owned(),
             source,
         })?;
@@ -736,7 +738,11 @@ impl EventLogAppender for SessionLogAppender {
     }
 }
 
-pub fn cleanup_incomplete_suffix(file: &mut fs::File, retained_len: u64) -> io::Result<()> {
-    file.set_len(retained_len)?;
-    file.sync_all()
+pub fn cleanup_incomplete_suffix(
+    file: &mut fs::File,
+    path: &Path,
+    retained_len: u64,
+) -> io::Result<()> {
+    truncate_durable(file, path, retained_len)?;
+    sync_durable(file, path)
 }

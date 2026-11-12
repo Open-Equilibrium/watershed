@@ -4,7 +4,8 @@ use crate::runtime::{
     fs_guards::{
         AnchoredDir, AnchoredFile, ensure_anchored_new_leaf_available,
         open_anchored_file_for_update, open_anchored_session_log_append_file, path_io_error,
-        read_anchored_file_with_limit, sync_directory, with_anchored_replacement_temp,
+        read_anchored_file_with_limit, sync_directory, sync_durable,
+        with_anchored_replacement_temp, write_durable,
     },
     session_bundle::{
         SessionBundlePaths, ensure_session_object_count, ensure_session_object_total,
@@ -16,7 +17,7 @@ use proto::decode_lowercase_sha256_hex;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt, io,
-    io::{Read, Write},
+    io::Read,
 };
 
 pub struct SessionObjectWriter {
@@ -273,7 +274,7 @@ impl SessionObjectWriter {
                 path.diagnostic_path().display()
             )));
         }
-        file.sync_all()
+        sync_durable(&file, path.diagnostic_path())
             .map_err(|source| path_io_error(path.diagnostic_path(), source))
     }
 
@@ -418,9 +419,8 @@ fn parse_session_object_digest(value: &str) -> Result<[u8; 32], RuntimeError> {
 
 fn write_session_object(path: &AnchoredFile, bytes: &[u8]) -> Result<(), RuntimeError> {
     let mut file = open_anchored_session_log_append_file(path)?;
-    file.write_all(bytes)
-        .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
-    file.sync_all()
+    write_durable(&mut file, path.diagnostic_path(), bytes)
+        .and_then(|()| sync_durable(&file, path.diagnostic_path()))
         .map_err(|source| path_io_error(path.diagnostic_path(), source))
 }
 

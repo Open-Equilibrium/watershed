@@ -1,11 +1,11 @@
 use crate::runtime::{
     execution_plan::ScriptWrite,
-    fs_guards::{AnchoredDir, AnchoredFile, with_anchored_replacement_temp_checked},
+    fs_guards::{AnchoredDir, AnchoredFile, with_anchored_replacement_temp_checked, write_durable},
     types::RuntimeError,
 };
 #[cfg(test)]
 use std::cell::RefCell;
-use std::io::{self, Write};
+use std::io;
 
 mod target;
 #[cfg(test)]
@@ -101,12 +101,12 @@ fn replace_script_output_atomically_checked(
         Some(core_policy::DenyReasonCode::WriteDenied),
         candidate_check,
         |temp_path, mut temp_file| {
-            temp_file
-                .write_all(contents)
-                .map_err(|source| RuntimeError::Io {
+            write_durable(&mut temp_file, temp_path.diagnostic_path(), contents).map_err(
+                |source| RuntimeError::Io {
                     path: temp_path.diagnostic_path().to_owned(),
                     source,
-                })?;
+                },
+            )?;
             // Keep the created file open through capability-relative publication. A peer with
             // write access to this exact directory can already replace the destination itself.
 
