@@ -302,9 +302,9 @@ fn folder_key(canonical: &Path) -> String {
 }
 
 /// The per-user folder of the locks of folders outside Git (ADR-0267). macOS uses Liquid's app
-/// folder under the user's Library, as its settings do; Linux uses the session's runtime folder
-/// and otherwise Liquid's config folder. Only absolute locations count, since a relative one
-/// would differ between working directories.
+/// folder under the user's Library, as its settings do; Linux uses Liquid's config folder, so
+/// programs with and without a session runtime folder share one. Only absolute locations count,
+/// since a relative one would differ between working directories.
 fn user_lock_folder() -> Result<PathBuf, DiffError> {
     // Tests must not reach the real home; `isolate_user_home` records the one they use.
     #[cfg(test)]
@@ -331,9 +331,6 @@ fn user_lock_folder() -> Result<PathBuf, DiffError> {
         let home = absolute("HOME").ok_or_else(unset)?;
         return Ok(home.join("Library/Application Support/Liquid/project-locks"));
     }
-    if let Some(runtime) = absolute("XDG_RUNTIME_DIR") {
-        return Ok(runtime.join("liquid/project-locks"));
-    }
     let config = absolute("XDG_CONFIG_HOME")
         .or_else(|| absolute("HOME").map(|home| home.join(".config")))
         .ok_or_else(unset)?;
@@ -357,7 +354,6 @@ pub(crate) fn isolate_user_home() {
     std::fs::create_dir_all(&home).expect("test user home");
     unsafe {
         std::env::set_var("HOME", &home);
-        std::env::remove_var("XDG_RUNTIME_DIR");
         std::env::remove_var("XDG_CONFIG_HOME");
     }
     *TEST_HOME.lock().expect("test home") = Some(home);
@@ -478,6 +474,17 @@ mod tests {
                 drop(running);
             });
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn folder_locks_do_not_depend_on_the_runtime_folder() {
+        isolate_user_home();
+        let without = user_lock_folder().unwrap();
+        // A program started in a session with a runtime folder must share the locks of one without.
+        unsafe { std::env::set_var("XDG_RUNTIME_DIR", std::env::temp_dir()) };
+        let with = user_lock_folder().unwrap();
+        unsafe { std::env::remove_var("XDG_RUNTIME_DIR") };
+        assert_eq!(with, without);
     }
 
     #[test]
