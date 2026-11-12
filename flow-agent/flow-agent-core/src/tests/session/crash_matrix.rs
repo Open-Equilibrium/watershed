@@ -661,3 +661,22 @@ fn continuation_run_at_depth_twelve_survives_a_process_death_at_every_durable_st
         "a continuation appends its history entry"
     );
 }
+
+#[test]
+fn root_run_survives_a_power_loss_at_every_durable_step() {
+    let reference = run_crash_matrix(
+        |_| {},
+        Store::start_root,
+        |_| true,
+        next_root_reservation,
+        true,
+    );
+    assert!(
+        reference.iter().any(|step| step.starts_with("sync ")),
+        "a power-loss trace records file syncs as durable steps"
+    );
+    assert!(
+        reference.iter().any(|step| step.starts_with("truncate ")),
+        "a power-loss trace records truncations as durable steps"
+    );
+}
