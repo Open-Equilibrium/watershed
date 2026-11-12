@@ -249,17 +249,21 @@ fn dispatch_event(
     Ok(())
 }
 
-/// The events that end a reply: a completion, a failure, or an error.
+/// The events that end a reply: a completion, or one of the failure events.
 fn is_terminal_event(event: &serde_json::Value) -> bool {
+    event
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|event_type| {
+            event_type == "response.completed" || is_failure_event(event_type)
+        })
+}
+
+/// The events that end a reply without completing it: a failure, an incomplete reply or an error.
+pub(crate) fn is_failure_event(event_type: &str) -> bool {
     matches!(
-        event.get("type").and_then(serde_json::Value::as_str),
-        Some(
-            "response.completed"
-                | "response.failed"
-                | "response.incomplete"
-                | "response.error"
-                | "error"
-        )
+        event_type,
+        "response.failed" | "response.incomplete" | "response.error" | "error"
     )
 }
 

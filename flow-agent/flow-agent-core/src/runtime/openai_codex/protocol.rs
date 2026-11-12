@@ -1,5 +1,5 @@
 use super::OPENAI_CODEX_PROVIDER_ID;
-use crate::runtime::{digest::sha256_hex, types::RuntimeError};
+use crate::runtime::{digest::sha256_hex, responses::is_failure_event, types::RuntimeError};
 use proto::parse_unique_json;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -165,7 +165,7 @@ pub(crate) fn decode_responses_turn(
                 completed_id = Some(response_id(event)?.to_owned());
                 token_usage = decode_token_usage(event)?;
             }
-            "response.error" | "response.failed" | "response.incomplete" | "error" => {
+            event_type if is_failure_event(event_type) => {
                 return Err(RuntimeError::definitive_provider_error(
                     None,
                     provider_error_message(event)
