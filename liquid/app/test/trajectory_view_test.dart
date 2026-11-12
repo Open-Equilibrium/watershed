@@ -1153,6 +1153,41 @@ void main() {
     expect(announced.single, endsWith(' of 60'));
   });
 
+  testWidgets('dragging a range handle announces nothing', (tester) async {
+    final announced = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockDecodedMessageHandler<dynamic>(
+      SystemChannels.accessibility,
+      (message) async {
+        final event = message! as Map<Object?, Object?>;
+        if (event['type'] == 'announce') announced.add('$event');
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger
+          .setMockDecodedMessageHandler<dynamic>(
+            SystemChannels.accessibility,
+            null,
+          ),
+    );
+    await show(tester, historyOf(long));
+    String shown() =>
+        tester.getSemantics(find.byKey(const Key('range-brush'))).label;
+    final before = shown();
+    final drag = await tester.startGesture(
+      tester.getCenter(find.byKey(const Key('range-start'))),
+    );
+    for (var move = 0; move < 20; move++) {
+      await drag.moveBy(const Offset(5, 0));
+      await tester.pump();
+    }
+    await drag.up();
+    await tester.pumpAndSettle();
+    expect(shown(), isNot(before), reason: 'the drag moved the range');
+    // A pointer drag crosses many steps; announcing each would flood the screen reader.
+    expect(announced, isEmpty);
+  });
+
   testWidgets('a click on the timeline jumps to the step there', (
     tester,
   ) async {

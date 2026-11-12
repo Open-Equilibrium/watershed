@@ -466,15 +466,21 @@ class _BrushViewState extends State<_BrushView> {
   void _shift(bool start, int delta) {
     final own = (start ? widget.brush.startStep : widget.brush.endStep).index;
     final step = _reach(start, delta);
-    if (step != own) widget.onHandleStep?.call(start, step);
+    if (step == own) return;
+    _announce = true;
+    widget.onHandleStep?.call(start, step);
   }
+
+  /// Whether the next change of the range came from a key or assistive adjust, which announce
+  /// it; a pointer drag or a live run would announce every step they cross.
+  bool _announce = false;
 
   /// What a handle says after `delta` records, which assistive technology previews; what it says
   /// now where that record is not known, as at a limit.
   String _spoken(bool start, int delta, HandleStep now) =>
       widget.handleStep?.call(_reach(start, delta))?.spoken ?? now.spoken;
 
-  /// A change of the range's steps announces them, as "Steps 12–31 of 48".
+  /// A handle moved by a key or assistive adjust announces the range, as "Steps 12–31 of 48".
   @override
   void didUpdateWidget(_BrushView old) {
     super.didUpdateWidget(old);
@@ -483,7 +489,10 @@ class _BrushViewState extends State<_BrushView> {
     final moved =
         first.index != old.brush.startStep.index ||
         last.index != old.brush.endStep.index;
-    if (!brush.range || !moved) return;
+    if (!moved) return;
+    final announce = _announce;
+    _announce = false;
+    if (!brush.range || !announce) return;
     SemanticsService.sendAnnouncement(
       View.of(context),
       'Steps ${first.index + 1}–${last.index + 1} of ${first.count}',
