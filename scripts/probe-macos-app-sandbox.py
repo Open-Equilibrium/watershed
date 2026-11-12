@@ -338,7 +338,7 @@ def main():
     if platform.system() != "Darwin" or platform.machine().lower() not in {"arm64", "aarch64"}:
         evidence["error"] = "Native macOS ARM64 required; no probe executed."
         print(json.dumps(evidence)); return 2
-    spec = importlib.util.spec_from_file_location("profile_probe", Path(__file__).with_name("probe-macos-self-protection.py"))
+    spec = importlib.util.spec_from_file_location("profile_probe", Path(__file__).with_name("probe-macos-flow-owned-write-protection.py"))
     api = importlib.util.module_from_spec(spec); spec.loader.exec_module(api)
     api.CHILD_ENV.update({"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"})
     try:

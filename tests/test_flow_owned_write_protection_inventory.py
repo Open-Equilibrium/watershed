@@ -19,8 +19,8 @@ def load(name, file):
     return module
 
 
-CASES = load("native_cases", "macos-self-protection-cases.py")
-PROBE = load("native_probe", "probe-macos-self-protection.py")
+CASES = load("native_cases", "macos-flow-owned-write-protection-cases.py")
+PROBE = load("native_probe", "probe-macos-flow-owned-write-protection.py")
 
 
 class LinkCreationIsNotProtection(unittest.TestCase):

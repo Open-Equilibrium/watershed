@@ -1,4 +1,4 @@
-"""Finite file/device operations retained from macos-self-protection-cases.py."""
+"""Finite file/device operations retained from macos-flow-owned-write-protection-cases.py."""
 import ctypes
 import json
 import mmap

@@ -258,7 +258,7 @@ def main() -> int:
         root = Path(temporary).resolve()
         if args.mode.startswith("lifecycle"):
             import runpy
-            cases_module = runpy.run_path(str(Path(__file__).with_name("macos-self-protection-cases.py")))
+            cases_module = runpy.run_path(str(Path(__file__).with_name("macos-flow-owned-write-protection-cases.py")))
             evidence["cases"] = cases_module["run"](sys.modules[__name__], root, args.mode == "lifecycle")
         elif args.mode == "host-build":
             try:

@@ -404,7 +404,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             workflow.replace('--executor "$M12_INSTALLED_EXECUTOR"',
                              f'--executor "$PWD/{M12_EXECUTOR}"', 1),
             workflow.replace("--test native_contract", "--test absent", 1),
-            workflow.replace("--test native_self_protection", "--test absent", 1),
+            workflow.replace("--test native_flow_owned_write_protection", "--test absent", 1),
             workflow.replace("cargo llvm-cov show-env --sh", "true", 1),
             workflow.replace('eval "$(cargo llvm-cov show-env --sh)"\n          cargo llvm-cov clean --workspace',
                              'cargo llvm-cov clean --workspace\n          eval "$(cargo llvm-cov show-env --sh)"', 1),
@@ -617,7 +617,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         release = step_run(workflow, "Run native release Executor acceptance")
         self.assertIn('FLOW_EXECUTOR_UNDER_TEST="$M12_INSTALLED_EXECUTOR"', release)
         self.assertIn("cargo nextest run --locked -p flow-agent-executor "
-                      "--test native_contract --test native_self_protection", release)
+                      "--test native_contract --test native_flow_owned_write_protection", release)
         self.assertNotIn("--skip", release)
         self.assertLess(order.index("Run native release Executor acceptance"),
                         order.index("Check native coverage and installation acceptance"))
