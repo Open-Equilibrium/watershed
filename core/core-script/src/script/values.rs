@@ -349,7 +349,9 @@ fn validate_value_contract_at(
         )));
     }
     match contract {
-        ValueContract::Boolean | ValueContract::SessionObject | ValueContract::String { .. } => {}
+        ValueContract::Boolean {}
+        | ValueContract::SessionObject {}
+        | ValueContract::String { .. } => {}
         ValueContract::Integer { min, max } => {
             if matches!((min, max), (Some(min), Some(max)) if min > max) {
                 return Err(FlowValueError::new(format!(
@@ -397,8 +399,8 @@ fn validate_against_contract_at(
     path: &str,
 ) -> Result<(), FlowValueError> {
     match (value, contract) {
-        (FlowValue::Boolean(_), ValueContract::Boolean)
-        | (FlowValue::SessionObject(_), ValueContract::SessionObject) => Ok(()),
+        (FlowValue::Boolean(_), ValueContract::Boolean {})
+        | (FlowValue::SessionObject(_), ValueContract::SessionObject {}) => Ok(()),
         (FlowValue::Integer(value), ValueContract::Integer { min, max }) => {
             let value = proto::parse_canonical_i64(value).map_err(|error| {
                 let message = match error {

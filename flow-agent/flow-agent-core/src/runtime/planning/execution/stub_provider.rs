@@ -120,7 +120,7 @@ fn stub_value_for_contract(
     content: &str,
 ) -> Result<core_script::FlowValue, RuntimeError> {
     Ok(match contract {
-        core_script::ValueContract::Boolean => core_script::FlowValue::Boolean(true),
+        core_script::ValueContract::Boolean {} => core_script::FlowValue::Boolean(true),
         core_script::ValueContract::Integer { min, max } => {
             let value = min.unwrap_or(0).min(max.unwrap_or(i64::MAX));
             core_script::FlowValue::Integer(value.to_string())
@@ -143,7 +143,7 @@ fn stub_value_for_contract(
                 })
                 .collect::<Result<_, RuntimeError>>()?,
         ),
-        core_script::ValueContract::SessionObject => core_script::FlowValue::SessionObject(
+        core_script::ValueContract::SessionObject {} => core_script::FlowValue::SessionObject(
             core_script::build_session_object_uri(&"0".repeat(64)).map_err(|error| {
                 RuntimeError::Protocol(format!("stub session object URI is invalid: {error}"))
             })?,

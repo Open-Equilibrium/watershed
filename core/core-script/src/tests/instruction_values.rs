@@ -48,7 +48,7 @@ fn m11_instruction_rendering_requires_exact_typed_parameters() {
             },
             InstructionParameter {
                 name: "strict".to_owned(),
-                value_contract: ValueContract::Boolean,
+                value_contract: ValueContract::Boolean {},
             },
         ],
     };

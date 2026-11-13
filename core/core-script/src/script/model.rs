@@ -330,8 +330,8 @@ pub struct InstructionParameter {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum ValueContract {
-    /// Boolean value.
-    Boolean,
+    /// Boolean value. A struct variant, so serde rejects unknown fields on it too.
+    Boolean {},
     /// Signed 64-bit integer value.
     Integer {
         /// Optional inclusive minimum.
@@ -361,7 +361,7 @@ pub enum ValueContract {
         fields: Vec<ValueFieldContract>,
     },
     /// Immutable session-owned object reference.
-    SessionObject,
+    SessionObject {},
 }
 
 /// One field in a closed map contract.

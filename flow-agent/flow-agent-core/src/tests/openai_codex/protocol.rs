@@ -498,7 +498,7 @@ fn provider_arguments_enforce_declared_tool_parameter_contracts() {
 
 #[test]
 fn output_contract_instruction_requires_the_tagged_flow_value() {
-    let instruction = output_contract_instruction(&core_script::ValueContract::Boolean)
+    let instruction = output_contract_instruction(&core_script::ValueContract::Boolean {})
         .expect("output instruction");
     assert!(instruction.contains("flow-value-v0"));
     assert!(instruction.contains("boolean"));

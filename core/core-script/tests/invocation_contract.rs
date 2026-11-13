@@ -102,10 +102,13 @@ fn public_closed_definitions_reject_unknown_fields() {
     use serde_json::json;
     let boolean = json!({"type": "boolean"});
     let predicate = json!({"path": [], "equals": {"type": "boolean", "value": true}});
-    rejects_unknown_field::<core_script::ValueContract>(
-        "ValueContract",
+    for value_contract in [
         json!({"type": "string", "max_lenght": 3}),
-    );
+        json!({"type": "boolean", "extra": 1}),
+        json!({"type": "session-object", "extra": 1}),
+    ] {
+        rejects_unknown_field::<core_script::ValueContract>("ValueContract", value_contract);
+    }
     rejects_unknown_field::<core_script::ValueFieldContract>(
         "ValueFieldContract",
         json!({"name": "ok", "required": true, "value_contract": boolean.clone(), "extra": 1}),
