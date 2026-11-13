@@ -73,7 +73,8 @@ fn path_component_has_windows_alias(component: &str) -> bool {
     }
     let basename = component
         .split_once('.')
-        .map_or(component, |(basename, _)| basename);
+        .map_or(component, |(basename, _)| basename)
+        .trim_end_matches(' ');
     let uppercase = basename.to_ascii_uppercase();
     matches!(
         uppercase.as_str(),

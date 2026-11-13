@@ -180,7 +180,7 @@ impl_token_serde!(ToolKind, "Tool kind");
 
 /// Tool command shape.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 pub enum ToolCommand {
     /// Predefined command id plus literal argv.
     Predefined {
@@ -318,6 +318,7 @@ pub struct InstructionBlock {
 
 /// One typed Instruction placeholder.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct InstructionParameter {
     /// Placeholder name without braces.
     pub name: String,
@@ -327,7 +328,7 @@ pub struct InstructionParameter {
 
 /// Closed recursive runtime value contract.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "kebab-case")]
+#[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum ValueContract {
     /// Boolean value.
     Boolean,
@@ -365,6 +366,7 @@ pub enum ValueContract {
 
 /// One field in a closed map contract.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ValueFieldContract {
     /// Exact NFC field name.
     pub name: String,
@@ -410,6 +412,7 @@ pub enum ValuePathSegment {
 
 /// Exact typed equality predicate over a Phase result.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ValuePredicate {
     /// Logical path from the whole result; an empty path selects the whole result.
     pub path: Vec<ValuePathSegment>,
@@ -419,6 +422,7 @@ pub struct ValuePredicate {
 
 /// Bounded declarative Phase repetition.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PhaseLoop {
     /// Maximum local iterations, from one through 32.
     pub max_iterations: u8,
@@ -428,6 +432,7 @@ pub struct PhaseLoop {
 
 /// Ordered conditional jump between child Phase siblings.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PhaseTransition {
     /// Source child Phase reference.
     pub from_phase_ref: String,

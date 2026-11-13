@@ -33,7 +33,9 @@ fn non_nfc_block_field(block: &Value) -> Option<String> {
 }
 
 fn non_nfc_field(field: &str, value: &Value) -> Option<String> {
-    if field == "result_from" || field.ends_with("_ref") || field.ends_with("_refs") {
+    let reference =
+        (field.ends_with("_ref") || field.ends_with("_refs")) && is_reference_text(value);
+    if field == "result_from" || reference {
         return None;
     }
     match value {
@@ -47,6 +49,15 @@ fn non_nfc_field(field: &str, value: &Value) -> Option<String> {
             }
         }),
         Value::Null | Value::Bool(_) | Value::Number(_) => None,
+    }
+}
+
+/// Reference names are text or a list of text; an object under a reference-like key is data.
+fn is_reference_text(value: &Value) -> bool {
+    match value {
+        Value::String(_) => true,
+        Value::Array(items) => items.iter().all(Value::is_string),
+        _ => false,
     }
 }
 

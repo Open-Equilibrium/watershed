@@ -5,8 +5,9 @@ use super::super::load::{
 use super::super::model::{
     AllowedParameter, BlockIdentity, FlowBlock, FlowValue, InstructionBlock, MAX_BLOCK_NAME_CHARS,
     MAX_FLOW_FANOUT, MAX_FLOW_NESTING_DEPTH, MAX_PHASE_FANOUT, MAX_PHASE_NESTING_DEPTH,
-    ParameterValueType, PhaseBlock, PhaseTransition, RegistryBlock, ResolvedRegistry, ToolBlock,
-    ToolCommand, ToolKind, ValuePredicate,
+    ParameterValueType, PhaseBlock, PhaseLoop, PhaseTransition, RegistryBlock, ResolvedRegistry,
+    ToolBlock, ToolCommand, ToolKind, ValueContract, ValueFieldContract, ValuePathSegment,
+    ValuePredicate,
 };
 use super::{
     duplicated_subflow_tail_blocks, flow_chain_blocks, own_script_tool, phase_chain_block,
@@ -325,6 +326,43 @@ fn registry_refuses_non_nfc_definition_text_instead_of_converting_it() {
             "{field}: {error}"
         );
     }
+}
+
+#[test]
+fn non_nfc_predicate_literal_under_ref_named_field_is_rejected() {
+    let mut phase = test_phase();
+    phase.output = ValueContract::Map {
+        fields: vec![ValueFieldContract {
+            name: "choice".to_owned(),
+            required: true,
+            value_contract: ValueContract::Map {
+                fields: vec![ValueFieldContract {
+                    name: "target_ref".to_owned(),
+                    required: true,
+                    value_contract: ValueContract::String { max_length: None },
+                }],
+            },
+        }],
+    };
+    phase.loop_config = Some(PhaseLoop {
+        max_iterations: 2,
+        until: ValuePredicate {
+            path: vec![ValuePathSegment::Field {
+                field: "choice".to_owned(),
+            }],
+            equals: FlowValue::Map(std::collections::BTreeMap::from([(
+                "target_ref".to_owned(),
+                FlowValue::String("Cafe\u{301}".to_owned()),
+            )])),
+        },
+    });
+
+    let error = ResolvedRegistry::from_blocks([RegistryBlock::Phase(phase)])
+        .expect_err("non-NFC predicate text is refused, not converted");
+    assert!(
+        matches!(error, RegistryError::NonNfcDefinitionText { .. }),
+        "{error}"
+    );
 }
 
 #[test]
