@@ -20,9 +20,9 @@ pub(crate) fn write_durable(file: &mut fs::File, path: &Path, bytes: &[u8]) -> i
 pub(crate) fn truncate_durable(file: &fs::File, path: &Path, len: u64) -> io::Result<()> {
     #[cfg(test)]
     durable_step(path, "truncate");
-    file.set_len(len)?;
     #[cfg(test)]
     record_truncate(path, file, len);
+    file.set_len(len)?;
     let _ = path;
     Ok(())
 }

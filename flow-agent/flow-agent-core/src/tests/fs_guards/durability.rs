@@ -1,7 +1,7 @@
 use super::super::helpers::empty_workspace;
 use crate::runtime::fs_guards::{
     PowerLoss, apply_power_loss, finish_durable_trace, start_durable_trace, sync_directory,
-    sync_durable, write_durable,
+    sync_durable, truncate_durable, write_durable,
 };
 use std::fs;
 use std::{os::unix::fs::symlink, process::Command, sync::mpsc, time::Duration};
@@ -85,4 +85,20 @@ fn power_loss_cuts_the_last_unsynced_write_before_its_line_feed() {
     finish_durable_trace(&workspace);
 
     assert_eq!(fs::read(&path).expect("log reads"), b"synced\nunsynced");
+}
+
+#[test]
+fn power_loss_restores_an_unsynced_truncation() {
+    let workspace = empty_workspace("power-loss-unsynced-truncation");
+    let path = workspace.join("log.jsonl");
+    let mut file = fs::File::create(&path).expect("log created");
+    start_durable_trace(&workspace, None);
+    write_durable(&mut file, &path, b"original").expect("record written");
+    sync_durable(&file, &path).expect("record synced");
+    truncate_durable(&file, &path, 4).expect("record truncates");
+
+    apply_power_loss(&workspace, PowerLoss::Drop);
+    finish_durable_trace(&workspace);
+
+    assert_eq!(fs::read(&path).expect("log reads"), b"original");
 }

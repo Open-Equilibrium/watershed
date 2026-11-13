@@ -12,7 +12,7 @@ use super::test_path_key;
 use std::{
     collections::BTreeMap,
     fs,
-    os::unix::fs::MetadataExt as _,
+    os::unix::fs::{FileExt as _, MetadataExt as _},
     path::{Path, PathBuf},
     sync::{Mutex, MutexGuard},
 };
@@ -50,7 +50,14 @@ struct Ledger {
 struct LedgerFile {
     /// A duplicate handle of the traced file, kept to take unsynced bytes away at a power loss.
     file: fs::File,
+    /// Synced bytes a truncation removed, from its offset up to `synced_len`.
+    lost_tail: Option<LostTail>,
     synced_len: u64,
+}
+
+struct LostTail {
+    offset: u64,
+    bytes: Vec<u8>,
 }
 
 #[derive(Clone, Copy)]
@@ -62,6 +69,12 @@ struct LastWrite {
 impl Ledger {
     fn apply(&self, loss: PowerLoss) {
         for (key, entry) in &self.files {
+            if let Some(tail) = &entry.lost_tail {
+                entry
+                    .file
+                    .write_all_at(&tail.bytes, tail.offset)
+                    .expect("power loss restores an unsynced truncation");
+            }
             let mut keep = entry.synced_len;
             if let Some(last) = self.last_write.filter(|last| {
                 matches!(loss, PowerLoss::CutLastWrite) && last.key == *key && last.end > keep
@@ -182,6 +195,7 @@ pub(crate) fn record_write(path: &Path, file: &fs::File, written: u64) {
     with_ledger(path, |ledger| {
         ledger.files.entry(key).or_insert_with(|| LedgerFile {
             file: file.try_clone().expect("written file duplicates"),
+            lost_tail: None,
             synced_len: end.saturating_sub(written),
         });
         ledger.last_write = Some(LastWrite { key, end });
@@ -196,17 +210,34 @@ pub(crate) fn record_sync(path: &Path, file: &fs::File) {
     with_ledger(path, |ledger| {
         if let Some(entry) = ledger.files.get_mut(&key) {
             entry.synced_len = len;
+            entry.lost_tail = None;
         }
     });
 }
 
-/// Records that `file` at `path` now holds `len` bytes; the truncation is durable only at a sync.
+/// Records that `file` at `path` is about to shrink to `len` bytes, before the shrink. The synced
+/// bytes it removes are kept, so a power loss restores them: the truncation is durable only at a sync.
 pub(crate) fn record_truncate(path: &Path, file: &fs::File, len: u64) {
     let metadata = file.metadata().expect("truncated file has metadata");
     let key = (metadata.dev(), metadata.ino());
+    let current = metadata.len();
     with_ledger(path, |ledger| {
         if let Some(entry) = ledger.files.get_mut(&key) {
-            entry.synced_len = entry.synced_len.min(len);
+            let lost_until = entry
+                .lost_tail
+                .as_ref()
+                .map_or(entry.synced_len, |tail| tail.offset);
+            if len < lost_until {
+                let mut bytes = vec![0; lost_until.min(current).saturating_sub(len) as usize];
+                // WHY: the traced handle is write-only, and reading it by path leaves its offset alone.
+                fs::File::open(path)
+                    .and_then(|readable| readable.read_exact_at(&mut bytes, len))
+                    .expect("synced bytes read before truncation");
+                if let Some(tail) = entry.lost_tail.take() {
+                    bytes.extend(tail.bytes);
+                }
+                entry.lost_tail = Some(LostTail { offset: len, bytes });
+            }
         }
         if let Some(last) = ledger.last_write.as_mut().filter(|last| last.key == key) {
             last.end = last.end.min(len);
