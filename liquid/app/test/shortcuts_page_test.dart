@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
+import 'package:liquid/src/controls.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/shortcuts/keymap.dart';
@@ -197,6 +198,26 @@ void main() {
       shortcuts.value.bindings(Command.focusInput),
       isNot(contains(const Keys(LogicalKeyboardKey.keyN, meta: true))),
     );
+  });
+
+  testWidgets('changing the reveal key hides the hints', (tester) async {
+    await show(tester, ShortcutSettings.standard());
+    await tester.sendKeyDownEvent(
+      LogicalKeyboardKey.metaLeft,
+      platform: 'macos',
+    );
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(find.byType(KeyBadge), findsWidgets);
+
+    await shortcuts.change(ShortcutSettings.liquidKey());
+    await tester.pumpAndSettle();
+    expect(
+      find.byType(KeyBadge),
+      findsNothing,
+      reason:
+          'the hints shown for ⌘ do not stay once the Liquid key reveals them',
+    );
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft, platform: 'macos');
   });
 
   testWidgets(
