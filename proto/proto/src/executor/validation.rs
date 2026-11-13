@@ -14,6 +14,7 @@ use crate::{canonical::is_nfc, session_object::decode_lowercase_sha256_hex};
 pub(super) fn validate_request(request: &ExecutorRequestV0) -> Result<(), ExecutorProtocolError> {
     validate_schema(&request.schema, EXECUTOR_REQUEST_SCHEMA_V0, "request")?;
     validate_text(&request.request_id, "request_id", MAX_ID_CHARS)?;
+    validate_nfc(&request.request_id, "request_id")?;
     let policy = &request.resolved_policy;
     validate_text(&policy.tool_id, "tool_id", MAX_ID_CHARS)?;
     validate_text(&policy.tool_kind, "tool_kind", MAX_NAME_CHARS)?;

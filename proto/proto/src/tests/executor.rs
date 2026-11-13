@@ -321,6 +321,18 @@ fn executor_generated_records_bind_normalized_ids_to_the_original_request() {
 }
 
 #[test]
+fn non_nfc_request_id_is_refused_before_serialization() {
+    let mut request = request();
+    request.request_id = "e\u{301}".to_owned();
+    assert_eq!(
+        canonical_executor_request_v0(&request)
+            .unwrap_err()
+            .to_string(),
+        "Executor request_id must use NFC text"
+    );
+}
+
+#[test]
 fn executor_generated_diagnostics_enforce_the_normalized_character_bound() {
     for count in [4_000, 4_001] {
         let preflight = ExecutorPreflightV0::Error {
