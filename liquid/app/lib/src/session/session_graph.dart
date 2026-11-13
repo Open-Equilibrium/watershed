@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/foundation.dart';
 
 import '../rust/api/history.dart';
@@ -7,69 +5,36 @@ import '../rust/api/history.dart';
 /// One branch of the session: the path from the first entry to a tip.
 @immutable
 class Branch {
-  const Branch({
-    required this.tip,
-    required this.ref,
-    required this.name,
-    this.durationMs,
-  });
+  const Branch({required this.tip, required this.ref});
 
   /// The tip's entry id.
   final String tip;
 
   /// A, B, C… in tree order.
   final String ref;
-
-  /// The tip's label, or the branch's latest prompt.
-  final String name;
-  final int? durationMs;
 }
 
-/// One row of the session tree: a step, a branch tip or the entry the next prompt continues
-/// from.
+/// One row of the session tree: a step, or a fork, tip or leaf outside the steps.
 @immutable
 class GraphRow {
-  const GraphRow({
-    required this.node,
-    required this.lane,
-    required this.parentRow,
-    required this.turn,
-    required this.step,
-    this.branch,
-    this.pending = false,
-  });
+  const GraphRow({required this.node, required this.step});
 
   final BridgeTreeNode node;
-  final int lane;
-
-  /// The row of the nearest shown ancestor.
-  final int? parentRow;
-
-  /// Prompts on the path up to this row.
-  final int turn;
 
   /// The row's step number on its branch.
   final int step;
 
-  /// The branch this row is the tip of.
-  final Branch? branch;
-
-  /// Whether the next prompt starts a new branch here.
-  final bool pending;
-
-  /// Whether the row is a step rather than a fork or tip outside the steps.
+  /// Whether the row is a step rather than a fork, tip or leaf outside the steps.
   bool get isStep => _steps.contains(node.kind);
 }
 
-/// The session tree as a graph with one lane per branch and one row per step, in depth-first
-/// order like `git log --graph`.
+/// The session tree's rows in depth-first order, and its branches.
 @immutable
 class SessionGraph {
-  const SessionGraph(this.rows, this.branches, this.lanes, this._firstChild);
+  const SessionGraph(this.rows, this.branches, this._firstChild);
 
   final List<GraphRow> rows;
   final List<Branch> branches;
-  final int lanes;
   final Map<String, String> _firstChild;
 
   /// The branch reached from `entry` by following first children, so a tip that grew stays the
@@ -103,73 +68,26 @@ SessionGraph sessionGraph(List<BridgeTreeNode> entries, String? leaf) {
   }
   final rows = <GraphRow>[];
   final branches = <Branch>[];
-  var lanes = 0;
   // An explicit stack instead of recursion: long sessions have deep trees.
-  final stack = <_Visit>[
-    for (final root in roots.reversed)
-      _Visit(root, null, null, 0, 0, null, null, null),
-  ];
+  final stack = <_Visit>[for (final root in roots.reversed) _Visit(root, 0)];
   while (stack.isNotEmpty) {
     final visit = stack.removeLast();
     final node = visit.node;
-    final lane = visit.lane ?? lanes++;
     final kids = children[node.id] ?? const [];
-    final isUser = node.kind == BridgeEntryKind.user;
     final isStep = _steps.contains(node.kind);
-    final turn = visit.turn + (isUser ? 1 : 0);
     final step = visit.step + (isStep ? 1 : 0);
-    final prompt = isUser ? node.preview : visit.prompt;
-    // Durations count from the first prompt: an untimed one takes the latest time before it,
-    // and without any, the first time on the path.
-    final lastAt = node.atMs ?? visit.lastAt;
-    final startAt = isUser && visit.turn == 0
-        ? lastAt
-        : visit.startAt ?? node.atMs;
-    var parentRow = visit.parentRow;
-    // Forks outside steps keep a row, so their branches stay connected.
+    // Forks and tips outside steps, and the leaf, keep a row too.
     if (isStep || kids.length != 1 || node.id == leaf) {
-      Branch? branch;
       if (kids.isEmpty) {
-        final at = node.atMs;
-        branch = Branch(
-          tip: node.id,
-          ref: _ref(branches.length),
-          name: node.label ?? prompt ?? node.preview,
-          durationMs: at == null || startAt == null
-              ? null
-              : math.max(0, at - startAt),
-        );
-        branches.add(branch);
+        branches.add(Branch(tip: node.id, ref: _ref(branches.length)));
       }
-      rows.add(
-        GraphRow(
-          node: node,
-          lane: lane,
-          parentRow: parentRow,
-          turn: turn,
-          step: step,
-          branch: branch,
-          pending: kids.isNotEmpty && node.id == leaf,
-        ),
-      );
-      parentRow = rows.length - 1;
+      rows.add(GraphRow(node: node, step: step));
     }
     for (var index = kids.length - 1; index >= 0; index--) {
-      stack.add(
-        _Visit(
-          kids[index],
-          index == 0 ? lane : null,
-          parentRow,
-          turn,
-          step,
-          prompt,
-          startAt,
-          lastAt,
-        ),
-      );
+      stack.add(_Visit(kids[index], step));
     }
   }
-  return SessionGraph(rows, branches, math.max(lanes, 1), {
+  return SessionGraph(rows, branches, {
     for (final entry in children.entries) entry.key: entry.value.first.id,
   });
 }
@@ -182,29 +100,12 @@ const _steps = {
 };
 
 class _Visit {
-  const _Visit(
-    this.node,
-    this.lane,
-    this.parentRow,
-    this.turn,
-    this.step,
-    this.prompt,
-    this.startAt,
-    this.lastAt,
-  );
+  const _Visit(this.node, this.step);
 
   final BridgeTreeNode node;
 
-  /// `null` starts a new lane when the node is visited.
-  final int? lane;
-  final int? parentRow;
-  final int turn;
+  /// The steps on the path above the node.
   final int step;
-  final String? prompt;
-  final int? startAt;
-
-  /// The latest time on the path so far.
-  final int? lastAt;
 }
 
 String _ref(int index) =>

@@ -468,111 +468,23 @@ fn builds_the_session_tree_from_flat_entries() {
           "leafId":"l2"}"#,
     )
     .expect("JSON");
-    let node =
-        |id: &str, parent: Option<&str>, kind, preview: &str, label: Option<&str>| TreeNode {
-            id: id.to_owned(),
-            parent: parent.map(str::to_owned),
-            kind,
-            preview: preview.to_owned(),
-            label: label.map(str::to_owned),
-            at_ms: None,
-            failed: false,
-        };
+    let node = |id: &str, parent: Option<&str>, kind| TreeNode {
+        id: id.to_owned(),
+        parent: parent.map(str::to_owned),
+        kind,
+    };
     assert_eq!(
         History::from_entries(&data).tree(),
         SessionTree {
             nodes: vec![
-                TreeNode {
-                    at_ms: Some(1_792_836_000_250),
-                    ..node(
-                        "e1",
-                        None,
-                        EntryKind::User,
-                        "Add rate limiting to /login",
-                        None,
-                    )
-                },
-                node(
-                    "e2",
-                    Some("e1"),
-                    EntryKind::Assistant,
-                    "I'll look first.",
-                    Some("A2")
-                ),
-                node("e3", Some("e2"), EntryKind::ToolResult, "read", None),
-                node("e4", Some("e2"), EntryKind::Custom, "", None),
-                node("e5", Some("e4"), EntryKind::Other, "", None),
+                node("e1", None, EntryKind::User),
+                node("e2", Some("e1"), EntryKind::Assistant),
+                node("e3", Some("e2"), EntryKind::ToolResult),
+                node("e4", Some("e2"), EntryKind::Custom),
+                node("e5", Some("e4"), EntryKind::Other),
             ],
             leaf: Some("e4".to_owned()),
         }
-    );
-}
-
-#[test]
-fn names_what_a_tool_ran_on_and_whether_it_failed_in_the_tree() {
-    let data: Value = serde_json::from_str(
-        r#"{"entries":[
-          {"type":"message","id":"a1","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"bash","arguments":{"command":"npm test"}},{"type":"toolCall","id":"c2","name":"read","arguments":{"path":"a.ts"}}]}},
-          {"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"c1","toolName":"bash","isError":true,"content":[]}},
-          {"type":"message","id":"r2","parentId":"r1","message":{"role":"toolResult","toolCallId":"c2","toolName":"read","content":[]}},
-          {"type":"message","id":"a2","parentId":"r2","message":{"role":"assistant","stopReason":"error","content":[]}}],
-          "leafId":"a2"}"#,
-    )
-    .expect("JSON");
-    let nodes = History::from_entries(&data).tree().nodes;
-    assert_eq!(
-        nodes
-            .iter()
-            .map(|node| (node.id.as_str(), node.preview.as_str(), node.failed))
-            .collect::<Vec<_>>(),
-        [
-            ("a1", "", false),
-            ("r1", "bash npm test", true),
-            ("r2", "read a.ts", false),
-            ("a2", "", true),
-        ],
-        "a tool result names what its call ran on; a failed tool or response is marked"
-    );
-}
-
-#[test]
-fn names_what_each_result_ran_on_along_its_own_branch() {
-    // `s2` continues after `r1` and `s1` after the response, so each answers the earliest call
-    // its own branch left open; `r4` finds none open.
-    let data: Value = serde_json::from_str(
-        r#"{"entries":[
-          {"type":"message","id":"a1","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"","name":"bash","arguments":{"command":"ls"}},{"type":"toolCall","id":"","name":"bash","arguments":{"command":"make"}},{"type":"toolCall","id":"c3","name":"bash","arguments":{"command":"npm test"}}]}},
-          {"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
-          {"type":"custom","id":"t1","parentId":"r1","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"c3","durationMs":5}},
-          {"type":"message","id":"r2","parentId":"t1","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
-          {"type":"message","id":"r3","parentId":"r2","message":{"role":"toolResult","toolCallId":"c3","toolName":"bash","content":[]}},
-          {"type":"message","id":"s2","parentId":"r1","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
-          {"type":"message","id":"s1","parentId":"a1","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
-          {"type":"message","id":"a2","parentId":"r3","message":{"role":"assistant","content":[{"type":"toolCall","id":"","name":"bash","arguments":{"command":"cargo test"}}]}},
-          {"type":"message","id":"q1","parentId":"a2","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
-          {"type":"message","id":"r4","parentId":"r3","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}}],
-          "leafId":"q1"}"#,
-    )
-    .expect("JSON");
-    let previews: Vec<_> = History::from_entries(&data)
-        .tree()
-        .nodes
-        .into_iter()
-        .filter(|node| node.kind == EntryKind::ToolResult)
-        .map(|node| (node.id, node.preview))
-        .collect();
-    let preview = |id: &str, preview: &str| (id.to_owned(), preview.to_owned());
-    assert_eq!(
-        previews,
-        [
-            preview("r1", "bash ls"),
-            preview("r2", "bash make"),
-            preview("r3", "bash npm test"),
-            preview("s2", "bash make"),
-            preview("s1", "bash ls"),
-            preview("q1", "bash cargo test"),
-            preview("r4", "bash"),
-        ]
     );
 }
 
@@ -591,14 +503,6 @@ fn matches_each_result_to_its_own_call_when_ids_repeat() {
     )
     .expect("JSON");
     let history = History::from_entries(&data);
-    let previews: Vec<_> = history
-        .tree()
-        .nodes
-        .into_iter()
-        .filter(|node| node.kind == EntryKind::ToolResult)
-        .map(|node| node.preview)
-        .collect();
-    assert_eq!(previews, ["bash ls", "bash rm -rf build", "bash make"]);
     let chat: Vec<_> = history
         .transcript(None, 10)
         .items

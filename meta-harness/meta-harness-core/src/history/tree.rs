@@ -2,48 +2,25 @@
 
 use std::collections::HashMap;
 
-use super::entry::{Body, Call, Entry, OpenCalls, first_line};
-use crate::{EntryKind, SessionTree, TreeNode, pi};
+use super::entry::{Body, Entry};
+use crate::{EntryKind, SessionTree, TreeNode};
 
-/// Longest preview kept for a tree entry, in characters.
-const PREVIEW_CHARS: usize = 80;
-
-/// Builds the tree; label entries become node labels and drop out of the parent chain.
+/// Builds the tree; label entries drop out of the parent chain.
 pub(super) fn session_tree(entries: &[Entry], leaf: Option<&str>) -> SessionTree {
     let mut label_parents: HashMap<&str, Option<&str>> = HashMap::new();
-    let mut labels: HashMap<&str, Option<&str>> = HashMap::new();
     for entry in entries {
-        if let Body::Label { target, label } = &entry.body {
+        if matches!(entry.body, Body::Label) {
             label_parents.insert(&entry.id, entry.parent.as_deref());
-            if let Some(target) = target {
-                labels.insert(target, label.as_deref());
-            }
         }
     }
     let ends = label_ends(&label_parents);
     let nodes = entries
         .iter()
-        .zip(result_targets(entries))
-        .filter(|(entry, _)| !matches!(entry.body, Body::Label { .. }))
-        .map(|(entry, target)| {
-            let (kind, preview) = summary(&entry.body, target);
-            TreeNode {
-                id: entry.id.clone(),
-                parent: resolve(&ends, entry.parent.as_deref()),
-                kind,
-                preview,
-                label: labels
-                    .get(entry.id.as_str())
-                    .copied()
-                    .flatten()
-                    .map(str::to_owned),
-                at_ms: entry.at_ms,
-                failed: match &entry.body {
-                    Body::ToolResult { failed, .. } => *failed,
-                    Body::Assistant { stop_reason, .. } => stop_reason == "error",
-                    _ => false,
-                },
-            }
+        .filter(|entry| !matches!(entry.body, Body::Label))
+        .map(|entry| TreeNode {
+            id: entry.id.clone(),
+            parent: resolve(&ends, entry.parent.as_deref()),
+            kind: entry_kind(&entry.body),
         })
         .collect();
     SessionTree {
@@ -88,92 +65,13 @@ fn resolve(ends: &HashMap<&str, Option<&str>>, id: Option<&str>) -> Option<Strin
     ends.get(id).copied().unwrap_or(Some(id)).map(str::to_owned)
 }
 
-/// What the call each tool result answers works on, by the result's place in `entries`. One walk
-/// down every branch carries the calls its responses left open, so each result is matched once.
-fn result_targets(entries: &[Entry]) -> Vec<Option<String>> {
-    /// Entering an entry, or undoing what one did, for the branches after it.
-    enum Step<'a> {
-        Enter(usize),
-        /// Leaving a response.
-        Close,
-        /// Leaving a result that answered this call at this place.
-        Reopen(usize, &'a Call),
-    }
-    // A parent id names its last entry, as on a branch; an entry reached only through a stored
-    // cycle is never entered.
-    let by_id: HashMap<&str, usize> = entries
-        .iter()
-        .enumerate()
-        .map(|(index, entry)| (entry.id.as_str(), index))
-        .collect();
-    // Each entry's children as a list: its first child and each child's next sibling.
-    let mut first_child = vec![None; entries.len()];
-    let mut next_sibling = vec![None; entries.len()];
-    let mut steps = Vec::new();
-    for (index, entry) in entries.iter().enumerate() {
-        match entry.parent.as_deref().and_then(|parent| by_id.get(parent)) {
-            Some(&parent) => next_sibling[index] = first_child[parent].replace(index),
-            None => steps.push(Step::Enter(index)),
-        }
-    }
-    let mut targets = vec![None; entries.len()];
-    // The open calls of each response above the entry, the nearest last.
-    let mut open: Vec<OpenCalls> = Vec::new();
-    while let Some(step) = steps.pop() {
-        match step {
-            Step::Enter(index) => {
-                match &entries[index].body {
-                    Body::Assistant { calls, .. } => {
-                        let mut response = OpenCalls::default();
-                        response.respond(calls);
-                        open.push(response);
-                        steps.push(Step::Close);
-                    }
-                    Body::ToolResult { call, .. } => {
-                        if let Some((place, call)) =
-                            open.last_mut().and_then(|calls| calls.answer(call))
-                        {
-                            targets[index] = Some(pi::call_target(&call.arguments));
-                            steps.push(Step::Reopen(place, call));
-                        }
-                    }
-                    _ => {}
-                }
-                let mut child = first_child[index];
-                while let Some(next) = child {
-                    steps.push(Step::Enter(next));
-                    child = next_sibling[next];
-                }
-            }
-            Step::Close => {
-                open.pop();
-            }
-            Step::Reopen(place, call) => {
-                if let Some(calls) = open.last_mut() {
-                    calls.reopen(place, call);
-                }
-            }
-        }
-    }
-    targets
-}
-
-fn summary(body: &Body, target: Option<String>) -> (EntryKind, String) {
-    let line = |text: &str| first_line(text, PREVIEW_CHARS);
+fn entry_kind(body: &Body) -> EntryKind {
     match body {
-        Body::User { text, .. } => (EntryKind::User, line(text)),
-        Body::Assistant { text, .. } => (EntryKind::Assistant, line(text)),
-        Body::ToolResult { tool, .. } => {
-            let preview = match target {
-                Some(target) if !target.is_empty() => format!("{tool} {target}"),
-                _ => tool.clone(),
-            };
-            (EntryKind::ToolResult, line(&preview))
-        }
-        Body::System => (EntryKind::System, String::new()),
-        Body::ToolTiming { .. } | Body::Checkpoint { .. } | Body::Custom => {
-            (EntryKind::Custom, String::new())
-        }
-        Body::Label { .. } | Body::Other => (EntryKind::Other, String::new()),
+        Body::User { .. } => EntryKind::User,
+        Body::Assistant { .. } => EntryKind::Assistant,
+        Body::ToolResult { .. } => EntryKind::ToolResult,
+        Body::System => EntryKind::System,
+        Body::ToolTiming { .. } | Body::Checkpoint { .. } | Body::Custom => EntryKind::Custom,
+        Body::Label | Body::Other => EntryKind::Other,
     }
 }

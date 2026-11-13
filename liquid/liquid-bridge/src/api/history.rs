@@ -22,14 +22,6 @@ pub struct BridgeTreeNode {
     pub parent: Option<String>,
     /// What the entry holds.
     pub kind: BridgeEntryKind,
-    /// A one-line preview of its text or tool.
-    pub preview: String,
-    /// The label set on this entry.
-    pub label: Option<String>,
-    /// Unix milliseconds when the entry was stored, if known.
-    pub at_ms: Option<i64>,
-    /// Whether a tool call or model response failed.
-    pub failed: bool,
 }
 
 /// What a tree entry holds.

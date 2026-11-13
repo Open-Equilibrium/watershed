@@ -277,3 +277,25 @@ fn compactions_and_edits_leave_the_chat_of_the_branch_whole() {
         "compactions and edits change what the model sees, not the chat"
     );
 }
+
+#[test]
+fn a_request_timing_entry_is_not_chat() {
+    // pi stores a request timing entry before each model response, as sessions written by
+    // earlier versions also hold it.
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+          {"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Go"}},
+          {"type":"custom","id":"q1","parentId":"u1","customType":"watershed.timing","data":{"kind":"request","firstTokenMs":120,"durationMs":900}},
+          {"type":"message","id":"a1","parentId":"q1","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}],
+          "leafId":"a1"}"#,
+    )
+    .expect("JSON");
+    assert_eq!(
+        History::from_entries(&data).transcript(None, 100).items,
+        [
+            item("u1", ItemKind::UserMessage, "Go"),
+            item("a1", ItemKind::AssistantMessage, "Done."),
+        ],
+        "the request's timing adds no chat item"
+    );
+}

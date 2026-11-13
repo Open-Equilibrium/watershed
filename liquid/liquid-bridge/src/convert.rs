@@ -70,10 +70,6 @@ impl From<TreeNode> for BridgeTreeNode {
                 EntryKind::Custom => BridgeEntryKind::Custom,
                 EntryKind::Other => BridgeEntryKind::Other,
             },
-            preview: node.preview,
-            label: node.label,
-            at_ms: node.at_ms.map(int),
-            failed: node.failed,
         }
     }
 }

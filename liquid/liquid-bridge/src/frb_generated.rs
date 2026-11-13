@@ -5041,18 +5041,10 @@ impl SseDecode for crate::api::history::BridgeTreeNode {
         let mut var_id = <String>::sse_decode(deserializer);
         let mut var_parent = <Option<String>>::sse_decode(deserializer);
         let mut var_kind = <crate::api::history::BridgeEntryKind>::sse_decode(deserializer);
-        let mut var_preview = <String>::sse_decode(deserializer);
-        let mut var_label = <Option<String>>::sse_decode(deserializer);
-        let mut var_atMs = <Option<i64>>::sse_decode(deserializer);
-        let mut var_failed = <bool>::sse_decode(deserializer);
         return crate::api::history::BridgeTreeNode {
             id: var_id,
             parent: var_parent,
             kind: var_kind,
-            preview: var_preview,
-            label: var_label,
-            at_ms: var_atMs,
-            failed: var_failed,
         };
     }
 }
@@ -8177,10 +8169,6 @@ impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeTreeNode {
             self.id.into_into_dart().into_dart(),
             self.parent.into_into_dart().into_dart(),
             self.kind.into_into_dart().into_dart(),
-            self.preview.into_into_dart().into_dart(),
-            self.label.into_into_dart().into_dart(),
-            self.at_ms.into_into_dart().into_dart(),
-            self.failed.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -9553,10 +9541,6 @@ impl SseEncode for crate::api::history::BridgeTreeNode {
         <String>::sse_encode(self.id, serializer);
         <Option<String>>::sse_encode(self.parent, serializer);
         <crate::api::history::BridgeEntryKind>::sse_encode(self.kind, serializer);
-        <String>::sse_encode(self.preview, serializer);
-        <Option<String>>::sse_encode(self.label, serializer);
-        <Option<i64>>::sse_encode(self.at_ms, serializer);
-        <bool>::sse_encode(self.failed, serializer);
     }
 }
 

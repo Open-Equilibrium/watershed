@@ -185,7 +185,7 @@ class BranchMark extends StatelessWidget {
           Icon(LucideIcons.gitBranch, size: 13, color: ws.accent),
           const SizedBox(width: WsMetrics.space2),
           if (ref != null) ...[
-            RefBadge(ref: ref, shown: true),
+            RefBadge(ref: ref),
             const SizedBox(width: WsMetrics.space2),
           ] else ...[
             Text('New session branch', style: style),
@@ -332,12 +332,11 @@ class ToolRow extends StatelessWidget {
   }
 }
 
-/// A branch's letter: blue for a shown branch, gray otherwise.
+/// A branch's letter in the accent color.
 class RefBadge extends StatelessWidget {
-  const RefBadge({super.key, required this.ref, required this.shown});
+  const RefBadge({super.key, required this.ref});
 
   final String ref;
-  final bool shown;
 
   @override
   Widget build(BuildContext context) {
@@ -345,13 +344,13 @@ class RefBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space2),
       decoration: BoxDecoration(
-        color: shown ? ws.accent : ws.hover,
+        color: ws.accent,
         borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
       ),
       child: Text(
         ref,
         style: TextStyle(
-          color: shown ? ws.onAccent : ws.textMuted,
+          color: ws.onAccent,
           fontSize: WsMetrics.fsSmall,
           height: WsMetrics.lhSmall / WsMetrics.fsSmall,
           fontWeight: WsMetrics.fwMedium,
@@ -362,7 +361,7 @@ class RefBadge extends StatelessWidget {
 }
 
 /// How a part of a changed-lines count reads; the chat gives each tone its color.
-enum Tone { good, bad, muted, faint, plain }
+enum Tone { good, bad, plain }
 
 /// Changed lines as `+added −removed`, leaving out a missing count.
 List<(String, Tone)> lineParts(int? added, int? removed) => [
@@ -379,8 +378,6 @@ List<TextSpan> toneSpans(WsPalette ws, List<(String, Tone)> parts) => [
       style: switch (tone) {
         Tone.good => TextStyle(color: ws.success),
         Tone.bad => TextStyle(color: ws.danger),
-        Tone.muted => TextStyle(color: ws.textMuted),
-        Tone.faint => TextStyle(color: ws.textFaint),
         Tone.plain => null,
       },
     ),

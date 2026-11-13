@@ -191,19 +191,9 @@ class FakeBackend implements SessionBackend {
   @override
   Future<BridgeHistory> history() async {
     calls.add('history');
-    // What a read held at the gate answers when it began before a session switch.
-    final early = answerAsAtStart ? stored : null;
     await gate?.future;
-    if (early != null) return early;
-    if (historyError case final error?) throw error;
     return stored;
   }
-
-  Object? historyError;
-
-  /// Whether a held history read answers what was stored when it began, even when later reads
-  /// fail.
-  bool answerAsAtStart = false;
 
   /// Holds history reads until it completes.
   Completer<void>? gate;
@@ -911,16 +901,7 @@ BridgeHistory historyOf({
   ),
 }) => BridgeHistory(
   usage: usage,
-  tree:
-      tree ??
-      const [
-        BridgeTreeNode(
-          failed: false,
-          id: 'root',
-          kind: BridgeEntryKind.other,
-          preview: '',
-        ),
-      ],
+  tree: tree ?? const [BridgeTreeNode(id: 'root', kind: BridgeEntryKind.other)],
   leaf: leaf ?? 'e1',
 );
 

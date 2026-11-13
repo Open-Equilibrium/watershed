@@ -649,9 +649,6 @@ class SessionState {
     );
   }
 
-  /// The branch tree and what the stored responses used.
-  Future<BridgeHistory> history() => _backend.history();
-
   /// Continues the session from `entry`; the next prompt starts a new branch there. The chat
   /// then shows the branch the session continues. Returns whether this call branched: one asked
   /// for while another runs waits for that one instead, and one asked for while the session

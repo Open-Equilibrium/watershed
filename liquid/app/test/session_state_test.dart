@@ -181,10 +181,14 @@ void main() {
     await emit(event(BridgeEventKind.turnCompleted));
 
     backend.stored = historyOf();
-    expect((await state.history()).leaf, 'e1');
+    await state.loadChat();
+    expect(backend.calls, [
+      'transcript',
+      'history',
+    ], reason: 'a restore reads the chat, then the stored history');
+    backend.calls.clear();
     await state.branch('e1');
     expect(backend.calls, [
-      'history',
       'branch e1',
       'transcript',
       'history',
@@ -227,32 +231,21 @@ void main() {
     () async {
       backend.stored = historyOf(
         tree: [
+          const BridgeTreeNode(id: 'u1', kind: BridgeEntryKind.user),
           const BridgeTreeNode(
-            failed: false,
-            id: 'u1',
-            kind: BridgeEntryKind.user,
-            preview: 'Go',
-          ),
-          const BridgeTreeNode(
-            failed: false,
             id: 'a1',
             parent: 'u1',
             kind: BridgeEntryKind.assistant,
-            preview: 'Looked',
           ),
           const BridgeTreeNode(
-            failed: false,
             id: 'a2',
             parent: 'a1',
             kind: BridgeEntryKind.assistant,
-            preview: 'Done',
           ),
           const BridgeTreeNode(
-            failed: false,
             id: 'b1',
             parent: 'a1',
             kind: BridgeEntryKind.user,
-            preview: 'Instead',
           ),
         ],
         leaf: 'b1',
@@ -289,13 +282,7 @@ void main() {
 
   test('says below each turn what it changed, restored and live', () async {
     BridgeTreeNode node(String id, String? parent, BridgeEntryKind kind) =>
-        BridgeTreeNode(
-          failed: false,
-          id: id,
-          parent: parent,
-          kind: kind,
-          preview: id,
-        );
+        BridgeTreeNode(id: id, parent: parent, kind: kind);
     backend.stored = historyOf(
       tree: [
         node('c1', null, BridgeEntryKind.custom),
@@ -375,13 +362,7 @@ void main() {
     'a turn the restore placed gets no second row from its end event',
     () async {
       BridgeTreeNode node(String id, String? parent, BridgeEntryKind kind) =>
-          BridgeTreeNode(
-            failed: false,
-            id: id,
-            parent: parent,
-            kind: kind,
-            preview: id,
-          );
+          BridgeTreeNode(id: id, parent: parent, kind: kind);
       backend.stored = historyOf(
         tree: [
           node('c1', null, BridgeEntryKind.custom),
@@ -673,40 +654,11 @@ void main() {
 
   group('the rebuilt chat', () {
     const tree = [
-      BridgeTreeNode(
-        failed: false,
-        id: 'u1',
-        kind: BridgeEntryKind.user,
-        preview: 'Go',
-      ),
-      BridgeTreeNode(
-        failed: false,
-        id: 'a1',
-        parent: 'u1',
-        kind: BridgeEntryKind.assistant,
-        preview: 'Looked',
-      ),
-      BridgeTreeNode(
-        failed: false,
-        id: 'a2',
-        parent: 'a1',
-        kind: BridgeEntryKind.assistant,
-        preview: 'Done',
-      ),
-      BridgeTreeNode(
-        failed: false,
-        id: 'b1',
-        parent: 'a1',
-        kind: BridgeEntryKind.user,
-        preview: 'Instead',
-      ),
-      BridgeTreeNode(
-        failed: false,
-        id: 'b2',
-        parent: 'b1',
-        kind: BridgeEntryKind.assistant,
-        preview: 'B2',
-      ),
+      BridgeTreeNode(id: 'u1', kind: BridgeEntryKind.user),
+      BridgeTreeNode(id: 'a1', parent: 'u1', kind: BridgeEntryKind.assistant),
+      BridgeTreeNode(id: 'a2', parent: 'a1', kind: BridgeEntryKind.assistant),
+      BridgeTreeNode(id: 'b1', parent: 'a1', kind: BridgeEntryKind.user),
+      BridgeTreeNode(id: 'b2', parent: 'b1', kind: BridgeEntryKind.assistant),
     ];
     String describe(ItemView view) =>
         view.marker == null ? view.text.value : 'marker ${view.marker!.ref}';
@@ -805,40 +757,11 @@ void main() {
     'places a live turn\'s row after a branch mark an earlier page adds',
     () async {
       const tree = [
-        BridgeTreeNode(
-          failed: false,
-          id: 'u1',
-          kind: BridgeEntryKind.user,
-          preview: 'Go',
-        ),
-        BridgeTreeNode(
-          failed: false,
-          id: 'a1',
-          parent: 'u1',
-          kind: BridgeEntryKind.assistant,
-          preview: 'Looked',
-        ),
-        BridgeTreeNode(
-          failed: false,
-          id: 'a2',
-          parent: 'a1',
-          kind: BridgeEntryKind.assistant,
-          preview: 'Done',
-        ),
-        BridgeTreeNode(
-          failed: false,
-          id: 'b1',
-          parent: 'a1',
-          kind: BridgeEntryKind.user,
-          preview: 'Instead',
-        ),
-        BridgeTreeNode(
-          failed: false,
-          id: 'b2',
-          parent: 'b1',
-          kind: BridgeEntryKind.assistant,
-          preview: 'B2',
-        ),
+        BridgeTreeNode(id: 'u1', kind: BridgeEntryKind.user),
+        BridgeTreeNode(id: 'a1', parent: 'u1', kind: BridgeEntryKind.assistant),
+        BridgeTreeNode(id: 'a2', parent: 'a1', kind: BridgeEntryKind.assistant),
+        BridgeTreeNode(id: 'b1', parent: 'a1', kind: BridgeEntryKind.user),
+        BridgeTreeNode(id: 'b2', parent: 'b1', kind: BridgeEntryKind.assistant),
       ];
       backend.stored = historyOf(tree: tree, leaf: 'b2');
       backend.transcripts[''] = BridgeTranscript(
@@ -1140,20 +1063,8 @@ void main() {
     // a's parent is b and b's is a, so the path to the leaf must stop at the repeated entry.
     backend.stored = historyOf(
       tree: const [
-        BridgeTreeNode(
-          failed: false,
-          id: 'a',
-          parent: 'b',
-          kind: BridgeEntryKind.assistant,
-          preview: 'A',
-        ),
-        BridgeTreeNode(
-          failed: false,
-          id: 'b',
-          parent: 'a',
-          kind: BridgeEntryKind.user,
-          preview: 'B',
-        ),
+        BridgeTreeNode(id: 'a', parent: 'b', kind: BridgeEntryKind.assistant),
+        BridgeTreeNode(id: 'b', parent: 'a', kind: BridgeEntryKind.user),
       ],
       leaf: 'a',
     );

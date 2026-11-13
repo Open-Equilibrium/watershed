@@ -344,37 +344,10 @@ class BridgeTreeNode {
   /// What the entry holds.
   final BridgeEntryKind kind;
 
-  /// A one-line preview of its text or tool.
-  final String preview;
-
-  /// The label set on this entry.
-  final String? label;
-
-  /// Unix milliseconds when the entry was stored, if known.
-  final PlatformInt64? atMs;
-
-  /// Whether a tool call or model response failed.
-  final bool failed;
-
-  const BridgeTreeNode({
-    required this.id,
-    this.parent,
-    required this.kind,
-    required this.preview,
-    this.label,
-    this.atMs,
-    required this.failed,
-  });
+  const BridgeTreeNode({required this.id, this.parent, required this.kind});
 
   @override
-  int get hashCode =>
-      id.hashCode ^
-      parent.hashCode ^
-      kind.hashCode ^
-      preview.hashCode ^
-      label.hashCode ^
-      atMs.hashCode ^
-      failed.hashCode;
+  int get hashCode => id.hashCode ^ parent.hashCode ^ kind.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -383,11 +356,7 @@ class BridgeTreeNode {
           runtimeType == other.runtimeType &&
           id == other.id &&
           parent == other.parent &&
-          kind == other.kind &&
-          preview == other.preview &&
-          label == other.label &&
-          atMs == other.atMs &&
-          failed == other.failed;
+          kind == other.kind;
 }
 
 /// A turn of the current branch, as the Diff tab lists it (ADR-0234).

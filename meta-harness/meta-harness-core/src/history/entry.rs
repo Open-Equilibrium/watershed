@@ -47,7 +47,6 @@ pub(crate) enum Body {
     },
     ToolResult {
         call: String,
-        tool: String,
         failed: bool,
         /// The lines a file change added and removed, from the patch pi stored.
         lines: Option<ChangedLines>,
@@ -70,10 +69,8 @@ pub(crate) enum Body {
     },
     /// Another extension's custom entry.
     Custom,
-    Label {
-        target: Option<String>,
-        label: Option<String>,
-    },
+    /// A label entry, which drops out of the parent chain.
+    Label,
     /// Any other entry, such as a model change, a compaction or a message of another role.
     Other,
 }
@@ -114,14 +111,6 @@ impl<'a, T> OpenCalls<'a, T> {
     /// The call a result for `id` answers, with its place in the response.
     pub fn answer(&mut self, id: &str) -> Option<(usize, &'a Call)> {
         self.open.get_mut(id)?.pop_front()
-    }
-
-    /// Opens the call the latest answer returned again, for another branch from before it.
-    pub fn reopen(&mut self, place: usize, call: &'a Call) {
-        self.open
-            .entry(call.id.as_str())
-            .or_default()
-            .push_front((place, call));
     }
 
     /// Keeps the timing entry of a call with `id` that ended, until its result.
@@ -206,10 +195,7 @@ impl Entry {
         let body = match kind.as_str() {
             "message" => message(entry.get("message")),
             "custom" => custom(text("customType").unwrap_or_default(), entry.get("data")),
-            "label" => Body::Label {
-                target: text("targetId"),
-                label: text("label"),
-            },
+            "label" => Body::Label,
             _ => Body::Other,
         };
         Self {
@@ -295,7 +281,6 @@ fn message(message: Option<&Value>) -> Body {
             }
         }
         Some("toolResult") => {
-            let tool = visible_name(&field("toolName"));
             let failed = message.get("isError").and_then(Value::as_bool) == Some(true);
             let patch = message
                 .get("details")
@@ -306,7 +291,6 @@ fn message(message: Option<&Value>) -> Body {
                 lines: patch
                     .map(patch_lines)
                     .map(|(added, removed)| ChangedLines { added, removed }),
-                tool,
                 failed,
             }
         }

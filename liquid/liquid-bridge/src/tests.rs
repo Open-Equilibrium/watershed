@@ -1869,31 +1869,14 @@ IFS= read -r line || exit 0"#
     let nodes: Vec<_> = current
         .tree
         .iter()
-        .map(|node| {
-            (
-                node.id.as_str(),
-                node.parent.as_deref(),
-                node.kind,
-                node.at_ms,
-            )
-        })
+        .map(|node| (node.id.as_str(), node.parent.as_deref(), node.kind))
         .collect();
     assert_eq!(
         nodes,
         [
-            ("e1", None, BridgeEntryKind::User, Some(1_792_836_000_000)),
-            (
-                "e2",
-                Some("e1"),
-                BridgeEntryKind::Assistant,
-                Some(1_792_836_002_000)
-            ),
-            (
-                "b1",
-                Some("e1"),
-                BridgeEntryKind::User,
-                Some(1_792_836_060_000)
-            ),
+            ("e1", None, BridgeEntryKind::User),
+            ("e2", Some("e1"), BridgeEntryKind::Assistant),
+            ("b1", Some("e1"), BridgeEntryKind::User),
         ]
     );
     // The second read continues after the last entry and adds nothing.
@@ -1905,7 +1888,7 @@ IFS= read -r line || exit 0"#
 }
 
 #[test]
-fn reads_what_a_write_changed_in_the_chat_and_tree() {
+fn reads_what_a_write_changed_in_the_chat() {
     let entries = r#"{"entries":[{"type":"message","id":"s1","parentId":null,"message":{"role":"system","content":"","sections":{"preamble":"You are pi."},"toolsAdded":[{"name":"write"}]}},{"type":"message","id":"u1","parentId":"s1","message":{"role":"user","content":"Write it"}},{"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"write","arguments":{"path":"a.ts","content":"x\ny\n"}}]}},{"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"c1","toolName":"write","content":[{"type":"text","text":"ok"}]}},{"type":"message","id":"a2","parentId":"r1","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}],"leafId":"a2"}"#;
     let script = no_session_file(2)
         + &format!(
@@ -1919,11 +1902,10 @@ fn reads_what_a_write_changed_in_the_chat_and_tree() {
     let session =
         launch(gated(&script), std::env::temp_dir().display().to_string()).expect("agent starts");
     let history = session.history().expect("history");
-    let result = history.tree.iter().find(|node| node.id == "r1");
     assert_eq!(
-        result.map(|node| (node.preview.as_str(), node.failed)),
-        Some(("write a.ts", false)),
-        "the tree names what the write wrote to"
+        history.leaf.as_deref(),
+        Some("a2"),
+        "the chat ends at the last answer"
     );
     let chat = session.transcript(None, 50).expect("transcript");
     let write = chat
