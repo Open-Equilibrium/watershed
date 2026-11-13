@@ -17,6 +17,8 @@ pub(crate) struct ParsedSseStream {
     pub(crate) terminal_event: bool,
 }
 
+const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
+
 pub(crate) struct SseDecoder {
     pending_line: Vec<u8>,
     event_data: Vec<u8>,
@@ -24,6 +26,10 @@ pub(crate) struct SseDecoder {
     parsed: ParsedSseStream,
     /// Whether the first terminal Responses event ends the reply; later bytes are then ignored.
     stop_at_terminal_event: bool,
+    /// Whether the next push is the first one, which may start with a byte order mark.
+    at_stream_start: bool,
+    /// Whether the next push starts with the LF of a CRLF whose CR ended the previous push.
+    skip_lf: bool,
 }
 
 impl Default for SseDecoder {
@@ -40,6 +46,8 @@ impl Default for SseDecoder {
                 terminal_event: false,
             },
             stop_at_terminal_event: false,
+            at_stream_start: true,
+            skip_lf: false,
         }
     }
 }
@@ -57,17 +65,43 @@ impl SseDecoder {
         if self.parsed.terminal_event {
             return Ok(());
         }
-        self.wire_stream_bytes = validate_wire_stream_bytes(self.wire_stream_bytes, bytes.len())?;
         let mut remaining = bytes;
-        while let Some(newline) = remaining.iter().position(|byte| *byte == b'\n') {
-            self.append_line_fragment(&remaining[..newline])?;
+        if std::mem::take(&mut self.at_stream_start) {
+            remaining = remaining.strip_prefix(UTF8_BOM).unwrap_or(remaining);
+        }
+        if std::mem::take(&mut self.skip_lf) {
+            remaining = remaining.strip_prefix(b"\n").unwrap_or(remaining);
+        }
+        // The wire budget is charged per consumed line, so bytes after the terminal event are free.
+        while let Some(end) = remaining
+            .iter()
+            .position(|byte| matches!(byte, b'\r' | b'\n'))
+        {
+            let (line, terminator) = remaining.split_at(end);
+            let terminator_len = match terminator {
+                [b'\r', b'\n', ..] => 2,
+                [b'\r'] => {
+                    // WHY: this CR may pair with an LF that starts the next push.
+                    self.skip_lf = true;
+                    1
+                }
+                _ => 1,
+            };
+            self.charge_wire_bytes(end + terminator_len)?;
+            self.append_line_fragment(line)?;
             self.finish_line()?;
             if self.parsed.terminal_event {
                 return Ok(());
             }
-            remaining = &remaining[newline + 1..];
+            remaining = &terminator[terminator_len..];
         }
+        self.charge_wire_bytes(remaining.len())?;
         self.append_line_fragment(remaining)
+    }
+
+    fn charge_wire_bytes(&mut self, bytes: usize) -> Result<(), RuntimeError> {
+        self.wire_stream_bytes = validate_wire_stream_bytes(self.wire_stream_bytes, bytes)?;
+        Ok(())
     }
 
     pub(crate) fn finish(self) -> Result<ParsedSseStream, RuntimeError> {
@@ -104,11 +138,7 @@ impl SseDecoder {
 
     fn append_line_fragment(&mut self, bytes: &[u8]) -> Result<(), RuntimeError> {
         let prospective_len = self.pending_line.len().checked_add(bytes.len());
-        let prospective_last = bytes.last().or_else(|| self.pending_line.last());
-        if prospective_len.is_none_or(|len| {
-            len > MAX_RESPONSES_LINE_BYTES.saturating_add(1)
-                || (len > MAX_RESPONSES_LINE_BYTES && prospective_last != Some(&b'\r'))
-        }) {
+        if prospective_len.is_none_or(|len| len > MAX_RESPONSES_LINE_BYTES) {
             return Err(response_protocol(format!(
                 "response stream line exceeds {MAX_RESPONSES_LINE_BYTES} bytes"
             )));
@@ -118,7 +148,6 @@ impl SseDecoder {
     }
 
     fn finish_line(&mut self) -> Result<(), RuntimeError> {
-        strip_carriage_return(&mut self.pending_line);
         enforce_line_budget(self.pending_line.len())?;
         if self.pending_line.is_empty() {
             dispatch_event(
@@ -175,12 +204,6 @@ fn validate_decoded_stream_bytes(
         )));
     }
     Ok(next)
-}
-
-fn strip_carriage_return(line: &mut Vec<u8>) {
-    if line.last() == Some(&b'\r') {
-        line.pop();
-    }
 }
 
 fn enforce_line_budget(bytes: usize) -> Result<(), RuntimeError> {

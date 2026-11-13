@@ -197,3 +197,46 @@ fn responses_reject_unterminated_event_data_at_end_of_stream() {
     assert!(parse_sse_stream("data:{\"type\":\"response.completed\"}").is_err());
     assert!(parse_sse_stream("data:{\"type\":\"response.completed\"}\n").is_err());
 }
+
+#[test]
+fn terminal_event_decoding_is_independent_of_chunking() {
+    const LINE_BYTES: usize = 64 * 1024;
+    let budget = MAX_RESPONSES_DECODED_STREAM_BYTES + MAX_RESPONSES_EVENT_BYTES;
+    let base = "data:{\"type\":\"response.completed\",\"response\":{\"id\":\"\"}}\n\n";
+    let completion = format!(
+        "data:{{\"type\":\"response.completed\",\"response\":{{\"id\":\"{}\"}}}}\n\n",
+        "r".repeat(LINE_BYTES - base.len())
+    );
+    assert_eq!(completion.len(), LINE_BYTES);
+    let comment = format!(":{}\n", "x".repeat(LINE_BYTES - 2));
+    // Exactly the wire budget ends at the completion; the byte after it is never consumed.
+    let mut stream = comment.repeat(budget / LINE_BYTES - 1);
+    stream.push_str(&completion);
+    stream.push('\n');
+
+    let mut one_push = SseDecoder::ending_at_terminal_event();
+    one_push
+        .push(stream.as_bytes())
+        .expect("the completion ends the reply within the wire budget");
+    assert!(one_push.reply_ended());
+
+    let mut split_pushes = SseDecoder::ending_at_terminal_event();
+    for chunk in stream.as_bytes().chunks(4096) {
+        split_pushes
+            .push(chunk)
+            .expect("split pushes end the reply within the wire budget");
+    }
+    assert!(split_pushes.reply_ended());
+}
+
+#[test]
+fn sse_decoder_accepts_cr_only_lines_and_an_initial_bom() {
+    let completion = "data:{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\"}}";
+    for source in [
+        format!("\u{feff}{completion}\n\n"),
+        format!("{completion}\r\r"),
+    ] {
+        let values = parse_sse_stream(source).expect("line terminators and BOM are accepted");
+        assert_eq!(values.len(), 1);
+    }
+}
