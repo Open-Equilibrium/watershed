@@ -132,7 +132,9 @@ SessionGraph sessionGraph(List<BridgeTreeNode> nodes, String? leaf) {
           tip: node.id,
           ref: _ref(branches.length),
           name: node.label ?? prompt ?? node.preview,
-          durationMs: at == null || startAt == null ? null : at - startAt,
+          durationMs: at == null || startAt == null
+              ? null
+              : math.max(0, at - startAt),
         );
         branches.add(branch);
       }

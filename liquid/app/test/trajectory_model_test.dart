@@ -119,6 +119,14 @@ void main() {
       },
     );
 
+    test('a branch whose tip is stamped before its prompt lasts 0 ms', () {
+      final graph = sessionGraph([
+        node('u1', null, BridgeEntryKind.user, preview: 'Go', at: 2000),
+        node('a1', 'u1', BridgeEntryKind.assistant, at: 1000),
+      ], 'a1');
+      expect(graph.branches.single.durationMs, 0);
+    });
+
     test(
       'a duration starts at the time just before an untimed first prompt',
       () {
