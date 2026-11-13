@@ -53,18 +53,18 @@ void main() {
   test('a conflict is another command in the same area with the same keys', () {
     final keys = ShortcutSettings.liquidKey();
 
-    expect(keys.conflict(Command.focusInput, liquidN), Command.newSession);
+    expect(keys.conflicts(Command.focusInput, liquidN), [Command.newSession]);
     // The ⌘ variant that keeps working conflicts too.
-    expect(keys.conflict(Command.focusInput, commandN), Command.newSession);
+    expect(keys.conflicts(Command.focusInput, commandN), [Command.newSession]);
     // esc stops a run in the input area and dismisses a question.
     expect(
-      keys.conflict(
+      keys.conflicts(
         Command.dismissQuestion,
         const Keys(LogicalKeyboardKey.escape),
       ),
-      isNull,
+      isEmpty,
     );
-    expect(keys.conflict(Command.newSession, liquidN), isNull);
+    expect(keys.conflicts(Command.newSession, liquidN), isEmpty);
   });
 
   test('a Liquid ⌘ chord conflicts with the command whose menu shows the same ⌘ keys', () {
@@ -75,11 +75,11 @@ void main() {
     );
     final keys = ShortcutSettings.liquidKey();
 
-    expect(keys.conflict(Command.diff, liquidCommandN), Command.newSession);
+    expect(keys.conflicts(Command.diff, liquidCommandN), [Command.newSession]);
     final taken = keys.change(
       Command.diff,
       liquidCommandN,
-      clear: Command.newSession,
+      clear: [Command.newSession],
     );
     expect(
       taken.menu(Command.newSession),
@@ -87,14 +87,14 @@ void main() {
       reason: 'the menu bar would take the chord from Diff',
     );
     // The other way round: a ⌘ chord meets the Liquid key chord of another command.
-    expect(taken.conflict(Command.focusInput, commandN), Command.diff);
+    expect(taken.conflicts(Command.focusInput, commandN), [Command.diff]);
   });
 
   test('a Page to-do does not compete with the agent Send command', () {
     const commandEnter = Keys(LogicalKeyboardKey.enter, meta: true);
     final keys = ShortcutSettings.liquidKey();
 
-    expect(keys.conflict(Command.send, commandEnter), isNull);
+    expect(keys.conflicts(Command.send, commandEnter), isEmpty);
     expect(
       keys.change(Command.send, commandEnter).bindings(Command.toggleToDo),
       keys.bindings(Command.toggleToDo),
@@ -131,20 +131,20 @@ void main() {
     const commandOne = Keys(LogicalKeyboardKey.digit1, meta: true);
     final keys = ShortcutSettings.standard();
 
-    expect(keys.conflict(Command.filterSteps, commandOne), Command.chat);
-    expect(keys.conflict(Command.chat, commandF), Command.filterSteps);
+    expect(keys.conflicts(Command.filterSteps, commandOne), [Command.chat]);
+    expect(keys.conflicts(Command.chat, commandF), [Command.filterSteps]);
     expect(
-      keys.conflict(
+      keys.conflicts(
         Command.filterSteps,
         const Keys(LogicalKeyboardKey.digit1, liquid: true, meta: true),
       ),
-      Command.chat,
+      [Command.chat],
       reason: 'the menu bar ignores the Liquid key',
     );
     final taken = keys.change(
       Command.filterSteps,
       commandOne,
-      clear: Command.chat,
+      clear: [Command.chat],
     );
     expect(taken.bindings(Command.chat), isEmpty);
     expect(taken.bindings(Command.filterSteps), [commandOne]);
@@ -152,11 +152,11 @@ void main() {
 
   test('esc may be shared with the app area', () {
     expect(
-      ShortcutSettings.standard().conflict(
+      ShortcutSettings.standard().conflicts(
         Command.closeStep,
         const Keys(LogicalKeyboardKey.escape),
       ),
-      isNull,
+      isEmpty,
     );
   });
 
@@ -168,8 +168,8 @@ void main() {
       for (final command in Command.values) {
         for (final bound in keys.bindings(command)) {
           expect(
-            keys.conflict(command, bound),
-            isNull,
+            keys.conflicts(command, bound),
+            isEmpty,
             reason: '${keys.base.label} ${command.name} ${bound.label}',
           );
         }
@@ -181,7 +181,7 @@ void main() {
     final keys = ShortcutSettings.liquidKey().change(
       Command.focusInput,
       liquidN,
-      clear: Command.newSession,
+      clear: [Command.newSession],
     );
 
     expect(keys.bindings(Command.focusInput), [
@@ -192,11 +192,23 @@ void main() {
     expect(keys.label(Command.newSession), '⌘N');
   });
 
+  test('taking keys clears every command that runs them', () {
+    const commandEnter = Keys(LogicalKeyboardKey.enter, meta: true);
+    final keys = ShortcutSettings.standard();
+    final owners = keys.conflicts(Command.newSession, commandEnter);
+    expect(owners, unorderedEquals([Command.toggleToDo, Command.answerEditor]));
+
+    final taken = keys.change(Command.newSession, commandEnter, clear: owners);
+    expect(taken.conflicts(Command.newSession, commandEnter), isEmpty);
+    expect(taken.bindings(Command.toggleToDo), isNot(contains(commandEnter)));
+    expect(taken.bindings(Command.answerEditor), isNot(contains(commandEnter)));
+  });
+
   test('resetting a command takes its default keys back from the commands that run them', () {
     final taken = ShortcutSettings.liquidKey().change(
       Command.diff,
       liquidN,
-      clear: Command.newSession,
+      clear: [Command.newSession],
     );
 
     final restored = taken.resetTaking(Command.newSession);
@@ -206,6 +218,25 @@ void main() {
     ]);
     expect(restored.changed(Command.newSession), isFalse);
   });
+
+  test(
+    'resetting with the Liquid key off leaves no conflict once it is on',
+    () {
+      final taken = ShortcutSettings.liquidKey().change(
+        Command.diff,
+        liquidN,
+        clear: [Command.newSession],
+      );
+
+      final on = taken
+          .withLiquidKey(false)
+          .resetTaking(Command.newSession)
+          .withLiquidKey(true);
+      expect(on.bindings(Command.newSession), [liquidN, commandN]);
+      expect(on.conflicts(Command.newSession, liquidN), isEmpty);
+      expect(on.bindings(Command.diff), isNot(contains(liquidN)));
+    },
+  );
 
   test('the Custom switch decides whether Liquid key combinations exist', () {
     final off = ShortcutSettings.liquidKey().withLiquidKey(false);

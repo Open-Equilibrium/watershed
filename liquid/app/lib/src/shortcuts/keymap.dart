@@ -576,16 +576,15 @@ class ShortcutSettings {
           bound.meta &&
           bound.withoutLiquid == keys.withoutLiquid);
 
-  /// The other command that `keys` already runs for `command`: in its area, or across areas
+  /// The other commands that `keys` already run for `command`: in their area, or across areas
   /// for the app area's ⌘ keys.
-  Command? conflict(Command command, Keys keys) => Command.values
-      .where(
-        (other) =>
-            other != command &&
-            bindings(other)
-                .any((bound) => _runsSame(command, keys, other, bound)),
-      )
-      .firstOrNull;
+  List<Command> conflicts(Command command, Keys keys) => [
+    for (final other in Command.values)
+      if (other != command &&
+          bindings(other)
+              .any((bound) => _runsSame(command, keys, other, bound)))
+        other,
+  ];
 
   /// The kept Custom profile a change here would replace, when it holds anything its base
   /// does not.
@@ -605,7 +604,11 @@ class ShortcutSettings {
   /// Gives `command` new first keys, or none, keeping the ⌘ keys beside the Liquid key;
   /// `clear` gives up the same keys. Changing a profile other than Custom starts a new Custom
   /// profile from it.
-  ShortcutSettings change(Command command, Keys? keys, {Command? clear}) {
+  ShortcutSettings change(
+    Command command,
+    Keys? keys, {
+    Iterable<Command> clear = const [],
+  }) {
     final custom = _editable;
     final from = ShortcutSettings._(Profile.custom, custom);
     final next = {...custom.changes};
@@ -619,12 +622,14 @@ class ShortcutSettings {
 
     final rest = from.bindings(command).skip(1).where((other) => other != keys);
     put(command, [?keys, ...rest]);
-    if (clear != null && keys != null) {
-      put(clear, [
-        ...from
-            .bindings(clear)
-            .where((bound) => !_runsSame(command, keys, clear, bound)),
-      ]);
+    if (keys != null) {
+      for (final owner in clear) {
+        put(owner, [
+          ...from
+              .bindings(owner)
+              .where((bound) => !_runsSame(command, keys, owner, bound)),
+        ]);
+      }
     }
     return ShortcutSettings._(
       Profile.custom,
@@ -644,15 +649,17 @@ class ShortcutSettings {
     null => this,
   };
 
-  /// Restores `command`'s default keys and takes them from the other commands that run them now.
+  /// Restores `command`'s default keys and takes them from the other commands that run them now,
+  /// Liquid key combinations included while that key is off: they come back with it.
   ShortcutSettings resetTaking(Command command) {
     final custom = _active;
     if (custom == null) return this;
-    final defaults = _defaults(command);
+    final on = withLiquidKey(true);
+    final defaults = on._defaults(command);
     final changes = {...custom.changes}..remove(command);
     for (final other in Command.values) {
       if (other == command) continue;
-      final bound = bindings(other);
+      final bound = on.bindings(other);
       final kept = [
         for (final keys in bound)
           if (!defaults.any(
@@ -661,7 +668,7 @@ class ShortcutSettings {
             keys,
       ];
       if (kept.length == bound.length) continue;
-      if (listEquals(kept, _defaults(other))) {
+      if (listEquals(kept, on._defaults(other))) {
         changes.remove(other);
       } else {
         changes[other] = kept;

@@ -164,6 +164,41 @@ void main() {
     expect(shortcuts.value, ShortcutSettings.standard());
   });
 
+  testWidgets('Reset names every command it takes keys from', (tester) async {
+    // Diff runs New Session's ⇪N, and Focus Input its ⌘N.
+    final settings = ShortcutSettings.liquidKey()
+        .change(
+          Command.diff,
+          const Keys(LogicalKeyboardKey.keyN, liquid: true),
+          clear: [Command.newSession],
+        )
+        .change(
+          Command.focusInput,
+          const Keys(LogicalKeyboardKey.keyN, meta: true),
+          clear: [Command.newSession],
+        );
+    await show(tester, settings);
+    await openSettings(tester);
+    await tester.tap(find.text('Reset to ⇪N'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('already runs Diff'), findsOneWidget);
+    expect(find.textContaining('already runs Focus Input'), findsOneWidget);
+
+    await tester.tap(find.text('Use anyway, clear Diff and Focus Input'));
+    await tester.pumpAndSettle();
+    expect(
+      shortcuts.value.conflicts(
+        Command.newSession,
+        const Keys(LogicalKeyboardKey.keyN, liquid: true),
+      ),
+      isEmpty,
+    );
+    expect(
+      shortcuts.value.bindings(Command.focusInput),
+      isNot(contains(const Keys(LogicalKeyboardKey.keyN, meta: true))),
+    );
+  });
+
   testWidgets(
     'resetting a command whose keys another command took asks first',
     (tester) async {
@@ -204,7 +239,7 @@ void main() {
           .change(
             Command.focusInput,
             const Keys(LogicalKeyboardKey.keyN, meta: true),
-            clear: Command.newSession,
+            clear: [Command.newSession],
           )
           .choose(Profile.standard),
     );

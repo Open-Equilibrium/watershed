@@ -127,10 +127,10 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
   final _keys = FocusNode(debugLabel: 'shortcuts');
   final _search = TextEditingController();
 
-  /// The command taking new keys, the keys pressed for it and who runs them already.
+  /// The command taking new keys, the keys pressed for it and who runs each of them already.
   Command? _recording;
   Keys? _pressed;
-  Command? _conflict;
+  List<({Keys keys, List<Command> owners})> _conflicts = const [];
 
   /// Whether the keys shown are the defaults a Reset restores, which "Use anyway" takes.
   bool _restoring = false;
@@ -139,7 +139,7 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
   String? _refused;
 
   /// A change waiting until the user agrees that it replaces the kept Custom profile.
-  ({Command command, Keys keys, Command? clear})? _replacing;
+  ({Command command, Keys keys, List<Command> clear})? _replacing;
   final _keep = FocusNode(debugLabel: 'keep Custom');
   final _replace = FocusNode(debugLabel: 'replace Custom');
 
@@ -167,7 +167,7 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
     setState(() {
       _recording = command;
       _pressed = null;
-      _conflict = null;
+      _conflicts = const [];
       _refused = null;
       _restoring = false;
     });
@@ -177,31 +177,36 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
   void _stop() => setState(() {
     _recording = null;
     _pressed = null;
-    _conflict = null;
+    _conflicts = const [];
     _refused = null;
     _replacing = null;
     _restoring = false;
   });
 
   /// Restores `command`'s defaults. Keys another command runs now are taken only after the
-  /// same question recording asks.
+  /// same question recording asks, which names every command it takes keys from.
   void _reset(Command command) {
     final restored = _shortcuts.value.reset(command);
-    for (final keys in restored.bindings(command)) {
-      final conflict = restored.conflict(command, keys);
-      if (conflict != null) {
-        setState(() {
-          _recording = command;
-          _pressed = keys;
-          _conflict = conflict;
-          _refused = null;
-          _restoring = true;
-        });
-        _keys.requestFocus();
-        return;
-      }
+    // Liquid key combinations count while their key is off too: they come back with it.
+    final all = restored.withLiquidKey(true);
+    final conflicts = [
+      for (final keys in all.bindings(command))
+        if (all.conflicts(command, keys) case final owners
+            when owners.isNotEmpty)
+          (keys: keys, owners: owners),
+    ];
+    if (conflicts.isEmpty) {
+      _shortcuts.change(restored);
+      return;
     }
-    _shortcuts.change(restored);
+    setState(() {
+      _recording = command;
+      _pressed = conflicts.first.keys;
+      _conflicts = conflicts;
+      _refused = null;
+      _restoring = true;
+    });
+    _keys.requestFocus();
   }
 
   /// Restores `command`'s defaults, taking them from the commands that run them.
@@ -215,7 +220,7 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
   void _focusChanged() {
     if (_recording != null &&
         !_keys.hasPrimaryFocus &&
-        _conflict == null &&
+        _conflicts.isEmpty &&
         _replacing == null) {
       _stop();
     }
@@ -225,15 +230,15 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
   /// recording whose conflict names the owner under the profile before.
   void _settingsChanged() {
     if (_replacing != null && _shortcuts.value.replaced == null) _done();
-    if (_conflict != null) _stop();
+    if (_conflicts.isNotEmpty) _stop();
   }
 
   /// Changes `command`'s keys, after asking when that replaces the kept Custom profile.
-  void _change(Command command, Keys keys, {Command? clear}) {
+  void _change(Command command, Keys keys, {List<Command> clear = const []}) {
     if (_shortcuts.value.replaced == null) return _apply(command, keys, clear);
     setState(() {
       _pressed = keys;
-      _conflict = null;
+      _conflicts = const [];
       _refused = null;
       _replacing = (command: command, keys: keys, clear: clear);
     });
@@ -242,7 +247,7 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
     });
   }
 
-  void _apply(Command command, Keys keys, Command? clear) {
+  void _apply(Command command, Keys keys, List<Command> clear) {
     _shortcuts.change(_shortcuts.value.change(command, keys, clear: clear));
     _done();
   }
@@ -293,13 +298,15 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
       return KeyEventResult.handled;
     }
     final use = reserved(command, keys);
-    final conflict = _shortcuts.value.conflict(command, keys);
-    if (use == null && conflict == null) {
+    final owners = _shortcuts.value.conflicts(command, keys);
+    if (use == null && owners.isEmpty) {
       _change(command, keys);
     } else {
       setState(() {
         _pressed = keys;
-        _conflict = use == null ? conflict : null;
+        _conflicts = use == null && owners.isNotEmpty
+            ? [(keys: keys, owners: owners)]
+            : const [];
         _restoring = false;
         _refused = switch (use) {
           null => null,
@@ -502,7 +509,9 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
     final bindings = settings.bindings(command);
     if (_recording == command) {
       final pressed = _pressed;
-      final conflict = _conflict;
+      final conflicts = _conflicts;
+      final owners = {for (final conflict in conflicts) ...conflict.owners}
+          .toList();
       final refused = _refused;
       return [
         _Row(
@@ -525,27 +534,22 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
             onReplace: () =>
                 _apply(replacing.command, replacing.keys, replacing.clear),
           ),
-        if (pressed != null && conflict != null)
+        if (pressed != null && conflicts.isNotEmpty)
           _Notice(
             children: [
-              Text.rich(
-                TextSpan(
-                  text: '${pressed.label} already runs ',
-                  children: [
-                    TextSpan(
-                      text: conflict.label,
-                      style: const TextStyle(fontWeight: WsMetrics.fwSemibold),
-                    ),
-                    const TextSpan(text: '.'),
-                  ],
+              for (final conflict in conflicts)
+                Text.rich(
+                  TextSpan(
+                    text: '${conflict.keys.label} already runs ',
+                    children: _ownerSpans(conflict.owners),
+                  ),
+                  style: _Notice.text(context),
                 ),
-                style: _Notice.text(context),
-              ),
               _Link(
-                'Use anyway, clear ${conflict.label}',
+                'Use anyway, clear ${_ownerNames(owners)}',
                 onTap: () => _restoring
                     ? _restore(command)
-                    : _change(command, pressed, clear: conflict),
+                    : _change(command, pressed, clear: owners),
               ),
             ],
           ),
@@ -707,6 +711,26 @@ class _Row extends StatelessWidget {
 
 enum _Tone { plain, faint, changed, recording }
 
+/// The commands that run some keys, bold and in a sentence: `A.`, `A and B.` or `A, B and C.`.
+List<InlineSpan> _ownerSpans(List<Command> owners) => [
+  for (final (index, owner) in owners.indexed) ...[
+    if (index > 0) TextSpan(text: index == owners.length - 1 ? ' and ' : ', '),
+    TextSpan(
+      text: owner.label,
+      style: const TextStyle(fontWeight: WsMetrics.fwSemibold),
+    ),
+  ],
+  const TextSpan(text: '.'),
+];
+
+/// The names of commands in a link: `A`, `A and B` or `A, B and C`.
+String _ownerNames(List<Command> owners) {
+  final labels = [for (final owner in owners) owner.label];
+  return labels.length < 2
+      ? labels.join()
+      : '${labels.sublist(0, labels.length - 1).join(', ')} and ${labels.last}';
+}
+
 /// Keys as a key cap.
 class _Kbd extends StatelessWidget {
   const _Kbd(this.text, {this.tone = _Tone.plain});
@@ -809,7 +833,7 @@ class _ReplaceCustom extends StatelessWidget {
   });
 
   final ShortcutSettings settings;
-  final ({Command command, Keys keys, Command? clear}) change;
+  final ({Command command, Keys keys, List<Command> clear}) change;
   final FocusNode keep;
   final FocusNode replace;
   final VoidCallback onKeep;
