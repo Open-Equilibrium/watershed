@@ -95,8 +95,14 @@ impl Outbox {
             let waiting = self.pending.len();
             self.pending.retain(|event| !is_partial(event));
             if self.pending.len() < waiting && !self.behind {
+                // The exit stays last, as the event contract requires.
+                let exited = self
+                    .pending
+                    .last()
+                    .is_some_and(|event| event.kind == BridgeEventKind::Exited);
+                let at = self.pending.len() - usize::from(exited);
                 self.pending
-                    .push(crate::convert::event(BridgeEventKind::FellBehind));
+                    .insert(at, crate::convert::event(BridgeEventKind::FellBehind));
                 self.behind = true;
             }
         }

@@ -3,7 +3,7 @@ mod workspace;
 
 use meta_harness_core::{
     AgentCommand, AgentEvent, ChangedLines, CommandError, ItemDetail, ItemId, ItemKind, ItemStatus,
-    RequestId, SessionEvent, StoredSession, TurnId, Usage, UserInput,
+    NotificationLevel, RequestId, SessionEvent, StoredSession, TurnId, Usage, UserInput,
 };
 
 use crate::api::events::{
@@ -971,6 +971,35 @@ fn falling_behind_keeps_finished_items_and_sends_one_fell_behind_event() {
             "the finished items stay in order, one fell-behind event follows the partial output that went, and what comes after is live"
         );
     });
+}
+
+#[test]
+fn an_overflow_keeps_the_exit_last() {
+    let mut outbox = Outbox::default();
+    outbox.admit(BridgeEvent::from(delta(1, "partial")));
+    let note = || {
+        SessionEvent::Agent(AgentEvent::Notification {
+            level: NotificationLevel::Info,
+            message: "note".to_owned(),
+        })
+    };
+    for _ in 0..255 {
+        outbox.admit(BridgeEvent::from(note()));
+    }
+    outbox.admit(BridgeEvent::from(SessionEvent::Exited {
+        success: true,
+        error_output: String::new(),
+    }));
+    let kinds: Vec<_> = outbox.pending.iter().map(|event| event.kind).collect();
+    assert_eq!(
+        kinds.last(),
+        Some(&BridgeEventKind::Exited),
+        "the exit ends the stream even when the overflow comes with it"
+    );
+    assert_eq!(
+        kinds.get(kinds.len() - 2),
+        Some(&BridgeEventKind::FellBehind)
+    );
 }
 
 #[test]
