@@ -341,6 +341,25 @@ void main() {
     expect(shortcuts.value.changed(Command.newSession), isFalse);
   });
 
+  testWidgets('the Liquid key with Shift is refused, as macOS takes it', (
+    tester,
+  ) async {
+    await show(tester, ShortcutSettings.liquidKey());
+    await openSettings(tester);
+    await tester.tap(find.text('⇪N'));
+    await tester.pumpAndSettle();
+    await tester.sendKeyDownEvent(liquidKey, platform: 'macos');
+    await press(
+      tester,
+      LogicalKeyboardKey.keyM,
+      holding: LogicalKeyboardKey.shiftLeft,
+    );
+    await tester.sendKeyUpEvent(liquidKey, platform: 'macos');
+    await tester.pumpAndSettle();
+    expect(find.text('⇧⇪M is kept for capitals.'), findsOneWidget);
+    expect(shortcuts.value.changed(Command.newSession), isFalse);
+  });
+
   testWidgets('leaving the recording row stops recording', (tester) async {
     await show(tester, ShortcutSettings.standard());
     await openSettings(tester);

@@ -429,6 +429,9 @@ String? reserved(Command command, Keys keys) {
       return use;
     }
   }
+  // With Shift pressed first, macOS takes Caps Lock as its capitals toggle, so the Liquid key
+  // never arrives.
+  if (keys.liquid && keys.shift) return 'capitals';
   final typing = {
     Area.app,
     Area.input,

@@ -356,6 +356,21 @@ void main() {
     );
   });
 
+  test('the Liquid key with Shift is kept for capitals, which macOS takes', () {
+    expect(
+      reserved(
+        Command.newSession,
+        const Keys(LogicalKeyboardKey.keyN, liquid: true, shift: true),
+      ),
+      'capitals',
+    );
+    expect(
+      reserved(Command.newSession, liquidN),
+      isNull,
+      reason: 'the Liquid key alone stays free',
+    );
+  });
+
   test(
     'settings survive a JSON round trip and ignore what they do not know',
     () {
