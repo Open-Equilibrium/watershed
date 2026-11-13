@@ -46,6 +46,16 @@ fn inner_status_requires_one_exact_root_record() {
 }
 
 #[test]
+fn stopped_inner_root_status_is_not_a_reaped_tool() {
+    // A stopped root (WIFSTOPPED) keeps its Tool alive; it is never a termination.
+    let stopped = ((19_i32 << 8) | 0x7f).to_ne_bytes();
+    assert!(
+        apply_inner_status(&mut natural_outcome(0), &stopped).is_err(),
+        "a stopped Tool root cannot prove a reaped Tool"
+    );
+}
+
+#[test]
 fn natural_inner_exit_requires_successful_supervision_and_exact_tool_status() {
     let recorded = (7_i32 << 8).to_ne_bytes();
     assert!(apply_inner_status(&mut natural_outcome(65_i32 << 8), &recorded).is_err());

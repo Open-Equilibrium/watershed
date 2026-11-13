@@ -130,6 +130,12 @@ pub(super) fn apply_inner_status(
         BackendError::uncertain("Flow-owned write protection did not prove a reaped Tool root")
     })?;
     let status = ExitStatus::from_raw(i32::from_ne_bytes(status));
+    // WHY: a stopped or continued root is neither exited nor signaled, so it proves no termination.
+    if status.code().is_none() && status.signal().is_none() {
+        return Err(BackendError::uncertain(
+            "Flow-owned write protection did not prove a reaped Tool root",
+        ));
+    }
     if matches!(
         outcome.classification,
         None | Some(
@@ -178,7 +184,10 @@ pub(crate) fn run_inner(status_descriptor: &str, input: impl Read) -> Result<(),
         while let Some((pid, status)) = rustix::process::wait(rustix::process::WaitOptions::NOHANG)
             .map_err(|error| format!("failed to reap Tool: {error}"))?
         {
-            if pid.as_raw_nonzero().get() as u32 == child.id() {
+            // WHY: a traced root reports its stops here too; only its exit or signal ends the Tool.
+            if pid.as_raw_nonzero().get() as u32 == child.id()
+                && (status.exited() || status.signaled())
+            {
                 return status_file
                     .write_all(&status.as_raw().to_ne_bytes())
                     .map_err(|error| format!("failed to record Tool status: {error}"));
