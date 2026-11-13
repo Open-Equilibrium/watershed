@@ -22,12 +22,22 @@ impl PreparedExecutor {
         request_id: &str,
     ) -> Result<PreparedExecutorTool, RuntimeError> {
         workspace.verify_binding()?;
-        let environment = command_policy
-            .environment
-            .allow
-            .iter()
-            .filter_map(|name| std::env::var(name).ok().map(|value| (name.clone(), value)))
-            .collect::<BTreeMap<_, _>>();
+        let mut environment = BTreeMap::new();
+        for name in &command_policy.environment.allow {
+            match std::env::var(name) {
+                Ok(value) => {
+                    environment.insert(name.clone(), value);
+                }
+                Err(std::env::VarError::NotPresent) => {}
+                // WHY: a present value that is not UTF-8 must not silently run without its variable.
+                Err(std::env::VarError::NotUnicode(_)) => {
+                    return Err(RuntimeError::executor(
+                        proto::ExecutorErrorCodeV0::PolicyUnsupported,
+                        "allowed environment value is not UTF-8",
+                    ));
+                }
+            }
+        }
         let resolved_policy = proto::ExecutorResolvedPolicyV0 {
             argv: invocation.argv.clone(),
             environment,
@@ -72,7 +82,9 @@ impl PreparedExecutor {
         let protected_descriptors = self
             .protected_objects
             .iter()
-            .map(|object| rustix::io::dup(&object.descriptor).map_err(runtime_open_error))
+            .map(|object| {
+                rustix::io::fcntl_dupfd_cloexec(&object.descriptor, 0).map_err(runtime_open_error)
+            })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(PreparedExecutorTool {
             protected_descriptors,
@@ -90,7 +102,8 @@ pub(super) fn retain_protected_objects(
     let mut objects = BTreeMap::new();
     for root in roots {
         let path = protocol_path(&root.path)?;
-        let descriptor = rustix::io::dup(root.dir.as_ref()).map_err(runtime_open_error)?;
+        let descriptor =
+            rustix::io::fcntl_dupfd_cloexec(root.dir.as_ref(), 0).map_err(runtime_open_error)?;
         objects.insert(
             path.clone(),
             ProtectedObject {
@@ -102,7 +115,8 @@ pub(super) fn retain_protected_objects(
     }
     for program in selection.programs() {
         let path = protocol_path(program.path.diagnostic_path())?;
-        let descriptor = rustix::io::dup(&program.image).map_err(runtime_open_error)?;
+        let descriptor =
+            rustix::io::fcntl_dupfd_cloexec(&program.image, 0).map_err(runtime_open_error)?;
         objects.entry(path.clone()).or_insert(ProtectedObject {
             identity: descriptor_identity(&descriptor)?,
             descriptor,

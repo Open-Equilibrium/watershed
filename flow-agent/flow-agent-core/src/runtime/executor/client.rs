@@ -416,6 +416,71 @@ mod tests {
     }
 
     #[test]
+    fn prepare_tool_rejects_a_present_non_utf8_allowed_variable() {
+        if crate::tests::run_isolated_test("WATERSHED_EXECUTOR_NON_UTF8_CHILD") {
+            return;
+        }
+        use std::os::unix::ffi::OsStringExt as _;
+        const NAME: &str = "WATERSHED_EXECUTOR_NON_UTF8_FIXTURE";
+        // This test owns its process; the value is one synthetic non-UTF-8 byte.
+        unsafe { std::env::set_var(NAME, std::ffi::OsString::from_vec(vec![0xff])) };
+        let root = crate::tests::empty_workspace();
+        let workspace = AnchoredWorkspace::open(&root).expect("workspace opens");
+        let executor = preparation_fixture(vec![retained_object(&root)]);
+        let mut policy = executor_policy();
+        policy.commands[0].environment.allow = vec![NAME.to_owned()];
+        let invocation = ToolInvocation {
+            executable: "/bin/echo".to_owned(),
+            argv: vec!["literal argument".to_owned()],
+        };
+        let Err(error) = executor.prepare_tool(
+            &workspace,
+            &policy,
+            &policy.commands[0],
+            &invocation,
+            "non-utf8-request",
+        ) else {
+            panic!("a present non-UTF-8 allowed variable fails closed");
+        };
+        assert!(
+            matches!(
+                error,
+                RuntimeError::Executor(ref failure)
+                    if failure.code() == proto::ExecutorErrorCodeV0::PolicyUnsupported
+            ),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn prepared_protected_descriptors_are_close_on_exec() {
+        let root = crate::tests::empty_workspace();
+        let workspace = AnchoredWorkspace::open(&root).expect("workspace opens");
+        let executor = preparation_fixture(vec![retained_object(&root)]);
+        let policy = executor_policy();
+        let invocation = ToolInvocation {
+            executable: "/bin/echo".to_owned(),
+            argv: vec!["literal argument".to_owned()],
+        };
+        let prepared = executor
+            .prepare_tool(
+                &workspace,
+                &policy,
+                &policy.commands[0],
+                &invocation,
+                "cloexec-request",
+            )
+            .expect("host request is prepared");
+        for descriptor in &prepared.protected_descriptors {
+            let flags = rustix::io::fcntl_getfd(descriptor).expect("descriptor flags read");
+            assert!(
+                flags.contains(rustix::io::FdFlags::CLOEXEC),
+                "a retained descriptor must not leak into children"
+            );
+        }
+    }
+
+    #[test]
     fn one_shot_executor_works_without_parent_standard_descriptors() {
         const CHILD_ENV: &str = "WATERSHED_EXECUTOR_WITHOUT_STDIO_CHILD";
         if std::env::var_os(CHILD_ENV).is_none() && std::env::var_os("NEXTEST").is_none() {
