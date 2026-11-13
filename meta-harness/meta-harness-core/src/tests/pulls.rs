@@ -657,10 +657,10 @@ fn a_base_search_asks_github_for_matching_branches_up_to_a_bound() {
     run(async {
         let pushed = Pushed::new("search", "https://github.com/bw/api.git");
         let checkpoints = pushed.checkpoints(
-            "'api --hostname github.com graphql '*'-f owner=acme -f name=api -f search=release/2019 -F first=100 --jq .data.repository.refs.nodes[].name') printf 'release/2019-q3\\nrelease/2019-q4\\n' ;;\n\
-             'api --hostname github.com graphql '*'-f owner=acme -f name=api -f search=none -F first=100 --jq .data.repository.refs.nodes[].name') ;;\n\
-             'api --hostname github.com graphql '*'-f owner=acme -f name=api -f search=many -F first=100 --jq .data.repository.refs.nodes[].name') seq -f 'b%g' 1 150 ;;\n\
-             'api --hostname github.com graphql '*'-f owner=acme -f name=api -f search=broken -F first=100 --jq .data.repository.refs.nodes[].name') echo 'gh: Bad Gateway (HTTP 502)' >&2; exit 1 ;;",
+            "'api --hostname github.com graphql -f query=query('*'-f owner=acme -f name=api -f search=release/2019 -F first=100 --jq .data.repository.refs.nodes[].name') printf 'release/2019-q3\\nrelease/2019-q4\\n' ;;\n\
+             'api --hostname github.com graphql -f query=query('*'-f owner=acme -f name=api -f search=none -F first=100 --jq .data.repository.refs.nodes[].name') ;;\n\
+             'api --hostname github.com graphql -f query=query('*'-f owner=acme -f name=api -f search=many -F first=100 --jq .data.repository.refs.nodes[].name') seq -f 'b%g' 1 150 ;;\n\
+             'api --hostname github.com graphql -f query=query('*'-f owner=acme -f name=api -f search=broken -F first=100 --jq .data.repository.refs.nodes[].name') echo 'gh: Bad Gateway (HTTP 502)' >&2; exit 1 ;;",
         );
         assert_eq!(
             checkpoints

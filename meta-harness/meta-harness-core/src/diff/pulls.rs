@@ -632,7 +632,7 @@ impl WorkingTree {
                 &[
                     "graphql",
                     "-f",
-                    BRANCH_SEARCH,
+                    &format!("query={BRANCH_SEARCH}"),
                     "-f",
                     &format!("owner={owner}"),
                     "-f",
