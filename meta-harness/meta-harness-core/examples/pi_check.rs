@@ -201,15 +201,18 @@ async fn check() {
                     .accepted()
                     .await
                     .expect("branched");
+                let mut handed_back = false;
                 while let Some(event) = tokio::time::timeout(WAIT, events.recv())
                     .await
                     .expect("event in time")
                 {
                     if let SessionEvent::Agent(AgentEvent::InputTextSet { .. }) = &event {
                         println!("branch handed back: {event:?}");
+                        handed_back = true;
                         break;
                     }
                 }
+                assert!(handed_back, "the branch hands its prompt back");
                 let branched = session.history().await.expect("history").tree();
                 println!("branched: leaf {:?} -> {:?}", tree.leaf, branched.leaf);
                 let state = session.state().await.expect("state");
@@ -226,6 +229,7 @@ async fn check() {
             _ => println!("{event:?}"),
         }
     }
+    panic!("the event stream ended before both turns completed");
 }
 
 #[cfg(test)]
