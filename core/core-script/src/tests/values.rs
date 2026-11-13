@@ -210,6 +210,12 @@ fn m11_runtime_value_contract_covers_every_recursive_shape_and_bound() {
         .to_string()
         .contains("canonical JSON")
     );
+    assert!(
+        validate_flow_value(&FlowValue::String("x".repeat(MAX_FLOW_VALUE_BYTES + 1)))
+            .expect_err("text beyond the whole byte limit is rejected")
+            .to_string()
+            .contains("canonical JSON")
+    );
 
     validate_flow_value(&FlowValue::Integer(i64::MAX.to_string()))
         .expect("exact signed integer limit is valid");
