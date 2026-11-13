@@ -1,12 +1,13 @@
-use super::super::{super::helpers::empty_workspace, create_review_run, entry};
+use super::super::{super::helpers::empty_workspace, REQUEST_HASH, create_review_run, entry};
 use super::commit_review_event;
 use crate::runtime::{
     conversations::{
-        StatusTransactionCrashPoint, append_conversation_entry, canonical_json,
-        conversation_status_page, set_conversation_file_sync_error_for_path_for_test,
-        set_status_transaction_crash_point,
+        StatusTransactionCrashPoint, append_conversation_entry, append_run_attempt_intent,
+        canonical_json, conversation_status_page,
+        set_conversation_file_sync_error_for_path_for_test, set_status_transaction_crash_point,
     },
     fs_guards::set_directory_sync_error_for_path_for_test,
+    run_attempts::{RunAttemptIntent, RunAttemptKind},
 };
 use std::{
     fs,
@@ -339,6 +340,74 @@ fn conversation_status_recovery_binds_latest_entry_to_the_durable_append() {
         transaction_path.is_file(),
         "the inconsistent transaction remains for diagnosis"
     );
+}
+
+#[test]
+fn relabelled_attempt_transaction_fails_closed() {
+    let workspace = empty_workspace("conversation-status-relabelled-attempt");
+    create_review_run(&workspace);
+    append_run_attempt_intent(
+        &workspace,
+        "review",
+        "review-1",
+        &provider_intent("provider-001"),
+    )
+    .expect("the first intent is durable");
+    set_status_transaction_crash_point(StatusTransactionCrashPoint::CanonicalMutationApplied);
+    append_run_attempt_intent(
+        &workspace,
+        "review",
+        "review-1",
+        &provider_intent("provider-002"),
+    )
+    .expect_err("the crash point leaves the second intent's transaction recorded");
+    let conversation = crate::tests::helpers::workspace_session_dir(&workspace).join("review");
+    let transaction_path = conversation.join(".status-transaction.json");
+    let summary_path = conversation.join("status.json");
+    let prior_summary = fs::read(&summary_path).expect("prior summary reads");
+    let mut transaction: serde_json::Value =
+        serde_json::from_slice(&fs::read(&transaction_path).expect("transaction reads"))
+            .expect("transaction parses");
+    // Counters consistent with a terminal result, but the appended record is an intent.
+    transaction["mutation"]["kind"] = "attempt-result".into();
+    transaction["after"]["uncertain_attempts"] = 0.into();
+    fs::write(
+        &transaction_path,
+        format!(
+            "{}\n",
+            canonical_json(&transaction).expect("mutated transaction canonicalizes")
+        ),
+    )
+    .expect("mutated transaction writes");
+
+    let error = conversation_status_page(&workspace, None)
+        .expect_err("recovery rejects a result transaction over an appended intent");
+
+    assert!(
+        error
+            .to_string()
+            .contains("does not match its transaction kind"),
+        "{error}"
+    );
+    assert_eq!(
+        fs::read(&summary_path).expect("prior summary remains readable"),
+        prior_summary
+    );
+    assert!(
+        transaction_path.is_file(),
+        "the inconsistent transaction remains for diagnosis"
+    );
+}
+
+fn provider_intent(attempt_id: &str) -> RunAttemptIntent {
+    RunAttemptIntent {
+        attempt_id: attempt_id.to_owned(),
+        attempt_kind: RunAttemptKind::Provider,
+        expected_enforcement: None,
+        request_hash: REQUEST_HASH.to_owned(),
+        tool_id: None,
+        timestamp: "2026-07-30T12:00:00Z".to_owned(),
+    }
 }
 
 #[test]

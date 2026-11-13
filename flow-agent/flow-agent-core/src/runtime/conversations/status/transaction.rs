@@ -1,4 +1,5 @@
 use super::super::{
+    RunLogRecord,
     contract::{
         CONVERSATION_HISTORY_LEAF, CONVERSATION_RUNS_DIR, ConversationEntry,
         MAX_CONVERSATION_RECORD_BYTES, MAX_CONVERSATION_SEGMENT_BYTES, RUN_LOG_LEAF, protocol,
@@ -493,6 +494,25 @@ fn status_append_was_applied(
         if entry.entry_id != expected_entry_id {
             return Err(protocol(
                 "conversation status history entry does not match its status summary",
+            ));
+        }
+    } else {
+        let record = appended.strip_suffix(b"\n").ok_or_else(|| {
+            protocol("conversation status Run Log append is not a complete JSONL record")
+        })?;
+        let record: RunLogRecord = serde_json::from_slice(record)
+            .map_err(|_| protocol("conversation status Run Log append is malformed"))?;
+        let matches_kind = matches!(
+            (kind, &record),
+            (StatusAppendKind::AttemptIntent, RunLogRecord::Intent { .. })
+                | (
+                    StatusAppendKind::AttemptResult,
+                    RunLogRecord::TerminalResult { .. }
+                )
+        );
+        if !matches_kind {
+            return Err(protocol(
+                "conversation status Run Log append does not match its transaction kind",
             ));
         }
     }
