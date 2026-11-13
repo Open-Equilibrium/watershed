@@ -240,3 +240,53 @@ fn sse_decoder_accepts_cr_only_lines_and_an_initial_bom() {
         assert_eq!(values.len(), 1);
     }
 }
+
+#[test]
+fn sse_decoder_strips_an_initial_bom_split_across_pushes() {
+    let mut decoder = SseDecoder::default();
+    decoder
+        .push(b"\xEF")
+        .expect("first byte of the byte order mark");
+    decoder
+        .push(b"\xBB\xBFdata:{\"type\":\"response.completed\"}\n\n")
+        .expect("rest of the byte order mark and the event");
+
+    let parsed = decoder.finish().expect("split byte order mark decodes");
+    assert_eq!(parsed.values.len(), 1);
+}
+
+#[test]
+fn terminal_event_decoding_is_independent_of_chunking_at_crlf() {
+    const LINE_BYTES: usize = 64 * 1024;
+    let budget = MAX_RESPONSES_DECODED_STREAM_BYTES + MAX_RESPONSES_EVENT_BYTES;
+    let comment = format!(":{}\r\n", "x".repeat(LINE_BYTES - 3));
+    assert_eq!(comment.len(), LINE_BYTES);
+    // The split falls between the first comment's CR and its LF.
+    let split_at = LINE_BYTES - 1;
+    let base = "data:{\"type\":\"response.completed\",\"response\":{\"id\":\"\"}}\n\n";
+    for (extra_bytes, accepted) in [(0, true), (1, false)] {
+        // The completion is LINE_BYTES plus `extra_bytes`, so the budget ends exactly at or one past it.
+        let completion = format!(
+            "data:{{\"type\":\"response.completed\",\"response\":{{\"id\":\"{}\"}}}}\n\n",
+            "r".repeat(LINE_BYTES - base.len() + extra_bytes)
+        );
+        let mut stream = comment.repeat(budget / LINE_BYTES - 1);
+        stream.push_str(&completion);
+        stream.push('\n');
+        let bytes = stream.as_bytes();
+
+        let mut one_push = SseDecoder::ending_at_terminal_event();
+        let one = one_push.push(bytes);
+        let mut split_pushes = SseDecoder::ending_at_terminal_event();
+        let split = split_pushes
+            .push(&bytes[..split_at])
+            .and_then(|()| split_pushes.push(&bytes[split_at..]));
+
+        assert_eq!(one.is_ok(), accepted, "one push, {extra_bytes} extra bytes");
+        assert_eq!(
+            split.is_ok(),
+            accepted,
+            "push split after a CR, {extra_bytes} extra bytes"
+        );
+    }
+}

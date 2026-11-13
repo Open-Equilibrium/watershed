@@ -26,7 +26,7 @@ pub(crate) struct SseDecoder {
     parsed: ParsedSseStream,
     /// Whether the first terminal Responses event ends the reply; later bytes are then ignored.
     stop_at_terminal_event: bool,
-    /// Whether the next push is the first one, which may start with a byte order mark.
+    /// Whether no line has finished yet, so the first line may start with a byte order mark.
     at_stream_start: bool,
     /// Whether the next push starts with the LF of a CRLF whose CR ended the previous push.
     skip_lf: bool,
@@ -66,11 +66,13 @@ impl SseDecoder {
             return Ok(());
         }
         let mut remaining = bytes;
-        if std::mem::take(&mut self.at_stream_start) {
-            remaining = remaining.strip_prefix(UTF8_BOM).unwrap_or(remaining);
-        }
-        if std::mem::take(&mut self.skip_lf) {
-            remaining = remaining.strip_prefix(b"\n").unwrap_or(remaining);
+        // WHY: an LF that starts this push completes a CRLF whose CR ended the previous push.
+        if !remaining.is_empty()
+            && std::mem::take(&mut self.skip_lf)
+            && let Some(rest) = remaining.strip_prefix(b"\n")
+        {
+            self.charge_wire_bytes(1)?;
+            remaining = rest;
         }
         // The wire budget is charged per consumed line, so bytes after the terminal event are free.
         while let Some(end) = remaining
@@ -78,22 +80,26 @@ impl SseDecoder {
             .position(|byte| matches!(byte, b'\r' | b'\n'))
         {
             let (line, terminator) = remaining.split_at(end);
-            let terminator_len = match terminator {
-                [b'\r', b'\n', ..] => 2,
-                [b'\r'] => {
-                    // WHY: this CR may pair with an LF that starts the next push.
-                    self.skip_lf = true;
-                    1
-                }
-                _ => 1,
-            };
-            self.charge_wire_bytes(end + terminator_len)?;
+            // WHY: a CR ends the line, and the terminal event ends the consumed prefix, so the LF of a
+            // terminal CRLF is never charged. Charging the LF only when the reply continues keeps the
+            // budget the same whether the CRLF arrives in one push or is split between two.
+            self.charge_wire_bytes(end + 1)?;
             self.append_line_fragment(line)?;
             self.finish_line()?;
             if self.parsed.terminal_event {
                 return Ok(());
             }
-            remaining = &terminator[terminator_len..];
+            remaining = &terminator[1..];
+            if terminator[0] == b'\r' {
+                match remaining.first() {
+                    Some(&b'\n') => {
+                        self.charge_wire_bytes(1)?;
+                        remaining = &remaining[1..];
+                    }
+                    Some(_) => {}
+                    None => self.skip_lf = true,
+                }
+            }
         }
         self.charge_wire_bytes(remaining.len())?;
         self.append_line_fragment(remaining)
@@ -148,6 +154,10 @@ impl SseDecoder {
     }
 
     fn finish_line(&mut self) -> Result<(), RuntimeError> {
+        // WHY: the first line may start with a byte order mark split across pushes, so it is removed here.
+        if std::mem::take(&mut self.at_stream_start) && self.pending_line.starts_with(UTF8_BOM) {
+            self.pending_line.drain(..UTF8_BOM.len());
+        }
         enforce_line_budget(self.pending_line.len())?;
         if self.pending_line.is_empty() {
             dispatch_event(
