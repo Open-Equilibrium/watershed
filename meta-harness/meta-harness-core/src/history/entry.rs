@@ -316,7 +316,11 @@ fn message(message: Option<&Value>) -> Body {
             .to_owned()
     };
     let content = content_text(message.get("content"));
-    let chars = content.chars().count();
+    // A shell execution has no content: its command and output are what the model reads.
+    let chars = match message.get("role").and_then(Value::as_str) {
+        Some("bashExecution") => field("command").chars().count() + field("output").chars().count(),
+        _ => content.chars().count(),
+    };
     match message.get("role").and_then(Value::as_str) {
         Some("user") => Body::User {
             text: bounded(content, TEXT_CHARS),

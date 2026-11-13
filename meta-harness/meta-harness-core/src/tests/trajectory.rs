@@ -414,6 +414,28 @@ fn an_oversized_custom_message_keeps_its_place_in_the_branch() {
 }
 
 #[test]
+fn an_included_shell_execution_counts_its_characters_in_the_context() {
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+  {"type":"message","id":"b1","parentId":null,"timestamp":"2026-10-24T10:00:00.000Z","message":{"role":"bashExecution","command":"printf hello","output":"hello","excludeFromContext":false}},
+  {"type":"message","id":"a1","parentId":"b1","timestamp":"2026-10-24T10:00:01.000Z","message":{"role":"assistant","model":"faux-1","stopReason":"stop","content":[{"type":"text","text":"Done."}]}}
+],"leafId":"a1"}"#,
+    )
+    .expect("JSON");
+    let records = History::from_entries(&data).trajectory(None).records;
+    let context = records
+        .last()
+        .and_then(|record| record.context.clone())
+        .expect("a1 context");
+    assert_eq!(context.messages, 1);
+    assert_eq!(
+        context.message_chars,
+        "printf hello".len() + "hello".len(),
+        "the command and its output are what the model reads"
+    );
+}
+
+#[test]
 fn sums_the_usage_of_a_session_read_from_its_file() {
     let file = std::env::temp_dir().join(format!("watershed-usage-{}.jsonl", std::process::id()));
     std::fs::write(
