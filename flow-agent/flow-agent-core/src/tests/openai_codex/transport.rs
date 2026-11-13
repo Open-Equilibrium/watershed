@@ -26,12 +26,14 @@ use std::time::{Duration, Instant};
 
 /// Reads a request head; one read may return only part of a fragmented head.
 fn read_request_head(stream: &mut impl Read) -> String {
+    const MAX_HEAD_BYTES: usize = 64 * 1024;
     let mut buffer = Vec::new();
     let mut chunk = [0_u8; 4096];
     while !buffer.windows(4).any(|window| window == b"\r\n\r\n") {
         let read = stream.read(&mut chunk).expect("request head reads");
         assert!(read > 0, "request ends before its head");
         buffer.extend_from_slice(&chunk[..read]);
+        assert!(buffer.len() <= MAX_HEAD_BYTES, "request head is bounded");
     }
     String::from_utf8(buffer).expect("request head is UTF-8")
 }
@@ -745,9 +747,7 @@ fn spawn_endpoint(
     );
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("one endpoint request");
-        let mut request = vec![0_u8; 16 * 1024];
-        let read = stream.read(&mut request).expect("request reads");
-        let head = String::from_utf8_lossy(&request[..read]).into_owned();
+        let head = read_request_head(&mut stream);
         write!(
             stream,
             "{status_line}\r\nContent-Type: text/event-stream\r\n{extra_headers}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
