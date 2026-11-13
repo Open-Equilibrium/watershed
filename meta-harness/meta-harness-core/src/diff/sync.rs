@@ -192,6 +192,11 @@ impl WorkingTree {
 
     /// Pushes the captured commit, never a branch ref that could move after confirmation.
     pub(crate) async fn push(&self, transfer: GitTransfer) -> Result<GitTransfer, DiffError> {
+        // Git resolves the remote's name again, so the repository checked before must still be
+        // the one it pushes to.
+        if self.check_push_destination(&transfer).await? != transfer.confirmation.repository {
+            return Err(DiffError::PushDestinations);
+        }
         let spec = format!(
             "{}:{}",
             transfer.confirmation.commit, transfer.confirmation.reference

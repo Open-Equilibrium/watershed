@@ -842,6 +842,32 @@ fn push_refuses_other_or_multiple_repositories_before_hooks() {
 }
 
 #[test]
+fn a_remote_retargeted_after_preparation_is_not_pushed() {
+    run(async {
+        let remote = Remote::new("push-retargeted");
+        remote.repo.git(&["switch", "-c", "feature/topic"]);
+        Remote::commit(&remote.repo, "local.txt");
+        let tree = crate::diff::WorkingTree::open(remote.repo.path())
+            .await
+            .expect("repository");
+        let transfer = tree.prepare_push(None).await.expect("prepared");
+        let second = Repo::new("push-retargeted-second");
+        remote.repo.git(&[
+            "remote",
+            "set-url",
+            "origin",
+            second.path().to_str().unwrap(),
+        ]);
+        let pushed = tree.push(transfer).await;
+        assert!(
+            matches!(pushed, Err(DiffError::PushDestinations)),
+            "{pushed:?}"
+        );
+        assert_eq!(second.git(&["branch", "--list", "feature/topic"]), "");
+    });
+}
+
+#[test]
 fn push_destination_comparison_preserves_repository_paths() {
     use std::os::unix::fs::PermissionsExt;
     run(async {
