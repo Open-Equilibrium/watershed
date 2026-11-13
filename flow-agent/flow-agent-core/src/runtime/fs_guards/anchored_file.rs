@@ -4,6 +4,7 @@ use super::bounded_read::{
 };
 use crate::runtime::{digest::sha256_hex, types::RuntimeError};
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+use cap_std::fs::OpenOptionsExt as _;
 #[cfg(test)]
 use std::cell::RefCell;
 use std::{
@@ -24,9 +25,23 @@ pub fn open_anchored_session_log_append_file(
     let mut options = cap_std::fs::OpenOptions::new();
     options.append(true);
     options.follow(FollowSymlinks::No);
+    options.custom_flags(nonblocking_flag());
     let file = path.open(&options)?;
     validate_open_session_log_append_file(&path.path, &file)?;
+    clear_nonblocking(&path.path, &file)?;
     Ok(file)
+}
+
+/// `O_NONBLOCK` makes an open of a FIFO return instead of waiting for its other end.
+fn nonblocking_flag() -> i32 {
+    rustix::fs::OFlags::NONBLOCK.bits() as i32
+}
+
+fn clear_nonblocking(path: &Path, file: &fs::File) -> Result<(), RuntimeError> {
+    let flags =
+        rustix::fs::fcntl_getfl(file).map_err(|source| path_io_error(path, source.into()))?;
+    rustix::fs::fcntl_setfl(file, flags & !rustix::fs::OFlags::NONBLOCK)
+        .map_err(|source| path_io_error(path, source.into()))
 }
 
 pub fn validate_open_session_log_append_file(
@@ -257,11 +272,13 @@ pub fn open_anchored_real_file_for_read(
     ensure_anchored_real_file(file)?;
     let mut options = cap_std::fs::OpenOptions::new();
     options.read(true).follow(FollowSymlinks::No);
+    options.custom_flags(nonblocking_flag());
     let opened = file.open(&options)?;
     let metadata = opened
         .metadata()
         .map_err(|source| path_io_error(&file.path, source))?;
     validate_real_file(&file.path, &metadata)?;
+    clear_nonblocking(&file.path, &opened)?;
     Ok((opened, metadata))
 }
 

@@ -113,6 +113,29 @@ fn append_rejects_hardlinked_leaf_without_changing_target() {
 }
 
 #[test]
+fn session_log_append_rejects_a_fifo_without_blocking() {
+    let workspace = empty_workspace("session-append-fifo");
+    let session_path = ensure_runtime_dirs(&workspace)
+        .expect("runtime dirs")
+        .sessions
+        .file("fifo001.jsonl");
+    let status = std::process::Command::new("mkfifo")
+        .arg(session_path.diagnostic_path())
+        .status()
+        .expect("mkfifo runs");
+    assert!(status.success(), "mkfifo creates the test FIFO");
+
+    let (result_tx, result_rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let _ = result_tx.send(open_anchored_session_log_append_file(&session_path).map(drop));
+    });
+    let result = result_rx
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .expect("a FIFO is refused without waiting for a writer");
+    result.expect_err("a FIFO is not a session log");
+}
+
+#[test]
 fn session_log_append_handle_cannot_overwrite_existing_records() {
     let workspace = empty_workspace("session-append-semantics");
     let session_path = ensure_runtime_dirs(&workspace)
