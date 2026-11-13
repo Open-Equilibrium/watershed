@@ -568,6 +568,17 @@ Size measureText(String text, TextStyle style) {
   return size;
 }
 
+/// Wraps a text field so that, while an input method composes in `controller`, its keys go to the
+/// input method and not to the shortcuts above: ⏎ commits the text, arrows pick its candidates.
+Widget composingField(TextEditingController controller, Widget field) => Focus(
+  canRequestFocus: false,
+  skipTraversal: true,
+  onKeyEvent: (_, _) => controller.value.composing.isCollapsed
+      ? KeyEventResult.ignored
+      : KeyEventResult.skipRemainingHandlers,
+  child: field,
+);
+
 /// ⏎ and Space activate the focused control, before a view's own keys take them.
 const activateKeys = <ShortcutActivator, Intent>{
   SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),

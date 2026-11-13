@@ -384,6 +384,42 @@ void main() {
     );
   });
 
+  /// Sets the field's text as an input method leaves it while composing.
+  void compose(WidgetTester tester, Finder field, String text) {
+    tester.widget<TextField>(field).controller!.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+      composing: TextRange(start: 0, end: text.length),
+    );
+  }
+
+  testWidgets('Enter that ends a composition answers nothing', (tester) async {
+    await show(tester);
+    await emit(tester, question(BridgeQuestionKind.input));
+    await read(tester);
+    compose(tester, find.byKey(const Key('answer')), 'nihon');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(
+      backend.calls.where((call) => call.startsWith('answer')),
+      isEmpty,
+      reason: 'the Enter commits the input method\'s text first',
+    );
+  });
+
+  testWidgets('Enter that ends a composition sends nothing', (tester) async {
+    await show(tester);
+    await tester.tap(find.byKey(const Key('composer')));
+    compose(tester, find.byKey(const Key('composer')), 'nihon');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(
+      backend.calls.where((call) => call.startsWith('send')),
+      isEmpty,
+      reason: 'the Enter commits the input method\'s text first',
+    );
+  });
+
   testWidgets('a key on a closing card never answers the next request', (
     tester,
   ) async {

@@ -93,19 +93,22 @@ class _OptionListState extends State<_OptionList> {
                     ]),
                     ...Keymap.of(context).bind({Command.answer: _pick}),
                   },
-                  child: TextField(
-                    key: const Key('filter'),
-                    controller: _filter,
-                    focusNode: widget.focusNode,
-                    style: const TextStyle(fontSize: WsMetrics.fsSmall),
-                    decoration: const InputDecoration.collapsed(
-                      hintText: 'Type to filter',
+                  child: composingField(
+                    _filter,
+                    TextField(
+                      key: const Key('filter'),
+                      controller: _filter,
+                      focusNode: widget.focusNode,
+                      style: const TextStyle(fontSize: WsMetrics.fsSmall),
+                      decoration: const InputDecoration.collapsed(
+                        hintText: 'Type to filter',
+                      ),
+                      onChanged: (_) {
+                        setState(() => _highlight = 0);
+                        // The highlight returns to the first match, so the list returns to the top.
+                        if (_scroll.hasClients) _scroll.jumpTo(0);
+                      },
                     ),
-                    onChanged: (_) {
-                      setState(() => _highlight = 0);
-                      // The highlight returns to the first match, so the list returns to the top.
-                      if (_scroll.hasClients) _scroll.jumpTo(0);
-                    },
                   ),
                 ),
               ),
@@ -239,16 +242,19 @@ class _QuestionCardState extends State<QuestionCard> with ReadDelay {
                   color: context.ws.code,
                   borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
                 ),
-                child: TextField(
-                  key: const Key('answer'),
-                  controller: _text,
-                  focusNode: _field,
-                  maxLines: null,
-                  expands: true,
-                  keyboardType: TextInputType.multiline,
-                  textAlignVertical: TextAlignVertical.top,
-                  style: monoStyle(context),
-                  decoration: const InputDecoration.collapsed(hintText: ''),
+                child: composingField(
+                  _text,
+                  TextField(
+                    key: const Key('answer'),
+                    controller: _text,
+                    focusNode: _field,
+                    maxLines: null,
+                    expands: true,
+                    keyboardType: TextInputType.multiline,
+                    textAlignVertical: TextAlignVertical.top,
+                    style: monoStyle(context),
+                    decoration: const InputDecoration.collapsed(hintText: ''),
+                  ),
                 ),
               ),
             ),
@@ -274,15 +280,18 @@ class _QuestionCardState extends State<QuestionCard> with ReadDelay {
               bindings: keys.bind({
                 Command.answer: () => answerText(_text.text),
               }),
-              child: TextField(
-                key: const Key('answer'),
-                controller: _text,
-                focusNode: _field,
-                decoration: InputDecoration.collapsed(
-                  hintText: question.detail,
+              child: composingField(
+                _text,
+                TextField(
+                  key: const Key('answer'),
+                  controller: _text,
+                  focusNode: _field,
+                  decoration: InputDecoration.collapsed(
+                    hintText: question.detail,
+                  ),
+                  // The answer keys answer; the field keeps the focus for them.
+                  onEditingComplete: () {},
                 ),
-                // The answer keys answer; the field keeps the focus for them.
-                onEditingComplete: () {},
               ),
             ),
           ),

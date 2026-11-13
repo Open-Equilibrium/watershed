@@ -160,18 +160,21 @@ class Composer extends StatelessWidget {
                                 )
                         ? KeyEventResult.handled
                         : KeyEventResult.ignored,
-                    child: TextField(
-                      key: const Key('composer'),
-                      controller: controller,
-                      focusNode: focusNode,
-                      maxLines: null,
-                      expands: true,
-                      style: Theme.of(context).textTheme.bodyLarge,
-                      decoration: InputDecoration.collapsed(
-                        hintText: starting
-                            ? 'Describe the task…'
-                            : 'Steer the agent or queue a follow-up…',
-                        hintStyle: TextStyle(color: ws.textFaint),
+                    child: composingField(
+                      controller,
+                      TextField(
+                        key: const Key('composer'),
+                        controller: controller,
+                        focusNode: focusNode,
+                        maxLines: null,
+                        expands: true,
+                        style: Theme.of(context).textTheme.bodyLarge,
+                        decoration: InputDecoration.collapsed(
+                          hintText: starting
+                              ? 'Describe the task…'
+                              : 'Steer the agent or queue a follow-up…',
+                          hintStyle: TextStyle(color: ws.textFaint),
+                        ),
                       ),
                     ),
                   ),
