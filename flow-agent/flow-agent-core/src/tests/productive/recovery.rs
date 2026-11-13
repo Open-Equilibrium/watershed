@@ -8,10 +8,11 @@ use crate::runtime::{
     openai_codex::ProviderTurn,
     productive::{
         execute_productive_flow_with_recovery,
-        execute_productive_flow_with_tool_executor_and_recovery,
+        execute_productive_flow_with_tool_executor_and_recovery, tool_result_value,
     },
     responses::MAX_RESPONSES_DECODED_STREAM_BYTES,
     run_attempts::{RunAttemptKind, RunAttemptOutcome, RunAttemptResult},
+    tool_runner::{ToolExecutionOutcome, ToolTerminalClassification},
     types::{CANCELLED_REASON, MAX_PROVIDER_ERROR_MESSAGE_CHARS, RuntimeError},
 };
 use proto::EventType;
@@ -534,6 +535,81 @@ fn productive_recovery_replays_tool_started_only_for_a_started_cancellation() {
                 .any(|event| event.event_type == EventType::ToolStarted),
             expect_tool_started,
             "{stage}: tool.started replays only for a started cancellation"
+        );
+    }
+}
+
+#[test]
+fn productive_recovery_closes_a_cancelled_tool_with_a_full_output_envelope() {
+    let durable = tool_result_value(&ToolExecutionOutcome {
+        status: RunAttemptOutcome::Cancelled,
+        classification: Some(ToolTerminalClassification::Cancelled),
+        exit_code: None,
+        stdout: b"stdout".to_vec(),
+        stderr: b"stderr".to_vec(),
+    })
+    .expect("cancelled Tool result becomes durable");
+    for (name, wrong_request_hash) in [("valid", false), ("mismatched-request", true)] {
+        let (_workspace, fixture) = smoke_productive_execution_fixture();
+        let flow = fixture.smoke_flow();
+        let mut provider = ScriptedProvider {
+            bodies: Vec::new(),
+            turns: VecDeque::from([single_tool_provider_turn("response-tool", "call-1")]),
+        };
+        let mut attempts = MemoryAttempts::default();
+        let mut sink = MemorySink::default();
+        let mut tools = FakeToolExecutor::default();
+        let mut output = fake_tool_attempt_output(
+            serde_json::to_value(&durable.value).expect("Tool value serializes"),
+        );
+        if wrong_request_hash {
+            output["request_hash"] = serde_json::json!("sha256:wrong");
+        }
+        let mut recovery = InjectedAttemptRecovery::ToolResult(RunAttemptResult {
+            attempt_id: "tool-000001".to_owned(),
+            attempt_kind: RunAttemptKind::Tool,
+            outcome: RunAttemptOutcome::Cancelled,
+            classification: Some(CANCELLED_REASON.to_owned()),
+            exit_code: None,
+            timestamp: "2026-07-30T12:00:00Z".to_owned(),
+            durable_output: Some(output),
+        });
+
+        let result = execute_productive_flow_with_tool_executor_and_recovery(
+            fixture.execution(flow, "productive-cancelled-tool-envelope"),
+            &mut provider,
+            &mut attempts,
+            &mut sink,
+            &mut tools,
+            &mut recovery,
+        );
+        assert!(tools.invocations.is_empty(), "{name}: no redispatch");
+        if wrong_request_hash {
+            let error = result.expect_err(name);
+            assert!(
+                matches!(error, RuntimeError::Protocol(_))
+                    && error.to_string().contains("request hash"),
+                "{name}: {error}"
+            );
+            continue;
+        }
+        let execution = result.expect("a cancelled Tool with a full output envelope recovers");
+        assert!(
+            matches!(execution.terminal_error, Some(RuntimeError::Cancelled)),
+            "{name}"
+        );
+        let tool_events: Vec<EventType> = sink
+            .0
+            .iter()
+            .map(|event| event.event_type)
+            .filter(|event_type| {
+                matches!(event_type, EventType::ToolStarted | EventType::ToolFailed)
+            })
+            .collect();
+        assert_eq!(
+            tool_events,
+            [EventType::ToolStarted, EventType::ToolFailed],
+            "{name}"
         );
     }
 }

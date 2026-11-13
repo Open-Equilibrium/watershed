@@ -51,9 +51,25 @@ struct CancelledToolOutput {
     stage: ExecutorAttemptStage,
 }
 
+/// Whether a recovered Tool attempt carries a full output envelope; a cancelled one may too.
+pub(super) fn has_tool_output_envelope(result: &RunAttemptResult) -> bool {
+    result
+        .durable_output
+        .as_ref()
+        .and_then(|output| output.get("schema"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|schema| {
+            matches!(
+                schema,
+                TOOL_ATTEMPT_OUTPUT_SCHEMA_V1 | TOOL_ATTEMPT_OUTPUT_SCHEMA_V2
+            )
+        })
+}
+
 /// Returns the stage of a recovered cancelled Tool attempt. v0 records carry no stage and
 /// were always written after `tool.started`, so they read as `started`; so does a record
-/// without durable output, as recovery read it before stages existed.
+/// without durable output, as recovery read it before stages existed. A full Tool output
+/// envelope is written only once the Tool started.
 pub(super) fn recovered_cancelled_tool_stage(
     result: &RunAttemptResult,
 ) -> Result<ExecutorAttemptStage, RuntimeError> {
@@ -65,6 +81,9 @@ pub(super) fn recovered_cancelled_tool_stage(
         .and_then(serde_json::Value::as_str)
     {
         Some(ATTEMPT_CANCELLED_SCHEMA_V0) => Ok(ExecutorAttemptStage::Started),
+        Some(TOOL_ATTEMPT_OUTPUT_SCHEMA_V1 | TOOL_ATTEMPT_OUTPUT_SCHEMA_V2) => {
+            Ok(ExecutorAttemptStage::Started)
+        }
         Some(ATTEMPT_CANCELLED_TOOL_SCHEMA_V1) => {
             let output: CancelledToolOutput =
                 serde_json::from_value(durable_output.clone()).map_err(RuntimeError::Json)?;

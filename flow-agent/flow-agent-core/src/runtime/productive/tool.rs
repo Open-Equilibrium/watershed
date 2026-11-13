@@ -1,6 +1,6 @@
 use super::attempt_codec::{
     ExecutorAttemptStage, cancelled_tool_attempt_output, cleanup_unknown_recorded,
-    executor_dispatch_failure_output, recovered_cancelled_tool_stage,
+    executor_dispatch_failure_output, has_tool_output_envelope, recovered_cancelled_tool_stage,
     recovered_executor_dispatch_error, recovered_tool_output, recovered_tool_terminal,
     recovered_tool_value_bound, tool_attempt_output,
 };
@@ -68,6 +68,12 @@ where
     let recovered_attempt = recovered.is_some();
     let (durable_value, result) = match recovered {
         Some(recovered) => {
+            // WHY: a started Tool's cancelled envelope is validated like a completed one before replay.
+            if recovered.outcome == RunAttemptOutcome::Cancelled
+                && has_tool_output_envelope(&recovered)
+            {
+                recovered_tool_result(context, &prepared, &attempt, recovered.clone())?;
+            }
             start_recovered_tool(
                 context,
                 builder,
