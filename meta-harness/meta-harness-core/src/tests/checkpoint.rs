@@ -881,13 +881,14 @@ fn a_stalled_git_gives_up_and_leaves_later_captures_working() {
     run(async {
         let repo = Repo::new("stalled");
         // A clean filter runs during `git add`; this one takes far longer than the limit.
-        repo.git(&["config", "filter.slow.clean", "sleep 5; cat"]);
+        repo.git(&["config", "filter.slow.clean", "sleep 30; cat"]);
         repo.write(".gitattributes", "*.txt filter=slow\n");
-        let checkpoints = Checkpoints::with_timeout(repo.path(), Duration::from_millis(300));
+        // The limit leaves the later captures room on a loaded machine; the filter outlasts it.
+        let checkpoints = Checkpoints::with_timeout(repo.path(), Duration::from_secs(3));
         repo.write("a.txt", "new\n");
 
         let capture = tokio::time::timeout(
-            Duration::from_secs(4),
+            Duration::from_secs(20),
             checkpoints.capture(&at("t0", Phase::Start)),
         )
         .await
