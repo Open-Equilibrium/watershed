@@ -7,8 +7,12 @@ use crate::script::model::{
 /// Matches a Tool parameter pattern against one complete value.
 ///
 /// Patterns use the finite Rust `regex` syntax. Flow Agent implicitly anchors both ends,
-/// so an authored pattern cannot match only a substring.
+/// so an authored pattern cannot match only a substring. A pattern that turns on the verbose
+/// flag is refused, since a trailing comment would swallow the anchors.
 pub fn parameter_pattern_matches(pattern: &str, value: &str) -> Result<bool, String> {
+    if uses_verbose_flag(pattern) {
+        return Err("the verbose flag is not supported".to_owned());
+    }
     regex::RegexBuilder::new(pattern)
         .size_limit(super::model::MAX_REGISTRY_FILE_BYTES as usize)
         .build()
@@ -19,6 +23,17 @@ pub fn parameter_pattern_matches(pattern: &str, value: &str) -> Result<bool, Str
         .build()
         .map(|compiled| compiled.is_match(value))
         .map_err(|error| error.to_string())
+}
+
+/// Whether a `(?` flag group names the verbose flag `x`, as `(?x)`, `(?ix:` or `(?i-x)` do. An
+/// escaped or bracketed look-alike counts too: over-refusing fails closed.
+fn uses_verbose_flag(pattern: &str) -> bool {
+    pattern.match_indices("(?").any(|(start, _)| {
+        pattern[start + 2..]
+            .chars()
+            .take_while(|character| character.is_ascii_alphabetic() || *character == '-')
+            .any(|character| character == 'x')
+    })
 }
 use std::{collections::BTreeMap, fmt};
 
