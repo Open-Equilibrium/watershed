@@ -601,7 +601,30 @@ impl SessionLogAppender {
     }
 }
 
-fn append_native_event_batch_with<F, C>(
+#[cfg(test)]
+static NATIVE_BATCH_LENGTH_ERROR: Mutex<Option<io::ErrorKind>> = Mutex::new(None);
+
+/// Makes the next length read after a failed native batch write fail with `kind`.
+#[cfg(test)]
+pub(crate) fn set_native_batch_length_error_for_test(kind: io::ErrorKind) {
+    *NATIVE_BATCH_LENGTH_ERROR
+        .lock()
+        .expect("native batch length seam is not poisoned") = Some(kind);
+}
+
+fn native_batch_len(file: &fs::File) -> io::Result<u64> {
+    #[cfg(test)]
+    if let Some(kind) = NATIVE_BATCH_LENGTH_ERROR
+        .lock()
+        .expect("native batch length seam is not poisoned")
+        .take()
+    {
+        return Err(io::Error::from(kind));
+    }
+    file.metadata().map(|metadata| metadata.len())
+}
+
+pub(crate) fn append_native_event_batch_with<F, C>(
     file: &mut fs::File,
     path: &Path,
     original_len: u64,
@@ -627,10 +650,14 @@ where
         complete_prefixes.push(bytes.len());
     }
     if let Err(source) = write(file, &bytes) {
-        let current_len = file
-            .metadata()
-            .map(|metadata| metadata.len())
-            .unwrap_or(original_len);
+        // Without the length the committed prefix is unknown, so nothing is truncated.
+        let current_len = native_batch_len(file).map_err(|length_error| BatchAppendFailure {
+            committed_events: None,
+            error: RuntimeError::Protocol(format!(
+                "{} append failed ({source}) and its length could not be read ({length_error})",
+                path.display()
+            )),
+        })?;
         let written =
             usize::try_from(current_len.saturating_sub(original_len)).unwrap_or(usize::MAX);
         let committed_events = complete_prefixes.partition_point(|end| *end <= written);

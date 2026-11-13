@@ -177,8 +177,18 @@ impl ConversationWriterBackend {
     }
 
     fn sync_streams(&mut self) -> Result<(), RuntimeError> {
-        sync_anchored_stream_with(&mut self.contexts_appender, &self.contexts_file)?;
-        sync_anchored_stream_with(&mut self.events_appender, &self.events_file)
+        // Both streams sync even when one fails, so acknowledged events keep their final sync.
+        let mut failures = Vec::new();
+        if let Err(error) =
+            sync_anchored_stream_with(&mut self.contexts_appender, &self.contexts_file)
+        {
+            failures.push(error);
+        }
+        if let Err(error) = sync_anchored_stream_with(&mut self.events_appender, &self.events_file)
+        {
+            failures.push(error);
+        }
+        writer_failures_result(failures)
     }
 
     fn commit_semantic(&mut self, event: &QueuedEvent) -> WriterOutcome {
