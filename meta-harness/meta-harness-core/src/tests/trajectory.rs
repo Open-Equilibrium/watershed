@@ -382,6 +382,38 @@ fn a_custom_entry_too_large_to_read_keeps_its_place_in_the_branch() {
 }
 
 #[test]
+fn an_oversized_custom_message_keeps_its_place_in_the_branch() {
+    // A custom message starts like a custom entry, but its id and parent come first.
+    let file = std::env::temp_dir().join(format!(
+        "watershed-custom-message-gap-{}.jsonl",
+        std::process::id()
+    ));
+    let huge = "x".repeat(17_000_000);
+    std::fs::write(
+        &file,
+        format!(
+            r#"{{"type":"session","version":3,"id":"s1","cwd":"/tmp"}}
+{{"type":"message","id":"u1","parentId":null,"message":{{"role":"user","content":"Look"}}}}
+{{"type":"custom_message","id":"cm","parentId":"u1","timestamp":"2026-10-24T10:00:00.000Z","customType":"reminder","content":"{huge}","display":true}}
+{{"type":"message","id":"a1","parentId":"cm","message":{{"role":"assistant","content":[{{"type":"text","text":"Seen."}}]}}}}
+"#
+        ),
+    )
+    .expect("session file");
+    let history = History::from_file(&file, 16 * 1024 * 1024);
+    let _ = std::fs::remove_file(&file);
+    let records = history.expect("history").trajectory(Some("a1")).records;
+    assert_eq!(
+        records
+            .iter()
+            .map(|record| record.entry.as_str())
+            .collect::<Vec<_>>(),
+        ["u1", "a1"],
+        "the prompt before the skipped custom message stays on the branch"
+    );
+}
+
+#[test]
 fn sums_the_usage_of_a_session_read_from_its_file() {
     let file = std::env::temp_dir().join(format!("watershed-usage-{}.jsonl", std::process::id()));
     std::fs::write(

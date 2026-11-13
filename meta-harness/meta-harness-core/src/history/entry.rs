@@ -197,7 +197,7 @@ impl Entry {
     /// them after their data.
     pub fn skipped(start: &[u8], end: &[u8]) -> Option<Self> {
         let start = String::from_utf8_lossy(start);
-        let custom = start.starts_with(r#"{"type":"custom"#);
+        let custom = start.starts_with(r#"{"type":"custom","#);
         let fields = if custom {
             String::from_utf8_lossy(end)
         } else {
