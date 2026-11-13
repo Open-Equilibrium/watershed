@@ -114,6 +114,9 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   bool _comparing = false;
   List<String> _picked = const [];
 
+  /// The picked branch chosen last, which the next pick keeps beside it.
+  String? _lastPicked;
+
   /// The tips the loaded history was read for, so a comparison's labels match its records
   /// while another pair is picked or read.
   List<String> _loaded = const [];
@@ -195,6 +198,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
       _track = contextTrack(const []);
       _shown = null;
       _picked = const [];
+      _lastPicked = null;
       _comparing = false;
       _selected = null;
       _inspecting = false;
@@ -267,6 +271,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
           );
           if (_shown case final shown?) _shown = grown(shown);
           _picked = [for (final tip in _picked) grown(tip)];
+          if (_lastPicked case final last?) _lastPicked = grown(last);
         });
         // A shown tip that grew is read again up to its new tip.
         if (!listEquals(_leaves, leaves)) _again = true;
@@ -629,6 +634,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     setState(() {
       _comparing = true;
       _picked = _ordered([first.tip, other.tip]);
+      _lastPicked = other.tip;
       _cursor = other.tip;
       _range = null;
       _window = null;
@@ -644,7 +650,11 @@ class _TrajectoryViewState extends State<TrajectoryView> {
 
   void _pick(String tip) {
     if (_picked.contains(tip)) return;
-    setState(() => _picked = _ordered([_picked.last, tip]));
+    final kept = _lastPicked ?? _picked.last;
+    setState(() {
+      _picked = _ordered([kept, tip]);
+      _lastPicked = tip;
+    });
     _reload();
   }
 

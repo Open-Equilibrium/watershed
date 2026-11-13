@@ -1947,6 +1947,75 @@ void main() {
     expect(find.text('no test run in C'), findsOneWidget);
   });
 
+  testWidgets('picking two branches in turn compares those two', (
+    tester,
+  ) async {
+    final branchB = [
+      ...branchA.take(3),
+      record('b1', 2, BridgeRecordKind.user, 'Use a token bucket', 60000),
+      record('b2', 2, BridgeRecordKind.tool, 'bash', 61000, duration: 900),
+    ];
+    final tree = [
+      for (final (index, step) in branchA.indexed)
+        BridgeTreeNode(
+          failed: false,
+          id: step.entry,
+          parent: index == 0 ? null : branchA[index - 1].entry,
+          kind: BridgeEntryKind.other,
+          preview: step.label,
+        ),
+      const BridgeTreeNode(
+        failed: false,
+        id: 'b1',
+        parent: 'e3',
+        kind: BridgeEntryKind.user,
+        preview: 'Use a token bucket',
+      ),
+      const BridgeTreeNode(
+        failed: false,
+        id: 'b2',
+        parent: 'b1',
+        kind: BridgeEntryKind.toolResult,
+        preview: 'bash',
+      ),
+      const BridgeTreeNode(
+        failed: false,
+        id: 'c1',
+        parent: 'e3',
+        kind: BridgeEntryKind.user,
+        preview: 'Try a window',
+      ),
+      const BridgeTreeNode(
+        failed: false,
+        id: 'c2',
+        parent: 'c1',
+        kind: BridgeEntryKind.toolResult,
+        preview: 'grep',
+      ),
+    ];
+    await show(
+      tester,
+      historyOf(branchB, tree: tree, leaf: 'b2'),
+      size: shortest,
+    );
+    backend.histories['e6 b2'] = historyOf(
+      branchA,
+      tree: tree,
+      leaf: 'b2',
+      others: [branchB],
+    );
+    await press(tester, LogicalKeyboardKey.keyC);
+    await tester.tap(find.byKey(const ValueKey('tree-e6')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('tree-b2')));
+    await tester.pumpAndSettle();
+    expect(
+      backend.calls.last,
+      'history e6 b2',
+      reason: 'the comparison shows the branches picked last, A and B',
+    );
+  });
+
   testWidgets('keys for the list leave what the comparison hides alone', (
     tester,
   ) async {
