@@ -3,9 +3,12 @@ import os
 import selectors
 import signal
 import subprocess
+import sys
+import time
 import tomllib
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,12 +17,21 @@ DEADLINE = 30
 
 
 def read_line(stream) -> str:
-    """The next line of `stream`; fails instead of waiting past the deadline."""
+    """The next line of `stream`; fails instead of waiting past the deadline, even mid-line."""
+    descriptor = stream.fileno()
+    line = b""
+    deadline = time.monotonic() + DEADLINE
     with selectors.DefaultSelector() as selector:
-        selector.register(stream, selectors.EVENT_READ)
-        if not selector.select(DEADLINE):
-            raise AssertionError(f"runner printed nothing within {DEADLINE} seconds")
-    return stream.readline().strip()
+        selector.register(descriptor, selectors.EVENT_READ)
+        while not line.endswith(b"\n"):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not selector.select(remaining):
+                raise AssertionError(f"runner printed no complete line within {DEADLINE} seconds")
+            byte = os.read(descriptor, 1)
+            if not byte:
+                break
+            line += byte
+    return line.decode().strip()
 
 
 class RustTestIsolationRunnerTest(unittest.TestCase):
@@ -78,6 +90,23 @@ class RustTestIsolationRunnerTest(unittest.TestCase):
         child_home = Path(result.stdout.strip())
         self.assertTrue(child_home.is_absolute())
         self.assertFalse(child_home.parent.exists())
+
+    @unittest.skipIf(os.name == "nt", "requires POSIX pipes")
+    def test_read_line_gives_up_on_an_unfinished_line(self) -> None:
+        # The child leaves a half line in the pipe and stays alive, so only the deadline ends the read.
+        child = subprocess.Popen(
+            [sys.executable, "-c",
+             "import sys, time; sys.stdout.write('partial'); sys.stdout.flush(); time.sleep(5)"],
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            with mock.patch.object(sys.modules[__name__], "DEADLINE", 1), self.assertRaises(AssertionError):
+                read_line(child.stdout)
+        finally:
+            child.kill()
+            child.wait()
+            child.stdout.close()
 
     @unittest.skipIf(os.name == "nt", "requires POSIX signals")
     def test_runner_forwards_every_signal_until_the_child_exits(self) -> None:
