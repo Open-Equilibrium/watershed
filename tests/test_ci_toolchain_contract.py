@@ -169,7 +169,7 @@ def step_run(workflow: str, name: str) -> str:
         if not all(re.match(r"          \S", line) for line in block):
             raise AssertionError(f"unsupported folded CI command: {name}")
         return " ".join(line.removeprefix("          ") for line in block)
-    body = [line.removeprefix("          ") for line in block if line.startswith("          ")]
+    body = [line.removeprefix("          ") if line.startswith("          ") else "" for line in block]
     return "\n".join(body).rstrip()
 
 
@@ -372,7 +372,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             with self.subTest(step=step):
                 workflow = (f"jobs:\n  first:\n    steps:\n      - &example\n        name: Example\n{step}"
                             "  second:\n    steps:\n      - *example\n    env:\n      A: b\n")
-                self.assertEqual(step_run(workflow, "Example"), "first\nsecond")
+                self.assertEqual(step_run(workflow, "Example"), "first\n\nsecond")
                 self.assertEqual(job_of(workflow, "Example"), ["first", "second"])
 
     def test_folded_run_blocks_join_their_lines_with_spaces(self) -> None:
