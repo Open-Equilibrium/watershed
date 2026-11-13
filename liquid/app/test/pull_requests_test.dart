@@ -150,6 +150,38 @@ void main() {
   );
 
   test(
+    'records left under the host name by an interrupted start still move',
+    () async {
+      // A start stopped after it stored the device id, before it moved the records.
+      deviceFile()
+        ..createSync(recursive: true)
+        ..writeAsStringSync(jsonEncode({'device': 'kept-id'}));
+      basesFile().writeAsStringSync(
+        jsonEncode({
+          'bases': [
+            {
+              'device': Platform.localHostname,
+              'repository': '/work/api/.git',
+              'branch': 'feature',
+              'base': 'main',
+            },
+          ],
+        }),
+      );
+      final restarted = BranchBases(
+        file: SettingsFile(basesFile()),
+        deviceFile: SettingsFile(deviceFile()),
+      );
+      expect(await restarted.baseOf('/work/api/.git', 'feature'), 'main');
+      expect(
+        ((jsonDecode(basesFile().readAsStringSync()) as Map)['bases'] as List)
+            .single,
+        containsPair('device', 'kept-id'),
+      );
+    },
+  );
+
+  test(
     'queued branch creations record the branch each one started from',
     () async {
       backend.onCreateBranch = (name) =>

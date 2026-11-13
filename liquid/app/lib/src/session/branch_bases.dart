@@ -88,22 +88,22 @@ class BranchBases {
     if (known != null) return known;
     final stored = deviceFile;
     if (stored == null) return _device = _newId();
-    if ((await stored.load())?['device'] case final String kept) {
-      return _device = kept;
-    }
     var id = '';
-    var created = false;
-    await stored.update((json) {
-      // Another window may have created it since the read above.
-      if (json?['device'] case final String kept) {
-        id = kept;
-        return {...?json};
-      }
-      id = _newId();
-      created = true;
-      return {...?json, 'device': id};
-    });
-    if (created) await _moveHostRecords(id);
+    if ((await stored.load())?['device'] case final String kept) {
+      id = kept;
+    } else {
+      await stored.update((json) {
+        // Another window may have created it since the read above.
+        if (json?['device'] case final String kept) {
+          id = kept;
+          return {...?json};
+        }
+        id = _newId();
+        return {...?json, 'device': id};
+      });
+    }
+    // Also after a start that stopped between storing the id and moving the records.
+    await _moveHostRecords(id);
     return _device = id;
   }
 
@@ -111,12 +111,16 @@ class BranchBases {
   Future<void> _moveHostRecords(String id) async {
     final stored = file;
     if (stored == null) return;
+    final host = Platform.localHostname;
+    if (!_read(await stored.load()).any((record) => record.device == host)) {
+      return;
+    }
     await stored.update(
       (json) => {
         ...?json,
         'bases': _encode([
           for (final record in _read(json))
-            if (record.device == Platform.localHostname)
+            if (record.device == host)
               (
                 device: id,
                 repository: record.repository,
