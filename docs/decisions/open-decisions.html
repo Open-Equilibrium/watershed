@@ -152,18 +152,6 @@
         <ul><li><strong>A:</strong> A small set of resource-specific commands and action schemas. Pro: compact for agents, easy to test and restrict. Con: new capabilities need explicit additions.</li><li><strong>B:</strong> One broad document interface. Pro: flexible. Con: harder to secure, discover efficiently and change safely.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
       </details>
-      <details id="d-094" class="decision">
-        <summary><h3>D-094 - Where Liquid Keeps Its Device Id</h3></summary>
-        <p><strong>Status:</strong> Open; found in review. ADR-0270 gives each computer a random device id for its remembered pull-request bases, but Liquid writes it into <code>git-bases.json</code> in its data folder, which several computers may share. The second computer then reads the first one's id, loses its own remembered bases, and both overwrite each other's records for the same repository and branch. Effect: a wrong pre-filled base the user can change. Liquid has no per-computer storage location yet.</p>
-        <p><strong>How T3 Code does it:</strong> its state lives in a per-user folder on each computer (<code>~/.t3/userdata</code>), which is never shared, so the problem does not arise.</p>
-        <ul>
-          <li><strong>A: A per-computer folder</strong> (<code>~/Library/Caches/Liquid</code> on macOS, <code>$XDG_STATE_HOME/liquid</code> on Linux, <code>%LOCALAPPDATA%\Liquid</code> on Windows). Pro: small, Dart only. Con: macOS may purge caches, which forgets that computer's remembered bases.</li>
-          <li><strong>B: A keychain item through the Rust bridge</strong>, like the Workspace key. Pro: survives purges and folder moves. Con: Rust and bridge changes; needs a Secret Service on Linux.</li>
-          <li><strong>C: One data folder per computer.</strong> Pro: no code. Con: reverses the sharing that ADR-0270 assumes.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> A; a purge only costs a pre-filled choice.</p>
-        <p><strong>Acceptance criterion:</strong> two computers sharing one data folder keep separate ids and each keeps its own remembered bases.</p>
-      </details>
     </div>
   </section>
 
