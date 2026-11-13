@@ -24,6 +24,18 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// Reads a request head; one read may return only part of a fragmented head.
+fn read_request_head(stream: &mut impl Read) -> String {
+    let mut buffer = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    while !buffer.windows(4).any(|window| window == b"\r\n\r\n") {
+        let read = stream.read(&mut chunk).expect("request head reads");
+        assert!(read > 0, "request ends before its head");
+        buffer.extend_from_slice(&chunk[..read]);
+    }
+    String::from_utf8(buffer).expect("request head is UTF-8")
+}
+
 fn write_sse_response(stream: &mut impl Write, body: &str) {
     write!(
         stream,
@@ -45,9 +57,7 @@ fn productive_http_dispatch_uses_the_pinned_headers_and_no_retry() {
     );
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("one provider request");
-        let mut request = vec![0_u8; 16 * 1024];
-        let read = stream.read(&mut request).expect("request reads");
-        let request = String::from_utf8(request[..read].to_vec()).expect("request UTF-8");
+        let request = read_request_head(&mut stream);
         assert!(request.starts_with("POST /responses HTTP/1.1\r\n"));
         let lower = request.to_ascii_lowercase();
         assert!(lower.contains(&format!(
@@ -87,9 +97,7 @@ fn productive_http_dispatch_routes_fedramp_accounts() {
     let endpoint = format!("http://{}/responses", listener.local_addr().unwrap());
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("one provider request");
-        let mut request = vec![0_u8; 16 * 1024];
-        let read = stream.read(&mut request).expect("request reads");
-        let request = String::from_utf8(request[..read].to_vec()).expect("request UTF-8");
+        let request = read_request_head(&mut stream);
         assert!(
             request
                 .to_ascii_lowercase()

@@ -50,7 +50,11 @@ fn read_form_body(stream: &mut TcpStream) -> String {
     let mut form_content_type = false;
     loop {
         line.clear();
-        reader.read_line(&mut line).expect("request header reads");
+        assert_ne!(
+            reader.read_line(&mut line).expect("request header reads"),
+            0,
+            "headers end before blank line"
+        );
         if line == "\r\n" {
             break;
         }
