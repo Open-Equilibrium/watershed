@@ -32,17 +32,27 @@ struct CompletedInteractionSnapshot {
     deltas: Vec<serde_json::Value>,
 }
 
+fn fits_object_limit(bytes: &[u8]) -> bool {
+    u64::try_from(bytes.len()).unwrap_or(u64::MAX) <= MAX_SESSION_OBJECT_BYTES
+}
+
 pub fn event_payload_id<'a>(event: &'a EventEnvelope, field: &str) -> Option<&'a str> {
     event.payload.get(field).and_then(serde_json::Value::as_str)
 }
 
 impl ContextHistory {
     pub(crate) fn recovery_object(&self) -> Result<ContextObject, RuntimeError> {
-        let mut bytes = self.recovery_bytes(true)?;
-        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_SESSION_OBJECT_BYTES {
-            bytes = self.recovery_bytes(false)?;
-        }
-        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_SESSION_OBJECT_BYTES {
+        // WHY: completed deltas that alone exceed the limit always fall back, so skip building them.
+        let with_completed_deltas = if self.completed_deltas_fit_object_limit()? {
+            Some(self.recovery_bytes(true)?)
+        } else {
+            None
+        };
+        let bytes = match with_completed_deltas {
+            Some(bytes) if fits_object_limit(&bytes) => bytes,
+            _ => self.recovery_bytes(false)?,
+        };
+        if !fits_object_limit(&bytes) {
             return Err(RuntimeError::Protocol(
                 "recovery context exceeds its object byte limit".to_owned(),
             ));
@@ -51,6 +61,28 @@ impl ContextHistory {
             digest: sha256_hex(&bytes),
             bytes,
         })
+    }
+
+    /// Whether the completed deltas' canonical bytes alone fit the object limit. Each delta is
+    /// canonicalized separately and the scan stops at the limit, so the oversized array is never built.
+    fn completed_deltas_fit_object_limit(&self) -> Result<bool, RuntimeError> {
+        let Some((_, _, deltas)) = &self.latest_completed else {
+            return Ok(true);
+        };
+        // WHY: canonical JSON embeds the deltas array verbatim as "[" items joined by "," "]".
+        let mut total = 2u64;
+        for (index, delta) in deltas.iter().enumerate() {
+            let canonical = proto::canonical_json(delta).map_err(|error| {
+                RuntimeError::Protocol(format!("recovery context cannot be canonicalized: {error}"))
+            })?;
+            total = total
+                .saturating_add(u64::from(index > 0))
+                .saturating_add(u64::try_from(canonical.len()).unwrap_or(u64::MAX));
+            if total > MAX_SESSION_OBJECT_BYTES {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     fn recovery_bytes(

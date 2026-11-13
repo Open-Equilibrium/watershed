@@ -328,3 +328,42 @@ fn recovery_context_size_fallback_preserves_pending_message_deltas() {
             .contains("object byte limit")
     );
 }
+
+#[test]
+fn recovery_object_drops_oversized_completed_deltas() {
+    let object_limit = usize::try_from(MAX_SESSION_OBJECT_BYTES).expect("object limit fits usize");
+    let mut history = ContextHistory::default();
+    history.record(&EventEnvelope::new(
+        "evt-1",
+        EventType::MessageDelta,
+        "context-recovery-completed-deltas-001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "flow-agent-cli",
+        serde_json::json!({"message_id":"completed","content_delta":"x".repeat(object_limit)}),
+    ));
+    history.record(&EventEnvelope::new(
+        "evt-2",
+        EventType::MessageCompleted,
+        "context-recovery-completed-deltas-001",
+        2,
+        "2026-01-01T00:00:00Z",
+        "flow-agent-cli",
+        serde_json::json!({"message_id":"completed","role":"assistant"}),
+    ));
+
+    let object = history
+        .recovery_object()
+        .expect("oversized completed deltas are omitted from the snapshot");
+    let restored =
+        ContextHistory::from_recovery_bytes(&object.bytes, 2).expect("snapshot restores");
+    let (sequence, payload, deltas) = restored
+        .latest_completed
+        .expect("the completed interaction is kept");
+    assert_eq!(sequence, 2);
+    assert_eq!(
+        payload,
+        serde_json::json!({"message_id":"completed","role":"assistant"})
+    );
+    assert!(deltas.is_empty());
+}
