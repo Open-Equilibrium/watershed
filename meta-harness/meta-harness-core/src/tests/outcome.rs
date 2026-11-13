@@ -14,6 +14,7 @@ fn reads_test_counts_of_common_runners() {
         ("      Tests  12 passed (12)", count(12, 0)),
         ("===== 12 passed, 1 failed in 0.52s =====", count(12, 1)),
         ("============ 3 passed in 0.01s ============", count(3, 0)),
+        (".. [100%]\n2 passed in 0.01s\n", count(2, 0)),
         ("ℹ tests 6\nℹ pass 5\nℹ fail 1", count(5, 1)),
         ("# pass 6\n# fail 0", count(6, 0)),
         (

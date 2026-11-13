@@ -81,14 +81,20 @@ fn cargo(lines: &[&str]) -> Option<TestCount> {
     })
 }
 
-/// jest's `Tests:` line, vitest's `Tests` line and pytest's closing `=== … in …s ===` line.
+/// jest's `Tests:` line, vitest's `Tests` line and pytest's closing `=== … in …s ===` line, which
+/// `pytest -q` prints as `N passed in …s` without the banner.
 fn summary(lines: &[&str]) -> Option<TestCount> {
     let line = lines.iter().rev().find(|line| {
         let counts = line.contains(" passed") || line.contains(" failed");
+        let timed = line
+            .split(" in ")
+            .skip(1)
+            .any(|rest| rest.starts_with(|c: char| c.is_ascii_digit()));
         counts
             && (line.starts_with("Tests:")
                 || line.starts_with("Tests ")
-                || (line.starts_with('=') && line.contains(" in ")))
+                || (line.starts_with('=') && line.contains(" in "))
+                || (line.starts_with(|c: char| c.is_ascii_digit()) && timed))
     })?;
     Some(TestCount {
         passed: before(line, " passed"),
