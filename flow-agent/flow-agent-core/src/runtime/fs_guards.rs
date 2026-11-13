@@ -98,8 +98,9 @@ pub use segmented_jsonl::with_segmented_jsonl_discovery_metrics_for_test;
 pub use segmented_jsonl::{SegmentedJsonlLeaf, parse_segmented_jsonl_leaf};
 pub use segmented_jsonl::{
     canonical_segmented_jsonl_sibling, for_each_segmented_jsonl_line,
-    for_each_segmented_jsonl_member, is_segmented_jsonl_ordinal, retry_event_segment_discovery,
-    segmented_jsonl_files, segmented_jsonl_leaf, segmented_jsonl_leaf_stem, segmented_jsonl_path,
+    for_each_segmented_jsonl_line_until, for_each_segmented_jsonl_member,
+    is_segmented_jsonl_ordinal, retry_event_segment_discovery, segmented_jsonl_files,
+    segmented_jsonl_leaf, segmented_jsonl_leaf_stem, segmented_jsonl_path,
     segmented_jsonl_segment_count,
 };
 

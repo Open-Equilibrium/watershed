@@ -91,6 +91,7 @@ pub(crate) struct HistoryIndexMetrics {
     pub(crate) event_state_payload_peak: u64,
     pub(crate) event_work: u64,
     pub(crate) event_work_limit: u64,
+    pub(crate) event_lines_visited: u64,
     pub(crate) work: u64,
     pub(crate) work_limit: u64,
 }
@@ -462,6 +463,7 @@ impl ConversationHistoryIndex {
                 event_state_payload_peak: self.event_metrics.state_payload_peak,
                 event_work: self.event_metrics.work,
                 event_work_limit: self.event_metrics.work_limit,
+                event_lines_visited: self.event_metrics.lines_visited,
                 work: self.work.used,
                 work_limit: self.work.limit,
             }));

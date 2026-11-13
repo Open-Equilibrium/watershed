@@ -4,6 +4,7 @@ use super::{
 };
 #[cfg(test)]
 use std::cell::Cell;
+use std::ops::ControlFlow;
 
 const JSONL_SUFFIX: &str = ".jsonl";
 const MAX_SEGMENT_ORDINAL: u64 = 999_999;
@@ -341,7 +342,19 @@ pub fn for_each_segmented_jsonl_line(
     limits: SessionStreamLimits,
     mut visit: impl FnMut(&str) -> Result<(), RuntimeError>,
 ) -> Result<u64, RuntimeError> {
+    for_each_segmented_jsonl_line_until(base, limits, |line| {
+        visit(line).map(|()| ControlFlow::Continue(()))
+    })
+}
+
+/// Visits each line in order until `visit` breaks; the rest of the stream is neither read nor framed.
+pub fn for_each_segmented_jsonl_line_until(
+    base: &AnchoredFile,
+    limits: SessionStreamLimits,
+    mut visit: impl FnMut(&str) -> Result<ControlFlow<()>, RuntimeError>,
+) -> Result<u64, RuntimeError> {
     let mut total = 0u64;
+    let mut stopped = false;
     let files = segmented_jsonl_files(base, limits)?;
     let segment_count = files.len();
     for (index, file) in files.into_iter().enumerate() {
@@ -351,9 +364,16 @@ pub fn for_each_segmented_jsonl_line(
             &file,
             MAX_SESSION_SEGMENT_BYTES.min(remaining),
             non_final,
-            &mut visit,
+            |line| {
+                let flow = visit(line)?;
+                stopped = flow.is_break();
+                Ok(flow)
+            },
         )?;
         total = total.saturating_add(segment_bytes);
+        if stopped {
+            break;
+        }
     }
     Ok(total)
 }

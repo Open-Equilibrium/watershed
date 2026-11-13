@@ -9,6 +9,7 @@ use cap_std::fs::OpenOptionsExt as _;
 use std::cell::RefCell;
 use std::{
     fs, io,
+    ops::ControlFlow,
     path::{Path, PathBuf},
 };
 
@@ -139,7 +140,7 @@ pub fn for_each_anchored_file_line_with_limit(
     path: &AnchoredFile,
     max_bytes: u64,
     require_trailing_lf: bool,
-    visit: impl FnMut(&str) -> Result<(), RuntimeError>,
+    visit: impl FnMut(&str) -> Result<ControlFlow<()>, RuntimeError>,
 ) -> Result<u64, RuntimeError> {
     let (file, metadata) = open_anchored_file_for_read(path)?;
     if metadata.len() > max_bytes {

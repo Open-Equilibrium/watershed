@@ -50,6 +50,8 @@ pub(super) struct EventPointerMetrics {
     pub(super) work: u64,
     #[cfg(test)]
     pub(super) work_limit: u64,
+    #[cfg(test)]
+    pub(super) lines_visited: u64,
 }
 
 impl EventPointerMetrics {
@@ -59,6 +61,7 @@ impl EventPointerMetrics {
             self.state_payload_peak = self.state_payload_peak.max(_other.state_payload_peak);
             self.work = self.work.max(_other.work);
             self.work_limit = self.work_limit.max(_other.work_limit);
+            self.lines_visited = self.lines_visited.saturating_add(_other.lines_visited);
         }
     }
 }

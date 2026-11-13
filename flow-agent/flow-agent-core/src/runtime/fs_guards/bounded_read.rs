@@ -1,4 +1,5 @@
 use super::{Path, Read, RuntimeError, io};
+use std::ops::ControlFlow;
 
 const MAX_FILE_READ_REQUEST_BYTES: usize = 1024 * 1024;
 
@@ -14,17 +15,20 @@ pub fn for_each_reader_line_with_limit(
     reader: impl Read,
     path: &Path,
     max_bytes: u64,
-    visit: impl FnMut(&str) -> Result<(), RuntimeError>,
+    mut visit: impl FnMut(&str) -> Result<(), RuntimeError>,
 ) -> Result<u64, RuntimeError> {
-    for_each_reader_line_with_limit_inner(reader, path, max_bytes, false, visit)
+    for_each_reader_line_with_limit_inner(reader, path, max_bytes, false, |line| {
+        visit(line).map(|()| ControlFlow::Continue(()))
+    })
 }
 
+/// Visits each line until `visit` breaks; the rest of the reader is not read or framed.
 pub(super) fn for_each_reader_line_with_limit_inner(
     reader: impl Read,
     path: &Path,
     max_bytes: u64,
     require_trailing_lf: bool,
-    mut visit: impl FnMut(&str) -> Result<(), RuntimeError>,
+    mut visit: impl FnMut(&str) -> Result<ControlFlow<()>, RuntimeError>,
 ) -> Result<u64, RuntimeError> {
     let mut reader = io::BufReader::new(reader.take(max_bytes.saturating_add(1)));
     let mut line = Vec::new();
@@ -58,7 +62,9 @@ pub(super) fn for_each_reader_line_with_limit_inner(
         let line = std::str::from_utf8(&line).map_err(|source| {
             RuntimeError::Protocol(format!("{} is not valid UTF-8: {source}", path.display()))
         })?;
-        visit(line)?;
+        if visit(line)?.is_break() {
+            break;
+        }
     }
     Ok(total)
 }

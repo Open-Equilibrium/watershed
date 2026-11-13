@@ -13,7 +13,7 @@ use super::scratch::{
 };
 use crate::runtime::{
     fs_guards::{
-        AnchoredDir, AnchoredFile, DirectoryErrorMode, for_each_segmented_jsonl_line,
+        AnchoredDir, AnchoredFile, DirectoryErrorMode, for_each_segmented_jsonl_line_until,
         open_anchored_file_for_read, path_io_error, segmented_jsonl_files,
     },
     types::{EVENT_STREAM_LIMITS, MAX_CANONICAL_EVENT_BYTES, MAX_FLOW_EVENTS, RuntimeError},
@@ -28,6 +28,7 @@ use std::{
     cell::{Cell, RefCell},
     cmp::Ordering as CmpOrdering,
     io::{BufRead, BufReader, Read, Seek, SeekFrom},
+    ops::ControlFlow,
 };
 
 const EVENT_IDENTIFIER_RECORD_BYTES: usize = 48;
@@ -35,6 +36,13 @@ const EVENT_IDENTIFIER_RECORD_BYTES: usize = 48;
 #[cfg(test)]
 thread_local! {
     static FORCE_EVENT_IDENTIFIER_DIGEST_COLLISION: Cell<bool> = const { Cell::new(false) };
+    static EVENT_LINES_VISITED: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Counts one event line read by a validation pass, for the early-stop regression test.
+fn count_event_line() {
+    #[cfg(test)]
+    EVENT_LINES_VISITED.with(|count| count.set(count.get().saturating_add(1)));
 }
 const EVENT_IDENTIFIER_MAX_RECORDS_PER_PASS: u64 =
     MAX_FLOW_EVENTS * MAX_EVENT_PAYLOAD_STATE_IDENTIFIERS_V0;
@@ -279,6 +287,8 @@ pub(super) fn validate_committed_event_pointer(
     scratch: &mut HistoryScratch,
     work: &mut WorkBudget,
 ) -> Result<EventPointerMetrics, RuntimeError> {
+    #[cfg(test)]
+    EVENT_LINES_VISITED.with(|count| count.set(0));
     let runs = conversation
         .child(CONVERSATION_RUNS_DIR, false, DirectoryErrorMode::Protocol)?
         .ok_or_else(|| protocol("conversation runs directory disappeared"))?;
@@ -301,11 +311,8 @@ pub(super) fn validate_committed_event_pointer(
     let mut event_state_payload_peak = 0u64;
     let mut offset = 0u64;
     let mut line_number = 0usize;
-    for_each_segmented_jsonl_line(&events, EVENT_STREAM_LIMITS, |line| {
-        if reached {
-            offset = offset.saturating_add(u64::try_from(line.len()).unwrap_or(u64::MAX));
-            return Ok(());
-        }
+    for_each_segmented_jsonl_line_until(&events, EVENT_STREAM_LIMITS, |line| {
+        count_event_line();
         line_number = line_number.saturating_add(1);
         let canonical = line
             .strip_suffix('\n')
@@ -321,7 +328,11 @@ pub(super) fn validate_committed_event_pointer(
                 event_state_payload_peak.max(validation.retained_identifier_payload_bytes());
         }
         offset = offset.saturating_add(u64::try_from(line.len()).unwrap_or(u64::MAX));
-        Ok(())
+        Ok(if reached {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        })
     })?;
     if reached {
         Ok(EventPointerMetrics {
@@ -331,6 +342,8 @@ pub(super) fn validate_committed_event_pointer(
             work: event_work.used,
             #[cfg(test)]
             work_limit: event_work.limit,
+            #[cfg(test)]
+            lines_visited: EVENT_LINES_VISITED.with(Cell::get),
         })
     } else {
         Err(protocol(format!(
@@ -370,11 +383,8 @@ fn build_event_identifier_tokens(
         let mut offset = 0u64;
         let mut line_number = 0usize;
         let mut reached = false;
-        for_each_segmented_jsonl_line(events, EVENT_STREAM_LIMITS, |line| {
-            if reached {
-                offset = offset.saturating_add(u64::try_from(line.len()).unwrap_or(u64::MAX));
-                return Ok(());
-            }
+        for_each_segmented_jsonl_line_until(events, EVENT_STREAM_LIMITS, |line| {
+            count_event_line();
             line_number = line_number.saturating_add(1);
             let canonical = line
                 .strip_suffix('\n')
@@ -392,7 +402,11 @@ fn build_event_identifier_tokens(
             })?;
             reached = event.sequence == event_sequence;
             offset = offset.saturating_add(u64::try_from(line.len()).unwrap_or(u64::MAX));
-            Ok(())
+            Ok(if reached {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            })
         })?;
         if !chunk.is_empty() {
             write_event_identifier_sorted_run(scratch, &mut chunk, pass, &mut event_work)?;
