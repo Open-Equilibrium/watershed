@@ -47,13 +47,19 @@ class ContextTab extends StatelessWidget {
     final record = records[index];
     final message = record.kind == BridgeRecordKind.message;
     final detail = this.detail;
+    // A tool or user step counts what the request still holds of it, once its detail is read.
     final stepChars = message
         ? [
             for (final part
                 in detail?.messages ?? const <BridgeContextMessage>[])
               if (part.fresh && part.inContext) part.chars,
           ].fold(0, (sum, chars) => sum + chars)
-        : record.addedChars;
+        : detail == null
+        ? record.addedChars
+        : [
+            for (final part in detail.messages)
+              if (part.entry == record.entry && part.inContext) part.chars,
+          ].fold(0, (sum, chars) => sum + chars);
     final parts = requestParts(read, detail: detail, stepChars: stepChars);
     final number = requestNumber(records, request!);
     final relation = switch (record.kind) {

@@ -695,6 +695,46 @@ void main() {
     expect(find.text('AGENTS.md'), findsOneWidget);
   });
 
+  testWidgets('a step taken out of the context adds nothing to the request', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      historyOf([
+        record('u1', 1, BridgeRecordKind.user, 'Go', 0),
+        record('e1', 1, BridgeRecordKind.tool, 'read', 100, added: 2372),
+        record(
+          'm1',
+          1,
+          BridgeRecordKind.message,
+          'Done',
+          200,
+          usage: tokens(4812, 312),
+          context: saw(1, ['result of read']),
+        ),
+      ]),
+    );
+    backend.contexts['m1'] = const BridgeContextDetail(
+      sections: [],
+      tools: [],
+      messages: [
+        BridgeContextMessage(
+          entry: 'e1',
+          label: 'result of read',
+          chars: 2372,
+          inContext: false,
+          fresh: true,
+        ),
+      ],
+    );
+    await press(tester, LogicalKeyboardKey.arrowDown);
+    await press(tester, LogicalKeyboardKey.arrowDown);
+    await press(tester, LogicalKeyboardKey.enter);
+    await tester.tap(tab('Context'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('This step ≈0'), findsOneWidget);
+  });
+
   testWidgets('the session tree is compact and collapses to a rail', (
     tester,
   ) async {
