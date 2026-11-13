@@ -497,6 +497,41 @@ fn conversation_status_rolls_back_a_torn_named_transaction_append() {
 }
 
 #[test]
+fn torn_append_rollback_retry_syncs_the_truncation_before_clearing() {
+    let workspace = empty_workspace("conversation-status-rollback-retry-sync");
+    create_review_run(&workspace);
+    commit_review_event(&workspace);
+    set_status_transaction_crash_point(StatusTransactionCrashPoint::TransactionRecorded);
+    append_conversation_entry(&workspace, "review", &entry("root", None, "review-1", 1))
+        .expect_err("the transaction remains before its append");
+    OpenOptions::new()
+        .append(true)
+        .open(history_path(&workspace))
+        .expect("history opens")
+        .write_all(b"{")
+        .expect("torn append writes");
+
+    set_conversation_file_sync_error_for_path_for_test(
+        &history_path(&workspace),
+        io::ErrorKind::Other,
+    );
+    conversation_status_page(&workspace, None)
+        .expect_err("the truncation's sync failure keeps the transaction");
+    assert!(status_transaction_path(&workspace).exists());
+
+    set_conversation_file_sync_error_for_path_for_test(
+        &history_path(&workspace),
+        io::ErrorKind::Other,
+    );
+    conversation_status_page(&workspace, None)
+        .expect_err("a retry must sync the truncation before clearing the transaction");
+    assert!(status_transaction_path(&workspace).exists());
+
+    conversation_status_page(&workspace, None).expect("the next recovery syncs and clears");
+    assert!(!status_transaction_path(&workspace).exists());
+}
+
+#[test]
 fn conversation_status_rolls_back_an_append_that_lost_its_final_line_feed() {
     let workspace = empty_workspace("conversation-status-cut-line-feed");
     let prior_len = record_history_append_then_crash(

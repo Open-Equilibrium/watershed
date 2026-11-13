@@ -5,7 +5,10 @@ use super::super::{
         validate_conversation_entry, validate_digest, validate_id,
         validate_run_creation_identity_marker_name,
     },
-    conversation_stream::{append_anchored_canonical_jsonl_batch, sync_anchored_stream},
+    conversation_stream::{
+        append_anchored_canonical_jsonl_batch, conversation_file_sync_checkpoint,
+        sync_anchored_stream,
+    },
     storage::{canonical_json, required_child},
 };
 use super::{
@@ -537,16 +540,11 @@ fn finalize_status_append_recovery(
         kind,
         run_session_id,
         segment_ordinal,
-        prior_bytes,
         ..
     } = &transaction.mutation
     else {
         return Ok(());
     };
-    let newly_named_segment = *segment_ordinal > 1 && *prior_bytes == 0;
-    if !applied && !newly_named_segment {
-        return Ok(());
-    }
     if !applied {
         let target = status_append_target(
             conversation,
@@ -611,7 +609,9 @@ fn roll_back_torn_status_append(
     }
     let (file, _) = open_anchored_file_for_update(&target)?;
     truncate_durable(&file, target.diagnostic_path(), *prior_bytes)
-        .and_then(|()| sync_durable(&file, target.diagnostic_path()))
+        .map_err(|source| path_io_error(target.diagnostic_path(), source))?;
+    conversation_file_sync_checkpoint(target.diagnostic_path())?;
+    sync_durable(&file, target.diagnostic_path())
         .map_err(|source| path_io_error(target.diagnostic_path(), source))
 }
 
