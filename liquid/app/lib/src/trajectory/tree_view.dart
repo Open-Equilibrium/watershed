@@ -17,12 +17,13 @@ import 'trajectory_model.dart';
 const treeWidth = 200.0;
 const treeRailWidth = 24.0;
 const _rowHeight = 22.0;
+const _railRowHeight = 16.0;
 
 /// The session's branches as a graph like GitHub's network view: one lane per branch and one
 /// node per step, its shape and color telling the step's kind as the ledger's Kind tags do.
 /// Lines are gray but for the shown branches. Each row paints its own slice, so long trees
 /// stay a lazy list. Collapsed, it is a rail with one dot per turn.
-class SessionTreeView extends StatelessWidget {
+class SessionTreeView extends StatefulWidget {
   const SessionTreeView({
     super.key,
     required this.graph,
@@ -70,11 +71,60 @@ class SessionTreeView extends StatelessWidget {
   }
 
   @override
+  State<SessionTreeView> createState() => _SessionTreeViewState();
+}
+
+class _SessionTreeViewState extends State<SessionTreeView> {
+  /// The open list and the rail, scrolled to keep the highlighted row on screen as keys move it.
+  final _list = ScrollController();
+  final _rail = ScrollController();
+
+  @override
+  void didUpdateWidget(SessionTreeView old) {
+    super.didUpdateWidget(old);
+    if (old.selected != widget.selected || old.open != widget.open) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _reveal();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _list.dispose();
+    _rail.dispose();
+    super.dispose();
+  }
+
+  /// Scrolls the open list to the highlighted row, or the rail to the prompt owning it.
+  void _reveal() {
+    final tree = widget;
+    if (tree.open) {
+      final index = tree.graph.rows.indexWhere(
+        (row) => row.node.id == tree.selected,
+      );
+      _keepVisible(_list, index, _rowHeight);
+      return;
+    }
+    final owner = _ownerOf(tree.graph, tree.selected);
+    final index = _turns(tree.graph)
+        .indexWhere((turn) => turn.node.id == owner?.node.id);
+    _keepVisible(_rail, index, _railRowHeight);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    if (!open) return _Rail(tree: this);
+    final graph = widget.graph;
+    final selected = widget.selected;
+    final shown = widget.shown;
+    final picked = widget.picked;
+    final open = widget.open;
+    final onOpen = widget.onOpen;
+    final onRow = widget.onRow;
+    if (!open) return _Rail(tree: widget, controller: _rail);
     final lines = _linesOf[graph] ??= _lines(graph);
-    final path = _path();
+    final path = widget._path();
     final spacing = graph.lanes < 2
         ? 14.0
         : math.min(14.0, 60 / (graph.lanes - 1));
@@ -114,6 +164,7 @@ class SessionTreeView extends StatelessWidget {
           ),
           Expanded(
             child: ListView.builder(
+              controller: _list,
               itemExtent: _rowHeight,
               itemCount: graph.rows.length,
               itemBuilder: (context, index) {
@@ -184,6 +235,48 @@ class SessionTreeView extends StatelessWidget {
   }
 }
 
+/// The selected step's own prompt, if any. Turn numbers repeat on sibling branches, so it is
+/// found on the path to the step.
+GraphRow? _ownerOf(SessionGraph graph, String? selected) {
+  var owner = graph.rows.where((row) => row.node.id == selected).firstOrNull;
+  while (owner != null && owner.node.kind != BridgeEntryKind.user) {
+    final parent = owner.parentRow;
+    owner = parent == null ? null : graph.rows[parent];
+  }
+  return owner;
+}
+
+/// The rows of the prompts, one per turn.
+List<GraphRow> _turns(SessionGraph graph) => [
+  for (final row in graph.rows)
+    if (row.node.kind == BridgeEntryKind.user) row,
+];
+
+/// Scrolls `controller` the least that brings the row at `index`, `extent` tall, into view.
+void _keepVisible(ScrollController controller, int index, double extent) {
+  if (index < 0 || !controller.hasClients) return;
+  final position = controller.position;
+  final top = index * extent;
+  final bottom = top + extent;
+  final view = position.viewportDimension;
+  final double target;
+  if (top < position.pixels) {
+    target = top;
+  } else if (bottom > position.pixels + view) {
+    target = bottom - view;
+  } else {
+    return;
+  }
+  controller.animateTo(
+    math.min(
+      math.max(target, position.minScrollExtent),
+      position.maxScrollExtent,
+    ),
+    duration: const Duration(milliseconds: 120),
+    curve: Curves.easeOut,
+  );
+}
+
 /// What a node's shape and color show, for assistive technology.
 String _kindLabel(BridgeTreeNode node) {
   final kind = switch (node.kind) {
@@ -227,26 +320,16 @@ class _Toggle extends StatelessWidget {
 /// The collapsed tree: a rail with one dot per turn, filled for the selected step's turn, and
 /// its name below them.
 class _Rail extends StatelessWidget {
-  const _Rail({required this.tree});
+  const _Rail({required this.tree, required this.controller});
 
   final SessionTreeView tree;
+  final ScrollController controller;
 
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    final turns = [
-      for (final row in tree.graph.rows)
-        if (row.node.kind == BridgeEntryKind.user) row,
-    ];
-    // The selected step's own prompt: turn numbers repeat on sibling branches, so it is found on
-    // the path to the step.
-    var owner = tree.graph.rows
-        .where((row) => row.node.id == tree.selected)
-        .firstOrNull;
-    while (owner != null && owner.node.kind != BridgeEntryKind.user) {
-      final parent = owner.parentRow;
-      owner = parent == null ? null : tree.graph.rows[parent];
-    }
+    final turns = _turns(tree.graph);
+    final owner = _ownerOf(tree.graph, tree.selected);
     return Container(
       width: treeRailWidth,
       padding: const EdgeInsets.only(top: WsMetrics.space2),
@@ -259,8 +342,9 @@ class _Rail extends StatelessWidget {
           const SizedBox(height: WsMetrics.space2),
           Flexible(
             child: ListView.builder(
+              controller: controller,
               shrinkWrap: true,
-              itemExtent: 16,
+              itemExtent: _railRowHeight,
               itemCount: turns.length,
               itemBuilder: (context, index) {
                 final turn = turns[index];

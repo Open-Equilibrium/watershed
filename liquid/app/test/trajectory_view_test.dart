@@ -1574,6 +1574,90 @@ void main() {
     expect(find.byKey(const ValueKey('step-e6')), findsOneWidget);
   });
 
+  // Forty prompts in a row make the tree taller than its panel, with the first one selected.
+  Future<void> showLongTree(WidgetTester tester) async {
+    final steps = [
+      for (var index = 1; index <= 40; index++)
+        record(
+          'p$index',
+          index,
+          BridgeRecordKind.user,
+          'Prompt $index',
+          index * 1000,
+        ),
+    ];
+    final tree = [
+      for (final (index, step) in steps.indexed)
+        BridgeTreeNode(
+          failed: false,
+          id: step.entry,
+          parent: index == 0 ? null : steps[index - 1].entry,
+          kind: BridgeEntryKind.user,
+          preview: step.label,
+        ),
+    ];
+    await show(
+      tester,
+      historyOf(steps, tree: tree, leaf: 'p40'),
+      size: shortest,
+    );
+    await tester.tap(find.byKey(const ValueKey('tree-p1')));
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> moveDownTree(WidgetTester tester, int steps) async {
+    for (var move = 0; move < steps; move++) {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+      await tester.pumpAndSettle();
+    }
+  }
+
+  /// The tree's scrolling list, open or as the rail.
+  Finder treeList() => find.descendant(
+    of: find.byType(SessionTreeView),
+    matching: find.byType(ListView),
+  );
+
+  testWidgets('keys that move the tree cursor keep it on screen', (
+    tester,
+  ) async {
+    await showLongTree(tester);
+    await moveDownTree(tester, 30);
+    final cursor = find.byKey(const ValueKey('tree-p31'));
+    expect(
+      cursor,
+      findsOneWidget,
+      reason: 'the cursor row is built only while it is on screen',
+    );
+    expect(
+      tester.getRect(treeList()).contains(tester.getCenter(cursor)),
+      isTrue,
+      reason: 'the cursor row lies inside the tree panel',
+    );
+  });
+
+  testWidgets('keys that move the tree cursor keep its turn on the rail', (
+    tester,
+  ) async {
+    await showLongTree(tester);
+    await tester.tap(find.byTooltip('Collapse the session tree'));
+    await tester.pumpAndSettle();
+    await moveDownTree(tester, 30);
+    final turn = find.byTooltip('Turn 31 · Prompt 31');
+    expect(
+      turn,
+      findsOneWidget,
+      reason: 'the rail dot of the cursor turn is built only while on screen',
+    );
+    expect(
+      tester.getRect(treeList()).contains(tester.getCenter(turn)),
+      isTrue,
+      reason: 'the rail dot lies inside the rail',
+    );
+  });
+
   testWidgets('opening a turn shows its last request outside the range', (
     tester,
   ) async {
