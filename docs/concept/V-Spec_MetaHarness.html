@@ -271,16 +271,16 @@ liquid integration
       </svg>
       <ul>
         <li><strong>A · Switch the client:</strong> Meta-Harness runs as a service; Liquid on any device attaches over the authenticated remote connection (ADR-0185) and sees the same live session. The Workspace copy of the session record lets every device show its history without a connection.</li>
-        <li><strong>B · Survive a crash:</strong> every harness event is journaled before Liquid shows it, in short group commits rather than once per token, and every tool intent before the tool runs. After a crash Meta-Harness restarts the harness with its session; pi's own reading tools and Tools declared replay-safe run again, any other tool reports "interrupted" to the model, which continues without a restart click. A model answer cut off mid-stream is requested again.</li>
+        <li><strong>B · Survive a crash:</strong> as T3 Code does (ADR-0278). Every harness event is journaled before Liquid shows it, in short group commits rather than once per token. After a crash, restart or update, Meta-Harness resumes the harness's own session; unless the harness continues the cut turn itself, it sends: <em>"Continue where you left off. Your last turn was cut short, so a command or other action it started may have finished or may still be running. Before you repeat one that changes state, confirm it did not take effect and is not still running; if you cannot tell, say so instead of repeating it."</em> It does this at most three times in a row, and never while the session waits for the person, after a stop or once the person has written. A session stopped by a provider's usage limit continues when the limit resets.</li>
         <li><strong>C · Move an agent:</strong> at a turn boundary another of the person's hosts takes the session over: the record from Liquid, the files from the Git checkpoint ref (ADR-0220), its own credentials and the person's grant (ADR-0223). At each turn end Meta-Harness mirrors the session record into the agent-sessions area, its content as blobs with only metadata in the CRDT. The Sync Server gives the session to one host; two hosts continuing offline create two branches.</li>
         <li><strong>D · Several hosts:</strong> agent hosts hand each other tasks and messages and return results, as T3 Code's linked environments do; a harness's own approvals stay with the host that runs the work. Running single tools on another host follows later.</li>
       </ul>
       <div style="overflow-x:auto">
       <table>
-        <tr><th>Harness</th><th>Journal before display</th><th>Tool intent before it runs</th><th>Resume</th><th>Replay-safe</th></tr>
-        <tr><td>pi</td><td>Meta-Harness journals each RPC event first</td><td>through Watershed's pi extension</td><td>restart with <code>--session</code>, open calls reported as interrupted</td><td>pi's own reading tools</td></tr>
-        <tr><td>Flow Agent</td><td>its own journal</td><td>its own journal</td><td>Meta-Harness calls <code>flow resume</code></td><td>Tools declared replay-safe</td></tr>
-        <tr><td>Later adapters</td><td>Meta-Harness's journal</td><td>through their hooks where they exist</td><td>through their own session resume</td><td>their reading tools</td></tr>
+        <tr><th>Harness</th><th>Journal before display</th><th>Resume</th></tr>
+        <tr><td>pi</td><td>Meta-Harness journals each RPC event first</td><td>restart with <code>--session</code>, then the continue message</td></tr>
+        <tr><td>Flow Agent</td><td>its own journal</td><td>Meta-Harness calls <code>flow resume</code>; Flow Agent never repeats an uncertain attempt itself</td></tr>
+        <tr><td>Later adapters</td><td>Meta-Harness's journal</td><td>their own session resume, then the continue message</td></tr>
       </table>
       </div>
       <p class="muted">Each adapter reports which levels it reaches. The harness's own session file stays authoritative on its host, and pi keeps Liquid's records as custom entries in it; the Workspace record is the portable copy (ADR-0189). Without a Git project only the conversation moves.</p>

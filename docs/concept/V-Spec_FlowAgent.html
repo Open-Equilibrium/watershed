@@ -98,7 +98,7 @@ flow run hello-flow --emit jsonl</code></pre><p>The CLI owns stdout and streams 
         <li><strong>Server-host durability</strong> requires replication plus durable storage, with live ingestion by the Meta-Harness on that host and a persistent Flow Agent home otherwise. Cross-device work uses Portable continuation. Replication cadence, archive recovery, branch identity and any optional source fencing before child-Run import must satisfy <a href="../decisions/open-decisions.html#d-058">D-058</a> before shipping.</li>
         <li><strong>Export and share:</strong> HTML <code>/export</code> and GitHub-gist <code>/share</code> must include all branches from the one history file; their export framing is defined with that contract.</li>
         <li><strong>Plugins:</strong> post-M1 plugins run as Wasmtime modules: capability-scoped, sandboxed, with explicit grants and resource limits.</li>
-        <li><strong>Replay-safe Tools (ADR-0229):</strong> after a crash, Tools declared replay-safe may run again when Meta-Harness resumes Flow Agent (<a href="V-Spec_MetaHarness.html#durability">Meta-Harness durability</a>); all other uncertain effects keep the fail-closed reconciliation boundary.</li>
+        <li><strong>Resume under Meta-Harness (ADR-0278):</strong> Meta-Harness resumes Flow Agent with <code>flow resume</code>; uncertain attempts keep the fail-closed reconciliation boundary of <a href="../../PROTOCOL.md">PROTOCOL.md</a>, so no Tool runs again automatically.</li>
       </ul>
     </div></section>
 
