@@ -29,7 +29,7 @@ use std::{
     path::Path,
     sync::mpsc,
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[test]
@@ -518,7 +518,7 @@ fn active_history_scratch_member_removal_does_not_race_a_peer_sweep() {
         )
     });
     let selected = owner_member_rx
-        .recv()
+        .recv_timeout(Duration::from_secs(10))
         .expect("owner pauses before removing a mutable scratch member");
 
     let peer_workspace = workspace.to_path_buf();
@@ -562,7 +562,7 @@ fn active_history_scratch_member_removal_does_not_race_a_peer_sweep() {
     });
 
     let peer_skipped_active = match peer_event_rx
-        .recv()
+        .recv_timeout(Duration::from_secs(10))
         .expect("peer sweep reaches active scratch")
     {
         PeerEvent::ActiveScratchSkipped => {
@@ -581,12 +581,20 @@ fn active_history_scratch_member_removal_does_not_race_a_peer_sweep() {
         PeerEvent::MutableMemberInspected => {
             release_owner.send(()).expect("owner removal releases");
             owner_removed_rx
-                .recv()
+                .recv_timeout(Duration::from_secs(10))
                 .expect("owner removes the enumerated member normally");
             release_peer.send(()).expect("peer inspection releases");
             false
         }
     };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !peer.is_finished() {
+        assert!(
+            Instant::now() < deadline,
+            "peer sweep finishes without waiting on the owner's active scratch"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
     let peer_result = peer.join().expect("peer thread joins");
     if peer_skipped_active {
         release_owner.send(()).expect("owner removal releases");

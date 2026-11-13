@@ -1,5 +1,6 @@
 import json
 import os
+import selectors
 import signal
 import subprocess
 import tomllib
@@ -9,6 +10,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "scripts" / "run-isolated-rust-test.mjs"
+DEADLINE = 30
+
+
+def read_line(stream) -> str:
+    """The next line of `stream`; fails instead of waiting past the deadline."""
+    with selectors.DefaultSelector() as selector:
+        selector.register(stream, selectors.EVENT_READ)
+        if not selector.select(DEADLINE):
+            raise AssertionError(f"runner printed nothing within {DEADLINE} seconds")
+    return stream.readline().strip()
 
 
 class RustTestIsolationRunnerTest(unittest.TestCase):
@@ -34,6 +45,7 @@ class RustTestIsolationRunnerTest(unittest.TestCase):
             text=True,
             capture_output=True,
             check=False,
+            timeout=DEADLINE,
         )
 
     def test_runner_isolates_home_forwards_arguments_and_cleans_up(self) -> None:
@@ -83,9 +95,9 @@ class RustTestIsolationRunnerTest(unittest.TestCase):
             text=True,
         )
         try:
-            child_home = Path(runner.stdout.readline().strip())
+            child_home = Path(read_line(runner.stdout))
             runner.send_signal(signal.SIGINT)
-            self.assertEqual(runner.stdout.readline().strip(), "SIGINT")
+            self.assertEqual(read_line(runner.stdout), "SIGINT")
             runner.send_signal(signal.SIGTERM)
             self.assertEqual(runner.wait(timeout=30), 0)
         finally:
