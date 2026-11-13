@@ -117,11 +117,16 @@ impl PreparedExecutor {
                 tool_result,
                 ..
             } => {
-                validate_receipt_identity(&enforcement, self.selection.probe())?;
+                let outcome = validate_completed(
+                    &enforcement,
+                    tool_result,
+                    self.selection.probe(),
+                    started.cleanup_unknown,
+                )?;
                 Ok(ExecutorDispatchOutcome::Completed(Box::new(
                     ExecutorToolExecution {
                         enforcement,
-                        outcome: decode_tool_outcome(tool_result)?,
+                        outcome,
                         cleanup_unknown: started.cleanup_unknown,
                         #[cfg(any(test, feature = "m12-startup-evidence"))]
                         request_hash: _prepared.request_hash,
@@ -163,6 +168,23 @@ impl PreparedExecutor {
     }
 }
 
+/// Validates a terminal Completed answer. A surviving process group keeps only a valid answer, so
+/// an invalid one fails stop instead of dropping the unknown cleanup.
+fn validate_completed(
+    enforcement: &proto::EnforcementReceiptV0,
+    tool_result: proto::ExecutorToolResultV0,
+    probe: &proto::ExecutorProbeV0,
+    cleanup_unknown: bool,
+) -> Result<ToolExecutionOutcome, RuntimeError> {
+    match validate_receipt_identity(enforcement, probe)
+        .and_then(|()| decode_tool_outcome(tool_result))
+    {
+        Ok(outcome) => Ok(outcome),
+        Err(_) if cleanup_unknown => std::process::abort(),
+        Err(error) => Err(error),
+    }
+}
+
 fn invalid_request(_: proto::ExecutorProtocolError) -> RuntimeError {
     invalid_response("Flow constructed an invalid Executor protocol document")
 }
@@ -189,7 +211,7 @@ mod tests {
         ExecutorPreflightProcess, c_close, preflight_one_shot, preflight_one_shot_at_deadline,
         preflight_one_shot_with_deadline, start_one_shot,
     };
-    use super::{ExecutorSelection, PreparedExecutor};
+    use super::{ExecutorSelection, PreparedExecutor, validate_completed};
     use crate::runtime::run_attempts::{RunAttemptOutcome, ToolTerminalClassification};
     use crate::runtime::{
         executor::ExecutorSelectionSource, fs_guards::AnchoredWorkspace,
@@ -199,7 +221,10 @@ mod tests {
         collections::BTreeMap,
         fs::File,
         os::fd::{AsRawFd as _, OwnedFd},
-        os::unix::{fs::MetadataExt as _, process::CommandExt as _},
+        os::unix::{
+            fs::MetadataExt as _,
+            process::{CommandExt as _, ExitStatusExt as _},
+        },
         path::Path,
         process::Command,
         time::{Duration, Instant},
@@ -813,9 +838,8 @@ mod tests {
         assert!(executor.as_raw_fd() > last_protected_slot);
     }
 
-    #[test]
-    fn terminal_receipt_identity_must_match_the_prepared_probe() {
-        let probe = proto::ExecutorProbeV0 {
+    fn probe_fixture() -> proto::ExecutorProbeV0 {
+        proto::ExecutorProbeV0 {
             backend: format!("fake-{}-{}", std::env::consts::OS, std::env::consts::ARCH),
             backend_version: "1".to_owned(),
             executor: proto::EXECUTOR_NAME_V0.to_owned(),
@@ -827,7 +851,58 @@ mod tests {
             supported_policy_features: vec![
                 proto::EXECUTOR_FEATURE_FLOW_OWNED_WRITE_PROTECTION_V0.to_owned(),
             ],
+        }
+    }
+
+    #[test]
+    fn surviving_group_with_mismatched_receipt_identity_fails_stop() {
+        const CHILD_ENV: &str = "WATERSHED_EXECUTOR_SURVIVOR_IDENTITY_CHILD";
+        let probe = probe_fixture();
+        let receipt = proto::EnforcementReceiptV0 {
+            applied_policy_digest: "0".repeat(64),
+            backend: "other-backend".to_owned(),
+            backend_version: probe.backend_version.clone(),
+            executor: probe.executor.clone(),
+            executor_version: probe.executor_version.clone(),
+            platform: probe.platform.clone(),
+            flow_owned_write_protection_active: true,
         };
+        let tool_result = || proto::ExecutorToolResultV0 {
+            classification: None,
+            exit_code: Some(0),
+            status: proto::ExecutorToolStatusV0::Completed,
+            stderr_base64: proto::encode_executor_stream_v0(&[]),
+            stdout_base64: proto::encode_executor_stream_v0(&[]),
+        };
+        assert!(
+            validate_completed(&receipt, tool_result(), &probe, false).is_err(),
+            "without a surviving group the invalid answer is an ordinary error"
+        );
+        if std::env::var_os(CHILD_ENV).is_none() {
+            // The child re-runs only this test, so its abort cannot end the caller.
+            let test_name = std::thread::current()
+                .name()
+                .expect("test thread has a name")
+                .to_owned();
+            let status = Command::new(std::env::current_exe().expect("test executable resolves"))
+                .args(["--exact", &test_name, "--nocapture"])
+                .env(CHILD_ENV, "1")
+                .status()
+                .expect("isolated child starts");
+            assert_eq!(
+                status.signal(),
+                Some(rustix::process::Signal::ABORT.as_raw()),
+                "a surviving group with an invalid answer must fail stop: {status:?}"
+            );
+            return;
+        }
+        let outcome = validate_completed(&receipt, tool_result(), &probe, true);
+        panic!("a surviving group with an invalid answer returned {outcome:?} instead of aborting");
+    }
+
+    #[test]
+    fn terminal_receipt_identity_must_match_the_prepared_probe() {
+        let probe = probe_fixture();
         let receipt = proto::EnforcementReceiptV0 {
             applied_policy_digest: "0".repeat(64),
             backend: probe.backend.clone(),
