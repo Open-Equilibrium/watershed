@@ -56,6 +56,12 @@ fn apply(workspace: &mut Workspace<Sqlite>, mutation: Mutation) -> Option<Create
 
 /// A Workspace with one area and one Page holding the Text Block "Five days in Lisbon".
 fn lisbon(path: &Path) -> (PageId, liquid_core::BlockId) {
+    let (_workspace, page, block) = lisbon_open(path);
+    (page, block)
+}
+
+/// The same Workspace as [`lisbon`], still open: its writes may sit in the write-ahead log.
+fn lisbon_open(path: &Path) -> (Workspace<Sqlite>, PageId, liquid_core::BlockId) {
     let store = Sqlite::open(path, &KEY).unwrap();
     let mut workspace = Workspace::create(PersonId::new("benni"), store).unwrap();
     let Some(Created::Area(area)) = apply(
@@ -82,7 +88,7 @@ fn lisbon(path: &Path) -> (PageId, liquid_core::BlockId) {
     let Some(Created::Block { block, .. }) = apply(&mut workspace, add) else {
         panic!("a Block")
     };
-    (page, block)
+    (workspace, page, block)
 }
 
 #[test]
@@ -139,18 +145,19 @@ fn history_reads_in_pages_newest_first() {
 #[test]
 fn the_file_reveals_nothing_without_its_key() {
     let scratch = Scratch::new("key");
-    lisbon(&scratch.db());
-
-    let wrong = Sqlite::open(&scratch.db(), &[8; 32]);
-    assert!(matches!(wrong, Err(Error::Storage(_))));
+    // Scanned while the writer is open: its writes are then in the log, not yet folded in.
+    let (workspace, _, _) = lisbon_open(&scratch.db());
+    let wal = std::fs::read(scratch.0.join("replica.db-wal")).unwrap();
+    assert!(!wal.is_empty(), "the writes are in the log");
     let mut bytes = std::fs::read(scratch.db()).unwrap();
-    if let Ok(wal) = std::fs::read(scratch.0.join("replica.db-wal")) {
-        bytes.extend(wal);
-    }
+    bytes.extend(wal);
     assert!(!bytes.starts_with(b"SQLite format 3"));
     for plain in [&b"Lisbon"[..], b"Trips", b"benni"] {
         assert!(!bytes.windows(plain.len()).any(|window| window == plain));
     }
+    drop(workspace);
+    let wrong = Sqlite::open(&scratch.db(), &[8; 32]);
+    assert!(matches!(wrong, Err(Error::Storage(_))));
 }
 
 #[test]

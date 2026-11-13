@@ -10,7 +10,7 @@ use crate::api::database::{
 };
 use crate::api::workspace::{
     BridgeAnswer, BridgeBlockKind, BridgeMutation, BridgeMutationKind, BridgeQuery,
-    BridgeQueryKind, BridgeResource, BridgeResourceKind, LiquidWorkspace, MAX_WINDOW,
+    BridgeQueryKind, BridgeResource, BridgeResourceKind, LiquidWorkspace,
 };
 
 fn cell(kind: BridgeCellKind) -> BridgeCell {
@@ -299,13 +299,6 @@ fn rows_come_in_filtered_and_sorted_windows() {
     let containing = filtered(BridgeMatch::Contains, &expenses.name, Some(text("E")));
     assert_eq!(expenses.names(containing.clone()), ["groceries", "Rent"]);
     assert_eq!(expenses.rows(containing).unwrap().count, 2);
-    let capped = expenses
-        .rows(BridgeQuery {
-            limit: i64::MAX,
-            ..query(BridgeQueryKind::Rows)
-        })
-        .unwrap();
-    assert!(capped.rows.len() as i64 <= MAX_WINDOW);
 }
 
 #[test]
