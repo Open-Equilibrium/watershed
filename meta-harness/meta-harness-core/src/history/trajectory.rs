@@ -41,6 +41,7 @@ pub(super) fn context(entries: &[Entry], entry: &str) -> Option<ContextDetail> {
     if !matches!(response.body, Body::Assistant { .. }) {
         return None;
     }
+    // Only the context is wanted, so no rows are built.
     let mut projection = Projection::default();
     for entry in before {
         projection.add(entry, 0);
@@ -59,7 +60,10 @@ pub(super) fn trajectory(entries: &[Entry], leaf: Option<&str>) -> Trajectory {
         .and_then(|prompt| path[..=prompt].iter().rev().find_map(|entry| entry.at_ms))
         .or_else(|| path.iter().find_map(|entry| entry.at_ms))
         .unwrap_or(0);
-    let mut projection = Projection::default();
+    let mut projection = Projection {
+        keep_records: true,
+        ..Projection::default()
+    };
     let mut at = 0;
     for entry in &path {
         at = entry.at_ms.map_or(at, |millis| millis.saturating_sub(base));
@@ -75,6 +79,8 @@ pub(super) fn trajectory(entries: &[Entry], leaf: Option<&str>) -> Trajectory {
 #[derive(Default)]
 struct Projection<'a> {
     records: Vec<TrajectoryRecord>,
+    /// Whether rows are kept; a response's context alone needs none.
+    keep_records: bool,
     turn: u64,
     sections: BTreeMap<String, usize>,
     appended_chars: usize,
@@ -296,10 +302,12 @@ impl<'a> Projection<'a> {
             Body::User { text, chars } => {
                 self.turn += 1;
                 let label = first_line(text, LABEL_CHARS);
-                self.records.push(TrajectoryRecord {
-                    added_chars: *chars,
-                    ..row(id, self.turn, RecordKind::User, label.clone(), at, None)
-                });
+                if self.keep_records {
+                    self.records.push(TrajectoryRecord {
+                        added_chars: *chars,
+                        ..row(id, self.turn, RecordKind::User, label.clone(), at, None)
+                    });
+                }
                 self.count(
                     Some("prompt".to_owned()),
                     format!("prompt · {label}"),
@@ -334,23 +342,25 @@ impl<'a> Projection<'a> {
                     message_chars: self.message_chars + self.summary_chars(),
                     new_since_previous: self.new_since_previous(),
                 };
-                self.records.push(TrajectoryRecord {
-                    first_token_ms,
-                    model: model.clone(),
-                    usage: Some(*usage),
-                    stop_reason: stop_reason.clone(),
-                    failed: stop_reason == "error",
-                    context: Some(context),
-                    added_chars: *chars,
-                    ..row(
-                        id,
-                        self.turn,
-                        RecordKind::Message,
-                        label.clone(),
-                        at.saturating_sub(duration_ms.unwrap_or(0)),
-                        duration_ms,
-                    )
-                });
+                if self.keep_records {
+                    self.records.push(TrajectoryRecord {
+                        first_token_ms,
+                        model: model.clone(),
+                        usage: Some(*usage),
+                        stop_reason: stop_reason.clone(),
+                        failed: stop_reason == "error",
+                        context: Some(context),
+                        added_chars: *chars,
+                        ..row(
+                            id,
+                            self.turn,
+                            RecordKind::Message,
+                            label.clone(),
+                            at.saturating_sub(duration_ms.unwrap_or(0)),
+                            duration_ms,
+                        )
+                    });
+                }
                 self.count(None, format!("response · {label}"), *chars);
             }
             Body::ToolResult {
@@ -370,28 +380,30 @@ impl<'a> Projection<'a> {
                     Some(argument) => format!("result of {tool} · {argument}"),
                     None => format!("result of {tool}"),
                 };
-                self.records.push(TrajectoryRecord {
-                    target: pi::call_target(&arguments),
-                    changed_file: (!*failed)
-                        .then(|| pi::changed_path(tool, &arguments))
-                        .flatten(),
-                    detail: arguments,
-                    failed: *failed,
-                    outcome: ToolOutcome {
-                        // A failed write wrote nothing it was asked to.
-                        added: outcome.added.or(if *failed { None } else { written }),
-                        ..*outcome
-                    },
-                    added_chars: *chars,
-                    ..row(
-                        id,
-                        self.turn,
-                        RecordKind::Tool,
-                        tool.clone(),
-                        ended.saturating_sub(duration_ms.unwrap_or(0)),
-                        duration_ms,
-                    )
-                });
+                if self.keep_records {
+                    self.records.push(TrajectoryRecord {
+                        target: pi::call_target(&arguments),
+                        changed_file: (!*failed)
+                            .then(|| pi::changed_path(tool, &arguments))
+                            .flatten(),
+                        detail: arguments,
+                        failed: *failed,
+                        outcome: ToolOutcome {
+                            // A failed write wrote nothing it was asked to.
+                            added: outcome.added.or(if *failed { None } else { written }),
+                            ..*outcome
+                        },
+                        added_chars: *chars,
+                        ..row(
+                            id,
+                            self.turn,
+                            RecordKind::Tool,
+                            tool.clone(),
+                            ended.saturating_sub(duration_ms.unwrap_or(0)),
+                            duration_ms,
+                        )
+                    });
+                }
                 self.count(Some(format!("result of {tool}")), label, *chars);
             }
             // A shell command marked so stays out of the model's context.

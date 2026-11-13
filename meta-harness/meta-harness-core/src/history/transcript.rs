@@ -19,16 +19,32 @@ pub(super) fn transcript(
     limit: usize,
 ) -> Transcript {
     let path = path(entries, leaf);
-    // How each tool call ended, by its response and place there, from anywhere on the branch,
-    // so every page shows it.
+    let end = before
+        .and_then(|before| path.iter().position(|entry| entry.id == before))
+        .unwrap_or(path.len());
+    let start = end.saturating_sub(limit);
+    // How each tool call on the page ended, by its response and place there. A result follows its
+    // call, so the scan from the page's start stops once every call on the page has one.
+    let mut waiting: usize = path[start..end]
+        .iter()
+        .map(|entry| match &entry.body {
+            Body::Assistant { calls, .. } => calls.len(),
+            _ => 0,
+        })
+        .sum();
     let mut ended: HashMap<(&str, usize), Ended> = HashMap::new();
     let mut open = OpenCalls::default();
     let mut response = "";
-    for entry in &path {
+    let mut response_on_page = false;
+    for (index, entry) in path.iter().enumerate().skip(start) {
+        if waiting == 0 {
+            break;
+        }
         match &entry.body {
             Body::Assistant { calls, .. } => {
                 open.respond(calls);
                 response = &entry.id;
+                response_on_page = index < end;
             }
             Body::ToolTiming { call, duration_ms } => open.ended(call, *duration_ms),
             Body::ToolResult {
@@ -43,16 +59,15 @@ pub(super) fn transcript(
                     .map(|(added, removed)| ChangedLines { added, removed });
                 let duration_ms = open.timing(call).flatten();
                 if let Some((place, _)) = open.answer(call) {
+                    if response_on_page {
+                        waiting = waiting.saturating_sub(1);
+                    }
                     ended.insert((response, place), (*failed, duration_ms, lines));
                 }
             }
             _ => {}
         }
     }
-    let end = before
-        .and_then(|before| path.iter().position(|entry| entry.id == before))
-        .unwrap_or(path.len());
-    let start = end.saturating_sub(limit);
     let mut items = Vec::new();
     for entry in &path[start..end] {
         let item = |kind, text: &str| TranscriptItem {
