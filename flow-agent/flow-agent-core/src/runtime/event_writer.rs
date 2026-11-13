@@ -374,6 +374,9 @@ impl<A: EventLogAppender> SerialEventBackend for WriterWorker<'_, A> {
 
     fn shutdown(&mut self) -> WriterOutcome {
         let mut failures = self.pending_error.take().into_iter().collect::<Vec<_>>();
+        if let Err(error) = self.context_writer.finish(self.context_path) {
+            failures.push(error);
+        }
         if self.sync_required {
             match self.appender.sync(self.path.diagnostic_path()) {
                 Ok(()) => {

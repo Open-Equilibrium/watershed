@@ -197,20 +197,9 @@ impl ContextManifestWriter {
         };
         let actual = self.appender.len(path.diagnostic_path())?;
         if actual != self.byte_count {
-            return Err(RuntimeError::Protocol(format!(
-                "{} changed outside context manifest append semantics",
-                path.diagnostic_path().display()
-            )));
+            return Err(changed_outside_append_semantics(path));
         }
-        let (_, _, observed_bytes, observed_signature) = context_manifest_inventory(path)?;
-        if observed_bytes != self.byte_count
-            || observed_signature.signature() != self.manifest_signature.signature()
-        {
-            return Err(RuntimeError::Protocol(format!(
-                "{} changed outside context manifest append semantics",
-                path.diagnostic_path().display()
-            )));
-        }
+        self.verify_last_record(path)?;
         if let Some(object_writer) = self.object_writer.as_mut() {
             let referenced = context_manifest_object_digests(&manifest);
             object_writer.persist_manifest_objects(&referenced, &checkpoint.objects)?;
@@ -228,4 +217,40 @@ impl ContextManifestWriter {
             .push(checkpoint.manifest.line.as_bytes());
         Ok(())
     }
+
+    /// Checks only the final record, which this writer last wrote. Earlier records are rescanned
+    /// when the Run finishes, so persisting does not grow with the manifest stream.
+    fn verify_last_record(&self, path: &AnchoredFile) -> Result<(), RuntimeError> {
+        let Some(last) = self.last_manifest.as_deref() else {
+            return Ok(());
+        };
+        let bytes = self
+            .appender
+            .read_last_bytes(u64::try_from(last.len()).unwrap_or(u64::MAX))?;
+        let observed =
+            std::str::from_utf8(&bytes).map_err(|_| changed_outside_append_semantics(path))?;
+        if observed != last {
+            validate_context_manifest_line(path.diagnostic_path(), observed)?;
+            return Err(changed_outside_append_semantics(path));
+        }
+        Ok(())
+    }
+
+    /// Rescans the whole manifest stream once when the Run finishes.
+    pub(crate) fn finish(&self, path: &AnchoredFile) -> Result<(), RuntimeError> {
+        let (_, _, observed_bytes, observed_signature) = context_manifest_inventory(path)?;
+        if observed_bytes != self.byte_count
+            || observed_signature.signature() != self.manifest_signature.signature()
+        {
+            return Err(changed_outside_append_semantics(path));
+        }
+        Ok(())
+    }
+}
+
+fn changed_outside_append_semantics(path: &AnchoredFile) -> RuntimeError {
+    RuntimeError::Protocol(format!(
+        "{} changed outside context manifest append semantics",
+        path.diagnostic_path().display()
+    ))
 }

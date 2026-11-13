@@ -437,6 +437,28 @@ impl SessionLogAppender {
         Ok(self.total_bytes)
     }
 
+    /// Reads the final `len` bytes of the stream. A record never spans segments, so these bytes
+    /// hold the last record when the writer appended it last.
+    pub(crate) fn read_last_bytes(&self, len: u64) -> Result<Vec<u8>, RuntimeError> {
+        let (path, end) = match self.sealed_segments.last() {
+            Some(segment) if self.current_bytes == 0 => (segment.path.clone(), segment.bytes),
+            _ => (self.current_path()?, self.current_bytes),
+        };
+        let start = end.checked_sub(len).ok_or_else(|| {
+            RuntimeError::Protocol(format!(
+                "{} is shorter than its last record",
+                path.diagnostic_path().display()
+            ))
+        })?;
+        let (mut file, _) = open_anchored_file_for_read(&path)?;
+        file.seek(SeekFrom::Start(start))
+            .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
+        let mut bytes = vec![0; usize::try_from(len).unwrap_or(usize::MAX)];
+        file.read_exact(&mut bytes)
+            .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
+        Ok(bytes)
+    }
+
     pub(crate) fn current_path(&self) -> Result<AnchoredFile, RuntimeError> {
         segmented_jsonl_path(&self.base_path, self.current_ordinal)
     }
