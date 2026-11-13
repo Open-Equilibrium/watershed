@@ -4,7 +4,7 @@ use crate::runtime::{
     fs_guards::{
         AnchoredDir, AnchoredFile, ensure_anchored_new_leaf_available,
         open_anchored_file_for_update, open_anchored_session_log_append_file, path_io_error,
-        read_anchored_file_with_limit, sync_directory, sync_durable,
+        read_anchored_file_with_limit, sync_anchored_directory, sync_durable,
         with_anchored_replacement_temp, write_durable,
     },
     session_bundle::{
@@ -364,7 +364,7 @@ impl SessionObjectWriter {
         }
 
         if sync_parent {
-            sync_directory(&self.object_parent.path)?;
+            sync_anchored_directory(&self.object_parent)?;
         }
         Ok(())
     }
