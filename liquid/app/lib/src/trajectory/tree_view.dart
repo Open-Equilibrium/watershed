@@ -123,7 +123,7 @@ class _SessionTreeViewState extends State<SessionTreeView> {
     final onOpen = widget.onOpen;
     final onRow = widget.onRow;
     if (!open) return _Rail(tree: widget, controller: _rail);
-    final lines = _linesOf[graph] ??= _lines(graph);
+    final (lines, through) = _linesOf[graph] ??= _lines(graph);
     final path = widget._path();
     final spacing = graph.lanes < 2
         ? 14.0
@@ -197,6 +197,7 @@ class _SessionTreeViewState extends State<SessionTreeView> {
                               child: CustomPaint(
                                 painter: _RowPainter(
                                   lines[index],
+                                  through: through,
                                   row: index,
                                   kind: row.node.kind,
                                   failed: row.node.failed,
@@ -561,11 +562,8 @@ class _Check extends StatelessWidget {
   }
 }
 
-/// The graph lines crossing one row, each with the row it leads to.
+/// The graph lines that start or end at one row, each with the row it leads to.
 class _RowLines {
-  /// Lanes that pass through without a node here.
-  final Map<int, int> through = {};
-
   /// Lanes a fork from this row's node curves into.
   final List<(int, int)> curves = [];
 
@@ -576,14 +574,19 @@ class _RowLines {
   bool up = false;
 }
 
-/// The lines of each graph, computed once per graph rather than on every build.
-final _linesOf = Expando<List<_RowLines>>();
+/// A lane's line from row `from` down to row `to`, which passes the rows between them.
+typedef _Span = ({int lane, int from, int to});
+
+/// The lines of each graph, computed once per graph rather than on every build. Spans are kept
+/// once each, so the memory grows with the rows, not with every row a line passes.
+final _linesOf = Expando<(List<_RowLines>, List<_Span>)>();
 
 /// The shown tips of each graph and the rows on their paths.
 final _pathOf = Expando<(Set<String>, Set<int>)>();
 
-List<_RowLines> _lines(SessionGraph graph) {
+(List<_RowLines>, List<_Span>) _lines(SessionGraph graph) {
   final lines = [for (final _ in graph.rows) _RowLines()];
+  final spans = <_Span>[];
   for (var index = 0; index < graph.rows.length; index++) {
     final row = graph.rows[index];
     final parent = row.parentRow;
@@ -594,16 +597,17 @@ List<_RowLines> _lines(SessionGraph graph) {
     } else {
       lines[parent].curves.add((row.lane, index));
     }
-    for (var between = parent + 1; between < index; between++) {
-      lines[between].through[row.lane] = index;
+    if (index > parent + 1) {
+      spans.add((lane: row.lane, from: parent, to: index));
     }
   }
-  return lines;
+  return (lines, spans);
 }
 
 class _RowPainter extends CustomPainter {
   _RowPainter(
     this.lines, {
+    required this.through,
     required this.row,
     required this.kind,
     required this.failed,
@@ -615,6 +619,9 @@ class _RowPainter extends CustomPainter {
   });
 
   final _RowLines lines;
+
+  /// Every span of the graph; those passing this row are drawn.
+  final List<_Span> through;
   final int row;
   final BridgeEntryKind kind;
   final bool failed;
@@ -636,12 +643,14 @@ class _RowPainter extends CustomPainter {
           : palette.textFaint.withValues(alpha: 0.45)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.5;
-    for (final MapEntry(key: through, value: target) in lines.through.entries) {
-      canvas.drawLine(
-        Offset(x(through), 0),
-        Offset(x(through), size.height),
-        stroke(target),
-      );
+    for (final span in through) {
+      if (span.from < row && row < span.to) {
+        canvas.drawLine(
+          Offset(x(span.lane), 0),
+          Offset(x(span.lane), size.height),
+          stroke(span.to),
+        );
+      }
     }
     if (lines.up) {
       canvas.drawLine(Offset(x(lane), 0), Offset(x(lane), middle), stroke(row));
