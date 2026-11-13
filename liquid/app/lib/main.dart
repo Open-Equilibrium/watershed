@@ -33,9 +33,16 @@ Future<void> main() async {
     Platform.environment,
     defaultTargetPlatform,
   );
+  final computer = computerDirectory(
+    Platform.environment,
+    defaultTargetPlatform,
+  );
   final launch = await launchFromEnvironment(
     Platform.environment,
-    bases: BranchBases(file: SettingsFile(File('$settings/git-bases.json'))),
+    bases: BranchBases(
+      file: SettingsFile(File('$settings/git-bases.json')),
+      deviceFile: SettingsFile(File('$computer/device.json')),
+    ),
   );
   // Without a session the Workspace still opens; the reason stays in the terminal.
   if (launch.problem case final problem?) stderr.writeln('Liquid: $problem');

@@ -6,15 +6,19 @@ import '../settings_file.dart';
 /// The branch each branch Liquid created started from, per computer, repository and branch, in
 /// Liquid's own data: a pull request's base unless the user chooses another (approved pull
 /// request mockups §2). Several windows and processes share the file; each change re-reads it
-/// under the file's lock. A computer is named by a random id kept in the file rather than by its
-/// host name, which can change or repeat (ADR-0270).
+/// under the file's lock. A computer is named by a random id rather than by its host name, which
+/// can change or repeat (ADR-0270). The id lives in the computer's own folder, not beside the
+/// records: several computers may share those.
 class BranchBases {
-  BranchBases({this.file, String? device}) {
+  BranchBases({this.file, this.deviceFile, String? device}) {
     _device = device;
   }
 
   /// None keeps the records in memory only.
   final SettingsFile? file;
+
+  /// Where this computer keeps its id; none keeps the id in memory only.
+  final SettingsFile? deviceFile;
 
   /// This computer's id in the records, once known.
   String? _device;
@@ -76,17 +80,19 @@ class BranchBases {
     );
   }
 
-  /// This computer's id. The file keeps it once created, under the file's lock, and that first
-  /// creation moves the records that named the host name to it.
+  /// This computer's id. Its folder keeps the id once created, under that file's lock, and that
+  /// first creation moves the records that named the host name to it. An id that an older Liquid
+  /// stored in the shared records is not read: which computer it named cannot be told.
   Future<String> _deviceId() async {
     final known = _device;
     if (known != null) return known;
-    final stored = file;
+    final stored = deviceFile;
     if (stored == null) return _device = _newId();
     if ((await stored.load())?['device'] case final String kept) {
       return _device = kept;
     }
     var id = '';
+    var created = false;
     await stored.update((json) {
       // Another window may have created it since the read above.
       if (json?['device'] case final String kept) {
@@ -94,9 +100,20 @@ class BranchBases {
         return {...?json};
       }
       id = _newId();
-      return {
+      created = true;
+      return {...?json, 'device': id};
+    });
+    if (created) await _moveHostRecords(id);
+    return _device = id;
+  }
+
+  /// Moves the records that named this computer by host name, as before ADR-0270, to `id`.
+  Future<void> _moveHostRecords(String id) async {
+    final stored = file;
+    if (stored == null) return;
+    await stored.update(
+      (json) => {
         ...?json,
-        'device': id,
         'bases': _encode([
           for (final record in _read(json))
             if (record.device == Platform.localHostname)
@@ -109,9 +126,8 @@ class BranchBases {
             else
               record,
         ]),
-      };
-    });
-    return _device = id;
+      },
+    );
   }
 }
 

@@ -43,6 +43,30 @@ void main() {
     );
   });
 
+  test('each computer has its own folder apart from the settings', () {
+    expect(
+      computerDirectory({'HOME': '/Users/b'}, TargetPlatform.macOS),
+      '/Users/b/Library/Caches/Liquid',
+    );
+    expect(
+      computerDirectory({'HOME': '/home/b'}, TargetPlatform.linux),
+      '/home/b/.local/state/liquid',
+    );
+    expect(
+      computerDirectory({
+        'HOME': '/home/b',
+        'XDG_STATE_HOME': '/xdg',
+      }, TargetPlatform.linux),
+      '/xdg/liquid',
+    );
+    expect(
+      computerDirectory({
+        'LOCALAPPDATA': r'C:\Users\b\AppData\Local',
+      }, TargetPlatform.windows),
+      r'C:\Users\b\AppData\Local\Liquid',
+    );
+  });
+
   test(
     'the store keeps settings as JSON and reads nothing it cannot trust',
     () async {

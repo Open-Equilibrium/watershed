@@ -19,6 +19,8 @@ void main() {
   late PullRequests pulls;
 
   File basesFile() => File('${dir.path}/git-bases.json');
+  File deviceFile([String computer = 'computer']) =>
+      File('${dir.path}/$computer/device.json');
   BranchBases stored({String device = 'MacBook'}) =>
       BranchBases(file: SettingsFile(basesFile()), device: device);
 
@@ -67,23 +69,53 @@ void main() {
   );
 
   test(
-    'base records name this computer by a random id kept in the file',
+    'base records name this computer by a random id kept in its own folder',
     () async {
-      await BranchBases(file: SettingsFile(basesFile()))
-          .record('/work/api/.git', 'feature', 'main');
-      final stored = jsonDecode(basesFile().readAsStringSync()) as Map;
-      expect(stored['device'], isA<String>());
-      expect(stored['device'], isNot(Platform.localHostname));
-      // A later start finds the record under the same id.
+      BranchBases reopened() => BranchBases(
+        file: SettingsFile(basesFile()),
+        deviceFile: SettingsFile(deviceFile()),
+      );
+      await reopened().record('/work/api/.git', 'feature', 'main');
+      final id = (jsonDecode(deviceFile().readAsStringSync()) as Map)['device'];
+      expect(id, isA<String>());
+      expect(id, isNot(Platform.localHostname));
       expect(
-        await BranchBases(file: SettingsFile(basesFile()))
-            .baseOf('/work/api/.git', 'feature'),
+        (jsonDecode(basesFile().readAsStringSync()) as Map).containsKey(
+          'device',
+        ),
+        isFalse,
+      );
+      // A later start finds the record under the same id.
+      expect(await reopened().baseOf('/work/api/.git', 'feature'), 'main');
+      expect(
+        (jsonDecode(deviceFile().readAsStringSync()) as Map)['device'],
+        id,
+      );
+    },
+  );
+
+  test(
+    'computers sharing one data folder keep their own ids and remembered bases',
+    () async {
+      BranchBases computer(String name) => BranchBases(
+        file: SettingsFile(basesFile()),
+        deviceFile: SettingsFile(deviceFile(name)),
+      );
+      await computer('mac-a').record('/work/api/.git', 'feature', 'main');
+      await computer('mac-b').record('/work/api/.git', 'feature', 'develop');
+      expect(
+        await computer('mac-a').baseOf('/work/api/.git', 'feature'),
         'main',
       );
       expect(
-        (jsonDecode(basesFile().readAsStringSync()) as Map)['device'],
-        stored['device'],
+        await computer('mac-b').baseOf('/work/api/.git', 'feature'),
+        'develop',
       );
+      final ids = {
+        for (final name in ['mac-a', 'mac-b'])
+          (jsonDecode(deviceFile(name).readAsStringSync()) as Map)['device'],
+      };
+      expect(ids, hasLength(2));
     },
   );
 
@@ -102,13 +134,17 @@ void main() {
           ],
         }),
       );
-      final migrated = BranchBases(file: SettingsFile(basesFile()));
+      final migrated = BranchBases(
+        file: SettingsFile(basesFile()),
+        deviceFile: SettingsFile(deviceFile()),
+      );
       expect(await migrated.baseOf('/work/api/.git', 'feature'), 'main');
-      final stored = jsonDecode(basesFile().readAsStringSync()) as Map;
-      expect(stored['device'], isNot(Platform.localHostname));
+      final id = (jsonDecode(deviceFile().readAsStringSync()) as Map)['device'];
+      expect(id, isNot(Platform.localHostname));
       expect(
-        (stored['bases'] as List).single,
-        containsPair('device', stored['device']),
+        ((jsonDecode(basesFile().readAsStringSync()) as Map)['bases'] as List)
+            .single,
+        containsPair('device', id),
       );
     },
   );
