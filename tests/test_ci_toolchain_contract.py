@@ -160,11 +160,14 @@ def step_run(workflow: str, name: str) -> str:
     declaration = lines[run_index].removeprefix("        run:").strip()
     if declaration not in ("|", ">-"):
         return declaration
-    return "\n".join(
+    body = [
         line.removeprefix("          ")
         for line in field_block(lines[run_index + 1 :], "          ")
         if line.startswith("          ")
-    ).rstrip()
+    ]
+    if declaration == ">-":
+        return " ".join(line.strip() for line in body if line.strip())
+    return "\n".join(body).rstrip()
 
 
 def folded_tokens(workflow: str, name: str) -> list[str]:
@@ -368,6 +371,10 @@ class CiWorkflowContractTest(unittest.TestCase):
                             "  second:\n    steps:\n      - *example\n    env:\n      A: b\n")
                 self.assertEqual(step_run(workflow, "Example"), "first\nsecond")
                 self.assertEqual(job_of(workflow, "Example"), ["first", "second"])
+
+    def test_folded_run_blocks_join_their_lines_with_spaces(self) -> None:
+        workflow = "jobs:\n  first:\n    steps:\n      - name: Example\n        run: >-\n          first\n          second\n"
+        self.assertEqual(step_run(workflow, "Example"), "first second")
 
     def test_feature_gated_evidence_reporters_are_registered(self) -> None:
         manifest = tomllib.loads(
