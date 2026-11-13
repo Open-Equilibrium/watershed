@@ -255,8 +255,9 @@ impl WorkingTree {
         Ok(self.inspect_commit(committed, &before).await)
     }
 
-    /// The selected files whose only change is their executable bit, which Git's commit skips
-    /// while the user's `core.fileMode` is false; Liquid reads modes regardless of that setting.
+    /// The selected files whose mode changed, which Git's commit leaves out while the user's
+    /// `core.fileMode` is false, also when their contents change too; Liquid reads modes
+    /// regardless of that setting.
     async fn skipped_mode_changes(
         &self,
         from: &Snapshot,
@@ -287,8 +288,7 @@ impl WorkingTree {
         while let (Some(header), Some(path)) = (records.next(), records.next()) {
             let mut fields = header.trim_start_matches(':').split(' ');
             let (old_mode, new_mode) = (fields.next(), fields.next());
-            let (old_object, new_object) = (fields.next(), fields.next());
-            if old_mode != new_mode && old_object == new_object && selected.contains(path) {
+            if old_mode != new_mode && selected.contains(path) {
                 skipped.push(path.to_owned());
             }
         }

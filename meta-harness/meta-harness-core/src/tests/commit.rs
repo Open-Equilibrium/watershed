@@ -995,6 +995,36 @@ fn commit_refuses_a_mode_change_git_would_skip() {
 }
 
 #[test]
+fn commit_refuses_a_content_and_mode_change_git_would_partly_commit() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        let repo = Repo::new("commit-mode-and-content");
+        identity(&repo);
+        repo.write("script.sh", "run\n");
+        repo.git(&["add", "script.sh"]);
+        repo.git(&["commit", "-qm", "script"]);
+        // With this false, Git commits the new contents of script.sh but leaves its executable bit out.
+        repo.git(&["config", "core.fileMode", "false"]);
+        std::fs::set_permissions(
+            repo.path().join("script.sh"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        repo.write("script.sh", "run more\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        let plan = checkpoints.commit_plan(&[]).await.unwrap();
+        let head = repo.git(&["rev-parse", "HEAD"]);
+
+        let result = checkpoints
+            .commit(&plan.snapshot, &["script.sh".into()], "Message", None)
+            .await;
+
+        assert!(matches!(result, Err(DiffError::Git(_))), "{result:?}");
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    });
+}
+
+#[test]
 fn new_branch_commit_failure_reports_the_branch_after_either_hook() {
     use std::os::unix::fs::PermissionsExt;
     run(async {
