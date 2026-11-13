@@ -176,7 +176,7 @@ fn exact_recovery_appends_the_event_missing_after_its_durable_context() {
 
 #[test]
 fn readable_context_only_repair_notifies_despite_cleanup_or_sync_failure() {
-    for case in ["event-sync", "context-sync", "append-cleanup"] {
+    for case in ["event-sync", "append-cleanup"] {
         let (workspace, prefix, event, checkpoint) = context_only_recovery_fixture(
             &format!("conversation-failed-repair-notification-{case}"),
             false,
@@ -207,10 +207,6 @@ fn readable_context_only_repair_notifies_despite_cleanup_or_sync_failure() {
             }
             "event-sync" => set_conversation_file_sync_error_for_path_for_test(
                 &events_path,
-                io::ErrorKind::Other,
-            ),
-            "context-sync" => set_conversation_file_sync_error_for_path_for_test(
-                &run.join("contexts.jsonl"),
                 io::ErrorKind::Other,
             ),
             _ => unreachable!("closed repair failure matrix"),
@@ -268,6 +264,40 @@ fn readable_context_only_repair_notifies_despite_cleanup_or_sync_failure() {
             "stopped retry must not notify"
         );
     }
+}
+
+#[test]
+fn recovery_does_not_append_completion_when_context_tail_sync_fails() {
+    let (workspace, prefix, event, checkpoint) =
+        context_only_recovery_fixture("conversation-context-tail-sync-failure", false);
+    let run = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
+    let events_path = run.join("events.jsonl");
+    let mut resumed =
+        ConversationEventWriter::open_for_recovery(&workspace, "review", "review-1", false, None)
+            .expect("recovery writer opens");
+    replay_prefix(&mut resumed, &prefix);
+    let events_before = fs::read(&events_path).expect("event prefix reads");
+    let canonical = event.canonical_jsonl().expect("completion canonicalizes");
+    set_conversation_file_sync_error_for_path_for_test(
+        &run.join("contexts.jsonl"),
+        io::ErrorKind::Other,
+    );
+
+    let error = resumed
+        .commit(&event, &canonical, Some(checkpoint))
+        .expect_err("context tail synchronization failure rejects the repair");
+
+    assert!(
+        error
+            .to_string()
+            .contains("injected conversation file synchronization failure"),
+        "{error}"
+    );
+    assert_eq!(
+        fs::read(&events_path).expect("event stream reads after failure"),
+        events_before,
+        "the completion must not be appended before its context tail is synchronized"
+    );
 }
 
 #[test]

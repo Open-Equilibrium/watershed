@@ -282,6 +282,7 @@ impl ConversationEventWriter {
             .clone();
         validation.validate_constructed_event(&self.events_path, event, canonical_jsonl.len())?;
         self.run_objects.persist(&checkpoint.objects)?;
+        sync_anchored_stream(&self.contexts_file, CONTEXT_MANIFEST_STREAM_LIMITS)?;
         let append_error = match append_anchored_canonical_jsonl_batch(
             &self.events_file,
             &[canonical_jsonl],
@@ -291,9 +292,7 @@ impl ConversationEventWriter {
             Err(failure) if failure.committed_events == Some(1) => Some(failure.error),
             Err(failure) => return Err(failure.error),
         };
-        let sync_error = sync_anchored_stream(&self.contexts_file, CONTEXT_MANIFEST_STREAM_LIMITS)
-            .and_then(|()| sync_anchored_stream(&self.events_file, EVENT_STREAM_LIMITS))
-            .err();
+        let sync_error = sync_anchored_stream(&self.events_file, EVENT_STREAM_LIMITS).err();
         self.validation = Some(validation);
         let error = append_error.or(sync_error);
         if let Some(notifier) = &self.notifier {
