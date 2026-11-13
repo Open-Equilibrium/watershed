@@ -394,6 +394,20 @@ fn private_namespace(path: &Path) -> Result<(), DiffError> {
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
             .map_err(DiffError::Io)?;
     }
+    // The ancestors as resolved, so a link cannot hide a folder another user can rename. Each is
+    // owned by root or this user, and a folder anyone may write is sticky, as /tmp is.
+    let euid = rustix::process::geteuid().as_raw();
+    let resolved = std::fs::canonicalize(path).map_err(DiffError::Io)?;
+    for folder in resolved.ancestors().skip(1) {
+        let metadata = std::fs::metadata(folder).map_err(DiffError::Io)?;
+        let shared = metadata.mode() & 0o022 != 0 && metadata.mode() & 0o1000 == 0;
+        if shared || (metadata.uid() != 0 && metadata.uid() != euid) {
+            return Err(DiffError::Io(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "The project lock namespace must sit under folders only this user or the system can change.",
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -497,6 +511,29 @@ mod tests {
         let with = user_lock_folder().unwrap();
         unsafe { std::env::remove_var("XDG_RUNTIME_DIR") };
         assert_eq!(with, without);
+    }
+
+    #[test]
+    fn a_lock_namespace_under_a_shared_writable_ancestor_is_refused() {
+        let root =
+            std::env::temp_dir().join(format!("watershed-ancestor-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let namespace_under = |name: &str, bits: u32| {
+            let dir = root.join(name);
+            std::fs::create_dir_all(dir.join("liquid")).unwrap();
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(bits)).unwrap();
+            dir.join("liquid/project-locks")
+        };
+        // Another user could rename `liquid` out of a folder anyone may write, unless it is sticky.
+        let Err(DiffError::Io(error)) = private_namespace(&namespace_under("open", 0o777)) else {
+            panic!("a namespace under a folder anyone may rename is refused");
+        };
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(
+            private_namespace(&namespace_under("sticky", 0o1777)).is_ok(),
+            "a sticky folder, as /tmp is, is no risk"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
