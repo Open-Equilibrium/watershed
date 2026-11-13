@@ -328,6 +328,9 @@ class FakeBackend implements SessionBackend {
   /// What fetching fails with.
   Object? fetchError;
 
+  /// The remote a fetch reports it fetched, when it is not the checkout's.
+  String? fetchedRemote;
+
   int statusReads = 0;
 
   @override
@@ -503,10 +506,10 @@ class FakeBackend implements SessionBackend {
   }
 
   @override
-  Future<bool> fetch() async {
+  Future<String?> fetch() async {
     calls.add('fetch');
     if (fetchError case final error?) throw error;
-    return true;
+    return fetchedRemote ?? git?.remote;
   }
 
   @override

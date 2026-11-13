@@ -708,7 +708,11 @@ fn fetching_updates_only_the_upstreams_remote_tracking_branches() {
         clone.origin.git(&["tag", "v1"]);
         let _ = std::fs::remove_file(repo.path().join(".git/FETCH_HEAD"));
 
-        assert!(checkpoints.fetch().await.expect("fetched"));
+        assert_eq!(
+            checkpoints.fetch().await.expect("fetched").as_deref(),
+            Some("origin"),
+            "Fetch reports the remote it fetched"
+        );
 
         assert_eq!(checkpoints.status().await.expect("status").behind, 1);
         assert_eq!(read(repo, "a.txt"), "old\n", "the files stay");
@@ -719,7 +723,11 @@ fn fetching_updates_only_the_upstreams_remote_tracking_branches() {
 
         repo.git(&["switch", "-q", "-c", "local"]);
         assert!(
-            checkpoints.fetch().await.expect("sole remote fetched"),
+            checkpoints
+                .fetch()
+                .await
+                .expect("sole remote fetched")
+                .is_some(),
             "Fetch uses the sole remote before an upstream is configured"
         );
     });
@@ -751,7 +759,7 @@ fn automatic_fetch_never_imports_configured_bundles() {
             let bundles = repo.git(&["for-each-ref", "refs/bundles"]);
             let checkpoints = Checkpoints::new(repo.path());
 
-            assert!(checkpoints.fetch().await.expect("remote fetched"));
+            assert!(checkpoints.fetch().await.expect("remote fetched").is_some());
 
             assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "{symbolic}");
             assert_eq!(repo.git(&["for-each-ref", "refs/bundles"]), bundles);
@@ -798,7 +806,13 @@ fn automatic_fetch_never_expands_a_remote_group_into_unchecked_destinations() {
             assert!(matches!(fetched, Err(DiffError::Git(_))), "{fetched:?}");
             // Git uses the named remote for a one-member group, without expanding it.
             repo.git(&["config", "--replace-all", "remotes.origin", "backup"]);
-            assert!(checkpoints.fetch().await.expect("only origin fetched"));
+            assert!(
+                checkpoints
+                    .fetch()
+                    .await
+                    .expect("only origin fetched")
+                    .is_some()
+            );
             assert_eq!(
                 repo.git(&["rev-parse", "release"]),
                 repo.git(&["rev-parse", "HEAD"])
@@ -813,6 +827,7 @@ fn automatic_fetch_never_expands_a_remote_group_into_unchecked_destinations() {
                     .fetch()
                     .await
                     .expect("Origin is not the group origin")
+                    .is_some()
             );
             assert_eq!(
                 repo.git(&["rev-parse", "release"]),
@@ -925,7 +940,7 @@ fn a_background_fetch_leaves_tags_alone_despite_pruning_settings() {
             repo.git(&["config", &format!("{scope}.pruneTags"), "true"]);
             let checkpoints = Checkpoints::new(repo.path());
 
-            assert!(checkpoints.fetch().await.expect("fetched"));
+            assert!(checkpoints.fetch().await.expect("fetched").is_some());
 
             assert_eq!(repo.git(&["show-ref", "--tags"]), tags, "{scope}");
             assert_eq!(checkpoints.status().await.expect("status").behind, 1);
@@ -2185,7 +2200,7 @@ fn a_tag_named_like_the_branch_changes_nothing() {
         clone.commit_upstream("theirs\n");
         let checkpoints = Checkpoints::new(repo.path());
 
-        assert!(checkpoints.fetch().await.expect("fetched"));
+        assert!(checkpoints.fetch().await.expect("fetched").is_some());
         repo.write("a.txt", "edited\n");
         checkpoints
             .switch_branch(&local("other"), leave_on(&checkpoints).await)
@@ -2261,7 +2276,7 @@ fn automatic_fetch_follows_symbolic_destinations_only_within_remote_refs() {
             let fetched = checkpoints.fetch().await;
 
             if allowed {
-                assert!(fetched.expect("remote target fetched"));
+                assert!(fetched.expect("remote target fetched").is_some());
                 assert_eq!(
                     repo.git(&["rev-parse", target]),
                     clone.origin.git(&["rev-parse", "HEAD"])

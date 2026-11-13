@@ -895,9 +895,16 @@ impl AgentSession {
         })
     }
 
-    /// Fetches the upstream remote, origin or the sole remote through checked destinations.
-    pub fn fetch(&self) -> Result<bool, String> {
-        RUNTIME.block_on(async { self.checkpoints.fetch().await.map_err(shown) })
+    /// Fetches the upstream remote, origin or the sole remote through checked destinations, and
+    /// returns the remote it fetched, as Liquid shows it; none when there is no remote.
+    pub fn fetch(&self) -> Result<Option<String>, String> {
+        RUNTIME.block_on(async {
+            self.checkpoints
+                .fetch()
+                .await
+                .map(|remote| remote.map(|remote| visible_name(&without_credentials(&remote))))
+                .map_err(shown)
+        })
     }
 
     /// Pushes the branch through the user's Git and hooks, without a checkout lock.

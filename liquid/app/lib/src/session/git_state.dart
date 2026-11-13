@@ -141,9 +141,10 @@ class GitState {
       final fetched = await _backend.fetch();
       if (watch != _watches) return;
       _failures = 0;
-      if (fetched) {
+      // Freshness belongs to the remote Git fetched, which the checkout may no longer name.
+      if (fetched != null) {
         _fetched = DateTime.now();
-        _fetchedRemote = remote;
+        _fetchedRemote = fetched;
       }
       await refresh();
     } on Object catch (error) {

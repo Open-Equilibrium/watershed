@@ -149,8 +149,9 @@ abstract interface class SessionBackend {
   Future<BridgeGitOutcome> restoreStash(String id);
   Future<BridgeGitOutcome> discardStash(String id);
 
-  /// Fetches the upstream's remote, or else origin or the only remote; whether there was one.
-  Future<bool> fetch();
+  /// Fetches the upstream's remote, or else origin or the only remote; the remote fetched, if
+  /// there was one.
+  Future<String?> fetch();
 
   Future<BridgeGitOutcome> push(BridgePushConfirmation? confirmed);
   Future<BridgeGitOutcome> pull();
@@ -387,7 +388,7 @@ class RustSessionBackend implements SessionBackend {
   Future<BridgeGitOutcome> discardStash(String id) =>
       _session.discardStash(id: id);
   @override
-  Future<bool> fetch() => _session.fetch();
+  Future<String?> fetch() => _session.fetch();
   @override
   Future<BridgeGitOutcome> push(BridgePushConfirmation? confirmed) =>
       _session.push(confirmed: confirmed);

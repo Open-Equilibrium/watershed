@@ -392,15 +392,16 @@ impl WorkingTree {
         Ok((name, self.resolve("HEAD").await?))
     }
 
-    /// Fetches the upstream remote, origin or the sole remote, through checked destinations.
-    pub async fn fetch(&self) -> Result<bool, DiffError> {
+    /// Fetches the upstream remote, origin or the sole remote, through checked destinations;
+    /// returns the remote fetched, or none when there is no remote to fetch.
+    pub async fn fetch(&self) -> Result<Option<String>, DiffError> {
         let branch = self.branch().await?;
         let (remote, _) = self.remote(branch.as_deref()).await?;
         let Some(remote) = remote.filter(|remote| remote != ".") else {
-            return Ok(false);
+            return Ok(None);
         };
         self.fetch_remote(&remote).await?;
-        Ok(true)
+        Ok(Some(remote))
     }
 
     /// Fetches this named remote through the same destination checks for all callers.

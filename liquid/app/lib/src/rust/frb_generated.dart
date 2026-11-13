@@ -175,7 +175,9 @@ abstract class RustLibApi extends BaseApi {
     required String day,
   });
 
-  Future<bool> crateApiSessionAgentSessionFetch({required AgentSession that});
+  Future<String?> crateApiSessionAgentSessionFetch({
+    required AgentSession that,
+  });
 
   Future<BridgeBranches> crateApiSessionAgentSessionGitBranches({
     required AgentSession that,
@@ -1153,7 +1155,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<bool> crateApiSessionAgentSessionFetch({required AgentSession that}) {
+  Future<String?> crateApiSessionAgentSessionFetch({
+    required AgentSession that,
+  }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -1170,7 +1174,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_bool,
+          decodeSuccessData: sse_decode_opt_String,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateApiSessionAgentSessionFetchConstMeta,
@@ -10277,8 +10281,9 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
     day: day,
   );
 
-  /// Fetches the upstream remote, origin or the sole remote through checked destinations.
-  Future<bool> fetch() =>
+  /// Fetches the upstream remote, origin or the sole remote through checked destinations, and
+  /// returns the remote it fetched, as Liquid shows it; none when there is no remote.
+  Future<String?> fetch() =>
       RustLib.instance.api.crateApiSessionAgentSessionFetch(that: this);
 
   /// The checkout's branches.

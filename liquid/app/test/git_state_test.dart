@@ -106,6 +106,36 @@ void main() {
     },
   );
 
+  test('fetch freshness belongs to the remote git fetched', () async {
+    // The checkout names origin, but the fetch reached backup.
+    backend.fetchedRemote = 'backup';
+    await git.refresh();
+    await git.fetchNow();
+    expect(
+      git.fetched,
+      isNull,
+      reason: 'origin was not fetched, so it is not fresh',
+    );
+
+    backend.git = gitStatusOf(remote: 'backup', upstream: 'backup/main');
+    await git.refresh();
+    expect(git.fetched, isNotNull, reason: 'backup was fetched');
+  });
+
+  test('a created branch records the branch Git created it from', () async {
+    // The cached status says main, but the checkout moved to other before the branch was created.
+    final bases = BranchBases();
+    final state = GitState(
+      backend,
+      notify: (level, text) => notices.add((level, text)),
+      bases: bases,
+    );
+    await state.refresh();
+    backend.createdFrom = 'other';
+    await state.create('feature');
+    expect(await bases.baseOf('/work/api/.git', 'feature'), 'other');
+  });
+
   int fetches() => backend.calls.where((call) => call == 'fetch').length;
 
   test(
@@ -294,7 +324,7 @@ void main() {
       expect(finished, isFalse);
       expect(pending.remotes, ['origin']);
       if (stopped) state.stop();
-      pending.fetches.first.complete(true);
+      pending.fetches.first.complete('origin');
       await tester.pump();
       if (!stopped) {
         expect(pending.remotes, ['origin', 'other']);
@@ -866,10 +896,10 @@ BridgeFileChange change(String path) => BridgeFileChange(
 );
 
 class _PendingFetchBackend extends FakeBackend {
-  final fetched = Completer<bool>();
+  final fetched = Completer<String?>();
 
   @override
-  Future<bool> fetch() {
+  Future<String?> fetch() {
     calls.add('fetch');
     return fetched.future;
   }
@@ -877,12 +907,12 @@ class _PendingFetchBackend extends FakeBackend {
 
 class _QueuedFetchBackend extends FakeBackend {
   final remotes = <String?>[];
-  final fetches = <Completer<bool>>[];
+  final fetches = <Completer<String?>>[];
 
   @override
-  Future<bool> fetch() {
+  Future<String?> fetch() {
     remotes.add(git?.remote);
-    final fetched = Completer<bool>();
+    final fetched = Completer<String?>();
     fetches.add(fetched);
     return fetched.future;
   }

@@ -2376,7 +2376,7 @@ fn git_transfer_bridge_confirms_push_tracks_and_pulls() {
     std::fs::write(other.join("a.txt"), "remote change\n").unwrap();
     git(&other, &["commit", "-am", "Remote"]);
     git(&other, &["push"]);
-    assert!(session.fetch().unwrap());
+    assert_eq!(session.fetch().unwrap().as_deref(), Some("origin"));
     assert_eq!(session.git_status().unwrap().unwrap().behind, 1);
     assert_eq!(
         session.push(None).unwrap().kind,

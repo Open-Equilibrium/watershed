@@ -96,8 +96,9 @@ abstract class AgentSession implements RustOpaqueInterface {
     required String day,
   });
 
-  /// Fetches the upstream remote, origin or the sole remote through checked destinations.
-  Future<bool> fetch();
+  /// Fetches the upstream remote, origin or the sole remote through checked destinations, and
+  /// returns the remote it fetched, as Liquid shows it; none when there is no remote.
+  Future<String?> fetch();
 
   /// The checkout's branches.
   Future<BridgeBranches> gitBranches();

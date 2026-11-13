@@ -325,7 +325,7 @@ fn requested_fetch_uses_origin_without_upstream_and_checks_destinations() {
         remote.repo.git(&["switch", "-c", "feature/unpublished"]);
         remote.advance();
         let checkpoints = Checkpoints::new(remote.repo.path());
-        assert!(checkpoints.fetch().await.unwrap());
+        assert!(checkpoints.fetch().await.unwrap().is_some());
         assert_eq!(
             remote.repo.git(&["rev-parse", "origin/main"]),
             remote.bare.git(&["rev-parse", "main"])
@@ -699,7 +699,7 @@ fn pushes_use_the_only_remote_and_refuse_an_ambiguous_destination() {
         let status = checkpoints.status().await.unwrap();
         assert!(status.remote.is_none());
         assert!(status.has_remotes);
-        assert!(!checkpoints.fetch().await.unwrap());
+        assert!(checkpoints.fetch().await.unwrap().is_none());
         assert!(checkpoints.push(None).await.is_err());
         // A leftover remote setting alone does not configure an upstream.
         remote
@@ -1091,7 +1091,7 @@ fn fetches_serialize_across_instances_and_processes_after_remote_advances() {
             let second_result = if let Some(second) = second {
                 second.await.unwrap()
             } else {
-                Ok(true)
+                Ok(Some("origin".to_owned()))
             };
             let output = child.take().map(|child| child.wait_with_output().unwrap());
             assert!(
