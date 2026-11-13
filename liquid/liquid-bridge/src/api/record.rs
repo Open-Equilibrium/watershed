@@ -106,14 +106,15 @@ pub(crate) fn write_folder(
         ".{}.partial",
         folder.file_name().unwrap_or_default().to_string_lossy()
     ));
-    let _ = std::fs::remove_dir_all(&temporary);
-    let result = std::fs::create_dir(&temporary)
-        .map_err(|error| format!("could not create {}: {error}", temporary.display()))
-        .and_then(|()| write(&temporary))
-        .and_then(|()| {
-            std::fs::rename(&temporary, &folder)
-                .map_err(|error| format!("could not finish {}: {error}", folder.display()))
-        });
+    // Only a folder this call created is removed: an existing one may belong to someone else.
+    if let Err(error) = std::fs::create_dir(&temporary) {
+        let _ = std::fs::remove_dir(&folder);
+        return Err(format!("could not create {}: {error}", temporary.display()));
+    }
+    let result = write(&temporary).and_then(|()| {
+        std::fs::rename(&temporary, &folder)
+            .map_err(|error| format!("could not finish {}: {error}", folder.display()))
+    });
     match result {
         Ok(()) => Ok(folder),
         Err(error) => {

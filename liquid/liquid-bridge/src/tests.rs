@@ -2788,6 +2788,25 @@ fn a_failed_export_leaves_no_folder_behind() {
 }
 
 #[test]
+fn an_export_never_deletes_a_folder_it_did_not_create() {
+    let downloads =
+        std::env::temp_dir().join(format!("liquid-bridge-foreign-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&downloads);
+    std::fs::create_dir_all(&downloads).expect("downloads");
+    let foreign = downloads.join(".Demo – record 2026-11-12.partial");
+    std::fs::create_dir(&foreign).expect("foreign folder");
+    std::fs::write(foreign.join("keep.txt"), "not ours").expect("foreign file");
+    let _ = crate::api::record::write_folder(&downloads, "Demo – record 2026-11-12", |folder| {
+        std::fs::write(folder.join("session.jsonl"), "copy").map_err(|error| error.to_string())
+    });
+    assert!(
+        foreign.join("keep.txt").is_file(),
+        "a folder the export did not create survives"
+    );
+    let _ = std::fs::remove_dir_all(&downloads);
+}
+
+#[test]
 fn a_long_multibyte_title_keeps_its_record_name_within_a_file_name() {
     // File systems such as ext4 count bytes, and the temporary folder adds `.` and `.partial`.
     let title = "語".repeat(80);
