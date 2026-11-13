@@ -112,6 +112,12 @@ private func disableLiquidKey() -> FlutterError? {
   if item.status == .enabled || item.status == .requiresApproval {
     do { try item.unregister() } catch { failure = error }
   }
+  // A helper launchd keeps running would map Caps Lock again; asked to stop, it gives it back.
+  if failure != nil {
+    for helper in NSRunningApplication.runningApplications(withBundleIdentifier: helperIdentifier) {
+      kill(helper.processIdentifier, SIGTERM)
+    }
+  }
   do { try runHelper("--remove") } catch { failure = failure ?? error }
   return failure.map {
     FlutterError(code: "disable", message: $0.localizedDescription, details: nil)
