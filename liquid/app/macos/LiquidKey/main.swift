@@ -51,9 +51,29 @@ func remapLater() {
     }
 }
 
+/// The periodic check while this session is in front. A departing session's helper may give the
+/// remapping back after the last retry above, and nothing else tells this helper. Five seconds
+/// matches that last retry; a check reads each keyboard's mappings and writes only one that lost
+/// the Liquid key.
+var recheck: Timer?
+
+func startRecheck() {
+    stopRecheck()
+    recheck = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
+        Mapping.reapply(active: sessionActive)
+    }
+}
+
+func stopRecheck() {
+    recheck?.invalidate()
+    recheck = nil
+}
+
 /// Gives the remapping back if this helper set it in this session; another user's helper may
-/// hold it now, and a helper that failed before setting it must not take that one away.
+/// hold it now, and a helper that failed before setting it must not take that one away. Giving it
+/// back is the helper's last act, so the periodic check stops first.
 func unmap() {
+    stopRecheck()
     if Mapping.givesBack(mapped: mapped, active: sessionActive) {
         Mapping.apply(on: false)
         mapped = false
@@ -181,6 +201,7 @@ follow(NSWorkspace.shared.frontmostApplication)
 remap()
 // Keyboards attached before the start may get their HID service later too.
 remapLater()
+startRecheck()
 let workspace = NSWorkspace.shared.notificationCenter
 workspace.addObserver(
     forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
@@ -191,6 +212,7 @@ workspace.addObserver(
     forName: NSWorkspace.sessionDidResignActiveNotification, object: nil, queue: .main
 ) { _ in
     sessionActive = false
+    stopRecheck()
     Mapping.apply(on: false)
 }
 workspace.addObserver(
@@ -199,6 +221,7 @@ workspace.addObserver(
     sessionActive = true
     remap()
     remapLater()
+    startRecheck()
 }
 NotificationCenter.default.addObserver(
     forName: NSApplication.willTerminateNotification, object: nil, queue: .main

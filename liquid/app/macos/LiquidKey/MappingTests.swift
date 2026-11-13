@@ -62,6 +62,28 @@ check(
     turnOff(refusing: nil) && keyboards.allSatisfy(\.isEmpty),
     "turning it off succeeds once every keyboard took it")
 
+// Another session's helper may give the remapping back after this one set it. Only an active
+// helper sets it again, and only on a keyboard that lost it.
+var lost = [[entry(control, command)], [entry(Mapping.capsLock, Mapping.f18)]]
+var writes = 0
+func recheck(active: Bool) {
+    Mapping.reapply(active: active, to: Array(lost.indices), read: { lost[$0] }) {
+        keyboard, mappings in
+        writes += 1
+        lost[keyboard] = mappings
+        return true
+    }
+}
+recheck(active: false)
+check(
+    writes == 0 && pairs(lost[0]) == pairs([entry(control, command)]),
+    "an inactive helper does not re-apply the Liquid key")
+recheck(active: true)
+check(
+    writes == 1
+        && pairs(lost[0]) == pairs([entry(control, command), entry(Mapping.capsLock, Mapping.f18)]),
+    "an active helper re-applies a mapping another session removed and keeps the others")
+
 /// A Liquid key press at 10 s with its own `repeats`, each with the latest key press of any key
 /// then, released at `released`.
 func tap(

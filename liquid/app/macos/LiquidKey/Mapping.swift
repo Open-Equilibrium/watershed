@@ -8,18 +8,30 @@ enum Mapping {
     static let f18: UInt64 = 0x7_0000_006D
     static let source = "HIDKeyboardModifierMappingSrc"
     static let destination = "HIDKeyboardModifierMappingDst"
+    private static let userKey = "UserKeyMapping" as CFString
 
     /// A keyboard's mappings with the Liquid key on or off; other mappings stay. On replaces any
     /// other Caps Lock mapping, off removes only Liquid's.
     static func merged(_ current: [[String: Any]], on: Bool) -> [[String: Any]] {
-        func number(_ entry: [String: Any], _ key: String) -> UInt64? {
-            (entry[key] as? NSNumber)?.uint64Value
-        }
         let kept = current.filter { entry in
             guard number(entry, source) == capsLock else { return true }
             return !on && number(entry, destination) != f18
         }
         return on ? kept + [[source: capsLock, destination: f18]] : kept
+    }
+
+    /// Whether an active helper sets the Liquid key again on a keyboard with these mappings: only
+    /// one that lost it, as when another session's helper gave the remapping back. An inactive
+    /// helper leaves keyboards alone, since another user's helper may hold them.
+    static func needsReapply(_ current: [[String: Any]], active: Bool) -> Bool {
+        let holds = current.contains { entry in
+            number(entry, source) == capsLock && number(entry, destination) == f18
+        }
+        return active && !holds
+    }
+
+    private static func number(_ entry: [String: Any], _ key: String) -> UInt64? {
+        (entry[key] as? NSNumber)?.uint64Value
     }
 
     /// Whether a helper gives the remapping back: only one it set, while its session is in front,
@@ -32,18 +44,49 @@ enum Mapping {
     /// whether macOS listed the keyboards and each one took it.
     @discardableResult
     static func apply(on: Bool) -> Bool {
-        let key = "UserKeyMapping" as CFString
+        guard let keyboards = attachedKeyboards() else { return false }
+        return apply(on: on, to: keyboards, read: readMappings, write: writeMappings)
+    }
+
+    /// Sets the Liquid key again on each attached keyboard that lost it, while `active`; needs no
+    /// permission. Returns whether macOS listed the keyboards and each one that needed it took it.
+    @discardableResult
+    static func reapply(active: Bool) -> Bool {
+        guard let keyboards = attachedKeyboards() else { return false }
+        return reapply(active: active, to: keyboards, read: readMappings, write: writeMappings)
+    }
+
+    /// Applies the Liquid key to each keyboard that `needsReapply` names; returns whether all of
+    /// those took it.
+    @discardableResult
+    static func reapply<Keyboard>(
+        active: Bool, to keyboards: [Keyboard], read: (Keyboard) -> [[String: Any]],
+        write: (Keyboard, [[String: Any]]) -> Bool
+    ) -> Bool {
+        apply(
+            on: true, to: keyboards.filter { needsReapply(read($0), active: active) },
+            read: read, write: write)
+    }
+
+    /// The keyboards macOS lists now, or nil when it lists none.
+    private static func attachedKeyboards() -> [IOHIDServiceClient]? {
         let client = IOHIDEventSystemClientCreateSimpleClient(kCFAllocatorDefault)
         guard let services = IOHIDEventSystemClientCopyServices(client) as? [IOHIDServiceClient]
-        else { return false }
-        let keyboards = services.filter { service in
+        else { return nil }
+        return services.filter { service in
             IOHIDServiceClientConformsTo(
                 service, UInt32(kHIDPage_GenericDesktop), UInt32(kHIDUsage_GD_Keyboard)) != 0
         }
-        return apply(
-            on: on, to: keyboards,
-            read: { IOHIDServiceClientCopyProperty($0, key) as? [[String: Any]] ?? [] },
-            write: { IOHIDServiceClientSetProperty($0, key, $1 as CFArray) })
+    }
+
+    private static func readMappings(_ keyboard: IOHIDServiceClient) -> [[String: Any]] {
+        IOHIDServiceClientCopyProperty(keyboard, userKey) as? [[String: Any]] ?? []
+    }
+
+    private static func writeMappings(
+        _ keyboard: IOHIDServiceClient, _ mappings: [[String: Any]]
+    ) -> Bool {
+        IOHIDServiceClientSetProperty(keyboard, userKey, mappings as CFArray)
     }
 
     /// Applies the Liquid key to each keyboard, also after one refuses it; returns whether all
