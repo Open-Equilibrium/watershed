@@ -394,13 +394,17 @@ fn private_namespace(path: &Path) -> Result<(), DiffError> {
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
             .map_err(DiffError::Io)?;
     }
-    // The ancestors as resolved, so a link cannot hide a folder another user can rename. Each is
-    // owned by root or this user, and a folder anyone may write is sticky, as /tmp is.
+    // The ancestors as written and as resolved. A link on the way must sit in a folder no one else
+    // can change, which the written ancestors check, and what it leads to must be one too, which
+    // the resolved ancestors check. Each is owned by root or this user, and a folder anyone may
+    // write is sticky, as /tmp is.
     let euid = rustix::process::geteuid().as_raw();
     let resolved = std::fs::canonicalize(path).map_err(DiffError::Io)?;
-    for folder in resolved.ancestors().skip(1) {
-        let metadata = std::fs::metadata(folder).map_err(DiffError::Io)?;
-        let shared = metadata.mode() & 0o022 != 0 && metadata.mode() & 0o1000 == 0;
+    for folder in path.ancestors().skip(1).chain(resolved.ancestors().skip(1)) {
+        let metadata = std::fs::symlink_metadata(folder).map_err(DiffError::Io)?;
+        // A link's own mode means nothing; the folder holding it is checked as well.
+        let shared =
+            !metadata.is_symlink() && metadata.mode() & 0o022 != 0 && metadata.mode() & 0o1000 == 0;
         if shared || (metadata.uid() != 0 && metadata.uid() != euid) {
             return Err(DiffError::Io(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
@@ -533,6 +537,27 @@ mod tests {
             private_namespace(&namespace_under("sticky", 0o1777)).is_ok(),
             "a sticky folder, as /tmp is, is no risk"
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_namespace_reached_through_a_link_in_a_shared_folder_is_refused() {
+        let root = std::env::temp_dir().join(format!("watershed-link-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let shared = root.join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let owned = root.join("owned/config");
+        std::fs::create_dir_all(owned.join("liquid")).unwrap();
+        // Another user could replace this link with one to a folder of theirs, so the namespace
+        // reached through it is refused even though the folder it resolves to is private.
+        std::os::unix::fs::symlink(&owned, shared.join("config")).unwrap();
+        let Err(DiffError::Io(error)) =
+            private_namespace(&shared.join("config/liquid/project-locks"))
+        else {
+            panic!("a namespace reached through a link another user may replace is refused");
+        };
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
         std::fs::remove_dir_all(root).unwrap();
     }
 
