@@ -82,5 +82,15 @@ check(
     !tap([(10.5, 10.2)], released: 10.55, lastKeyDown: 10.501),
     "another key before the key's own repeat makes it no tap")
 
+check(
+    !Mapping.givesBack(mapped: false, active: true),
+    "a helper that never mapped gives nothing back")
+check(
+    Mapping.givesBack(mapped: true, active: true),
+    "a helper that mapped gives its remapping back while its session is in front")
+check(
+    !Mapping.givesBack(mapped: true, active: false),
+    "a helper whose session left gives nothing back")
+
 if failures > 0 { exit(1) }
 print("Liquid key helper checks passed")

@@ -22,6 +22,12 @@ enum Mapping {
         return on ? kept + [[source: capsLock, destination: f18]] : kept
     }
 
+    /// Whether a helper gives the remapping back: only one it set, while its session is in front,
+    /// since another user's helper may hold the keyboards otherwise.
+    static func givesBack(mapped: Bool, active: Bool) -> Bool {
+        mapped && active
+    }
+
     /// Applies the Liquid key to every keyboard attached now; needs no permission. Returns
     /// whether macOS listed the keyboards and each one took it.
     @discardableResult

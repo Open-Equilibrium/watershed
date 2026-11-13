@@ -31,10 +31,15 @@ var press: Press?
 var shiftedDown = false
 /// Whether this user's session is in front; the remapping holds for every user's keyboards.
 var sessionActive = true
+/// Whether this helper set the remapping, which only it gives back.
+var mapped = false
 
 /// Sets the remapping while this session is in front.
 func remap() {
-    if sessionActive { Mapping.apply(on: true) }
+    if sessionActive {
+        Mapping.apply(on: true)
+        mapped = true
+    }
 }
 
 /// Sets the remapping again later for what may have undone it: a keyboard's HID service
@@ -46,9 +51,13 @@ func remapLater() {
     }
 }
 
-/// Gives the remapping back if this session set it; another user's helper may hold it now.
+/// Gives the remapping back if this helper set it in this session; another user's helper may
+/// hold it now, and a helper that failed before setting it must not take that one away.
 func unmap() {
-    if sessionActive { Mapping.apply(on: false) }
+    if Mapping.givesBack(mapped: mapped, active: sessionActive) {
+        Mapping.apply(on: false)
+        mapped = false
+    }
 }
 
 /// Without its hotkeys the key would be dead, so Caps Lock comes back and the helper ends.
