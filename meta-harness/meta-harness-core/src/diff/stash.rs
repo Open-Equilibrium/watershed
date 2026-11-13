@@ -265,7 +265,10 @@ impl WorkingTree {
     ) -> Result<BTreeSet<String>, DiffError> {
         // The reset can remove ignored contents where a tracked file or parent returns. They
         // were excluded from the saved changes.
-        git_path_output(&self.root, &[], &["ls-files", "-z"]).await?;
+        let tracked: HashSet<String> =
+            paths(&git_path_output(&self.root, &[], &["ls-files", "-z"]).await?)
+                .into_iter()
+                .collect();
         let now = Snapshot(self.capture(&[]).await?);
         let head = self
             .checkpointed("HEAD")
@@ -275,7 +278,15 @@ impl WorkingTree {
         self.tree_paths(&head).await?;
         let reset = self.changes(&now, &head, Whitespace::Shown).await?;
         let mut blocked = self.ignored_in_the_way(&reset, &self.env(index)).await?;
-        blocked.extend(self.repositories_in_the_way(&reset, false));
+        // A path the project's index tracks is removed from a repository it lies in, so its
+        // deletion counts; an untracked one is left to the repository, as stash leaves it.
+        let reset: Vec<FileChange> = reset
+            .into_iter()
+            .filter(|change| {
+                change.status != ChangeStatus::Deleted || tracked.contains(&change.path)
+            })
+            .collect();
+        blocked.extend(self.repositories_in_the_way(&reset));
         Ok(blocked)
     }
 
@@ -479,7 +490,7 @@ impl WorkingTree {
         // contents too. Check both trees because --index restores saved index-only changes.
         for changes in [&index_changes, &tracked_changes] {
             in_the_way.extend(self.ignored_in_the_way(changes, &[]).await?);
-            in_the_way.extend(self.repositories_in_the_way(changes, true));
+            in_the_way.extend(self.repositories_in_the_way(changes));
         }
         let stash_changes = self.changes(&base, &tracked, Whitespace::Shown).await?;
         // Only a file still tracked in HEAD can be removed to make way for untracked files.

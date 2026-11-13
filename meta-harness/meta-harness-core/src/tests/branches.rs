@@ -3550,6 +3550,31 @@ fn leaving_changes_leaves_an_untracked_nested_repository_alone() {
 }
 
 #[test]
+fn leaving_changes_refuses_a_staged_file_inside_a_nested_repository() {
+    run(async {
+        let repo = Repo::new("stash-staged-in-repository");
+        repo.git(&["branch", "other"]);
+        repo.write("a.txt", "unsaved\n");
+        std::fs::create_dir(repo.path().join("nested")).expect("folder");
+        repo.write("nested/file", "staged\n");
+        repo.git(&["add", "nested/file"]);
+        // The project's index still holds the file, which Git's reset would remove from the repository.
+        repo.git(&["init", "-q", "nested"]);
+        let checkpoints = Checkpoints::new(repo.path());
+
+        let switched = checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await;
+
+        assert!(
+            matches!(switched, Err(DiffError::WouldOverwrite(ref paths)) if paths == &["nested"]),
+            "{switched:?}"
+        );
+        assert_eq!(read(&repo, "nested/file"), "staged\n");
+    });
+}
+
+#[test]
 fn restoring_never_applies_a_stashed_deletion_inside_a_nested_repository() {
     run(async {
         let repo = Repo::new("stash-deletion-in-repository");

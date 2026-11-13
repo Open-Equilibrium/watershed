@@ -52,21 +52,13 @@ pub struct Revertable {
 }
 
 impl WorkingTree {
-    /// Repositories a whole-checkout write could overwrite, or with `deletions` delete from.
-    /// Share the revert's bounded, link-aware search, without restricting it to the session's
-    /// working folder. A save leaves untracked repositories alone, which its reset lists as
-    /// deleted, so only a restore counts deletions.
-    pub(super) fn repositories_in_the_way(
-        &self,
-        changes: &[FileChange],
-        deletions: bool,
-    ) -> BTreeSet<String> {
+    /// Repositories a whole-checkout write could overwrite or delete from. Share the revert's
+    /// bounded, link-aware search, without restricting it to the session's working folder. The
+    /// caller decides which deletions the write makes.
+    pub(super) fn repositories_in_the_way(&self, changes: &[FileChange]) -> BTreeSet<String> {
         let mut kept = BTreeSet::new();
         let mut budget = MAX_SEARCHED_ENTRIES;
-        for change in changes
-            .iter()
-            .filter(|change| deletions || change.status != ChangeStatus::Deleted)
-        {
+        for change in changes {
             if let Some(path) = self.repository_near(&change.path, &kept, &mut budget) {
                 kept.insert(path);
             }
@@ -85,7 +77,13 @@ impl WorkingTree {
     ) -> Result<Revertable, DiffError> {
         let mut revertable = Revertable::default();
         let mut changes = Vec::new();
+        // A repository either state records counts wherever the working folder is, though only
+        // the changes below the folder are the revert's.
+        let mut recorded = BTreeSet::new();
         for (change, repository) in self.listed(from, to, Whitespace::Shown).await? {
+            if repository {
+                recorded.insert(change.path.clone());
+            }
             if !self.within(&change.path) {
                 continue;
             }
@@ -102,8 +100,9 @@ impl WorkingTree {
         changes.sort_by(|a, b| a.path.cmp(&b.path));
         let mut budget = MAX_SEARCHED_ENTRIES;
         for change in changes {
-            match self.repository_near(&change.path, &revertable.left_alone, &mut budget) {
+            match self.repository_near(&change.path, &recorded, &mut budget) {
                 Some(path) => {
+                    recorded.insert(path.clone());
                     revertable.left_alone.insert(path);
                     revertable.kept.push(change);
                 }

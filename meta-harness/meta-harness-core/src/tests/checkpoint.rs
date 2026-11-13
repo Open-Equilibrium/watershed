@@ -1426,6 +1426,46 @@ fn a_plan_asks_again_when_fresh_ignored_contents_are_too_large_to_confirm() {
 }
 
 #[test]
+fn a_revert_in_a_folder_below_a_recorded_repository_leaves_it_alone() {
+    run(async {
+        let repo = Repo::new("revert-below-repository");
+        // The project records a nested repository at `module`, and the working folder is below it.
+        let nested = Repo::at(repo.path().join("module"));
+        let head = nested.git(&["rev-parse", "HEAD"]).trim().to_owned();
+        repo.git(&[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{head},module"),
+        ]);
+        repo.git(&["commit", "-q", "-m", "record module"]);
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .capture(&at("t1", Phase::Start))
+            .await
+            .expect("started");
+        // Ordinary files now stand where the repository was, below the working folder.
+        repo.git(&["rm", "-q", "--cached", "module"]);
+        std::fs::remove_dir_all(repo.path().join("module")).expect("removed");
+        std::fs::create_dir_all(repo.path().join("module/work")).expect("folder");
+        repo.write("module/work/file.txt", "file\n");
+
+        let plan = Checkpoints::new(&repo.path().join("module/work"))
+            .revert_plan(&at("t1", Phase::Start), None)
+            .await
+            .expect("plan");
+
+        assert!(
+            plan.files
+                .iter()
+                .any(|file| file.path == "module/work/file.txt" && file.kept),
+            "{:?}",
+            plan.files
+        );
+    });
+}
+
+#[test]
 fn a_revert_lists_ignored_files_in_the_way_of_restored_ones() {
     run(async {
         let repo = Repo::new("revert-ignored");
