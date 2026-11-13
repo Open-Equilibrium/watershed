@@ -282,7 +282,10 @@ fn execute_unix_tool(
         Err(error) => {
             classification = Some(match error {
                 CleanupFailure::Signal => ToolTerminalClassification::ProcessSignalFailed,
-                CleanupFailure::Reap => ToolTerminalClassification::ProcessReapFailed,
+                CleanupFailure::Reap => {
+                    reap_in_background(child);
+                    ToolTerminalClassification::ProcessReapFailed
+                }
             });
             false
         }
@@ -361,6 +364,14 @@ fn primary_classification(trigger: &PrimaryTrigger) -> Option<ToolTerminalClassi
     }
 }
 
+/// Hands a leader that outlived its forced-reap deadline to a detached thread, which consumes its
+/// status once the group is gone; dropping the unreaped `Child` would leave a zombie.
+fn reap_in_background(mut child: Child) {
+    thread::spawn(move || {
+        let _ = child.wait();
+    });
+}
+
 fn cleanup_process_group(
     child: &mut Child,
     process_group: rustix::process::Pid,
@@ -420,7 +431,6 @@ fn cleanup_process_group(
             stderr.drain_available();
             thread::sleep(CONTROLLER_POLL_INTERVAL);
         }
-        let _ = child.wait();
         return Err(CleanupFailure::Reap);
     }
     finish_process_group_cleanup(

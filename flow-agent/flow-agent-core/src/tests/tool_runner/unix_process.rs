@@ -464,6 +464,45 @@ fn runner_forced_reap() {
 }
 
 #[test]
+fn reap_timeout_hands_the_child_to_a_reaper() {
+    force_reap_timeout_for_test(true);
+    let outcome = execute_timed_out_after_term_ready(
+        "reap-timeout-reaper",
+        "trap '' TERM; printf %s $$; : > term-ready; while :; do /bin/sleep 1; done",
+    );
+    force_reap_timeout_for_test(false);
+
+    assert_eq!(
+        outcome.classification,
+        Some(ToolTerminalClassification::ProcessReapFailed)
+    );
+    let leader = std::str::from_utf8(&outcome.stdout)
+        .expect("leader pid is UTF-8")
+        .parse::<i32>()
+        .expect("the Tool reports its leader pid");
+    let leader = rustix::process::Pid::from_raw(leader).expect("leader pid is positive");
+    // NOWAIT observes an exited leader without consuming its status, so ECHILD means a reaper took it.
+    let started = Instant::now();
+    loop {
+        match rustix::process::waitid(
+            rustix::process::WaitId::Pid(leader),
+            rustix::process::WaitIdOptions::EXITED
+                | rustix::process::WaitIdOptions::NOHANG
+                | rustix::process::WaitIdOptions::NOWAIT,
+        ) {
+            Err(rustix::io::Errno::CHILD) => break,
+            Ok(_) => {}
+            Err(error) => panic!("leader observation failed: {error}"),
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "the leader outlived its forced reap without being reaped"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
 fn runner_output_drain() {
     const FILTER: &str = "tests::tool_runner::unix_process::runner_output_drain";
     const MARKER: &str = "escaped-output-holder";
