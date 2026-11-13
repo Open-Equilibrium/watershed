@@ -175,32 +175,20 @@ void main() {
     );
   });
 
-  test('signals when the stored history changes and branches', () async {
-    final changes = <int>[];
-    state.stored.addListener(() => changes.add(state.stored.value));
+  test('reads the stored history and branches, rebuilding the chat', () async {
     await emit(event(BridgeEventKind.turnStarted));
-    await emit(
-      event(
-        BridgeEventKind.contentDelta,
-        item: item(1),
-        text: 'streaming text is not stored yet',
-      ),
-    );
-    expect(changes, isEmpty);
     await emit(event(BridgeEventKind.itemCompleted, item: item(1)));
     await emit(event(BridgeEventKind.turnCompleted));
-    expect(changes, [1, 2]);
 
-    backend.stored = historyOf([]);
-    expect((await state.history(['e2'])).leaf, 'e1');
+    backend.stored = historyOf();
+    expect((await state.history()).leaf, 'e1');
     await state.branch('e1');
     expect(backend.calls, [
-      'history e2',
+      'history',
       'branch e1',
       'transcript',
       'history',
     ], reason: 'a branch rebuilds the chat');
-    expect(changes.last, 3);
   });
 
   test(
@@ -210,14 +198,11 @@ void main() {
       final confirmed = revertPlanOf().confirmation;
       backend.turnList = [turnOf('T1', number: 1), turn];
       await state.readChanges();
-      final changes = <int>[];
-      state.stored.addListener(() => changes.add(state.stored.value));
       // pi continues before the turn's prompt, so the new branch holds only the earlier turn.
       backend.turnList = [turnOf('T1', number: 1)];
 
       expect(await state.revert(turn, confirmed), isTrue);
       expect(backend.calls, containsAllInOrder(['revert T2', 'transcript']));
-      expect(changes, [1], reason: 'the stored history changed');
       expect(state.turns.value.map((turn) => turn.id), ['T1']);
       expect(state.shown.value?.to.id, 'T1');
 
@@ -233,7 +218,6 @@ void main() {
         'Could not revert and branch. The files were reverted, but the session could '
         'not continue from before the turn: the agent has exited',
       );
-      expect(changes, [1]);
       expect(state.turns.value.map((turn) => turn.id), ['T0']);
     },
   );
@@ -242,7 +226,6 @@ void main() {
     'rebuilds the chat of the current branch with its branch mark',
     () async {
       backend.stored = historyOf(
-        [],
         tree: [
           const BridgeTreeNode(
             failed: false,
@@ -314,7 +297,6 @@ void main() {
           preview: id,
         );
     backend.stored = historyOf(
-      [],
       tree: [
         node('c1', null, BridgeEntryKind.custom),
         node('u1', 'c1', BridgeEntryKind.user),
@@ -401,7 +383,6 @@ void main() {
             preview: id,
           );
       backend.stored = historyOf(
-        [],
         tree: [
           node('c1', null, BridgeEntryKind.custom),
           node('u1', 'c1', BridgeEntryKind.user),
@@ -731,7 +712,7 @@ void main() {
         view.marker == null ? view.text.value : 'marker ${view.marker!.ref}';
 
     test('holds one branch at a time and never doubles', () async {
-      backend.stored = historyOf([], tree: tree, leaf: 'b2');
+      backend.stored = historyOf(tree: tree, leaf: 'b2');
       backend.transcripts[''] = BridgeTranscript(
         items: [
           chatItem('u1', BridgeItemKind.userMessage, text: 'Go'),
@@ -774,7 +755,7 @@ void main() {
     test(
       'marks the branch at the start when earlier pages show nothing',
       () async {
-        backend.stored = historyOf([], tree: tree, leaf: 'b2');
+        backend.stored = historyOf(tree: tree, leaf: 'b2');
         backend.transcripts[''] = BridgeTranscript(
           items: [chatItem('b2', BridgeItemKind.assistantMessage, text: 'B2')],
           more: true,
@@ -792,7 +773,7 @@ void main() {
     );
 
     test('marks the branch where it leaves, also on an earlier page', () async {
-      backend.stored = historyOf([], tree: tree, leaf: 'b2');
+      backend.stored = historyOf(tree: tree, leaf: 'b2');
       // The newest page starts after the first entry past the fork.
       backend.transcripts[''] = BridgeTranscript(
         items: [chatItem('b2', BridgeItemKind.assistantMessage, text: 'B2')],
@@ -859,7 +840,7 @@ void main() {
           preview: 'B2',
         ),
       ];
-      backend.stored = historyOf([], tree: tree, leaf: 'b2');
+      backend.stored = historyOf(tree: tree, leaf: 'b2');
       backend.transcripts[''] = BridgeTranscript(
         items: [chatItem('b2', BridgeItemKind.assistantMessage, text: 'B2')],
         more: true,
@@ -1158,7 +1139,6 @@ void main() {
   test('a stored parent cycle restores without hanging', () async {
     // a's parent is b and b's is a, so the path to the leaf must stop at the repeated entry.
     backend.stored = historyOf(
-      [],
       tree: const [
         BridgeTreeNode(
           failed: false,
@@ -1225,7 +1205,6 @@ void main() {
 
   test('restores what a continued session used', () async {
     backend.stored = historyOf(
-      [],
       usage: const BridgeUsage(
         input: 100,
         output: 20,

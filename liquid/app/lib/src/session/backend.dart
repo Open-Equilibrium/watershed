@@ -45,8 +45,7 @@ abstract interface class SessionBackend {
     String path, {
     required bool hideWhitespace,
   });
-  Future<BridgeHistory> history(List<String> leaves);
-  Future<BridgeContextDetail?> context(String entry);
+  Future<BridgeHistory> history();
   Future<BridgeTranscript> transcript(String? before);
   Future<void> branch(String entry);
 
@@ -278,14 +277,10 @@ class RustSessionBackend implements SessionBackend {
     hideWhitespace: hideWhitespace,
   );
   @override
-  Future<BridgeHistory> history(List<String> leaves) =>
-      _session.history(leaves: leaves);
+  Future<BridgeHistory> history() => _session.history();
   @override
   Future<BridgeTranscript> transcript(String? before) =>
       _session.transcript(before: before, limit: chatPage);
-  @override
-  Future<BridgeContextDetail?> context(String entry) =>
-      _session.context(entry: entry);
   @override
   Future<void> branch(String entry) => _session.branch(entry: entry);
   @override

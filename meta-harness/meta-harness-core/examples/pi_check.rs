@@ -1,6 +1,6 @@
 //! Manual check of the core against real pi: Watershed's extension is loaded, two turns with a
 //! scripted model in a Git project, one command that writes a file and one that writes nothing,
-//! both turns' checkpoints and the first turn's changes, the branch tree and Trajectory,
+//! both turns' checkpoints and the first turn's changes, the branch tree and chat,
 //! a branch at the second prompt, the state, then the history again after reopening the session
 //! file, a new session and the way back.
 //! Run from the repository root:
@@ -15,7 +15,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use meta_harness_core::{
-    AgentCommand, AgentEvent, Checkpoint, Phase, RecordKind, Session, SessionEvent, Whitespace,
+    AgentCommand, AgentEvent, Checkpoint, ItemKind, Phase, Session, SessionEvent, Whitespace,
 };
 
 const WAIT: Duration = Duration::from_secs(30);
@@ -185,14 +185,14 @@ async fn check() {
                 assert_eq!(changes.len(), 1, "the first command wrote run.txt");
                 let tree = history.tree();
                 println!("tree: {} entries, leaf {:?}", tree.nodes.len(), tree.leaf);
-                let records = history.trajectory(None).records;
-                for record in &records {
-                    println!("trajectory: {record:?}");
+                let chat = history.transcript(None, 100).items;
+                for item in &chat {
+                    println!("chat: {item:?}");
                 }
                 // Branch at the second prompt: pi continues before it and hands it back.
-                let again = records
+                let again = chat
                     .iter()
-                    .rfind(|record| record.kind == RecordKind::User)
+                    .rfind(|item| item.kind == ItemKind::UserMessage)
                     .expect("second prompt");
                 session
                     .branch(&again.entry, None)

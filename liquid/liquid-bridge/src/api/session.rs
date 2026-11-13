@@ -15,8 +15,8 @@ use tokio::sync::{Mutex, mpsc};
 
 use crate::api::events::{BridgeEvent, BridgeQueue};
 use crate::api::history::{
-    BridgeChangesState, BridgeContextDetail, BridgeHistory, BridgeRevertConfirmation,
-    BridgeRevertPlan, BridgeRunningAgent, BridgeTranscript, BridgeTurn, BridgeTurnChanges,
+    BridgeChangesState, BridgeHistory, BridgeRevertConfirmation, BridgeRevertPlan,
+    BridgeRunningAgent, BridgeTranscript, BridgeTurn, BridgeTurnChanges,
 };
 use crate::api::record::{README, SESSION_FILE, download_dir, record_name, write_folder};
 use crate::convert::describe;
@@ -600,25 +600,15 @@ impl AgentSession {
         Ok(Some(id))
     }
 
-    /// Reads the session's branch tree and the Trajectory of each branch ending at an entry in
-    /// `leaves`, or of the current branch when `leaves` is empty.
-    pub fn history(&self, leaves: Vec<String>) -> Result<BridgeHistory, String> {
+    /// Reads the session's branch tree and what its stored responses used.
+    pub fn history(&self) -> Result<BridgeHistory, String> {
         RUNTIME.block_on(async {
             let mut session = self.session.lock().await;
             let history = open(&mut session)?.history().await.map_err(describe)?;
             let tree = history.tree();
-            let trajectories = if leaves.is_empty() {
-                vec![history.trajectory(None).into()]
-            } else {
-                leaves
-                    .iter()
-                    .map(|leaf| history.trajectory(Some(leaf)).into())
-                    .collect()
-            };
             Ok(BridgeHistory {
                 tree: tree.nodes.into_iter().map(Into::into).collect(),
                 leaf: tree.leaf,
-                trajectories,
                 usage: history.usage().into(),
             })
         })
@@ -636,16 +626,6 @@ impl AgentSession {
             let history = open(&mut session)?.history().await.map_err(describe)?;
             let limit = usize::try_from(limit).unwrap_or(usize::MAX);
             Ok(history.transcript(before.as_deref(), limit).into())
-        })
-    }
-
-    /// Everything the model saw for the request behind the response `entry`; `None` unless
-    /// `entry` is a response.
-    pub fn context(&self, entry: String) -> Result<Option<BridgeContextDetail>, String> {
-        RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            let history = open(&mut session)?.history().await.map_err(describe)?;
-            Ok(history.context(&entry).map(Into::into))
         })
     }
 

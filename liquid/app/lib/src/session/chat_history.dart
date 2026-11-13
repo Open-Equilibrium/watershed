@@ -2,9 +2,9 @@ import 'package:flutter/foundation.dart';
 
 import '../rust/api/events.dart';
 import '../rust/api/history.dart';
-import '../trajectory/trajectory_model.dart';
 import 'backend.dart';
 import 'chat_items.dart';
+import 'session_graph.dart';
 
 /// A session's chat as it stores it: the current branch, read back page by page from the
 /// newest, with a mark where the branch leaves the others.
@@ -70,7 +70,7 @@ class ChatHistory {
     final List<BridgeTurn> turns;
     try {
       page = await _backend.transcript(null);
-      history = await _backend.history(const []);
+      history = await _backend.history();
       turns = await _backend.turns();
     } on Object catch (error) {
       notify(BridgeLevel.error, 'Could not restore the chat: $error');

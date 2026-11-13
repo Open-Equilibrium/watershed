@@ -2,8 +2,7 @@ use serde_json::{Map, Value};
 
 use crate::{
     AgentEvent, ChangedLines, EntryKind, History, ItemDetail, ItemId, ItemKind, ItemStatus,
-    NotificationLevel, PiAdapter, RecordKind, RequestId, SessionTree, TreeNode, TurnId, Usage,
-    UserInput,
+    NotificationLevel, PiAdapter, RequestId, SessionTree, TreeNode, TurnId, Usage, UserInput,
 };
 
 const TURN: TurnId = TurnId(1);
@@ -600,28 +599,20 @@ fn matches_each_result_to_its_own_call_when_ids_repeat() {
         .map(|node| node.preview)
         .collect();
     assert_eq!(previews, ["bash ls", "bash rm -rf build", "bash make"]);
-    let steps: Vec<_> = history
-        .trajectory(None)
-        .records
-        .into_iter()
-        .filter(|record| record.kind == RecordKind::Tool)
-        .map(|record| (record.target, record.failed))
-        .collect();
-    assert_eq!(
-        steps,
-        [
-            ("ls".to_owned(), false),
-            ("rm -rf build".to_owned(), true),
-            ("make".to_owned(), false)
-        ]
-    );
     let chat: Vec<_> = history
         .transcript(None, 10)
         .items
         .into_iter()
         .filter_map(|item| Some((item.target?, item.failed)))
         .collect();
-    assert_eq!(chat, steps, "the chat tells the same as the Trajectory");
+    assert_eq!(
+        chat,
+        [
+            ("ls".to_owned(), false),
+            ("rm -rf build".to_owned(), true),
+            ("make".to_owned(), false)
+        ]
+    );
 }
 
 #[test]
@@ -680,16 +671,16 @@ fn times_results_with_repeated_ids_only_when_their_calls_can_be_told_apart() {
     ))
     .expect("JSON");
     let history = History::from_entries(&data);
-    let steps: Vec<_> = history
-        .trajectory(None)
-        .records
+    let chat: Vec<_> = history
+        .transcript(None, 100)
+        .items
         .into_iter()
-        .filter(|record| record.kind == RecordKind::Tool)
-        .map(|record| (record.target, record.duration_ms))
+        .filter_map(|item| Some((item.target?, item.duration_ms)))
+        .filter(|(target, _)| target != "./deploy.sh")
         .collect();
     let step = |target: &str, duration: Option<u64>| (target.to_owned(), duration);
     assert_eq!(
-        steps,
+        chat,
         [
             step("ls", Some(10)),
             step("make", Some(20)),
@@ -699,14 +690,6 @@ fn times_results_with_repeated_ids_only_when_their_calls_can_be_told_apart() {
         ],
         "a parallel call's timing could be another's, so it is unknown"
     );
-    let chat: Vec<_> = history
-        .transcript(None, 100)
-        .items
-        .into_iter()
-        .filter_map(|item| Some((item.target?, item.duration_ms)))
-        .filter(|(target, _)| target != "./deploy.sh")
-        .collect();
-    assert_eq!(chat, steps, "the chat tells the same as the Trajectory");
 }
 
 #[test]
@@ -724,19 +707,13 @@ fn reports_extension_errors_as_notifications() {
 
 #[test]
 fn shows_invisible_and_reordering_characters_in_what_a_call_shows() {
-    use crate::pi::{call_target, changed_path};
+    use crate::pi::call_target;
     // Right-to-left override, zero-width space and carriage return; the target is the first
     // line.
     let command = r#"{"command":"rm -rf /\u202egnp.txt\u200b\r\n\techo\u0000"}"#;
     assert_eq!(
         call_target(command),
         "rm -rf /<U+202E>gnp.txt<U+200B><U+000D>"
-    );
-    // As the adapter receives them: parsed, with the characters themselves.
-    let edit = serde_json::json!({"path": "a\u{2066}b.rs", "oldText": "x\u{2028}y"}).to_string();
-    assert_eq!(
-        changed_path("edit", &edit).as_deref(),
-        Some("a<U+2066>b.rs")
     );
     // Characters Unicode lets renderers ignore: variation selectors, fillers, joiners and tags.
     let ignorable = r#"{"command":"rm\ufe0f \u3164-\u115f\u034f\u17b4\u180b\udb40\udd00"}"#;
@@ -778,14 +755,6 @@ fn shows_tool_names_with_hiding_characters_written_out() {
         .filter_map(|item| item.tool)
         .collect();
     assert_eq!(chat, ["lint<U+202E><U+000A>"]);
-    let steps: Vec<_> = history
-        .trajectory(None)
-        .records
-        .into_iter()
-        .filter(|record| record.label.starts_with("lint"))
-        .map(|record| record.label)
-        .collect();
-    assert_eq!(steps, ["lint<U+202E><U+000A>"]);
 }
 
 #[test]

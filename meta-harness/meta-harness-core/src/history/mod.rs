@@ -1,8 +1,7 @@
-//! A session's stored history: its branch tree and the Trajectory of each branch.
+//! A session's stored history: its branch tree, its chat, its turns and what it cost.
 
 mod entry;
 mod outcome;
-mod trajectory;
 mod transcript;
 mod tree;
 mod turns;
@@ -11,8 +10,6 @@ pub use turns::{ChangeCount, TurnCheckpoints};
 
 pub(crate) use entry::first_line;
 pub(crate) use outcome::patch_lines;
-#[cfg(test)]
-pub(crate) use outcome::test_counts;
 
 use std::io::Read;
 use std::path::Path;
@@ -117,11 +114,6 @@ impl History {
         tree::session_tree(&self.entries, self.leaf.as_deref())
     }
 
-    /// The branch ending at `leaf`, or at the session's leaf, as Trajectory rows.
-    pub fn trajectory(&self, leaf: Option<&str>) -> Trajectory {
-        trajectory::trajectory(&self.entries, leaf.or(self.leaf.as_deref()))
-    }
-
     /// The chat of the session's current branch: the items of up to `limit` entries before
     /// `before`, or of the newest entries.
     pub fn transcript(&self, before: Option<&str>, limit: usize) -> Transcript {
@@ -133,149 +125,6 @@ impl History {
     pub fn turns(&self, leaf: Option<&str>) -> Vec<TurnCheckpoints> {
         turns::turns(&self.entries, leaf.or(self.leaf.as_deref()))
     }
-
-    /// Everything the model saw for the request that produced the response `entry`, in parts;
-    /// `None` unless `entry` is a response.
-    pub fn context(&self, entry: &str) -> Option<ContextDetail> {
-        trajectory::context(&self.entries, entry)
-    }
-}
-
-/// What a Trajectory row shows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RecordKind {
-    /// A user prompt; it starts a turn.
-    User,
-    /// One model request and its response.
-    Message,
-    /// A tool call and its result.
-    Tool,
-}
-
-/// What the agent sent to the model for one request.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct StepContext {
-    /// Characters of the system prompt, all sections and appended instructions.
-    pub prompt_chars: usize,
-    /// The system prompt's named sections, such as `preamble` or `project_context`.
-    pub sections: Vec<String>,
-    /// The tools the model could call, by name.
-    pub tools: Vec<String>,
-    /// Characters of the tools' declarations.
-    pub tool_chars: usize,
-    /// Characters of the messages in the conversation, including a compaction summary.
-    pub message_chars: usize,
-    /// Messages in the conversation before this request.
-    pub messages: usize,
-    /// What changed since the previous request, such as `prompt` or `result of bash`.
-    pub new_since_previous: Vec<String>,
-}
-
-/// One Trajectory row.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TrajectoryRecord {
-    /// The agent's entry id, used to branch from this row.
-    pub entry: String,
-    /// The turn on this branch, counted from 1.
-    pub turn: u64,
-    /// What the row shows.
-    pub kind: RecordKind,
-    /// The prompt, the response's first line or the tool name.
-    pub label: String,
-    /// A tool call's arguments as JSON text.
-    pub detail: String,
-    /// What a tool call works on, such as a command or a path, on one line.
-    pub target: String,
-    /// The file a successful file change changed.
-    pub changed_file: Option<String>,
-    /// Milliseconds from the branch's first entry to the start.
-    pub start_ms: u64,
-    /// How long it took, when measured.
-    pub duration_ms: Option<u64>,
-    /// Milliseconds until the first streamed content of a model response.
-    pub first_token_ms: Option<u64>,
-    /// The model of a response.
-    pub model: String,
-    /// Tokens and cost of a response.
-    pub usage: Option<Usage>,
-    /// Why a response ended.
-    pub stop_reason: String,
-    /// Whether a tool call or response failed.
-    pub failed: bool,
-    /// What the model saw for a response.
-    pub context: Option<StepContext>,
-    /// What a tool call did.
-    pub outcome: ToolOutcome,
-    /// Characters the step adds to the model's context: its prompt, response or tool result.
-    pub added_chars: usize,
-}
-
-/// What a tool call did, as far as its stored result shows.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ToolOutcome {
-    /// Lines an edit added or a write wrote.
-    pub added: Option<u32>,
-    /// Lines an edit removed.
-    pub removed: Option<u32>,
-    /// A shell command's exit code.
-    pub exit_code: Option<i32>,
-    /// Tests a shell command ran, from a common test runner's output.
-    pub tests: Option<TestCount>,
-}
-
-/// Tests a run passed and failed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TestCount {
-    /// Tests that passed.
-    pub passed: u32,
-    /// Tests that failed.
-    pub failed: u32,
-}
-
-/// Everything the model saw for one request: system-prompt sections, tool declarations and
-/// messages, each with its length in characters.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ContextDetail {
-    /// Sections of the system prompt, by name.
-    pub sections: Vec<ContextPart>,
-    /// Declared tools, by name.
-    pub tools: Vec<ContextPart>,
-    /// Messages on the branch up to the request, including ones a compaction or edit removed.
-    pub messages: Vec<ContextMessage>,
-}
-
-/// A named part of the model's context.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ContextPart {
-    /// Its name.
-    pub name: String,
-    /// Its length in characters.
-    pub chars: usize,
-}
-
-/// A message on the branch up to a request.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ContextMessage {
-    /// The entry id.
-    pub entry: String,
-    /// What it is, such as `prompt · Add rate limiting` or `result of bash · npm test`.
-    pub label: String,
-    /// Its length in characters.
-    pub chars: usize,
-    /// Whether the model saw it; a compaction or edit can take it out.
-    pub in_context: bool,
-    /// Whether it arrived since the previous request; the model's own reply to that request does
-    /// not count.
-    pub fresh: bool,
-}
-
-/// One branch of a session, from its first entry to its leaf.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Trajectory {
-    /// The rows in order.
-    pub records: Vec<TrajectoryRecord>,
-    /// Milliseconds from the first to the last entry.
-    pub duration_ms: u64,
 }
 
 /// A page of the chat of a session's current branch.

@@ -56,10 +56,6 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// send that many more. Liquid calls it after applying each batch it received (ADR-0272).
   Future<void> confirmApplied({required PlatformInt64 applied});
 
-  /// Everything the model saw for the request behind the response `entry`; `None` unless
-  /// `entry` is a response.
-  Future<BridgeContextDetail?> context({required String entry});
-
   /// Creates the branch `name` at the current commit and switches to it.
   Future<BridgeGitOutcome> createBranch({required String name});
 
@@ -109,9 +105,8 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// The checkout's branch, upstream and uncommitted files; none outside Git.
   Future<BridgeGitStatus?> gitStatus();
 
-  /// Reads the session's branch tree and the Trajectory of each branch ending at an entry in
-  /// `leaves`, or of the current branch when `leaves` is empty.
-  Future<BridgeHistory> history({required List<String> leaves});
+  /// Reads the session's branch tree and what its stored responses used.
+  Future<BridgeHistory> history();
 
   /// Whether the project is in a Git repository, so its turns can have checkpoints.
   Future<bool> inRepository();

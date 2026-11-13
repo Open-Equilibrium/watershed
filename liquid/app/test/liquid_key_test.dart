@@ -222,22 +222,4 @@ void main() {
       ]);
     },
   );
-
-  testWidgets('the Trajectory keys in the status bar follow the shortcuts', (
-    tester,
-  ) async {
-    await show(
-      tester,
-      ShortcutSettings.standard().change(
-        Command.branch,
-        const Keys(LogicalKeyboardKey.keyX),
-      ),
-    );
-    await tester.tap(find.text('Trajectory'));
-    await tester.pumpAndSettle();
-
-    await hold(tester, LogicalKeyboardKey.metaLeft);
-    expect(find.textContaining('X branch'), findsOneWidget);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft, platform: 'macos');
-  });
 }

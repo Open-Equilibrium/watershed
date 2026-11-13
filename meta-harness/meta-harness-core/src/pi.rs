@@ -377,7 +377,7 @@ fn role(record: &Map<String, Value>) -> Option<&str> {
 /// Characters of a call's target kept for one-line summaries.
 const TARGET_CHARS: usize = 120;
 
-/// The arguments that name the file a call of one of pi's file tools changes.
+/// The arguments that name the file a call of one of pi's file tools works on.
 pub(crate) const PATH_ARGUMENTS: [&str; 2] = ["path", "file_path"];
 
 /// The argument that names what a call of one of pi's tools works on: its command, path or
@@ -394,18 +394,6 @@ pub(crate) fn call_argument(arguments: &str) -> Option<String> {
 /// What a call works on, for one-line summaries: its main argument, else its arguments.
 pub(crate) fn call_target(arguments: &str) -> String {
     call_argument(arguments).unwrap_or_else(|| first_line(&visible(arguments), TARGET_CHARS))
-}
-
-/// The file a call of one of pi's file tools changes.
-pub(crate) fn changed_path(tool: &str, arguments: &str) -> Option<String> {
-    if item_kind(tool) != ItemKind::FileChange {
-        return None;
-    }
-    let arguments: Value = serde_json::from_str(arguments).ok()?;
-    PATH_ARGUMENTS
-        .iter()
-        .find_map(|name| arguments.get(*name)?.as_str())
-        .map(visible)
 }
 
 /// What a call of pi's `tool` does, for live and restored chat items alike. Records name

@@ -3,11 +3,10 @@
 use std::ffi::OsString;
 
 use meta_harness_core::{
-    AgentEvent, ChangeStatus, CommandError, ContextDetail, ContextMessage, ContextPart, EntryKind,
-    FileChange, ItemDetail, ItemKind, ItemStatus, MAX_RECORD_BYTES, Model, NotificationLevel,
-    Queue, RecordKind, RevertConfirmation, RevertFile, SessionEvent, StepContext, StoredSession,
-    ToolOutcome, Trajectory, TrajectoryRecord, Transcript, TranscriptItem, TreeNode,
-    TurnCheckpoints, Usage, UserInput, visible_name,
+    AgentEvent, ChangeStatus, CommandError, EntryKind, FileChange, ItemDetail, ItemKind,
+    ItemStatus, MAX_RECORD_BYTES, Model, NotificationLevel, Queue, RevertConfirmation, RevertFile,
+    SessionEvent, StoredSession, Transcript, TranscriptItem, TreeNode, TurnCheckpoints, Usage,
+    UserInput, visible_name,
 };
 
 use crate::api::events::{
@@ -16,10 +15,8 @@ use crate::api::events::{
     BridgeStep, BridgeUsage,
 };
 use crate::api::history::{
-    BridgeContextDetail, BridgeContextMessage, BridgeContextPart, BridgeEntryKind, BridgeRecord,
-    BridgeRecordKind, BridgeRevertConfirmation, BridgeRevertFile, BridgeStepContext,
-    BridgeToolOutcome, BridgeTrajectory, BridgeTranscript, BridgeTranscriptItem, BridgeTreeNode,
-    BridgeTurn,
+    BridgeEntryKind, BridgeRevertConfirmation, BridgeRevertFile, BridgeTranscript,
+    BridgeTranscriptItem, BridgeTreeNode, BridgeTurn,
 };
 use crate::api::session::{BridgeModel, BridgeStoredSession};
 
@@ -81,43 +78,6 @@ impl From<TreeNode> for BridgeTreeNode {
     }
 }
 
-impl From<Trajectory> for BridgeTrajectory {
-    fn from(trajectory: Trajectory) -> Self {
-        Self {
-            records: trajectory.records.into_iter().map(Into::into).collect(),
-            duration_ms: int(trajectory.duration_ms),
-        }
-    }
-}
-
-impl From<TrajectoryRecord> for BridgeRecord {
-    fn from(record: TrajectoryRecord) -> Self {
-        Self {
-            entry: record.entry,
-            turn: int(record.turn),
-            kind: match record.kind {
-                RecordKind::User => BridgeRecordKind::User,
-                RecordKind::Message => BridgeRecordKind::Message,
-                RecordKind::Tool => BridgeRecordKind::Tool,
-            },
-            label: record.label,
-            detail: record.detail,
-            target: record.target,
-            changed_file: record.changed_file,
-            start_ms: int(record.start_ms),
-            duration_ms: record.duration_ms.map(int),
-            first_token_ms: record.first_token_ms.map(int),
-            model: record.model,
-            usage: record.usage.map(Into::into),
-            stop_reason: record.stop_reason,
-            failed: record.failed,
-            context: record.context.map(Into::into),
-            outcome: record.outcome.into(),
-            added_chars: int(record.added_chars),
-        }
-    }
-}
-
 impl From<Queue> for BridgeQueue {
     fn from(queue: Queue) -> Self {
         Self {
@@ -149,63 +109,6 @@ impl From<TranscriptItem> for BridgeTranscriptItem {
             duration_ms: item.duration_ms.map(int),
             added: item.lines.map(|lines| int(lines.added)),
             removed: item.lines.map(|lines| int(lines.removed)),
-        }
-    }
-}
-
-impl From<ToolOutcome> for BridgeToolOutcome {
-    fn from(outcome: ToolOutcome) -> Self {
-        Self {
-            added: outcome.added.map(int),
-            removed: outcome.removed.map(int),
-            exit_code: outcome.exit_code,
-            tests_passed: outcome.tests.map(|tests| int(tests.passed)),
-            tests_failed: outcome.tests.map(|tests| int(tests.failed)),
-        }
-    }
-}
-
-impl From<ContextDetail> for BridgeContextDetail {
-    fn from(detail: ContextDetail) -> Self {
-        let parts = |parts: Vec<ContextPart>| {
-            parts
-                .into_iter()
-                .map(|part| BridgeContextPart {
-                    name: part.name,
-                    chars: int(part.chars),
-                })
-                .collect()
-        };
-        Self {
-            sections: parts(detail.sections),
-            tools: parts(detail.tools),
-            messages: detail.messages.into_iter().map(Into::into).collect(),
-        }
-    }
-}
-
-impl From<ContextMessage> for BridgeContextMessage {
-    fn from(message: ContextMessage) -> Self {
-        Self {
-            entry: message.entry,
-            label: message.label,
-            chars: int(message.chars),
-            in_context: message.in_context,
-            fresh: message.fresh,
-        }
-    }
-}
-
-impl From<StepContext> for BridgeStepContext {
-    fn from(context: StepContext) -> Self {
-        Self {
-            prompt_chars: int(context.prompt_chars),
-            sections: context.sections,
-            tools: context.tools,
-            tool_chars: int(context.tool_chars),
-            messages: int(context.messages),
-            message_chars: int(context.message_chars),
-            new_since_previous: context.new_since_previous,
         }
     }
 }

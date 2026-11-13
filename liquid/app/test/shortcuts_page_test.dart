@@ -72,15 +72,7 @@ void main() {
     expect(find.text('⇪N'), findsOneWidget);
     expect(find.text('⌘N'), findsOneWidget);
     expect(find.text('tap ⇪'), findsOneWidget);
-    expect(find.text('Trajectory'), findsWidgets);
     expect(find.text('Fold or unfold the folder'), findsOneWidget);
-    expect(find.text('Collapse or expand the turn'), findsOneWidget);
-    expect(find.text('Collapse all turns'), findsOneWidget);
-    expect(
-      find.text('Close the step, range or filter'),
-      findsOneWidget,
-      reason: 'esc closes the inspector, the range and the filter row',
-    );
 
     await press(tester, LogicalKeyboardKey.escape);
     expect(find.text('tap ⇪'), findsNothing);
@@ -289,23 +281,6 @@ void main() {
     ]);
   });
 
-  testWidgets('a Trajectory key that the menu bar runs asks first', (
-    tester,
-  ) async {
-    await show(tester, ShortcutSettings.standard());
-    await openSettings(tester);
-    await tester.tap(find.text('⌘F'));
-    await tester.pumpAndSettle();
-    await press(
-      tester,
-      LogicalKeyboardKey.digit1,
-      holding: LogicalKeyboardKey.metaLeft,
-    );
-    expect(find.textContaining('⌘1 already runs'), findsOneWidget);
-    expect(find.text('Use anyway, clear Chat'), findsOneWidget);
-    expect(shortcuts.value.changed(Command.filterSteps), isFalse);
-  });
-
   testWidgets('recording the keys a command already has changes nothing', (
     tester,
   ) async {
@@ -434,15 +409,15 @@ void main() {
     await show(tester, ShortcutSettings.standard());
     await openSettings(tester);
 
-    await tester.enterText(find.byType(TextField), 'branch');
+    await tester.enterText(find.byType(TextField), 'whitespace');
     await tester.pumpAndSettle();
-    expect(find.text('Branch from the step'), findsOneWidget);
+    expect(find.text('Hide or show whitespace changes'), findsOneWidget);
     expect(find.text('New Session'), findsNothing);
 
-    await tester.enterText(find.byType(TextField), '⌘2');
+    await tester.enterText(find.byType(TextField), '⌘3');
     await tester.pumpAndSettle();
-    expect(find.text('Trajectory'), findsWidgets);
-    expect(find.text('Diff'), findsNothing);
+    expect(find.text('Diff'), findsWidgets);
+    expect(find.text('New Session'), findsNothing);
   });
 
   testWidgets('lists every key that never changes', (tester) async {

@@ -8,7 +8,7 @@ import 'events.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 /// Whether the changes between two checkpoints could be read.
 enum BridgeChangesState {
@@ -20,103 +20,6 @@ enum BridgeChangesState {
 
   /// A checkpoint was removed.
   removed,
-}
-
-/// Everything the model saw for one request, in parts with their length in characters.
-class BridgeContextDetail {
-  /// Sections of the system prompt.
-  final List<BridgeContextPart> sections;
-
-  /// Declared tools.
-  final List<BridgeContextPart> tools;
-
-  /// Messages on the branch up to the request.
-  final List<BridgeContextMessage> messages;
-
-  const BridgeContextDetail({
-    required this.sections,
-    required this.tools,
-    required this.messages,
-  });
-
-  @override
-  int get hashCode => sections.hashCode ^ tools.hashCode ^ messages.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeContextDetail &&
-          runtimeType == other.runtimeType &&
-          sections == other.sections &&
-          tools == other.tools &&
-          messages == other.messages;
-}
-
-/// A message on the branch up to a request.
-class BridgeContextMessage {
-  /// The entry id.
-  final String entry;
-
-  /// What it is, such as `result of bash · npm test`.
-  final String label;
-
-  /// Its length in characters.
-  final PlatformInt64 chars;
-
-  /// Whether the model saw it; a compaction or edit can take it out.
-  final bool inContext;
-
-  /// Whether it arrived since the previous request.
-  final bool fresh;
-
-  const BridgeContextMessage({
-    required this.entry,
-    required this.label,
-    required this.chars,
-    required this.inContext,
-    required this.fresh,
-  });
-
-  @override
-  int get hashCode =>
-      entry.hashCode ^
-      label.hashCode ^
-      chars.hashCode ^
-      inContext.hashCode ^
-      fresh.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeContextMessage &&
-          runtimeType == other.runtimeType &&
-          entry == other.entry &&
-          label == other.label &&
-          chars == other.chars &&
-          inContext == other.inContext &&
-          fresh == other.fresh;
-}
-
-/// A named part of the model's context.
-class BridgeContextPart {
-  /// Its name.
-  final String name;
-
-  /// Its length in characters.
-  final PlatformInt64 chars;
-
-  const BridgeContextPart({required this.name, required this.chars});
-
-  @override
-  int get hashCode => name.hashCode ^ chars.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeContextPart &&
-          runtimeType == other.runtimeType &&
-          name == other.name &&
-          chars == other.chars;
 }
 
 /// What a tree entry holds.
@@ -140,7 +43,7 @@ enum BridgeEntryKind {
   other,
 }
 
-/// The session's branch tree and the requested Trajectories.
+/// The session's branch tree and what its stored responses used.
 class BridgeHistory {
   /// Every entry; parents precede their children.
   final List<BridgeTreeNode> tree;
@@ -148,22 +51,13 @@ class BridgeHistory {
   /// The entry the next prompt continues from.
   final String? leaf;
 
-  /// One Trajectory per requested branch, in request order.
-  final List<BridgeTrajectory> trajectories;
-
   /// What every stored response used, on every branch.
   final BridgeUsage usage;
 
-  const BridgeHistory({
-    required this.tree,
-    this.leaf,
-    required this.trajectories,
-    required this.usage,
-  });
+  const BridgeHistory({required this.tree, this.leaf, required this.usage});
 
   @override
-  int get hashCode =>
-      tree.hashCode ^ leaf.hashCode ^ trajectories.hashCode ^ usage.hashCode;
+  int get hashCode => tree.hashCode ^ leaf.hashCode ^ usage.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -172,137 +66,7 @@ class BridgeHistory {
           runtimeType == other.runtimeType &&
           tree == other.tree &&
           leaf == other.leaf &&
-          trajectories == other.trajectories &&
           usage == other.usage;
-}
-
-/// One Trajectory row.
-class BridgeRecord {
-  /// The entry id, used to branch.
-  final String entry;
-
-  /// The turn on this branch, counted from 1.
-  final PlatformInt64 turn;
-
-  /// What the row shows.
-  final BridgeRecordKind kind;
-
-  /// The prompt, the response's first line or the tool name.
-  final String label;
-
-  /// Tool arguments as JSON text.
-  final String detail;
-
-  /// What a tool call works on, such as a command or a path, on one line.
-  final String target;
-
-  /// The file a successful file change changed.
-  final String? changedFile;
-
-  /// Milliseconds from the branch's first entry to the start.
-  final PlatformInt64 startMs;
-
-  /// How long it took, when measured.
-  final PlatformInt64? durationMs;
-
-  /// Milliseconds until a response's first streamed content.
-  final PlatformInt64? firstTokenMs;
-
-  /// The model of a response.
-  final String model;
-
-  /// Tokens and cost of a response.
-  final BridgeUsage? usage;
-
-  /// Why a response ended.
-  final String stopReason;
-
-  /// Whether a tool call or response failed.
-  final bool failed;
-
-  /// What the model saw for a response.
-  final BridgeStepContext? context;
-
-  /// What a tool call did.
-  final BridgeToolOutcome outcome;
-
-  /// Characters the step adds to the model's context: its prompt, response or tool result.
-  final PlatformInt64 addedChars;
-
-  const BridgeRecord({
-    required this.entry,
-    required this.turn,
-    required this.kind,
-    required this.label,
-    required this.detail,
-    required this.target,
-    this.changedFile,
-    required this.startMs,
-    this.durationMs,
-    this.firstTokenMs,
-    required this.model,
-    this.usage,
-    required this.stopReason,
-    required this.failed,
-    this.context,
-    required this.outcome,
-    required this.addedChars,
-  });
-
-  @override
-  int get hashCode =>
-      entry.hashCode ^
-      turn.hashCode ^
-      kind.hashCode ^
-      label.hashCode ^
-      detail.hashCode ^
-      target.hashCode ^
-      changedFile.hashCode ^
-      startMs.hashCode ^
-      durationMs.hashCode ^
-      firstTokenMs.hashCode ^
-      model.hashCode ^
-      usage.hashCode ^
-      stopReason.hashCode ^
-      failed.hashCode ^
-      context.hashCode ^
-      outcome.hashCode ^
-      addedChars.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeRecord &&
-          runtimeType == other.runtimeType &&
-          entry == other.entry &&
-          turn == other.turn &&
-          kind == other.kind &&
-          label == other.label &&
-          detail == other.detail &&
-          target == other.target &&
-          changedFile == other.changedFile &&
-          startMs == other.startMs &&
-          durationMs == other.durationMs &&
-          firstTokenMs == other.firstTokenMs &&
-          model == other.model &&
-          usage == other.usage &&
-          stopReason == other.stopReason &&
-          failed == other.failed &&
-          context == other.context &&
-          outcome == other.outcome &&
-          addedChars == other.addedChars;
-}
-
-/// What a Trajectory row shows.
-enum BridgeRecordKind {
-  /// A user prompt.
-  user,
-
-  /// A model request and its response.
-  message,
-
-  /// A tool call and its result.
-  tool,
 }
 
 /// Exact identities returned unchanged by the revert dialog.
@@ -473,133 +237,6 @@ class BridgeRunningAgent {
           title == other.title;
 }
 
-/// What the agent sent to the model for one request.
-class BridgeStepContext {
-  /// Characters of the system prompt.
-  final PlatformInt64 promptChars;
-
-  /// The system prompt's named sections, such as `preamble` or `project_context`.
-  final List<String> sections;
-
-  /// The tools the model could call.
-  final List<String> tools;
-
-  /// Characters of the tools' declarations.
-  final PlatformInt64 toolChars;
-
-  /// Messages in the conversation before the request.
-  final PlatformInt64 messages;
-
-  /// Characters of those messages.
-  final PlatformInt64 messageChars;
-
-  /// What changed since the previous request.
-  final List<String> newSincePrevious;
-
-  const BridgeStepContext({
-    required this.promptChars,
-    required this.sections,
-    required this.tools,
-    required this.toolChars,
-    required this.messages,
-    required this.messageChars,
-    required this.newSincePrevious,
-  });
-
-  @override
-  int get hashCode =>
-      promptChars.hashCode ^
-      sections.hashCode ^
-      tools.hashCode ^
-      toolChars.hashCode ^
-      messages.hashCode ^
-      messageChars.hashCode ^
-      newSincePrevious.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeStepContext &&
-          runtimeType == other.runtimeType &&
-          promptChars == other.promptChars &&
-          sections == other.sections &&
-          tools == other.tools &&
-          toolChars == other.toolChars &&
-          messages == other.messages &&
-          messageChars == other.messageChars &&
-          newSincePrevious == other.newSincePrevious;
-}
-
-/// What a tool call did, as far as its stored result shows.
-class BridgeToolOutcome {
-  /// Lines an edit added or a write wrote.
-  final PlatformInt64? added;
-
-  /// Lines an edit removed.
-  final PlatformInt64? removed;
-
-  /// A shell command's exit code.
-  final int? exitCode;
-
-  /// Tests that passed, from a common test runner's output.
-  final PlatformInt64? testsPassed;
-
-  /// Tests that failed.
-  final PlatformInt64? testsFailed;
-
-  const BridgeToolOutcome({
-    this.added,
-    this.removed,
-    this.exitCode,
-    this.testsPassed,
-    this.testsFailed,
-  });
-
-  static Future<BridgeToolOutcome> default_() =>
-      RustLib.instance.api.crateApiHistoryBridgeToolOutcomeDefault();
-
-  @override
-  int get hashCode =>
-      added.hashCode ^
-      removed.hashCode ^
-      exitCode.hashCode ^
-      testsPassed.hashCode ^
-      testsFailed.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeToolOutcome &&
-          runtimeType == other.runtimeType &&
-          added == other.added &&
-          removed == other.removed &&
-          exitCode == other.exitCode &&
-          testsPassed == other.testsPassed &&
-          testsFailed == other.testsFailed;
-}
-
-/// One branch from its first entry to its leaf.
-class BridgeTrajectory {
-  /// The rows in order.
-  final List<BridgeRecord> records;
-
-  /// Milliseconds from the first to the last entry.
-  final PlatformInt64 durationMs;
-
-  const BridgeTrajectory({required this.records, required this.durationMs});
-
-  @override
-  int get hashCode => records.hashCode ^ durationMs.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeTrajectory &&
-          runtimeType == other.runtimeType &&
-          records == other.records &&
-          durationMs == other.durationMs;
-}
-
 /// A page of the chat of the session's current branch.
 class BridgeTranscript {
   /// The items in order.
@@ -765,7 +402,7 @@ class BridgeTurn {
   /// The entry that recorded its end checkpoint, once it ended.
   final String? endEntry;
 
-  /// The Trajectory's turn of its first prompt; 0 before a prompt was stored.
+  /// The turn of its first prompt on the branch, counted from 1; 0 before a prompt was stored.
   final PlatformInt64 number;
 
   /// The entry of its first prompt, before which a revert continues the session.

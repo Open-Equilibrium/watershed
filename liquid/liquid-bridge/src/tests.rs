@@ -14,8 +14,8 @@ use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use crate::api::history::{
-    BridgeChangesState, BridgeEntryKind, BridgeRecordKind, BridgeRevertConfirmation,
-    BridgeRevertFile, BridgeRunningAgent, BridgeTurn, BridgeTurnChanges,
+    BridgeChangesState, BridgeEntryKind, BridgeRevertConfirmation, BridgeRevertFile,
+    BridgeRunningAgent, BridgeTurn, BridgeTurnChanges,
 };
 use crate::api::session::{
     AgentSession, BridgeCheckpointSession, BridgeModel, BridgeStoredSession, SessionConfig,
@@ -1824,7 +1824,7 @@ IFS= read -r line || exit 0"#;
 }
 
 #[test]
-fn reads_the_history_of_each_branch_and_branches_from_a_step() {
+fn reads_the_history_of_the_branch_and_branches_from_a_step() {
     // A session forked after its first response: `e2` ends the original branch, `b1` the fork.
     let entries = r#"{"entries":[{"type":"message","id":"e1","parentId":null,"timestamp":"2026-10-24T10:00:00.000Z","message":{"role":"user","content":"Add rate limiting"}},{"type":"message","id":"e2","parentId":"e1","timestamp":"2026-10-24T10:00:02.000Z","message":{"role":"assistant","model":"faux-1","usage":{"input":10,"output":2,"cost":{"total":0.001}},"content":[{"type":"text","text":"Done."}]}},{"type":"message","id":"b1","parentId":"e1","timestamp":"2026-10-24T10:01:00.000Z","message":{"role":"user","content":"Use a token bucket"}}],"leafId":"b1"}"#;
     let respond = |id: &str| {
@@ -1855,7 +1855,7 @@ IFS= read -r line || exit 0"#
     let session =
         launch(gated(&script), std::env::temp_dir().display().to_string()).expect("agent starts");
 
-    let current = session.history(Vec::new()).expect("history");
+    let current = session.history().expect("history");
     assert_eq!(
         (
             current.usage.input,
@@ -1896,52 +1896,16 @@ IFS= read -r line || exit 0"#
             ),
         ]
     );
-    let steps =
-        |history: &crate::api::history::BridgeHistory| -> Vec<Vec<(BridgeRecordKind, String)>> {
-            history
-                .trajectories
-                .iter()
-                .map(|trajectory| {
-                    trajectory
-                        .records
-                        .iter()
-                        .map(|record| (record.kind, record.label.clone()))
-                        .collect()
-                })
-                .collect()
-        };
-    assert_eq!(
-        steps(&current),
-        [vec![
-            (BridgeRecordKind::User, "Add rate limiting".to_owned()),
-            (BridgeRecordKind::User, "Use a token bucket".to_owned()),
-        ]]
-    );
-
-    let both = session
-        .history(vec!["e2".to_owned(), "b1".to_owned()])
-        .expect("history");
-    assert_eq!(
-        steps(&both)[0][1],
-        (BridgeRecordKind::Message, "Done.".to_owned())
-    );
-    assert_eq!(both.trajectories[0].duration_ms, 2000);
-    let response = &both.trajectories[0].records[1];
-    assert_eq!(
-        (
-            response.duration_ms,
-            response.usage.map(|usage| usage.cost_micro_usd)
-        ),
-        (None, Some(1000))
-    );
-    assert_eq!(steps(&both)[1], steps(&current)[0]);
+    // The second read continues after the last entry and adds nothing.
+    let again = session.history().expect("history");
+    assert_eq!((again.leaf.as_deref(), again.tree.len()), (Some("b1"), 3));
 
     assert_eq!(session.branch("e1".to_owned()), Ok(()));
     assert!(call(session.shutdown()));
 }
 
 #[test]
-fn reads_tool_outcomes_and_what_the_model_saw() {
+fn reads_what_a_write_changed_in_the_chat_and_tree() {
     let entries = r#"{"entries":[{"type":"message","id":"s1","parentId":null,"message":{"role":"system","content":"","sections":{"preamble":"You are pi."},"toolsAdded":[{"name":"write"}]}},{"type":"message","id":"u1","parentId":"s1","message":{"role":"user","content":"Write it"}},{"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"write","arguments":{"path":"a.ts","content":"x\ny\n"}}]}},{"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"c1","toolName":"write","content":[{"type":"text","text":"ok"}]}},{"type":"message","id":"a2","parentId":"r1","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}],"leafId":"a2"}"#;
     let script = no_session_file(2)
         + &format!(
@@ -1954,51 +1918,20 @@ fn reads_tool_outcomes_and_what_the_model_saw() {
         + "IFS= read -r line || exit 0";
     let session =
         launch(gated(&script), std::env::temp_dir().display().to_string()).expect("agent starts");
-    let history = session.history(Vec::new()).expect("history");
-    let records = &history.trajectories[0].records;
-    assert_eq!(records[2].kind, BridgeRecordKind::Tool);
-    assert_eq!(records[2].outcome.added, Some(2), "lines the write wrote");
+    let history = session.history().expect("history");
     let result = history.tree.iter().find(|node| node.id == "r1");
     assert_eq!(
         result.map(|node| (node.preview.as_str(), node.failed)),
         Some(("write a.ts", false)),
         "the tree names what the write wrote to"
     );
-    assert_eq!(
-        records
-            .iter()
-            .map(|record| record.added_chars)
-            .collect::<Vec<_>>(),
-        [8, 34, 2, 5],
-        "what the prompt, the call, the result and the answer add to the context"
-    );
-    let context = records[3].context.as_ref().expect("a2 saw context");
-    assert_eq!(
-        (
-            context.prompt_chars,
-            context.sections.clone(),
-            context.tool_chars > 0,
-            context.messages
-        ),
-        (11, vec!["preamble".to_owned()], true, 3)
-    );
-    let detail = session
-        .context("a2".to_owned())
-        .expect("context")
-        .expect("a2 is a response");
-    assert_eq!(
-        detail
-            .messages
-            .iter()
-            .map(|message| (message.label.as_str(), message.fresh))
-            .collect::<Vec<_>>(),
-        [
-            ("prompt · Write it", false),
-            ("response · (tool calls)", false),
-            ("result of write · a.ts", true),
-        ]
-    );
-    assert_eq!(detail.tools[0].name, "write");
+    let chat = session.transcript(None, 50).expect("transcript");
+    let write = chat
+        .items
+        .iter()
+        .find(|item| item.tool.as_deref() == Some("write"))
+        .expect("the write");
+    assert_eq!(write.added, Some(2), "lines the write wrote");
     assert!(call(session.shutdown()));
 }
 

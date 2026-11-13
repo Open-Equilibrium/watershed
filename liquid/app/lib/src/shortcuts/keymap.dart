@@ -205,7 +205,7 @@ class _KeysActivator extends ShortcutActivator {
 
 /// Where a command's keys work. Keys conflict within one area, and the ⌘ keys of the app area,
 /// which the menu bar runs, in every area.
-enum Area { app, input, question, trajectory, diff, page }
+enum Area { app, input, question, diff, page }
 
 /// Keys that never change, as Settings → Shortcuts lists them per area; no command may take
 /// them there.
@@ -220,28 +220,6 @@ enum Fixed {
   moveThroughOptions('Move through options', Area.question, '↑↓', [
     Keys(LogicalKeyboardKey.arrowUp),
     Keys(LogicalKeyboardKey.arrowDown),
-  ]),
-  previousOrNextStep('Previous or next step', Area.trajectory, '↑↓', [
-    Keys(LogicalKeyboardKey.arrowUp),
-    Keys(LogicalKeyboardKey.arrowDown),
-  ]),
-  foldTurn('Collapse or expand the turn', Area.trajectory, '←→', [
-    Keys(LogicalKeyboardKey.arrowLeft),
-    Keys(LogicalKeyboardKey.arrowRight),
-  ]),
-  // Only while a range handle of the timeline has the focus, which takes them before the list.
-  rangeHandle('Move a range handle', Area.trajectory, '←→ ⇧←→ Home End ⌫', [
-    Keys(LogicalKeyboardKey.arrowLeft),
-    Keys(LogicalKeyboardKey.arrowRight),
-    Keys(LogicalKeyboardKey.arrowLeft, shift: true),
-    Keys(LogicalKeyboardKey.arrowRight, shift: true),
-    Keys(LogicalKeyboardKey.home),
-    Keys(LogicalKeyboardKey.end),
-    Keys(LogicalKeyboardKey.backspace),
-  ]),
-  moveInTree('Move in the session tree', Area.trajectory, '⌥↑↓', [
-    Keys(LogicalKeyboardKey.arrowUp, alt: true),
-    Keys(LogicalKeyboardKey.arrowDown, alt: true),
   ]),
   previousOrNextFile('Previous or next file', Area.diff, '↑↓', [
     Keys(LogicalKeyboardKey.arrowUp),
@@ -313,12 +291,6 @@ enum Command {
     Keys(LogicalKeyboardKey.digit1, meta: true),
     liquid: true,
   ),
-  trajectory(
-    'Trajectory',
-    Area.app,
-    Keys(LogicalKeyboardKey.digit2, meta: true),
-    liquid: true,
-  ),
   diff(
     'Diff',
     Area.app,
@@ -360,38 +332,7 @@ enum Command {
     Keys(LogicalKeyboardKey.enter, meta: true),
     liquid: true,
   ),
-  dismissQuestion('Dismiss', Area.question, Keys(LogicalKeyboardKey.escape)),
-  foldAll(
-    'Collapse all turns',
-    Area.trajectory,
-    Keys(LogicalKeyboardKey.arrowLeft, alt: true),
-  ),
-  openStep('Open the step', Area.trajectory, Keys(LogicalKeyboardKey.enter)),
-  filterSteps(
-    'Filter steps',
-    Area.trajectory,
-    Keys(LogicalKeyboardKey.keyF, meta: true),
-  ),
-  closeStep(
-    'Close the step, range or filter',
-    Area.trajectory,
-    Keys(LogicalKeyboardKey.escape),
-  ),
-  branch(
-    'Branch from the step',
-    Area.trajectory,
-    Keys(LogicalKeyboardKey.keyB),
-  ),
-  compare(
-    'Compare session branches',
-    Area.trajectory,
-    Keys(LogicalKeyboardKey.keyC),
-  ),
-  selectBranch(
-    'Select a session branch to compare',
-    Area.trajectory,
-    Keys(LogicalKeyboardKey.space),
-  );
+  dismissQuestion('Dismiss', Area.question, Keys(LogicalKeyboardKey.escape));
 
   const Command(this.label, this.area, this.keys, {this.liquid = false});
 

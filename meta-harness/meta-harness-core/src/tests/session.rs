@@ -6,8 +6,8 @@ use tokio::time::timeout;
 
 use crate::{
     AgentCommand, AgentEvent, Answer, CommandError, Delivery, EntryKind, History, ItemDetail,
-    ItemId, ItemKind, ItemStatus, Model, NotificationLevel, Pending, Queue, RecordKind, RequestId,
-    Session, SessionEvent, SessionState, SessionTree, TreeNode, TurnId, UserInput,
+    ItemId, ItemKind, ItemStatus, Model, NotificationLevel, Pending, Queue, RequestId, Session,
+    SessionEvent, SessionState, SessionTree, TreeNode, TurnId, UserInput,
 };
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -1547,14 +1547,6 @@ fn reads_state_and_tree_and_branches_through_the_extension() {
                 }],
                 leaf: Some("e1".to_owned()),
             }
-        );
-        let records = history.trajectory(None).records;
-        assert_eq!(
-            records
-                .iter()
-                .map(|record| (record.kind, record.label.as_str()))
-                .collect::<Vec<_>>(),
-            [(RecordKind::User, "hi")]
         );
         assert_eq!(
             accepted(session.branch("e1", Some("B")).await).await,

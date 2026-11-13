@@ -65,7 +65,7 @@ Future<Launch> launchFromEnvironment(
       config: SessionConfig(
         program: environment['LIQUID_PI'] ?? 'pi',
         extensionPath: extension,
-        // A stored session reopens with its Trajectory and branches after a restart.
+        // A stored session reopens with its chat and branches after a restart.
         session: environment['LIQUID_PI_SESSION'],
         cwd: project,
       ),

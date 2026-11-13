@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../format.dart';
 import '../rust/api/events.dart';
 import '../rust/api/history.dart';
-import '../trajectory/trajectory_model.dart';
+import 'session_graph.dart';
 
 /// One entry of the chat timeline. Its text grows in place while it streams, so only the widget
 /// that shows this item rebuilds (client architecture rule 6).

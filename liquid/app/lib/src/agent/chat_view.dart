@@ -7,13 +7,11 @@ import '../diff/revert_dialog.dart';
 import '../format.dart';
 import '../rust/api/events.dart';
 import '../rust/api/history.dart';
+import '../session/session_graph.dart';
 import '../session/session_state.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
-import '../trajectory/step_parts.dart';
-import '../trajectory/trajectory_model.dart';
-import '../trajectory/tree_view.dart';
 import 'input_lane.dart';
 import 'sidebar.dart';
 import 'start_page.dart';
@@ -333,3 +331,57 @@ class ToolRow extends StatelessWidget {
     );
   }
 }
+
+/// A branch's letter: blue for a shown branch, gray otherwise.
+class RefBadge extends StatelessWidget {
+  const RefBadge({super.key, required this.ref, required this.shown});
+
+  final String ref;
+  final bool shown;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space2),
+      decoration: BoxDecoration(
+        color: shown ? ws.accent : ws.hover,
+        borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
+      ),
+      child: Text(
+        ref,
+        style: TextStyle(
+          color: shown ? ws.onAccent : ws.textMuted,
+          fontSize: WsMetrics.fsSmall,
+          height: WsMetrics.lhSmall / WsMetrics.fsSmall,
+          fontWeight: WsMetrics.fwMedium,
+        ),
+      ),
+    );
+  }
+}
+
+/// How a part of a changed-lines count reads; the chat gives each tone its color.
+enum Tone { good, bad, muted, faint, plain }
+
+/// Changed lines as `+added −removed`, leaving out a missing count.
+List<(String, Tone)> lineParts(int? added, int? removed) => [
+  if (added != null) ('+$added', Tone.good),
+  if (added != null && removed != null) (' ', Tone.plain),
+  if (removed != null) ('−$removed', Tone.bad),
+];
+
+/// `parts` as spans in their tones' colors.
+List<TextSpan> toneSpans(WsPalette ws, List<(String, Tone)> parts) => [
+  for (final (text, tone) in parts)
+    TextSpan(
+      text: text,
+      style: switch (tone) {
+        Tone.good => TextStyle(color: ws.success),
+        Tone.bad => TextStyle(color: ws.danger),
+        Tone.muted => TextStyle(color: ws.textMuted),
+        Tone.faint => TextStyle(color: ws.textFaint),
+        Tone.plain => null,
+      },
+    ),
+];

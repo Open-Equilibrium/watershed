@@ -63,11 +63,6 @@ void main() {
         'Date arrow keys: a person\'s own change, which stays undoable.',
       ),
       (
-        'lib/src/trajectory/filter_bar.dart',
-        'text.clear();',
-        'The filter\'s clear button: a person\'s own change, which stays undoable.',
-      ),
-      (
         'lib/src/workspace/table_block.dart',
         '_name.value = TextEditingValue(',
         'The name taken from the line that became the Table, in its first frame; no earlier text is on its undo history.',

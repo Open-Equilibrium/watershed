@@ -119,9 +119,6 @@ class SessionState {
   PullRequests get pulls => _pulls ??= PullRequests(_backend, git, _bases);
   PullRequests? _pulls;
 
-  /// Counts the changes of the session's stored history; the Trajectory reloads on each.
-  final stored = ValueNotifier(0);
-
   /// What the start page offers: the project's recent sessions, the models and the selected
   /// one as `provider/id`.
   final recent = ValueNotifier<List<BridgeStoredSession>>(const []);
@@ -253,7 +250,6 @@ class SessionState {
     _chat.reset();
     totals.value = const SessionTotals();
     queue.value = const BridgeQueue(steering: [], followUp: []);
-    stored.value++;
     await loadChat();
     await loadStart();
     return true;
@@ -653,13 +649,8 @@ class SessionState {
     );
   }
 
-  /// The branch tree and the Trajectory of each branch ending at an entry in `leaves`, or of
-  /// the current branch.
-  Future<BridgeHistory> history([List<String> leaves = const []]) =>
-      _backend.history(leaves);
-
-  /// Everything the model saw for the request behind the response `entry`.
-  Future<BridgeContextDetail?> context(String entry) => _backend.context(entry);
+  /// The branch tree and what the stored responses used.
+  Future<BridgeHistory> history() => _backend.history();
 
   /// Continues the session from `entry`; the next prompt starts a new branch there. The chat
   /// then shows the branch the session continues. Returns whether this call branched: one asked
@@ -829,7 +820,6 @@ class SessionState {
 
   /// Shows the branch the session now continues.
   Future<void> _branched() async {
-    stored.value++;
     await loadChat();
   }
 
@@ -956,7 +946,6 @@ class SessionState {
       case BridgeEventKind.turnCompleted || BridgeEventKind.turnAborted:
         _turnActive = false;
         _stopping = false;
-        stored.value++;
         unawaited(loadTitle());
         final readAgain = _readAgainAtEnd;
         _readAgainAtEnd = false;
@@ -983,7 +972,6 @@ class SessionState {
       case BridgeEventKind.itemUpdated:
         _byId[event.item!.id]?.text.value = event.text ?? '';
       case BridgeEventKind.itemCompleted:
-        stored.value++;
         final view = _byId[event.item!.id];
         if (view != null) {
           view

@@ -127,33 +127,36 @@ void main() {
   );
 
   test('a ⌘ chord of the app area conflicts in every area, both ways', () {
-    const commandF = Keys(LogicalKeyboardKey.keyF, meta: true);
     const commandOne = Keys(LogicalKeyboardKey.digit1, meta: true);
+    const commandEnter = Keys(LogicalKeyboardKey.enter, meta: true);
     final keys = ShortcutSettings.standard();
 
-    expect(keys.conflicts(Command.filterSteps, commandOne), [Command.chat]);
-    expect(keys.conflicts(Command.chat, commandF), [Command.filterSteps]);
+    expect(keys.conflicts(Command.toggleToDo, commandOne), [Command.chat]);
+    expect(
+      keys.conflicts(Command.chat, commandEnter),
+      contains(Command.toggleToDo),
+    );
     expect(
       keys.conflicts(
-        Command.filterSteps,
+        Command.toggleToDo,
         const Keys(LogicalKeyboardKey.digit1, liquid: true, meta: true),
       ),
       [Command.chat],
       reason: 'the menu bar ignores the Liquid key',
     );
     final taken = keys.change(
-      Command.filterSteps,
+      Command.toggleToDo,
       commandOne,
       clear: [Command.chat],
     );
     expect(taken.bindings(Command.chat), isEmpty);
-    expect(taken.bindings(Command.filterSteps), [commandOne]);
+    expect(taken.bindings(Command.toggleToDo), [commandOne]);
   });
 
   test('esc may be shared with the app area', () {
     expect(
       ShortcutSettings.standard().conflicts(
-        Command.closeStep,
+        Command.stop,
         const Keys(LogicalKeyboardKey.escape),
       ),
       isEmpty,
@@ -285,10 +288,6 @@ void main() {
       'Quit',
     );
     expect(
-      reserved(Command.branch, const Keys(LogicalKeyboardKey.arrowDown)),
-      'Previous or next step',
-    );
-    expect(
       reserved(
         Command.queue,
         const Keys(LogicalKeyboardKey.enter, shift: true),
@@ -305,11 +304,6 @@ void main() {
         const Keys(LogicalKeyboardKey.arrowDown),
       ),
       'Move through options',
-    );
-    expect(
-      reserved(Command.branch, const Keys(LogicalKeyboardKey.keyX)),
-      isNull,
-      reason: 'the Trajectory has no text field',
     );
     expect(reserved(Command.newSession, liquidN), isNull);
     expect(

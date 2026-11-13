@@ -208,11 +208,11 @@ Future<void> confirmRemoveCheckpoints(
           Text(switch (sessions.length) {
             0 => 'No session has checkpoints in this project.',
             1 =>
-              '1 session keeps its chat and Trajectory, but no longer shows turn changes '
+              '1 session keeps its chat, but no longer shows turn changes '
                   'or reverts files. Project files, commits and branches stay. Git frees the '
                   'space at its next cleanup.',
             final count =>
-              '$count sessions keep their chats and Trajectories, but no longer show turn '
+              '$count sessions keep their chats, but no longer show turn '
                   'changes or revert files. Project files, commits and branches stay. Git '
                   'frees the space at its next cleanup.',
           }, style: DangerDialog.text(context)),

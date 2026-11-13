@@ -2,8 +2,7 @@
 
 use std::collections::HashMap;
 
-use super::entry::{Body, Entry, OpenCalls};
-use super::trajectory::path;
+use super::entry::{Body, Entry, OpenCalls, path};
 use super::{Transcript, TranscriptItem};
 use crate::pi::{call_target, item_kind};
 use crate::{ChangedLines, ItemKind};
@@ -50,19 +49,15 @@ pub(super) fn transcript(
             Body::ToolResult {
                 call,
                 failed,
-                outcome,
+                lines,
                 ..
             } => {
-                let lines = outcome
-                    .added
-                    .zip(outcome.removed)
-                    .map(|(added, removed)| ChangedLines { added, removed });
                 let duration_ms = open.timing(call).flatten();
                 if let Some((place, _)) = open.answer(call) {
                     if response_on_page {
                         waiting = waiting.saturating_sub(1);
                     }
-                    ended.insert((response, place), (*failed, duration_ms, lines));
+                    ended.insert((response, place), (*failed, duration_ms, *lines));
                 }
             }
             _ => {}

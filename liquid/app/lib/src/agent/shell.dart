@@ -20,7 +20,6 @@ import '../shortcuts/shortcut_reveal.dart';
 import '../shortcuts/shortcut_store.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
-import '../trajectory/trajectory_view.dart';
 import '../workspace/page_view.dart';
 import '../workspace/workspace_state.dart';
 import 'action_area.dart';
@@ -33,7 +32,7 @@ import 'sidebar.dart';
 import 'status_bar.dart';
 import 'worktrees_pane.dart';
 
-enum AgentTab { chat, trajectory, diff }
+enum AgentTab { chat, diff }
 
 /// The window: the sidebar with the Explorer and the agent session, and beside it the open
 /// Page or the agent surface with its tabs, the active tab, the widget strip, the input area
@@ -85,7 +84,6 @@ class _AgentShellState extends State<AgentShell> {
   /// Keeps the input area's state while it moves into the open tab.
   final _inputKey = GlobalKey(debugLabel: 'input area');
   final _tab = ValueNotifier(AgentTab.chat);
-  final _comparing = ValueNotifier(false);
   final _settings = ValueNotifier(false);
   final _focus = FocusNode(debugLabel: 'shell');
   late final _shortcuts = widget.shortcuts ?? ShortcutController.memory();
@@ -129,8 +127,6 @@ class _AgentShellState extends State<AgentShell> {
       state.git.watch();
     }
     widget.workspace?.open.addListener(_pageOpened);
-    // A reopened Trajectory tab starts outside the comparison.
-    _tab.addListener(() => _comparing.value = false);
     for (final settings in _saved.nonNulls) {
       settings.report = (problem) => widget.state != null
           ? widget.state!.notify(BridgeLevel.error, problem)
@@ -171,8 +167,6 @@ class _AgentShellState extends State<AgentShell> {
   /// Settings replace the main area; closing them gives the keys back to the shell.
   void _toggleSettings() {
     _settings.value = !_settings.value;
-    // Settings remove the agent surface, so the Trajectory built after them starts outside a comparison.
-    if (_settings.value) _comparing.value = false;
     if (!_settings.value) _focus.requestFocus();
   }
 
@@ -234,7 +228,6 @@ class _AgentShellState extends State<AgentShell> {
     _composer.dispose();
     _composerFocus.dispose();
     _tab.dispose();
-    _comparing.dispose();
     _settings.dispose();
     _focus.dispose();
     for (final settings in _saved.nonNulls) {
@@ -287,7 +280,6 @@ class _AgentShellState extends State<AgentShell> {
   late final Map<Command, VoidCallback> _actions = {
     if (widget.state case final state?) ...{
       Command.chat: () => _showTab(AgentTab.chat),
-      Command.trajectory: () => _showTab(AgentTab.trajectory),
       Command.diff: () => _showTab(AgentTab.diff),
       Command.focusInput: () {
         _showSession();
@@ -341,11 +333,7 @@ class _AgentShellState extends State<AgentShell> {
           label: 'View',
           menus: [
             PlatformMenuItemGroup(
-              members: [
-                item(Command.chat),
-                item(Command.trajectory),
-                item(Command.diff),
-              ],
+              members: [item(Command.chat), item(Command.diff)],
             ),
             PlatformMenuItemGroup(members: [item(Command.focusInput)]),
             provided(PlatformProvidedMenuItemType.toggleFullScreen),
@@ -447,7 +435,6 @@ class _AgentShellState extends State<AgentShell> {
                       child: switch ((widget.state, widget.info)) {
                         (final state?, final info?) => _agentSurface(
                           context,
-                          keys,
                           state,
                           info,
                         ),
@@ -467,7 +454,6 @@ class _AgentShellState extends State<AgentShell> {
   /// The agent surface: header, tabs, the active tab with the input area, and the status bar.
   Widget _agentSurface(
     BuildContext context,
-    ShortcutSettings keys,
     SessionState state,
     SessionInfo info,
   ) {
@@ -515,25 +501,17 @@ class _AgentShellState extends State<AgentShell> {
                   input: input,
                   parse: widget.parseDiff,
                 ),
-                AgentTab.trajectory => TrajectoryView(
-                  state: state,
-                  onBranched: _composerFocus.requestFocus,
-                  comparing: _comparing,
-                  input: input,
-                ),
               };
             },
           ),
         ),
         ListenableBuilder(
-          listenable: Listenable.merge([_tab, _comparing]),
+          listenable: _tab,
           builder: (context, _) => StatusBar(
             state: state,
             keys: switch (_tab.value) {
               AgentTab.chat => '',
               AgentTab.diff => diffKeys(),
-              AgentTab.trajectory =>
-                _comparing.value ? compareKeys(keys) : trajectoryKeys(keys),
             },
           ),
         ),
@@ -651,7 +629,6 @@ class _Tabs extends StatelessWidget {
 
   static const _commands = {
     AgentTab.chat: Command.chat,
-    AgentTab.trajectory: Command.trajectory,
     AgentTab.diff: Command.diff,
   };
 

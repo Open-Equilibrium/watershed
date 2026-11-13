@@ -6,8 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/diff/diff_view.dart';
-import 'package:liquid/src/trajectory/tree_view.dart';
-import 'package:liquid/src/trajectory/trajectory_view.dart';
 import 'package:liquid/src/agent/action_area.dart';
 import 'package:liquid/src/agent/chat_view.dart';
 import 'package:liquid/src/agent/shell.dart';
@@ -86,7 +84,6 @@ void main() {
         );
     backend
       ..stored = historyOf(
-        [],
         tree: [
           node('c1', null, BridgeEntryKind.custom),
           node('u1', 'c1', BridgeEntryKind.user),
@@ -139,7 +136,6 @@ void main() {
           );
       backend
         ..stored = historyOf(
-          [],
           tree: [
             node('c1', null, BridgeEntryKind.custom),
             node('u1', 'c1', BridgeEntryKind.user),
@@ -208,23 +204,13 @@ void main() {
         reason: 'the content runs on under the input area',
       );
 
-      await openTab(LogicalKeyboardKey.digit2);
-      final trajectory = tester.getRect(find.byType(TrajectoryView));
-      final tree = tester.getRect(find.byType(SessionTreeView));
-      expect(
-        center(area),
-        closeTo((trajectory.left + tree.left) / 2, 1),
-        reason: 'over the column left of the session tree',
-      );
-      expect(trajectory.bottom, greaterThan(tester.getRect(area).bottom));
+      await openTab(LogicalKeyboardKey.digit3);
+      expect(center(area), closeTo(center(find.byType(DiffView)), 1));
       expect(
         tester.widget<TextField>(composer).controller?.text,
         'draft',
         reason: 'the input area moves with the tab and keeps its text',
       );
-
-      await openTab(LogicalKeyboardKey.digit3);
-      expect(center(area), closeTo(center(find.byType(DiffView)), 1));
     },
   );
 
@@ -441,7 +427,7 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    for (final tab in [LogicalKeyboardKey.digit2, LogicalKeyboardKey.digit3]) {
+    for (final tab in [LogicalKeyboardKey.digit1, LogicalKeyboardKey.digit3]) {
       await press(tab);
       await press(LogicalKeyboardKey.comma);
       await press(LogicalKeyboardKey.keyL);
@@ -536,21 +522,19 @@ void main() {
     }
   });
 
-  testWidgets(
-    '⌘Z after a sent message does not bring the message back',
-    (tester) async {
-      await show(tester);
-      final composer = find.byKey(const Key('composer'));
-      await tester.enterText(composer, 'Say hi');
-      await tester.pump(const Duration(milliseconds: 600));
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pump(const Duration(milliseconds: 600));
-      await tester.tap(composer);
-      await undo(tester);
-      expect(tester.widget<TextField>(composer).controller?.text, '');
-    },
-    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
-  );
+  testWidgets('⌘Z after a sent message does not bring the message back', (
+    tester,
+  ) async {
+    await show(tester);
+    final composer = find.byKey(const Key('composer'));
+    await tester.enterText(composer, 'Say hi');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.tap(composer);
+    await undo(tester);
+    expect(tester.widget<TextField>(composer).controller?.text, '');
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
   testWidgets(
     '⌘Z after text handed back to the composer does not bring back what it replaced',
@@ -597,30 +581,27 @@ void main() {
     },
   );
 
-  testWidgets(
-    'a hand-back that changes no text keeps the undo history',
-    (tester) async {
-      await show(tester);
-      final composer = find.byKey(const Key('composer'));
-      await tester.enterText(composer, 'Hello');
-      await tester.pump(const Duration(milliseconds: 600));
-      await tester.enterText(composer, 'Hello there');
-      await tester.pump(const Duration(milliseconds: 600));
-      state.draft.value = 'Hello there';
-      await tester.pump(const Duration(milliseconds: 600));
-      await tester.tap(composer);
-      await undo(tester);
-      expect(tester.widget<TextField>(composer).controller?.text, 'Hello');
-    },
-    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
-  );
+  testWidgets('a hand-back that changes no text keeps the undo history', (
+    tester,
+  ) async {
+    await show(tester);
+    final composer = find.byKey(const Key('composer'));
+    await tester.enterText(composer, 'Hello');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.enterText(composer, 'Hello there');
+    await tester.pump(const Duration(milliseconds: 600));
+    state.draft.value = 'Hello there';
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.tap(composer);
+    await undo(tester);
+    expect(tester.widget<TextField>(composer).controller?.text, 'Hello');
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
   testWidgets('marks the branch in the rebuilt chat and reads earlier items', (
     tester,
   ) async {
     await show(tester);
     backend.stored = historyOf(
-      [],
       tree: [
         const BridgeTreeNode(
           failed: false,
@@ -952,24 +933,6 @@ void main() {
       await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
       await tester.pumpAndSettle();
     }
-
-    await openTab(LogicalKeyboardKey.digit2);
-    await tester.tap(composer);
-    await tester.pump();
-    for (final key in [
-      LogicalKeyboardKey.keyC,
-      LogicalKeyboardKey.keyB,
-      LogicalKeyboardKey.space,
-    ]) {
-      await tester.sendKeyEvent(key);
-    }
-    await tester.pumpAndSettle();
-    expect(state.notice.value, isNull, reason: 'c did not compare');
-    expect(
-      backend.calls.where((call) => call.startsWith('branch')),
-      isEmpty,
-      reason: 'b did not branch',
-    );
 
     await openTab(LogicalKeyboardKey.digit3);
     expect(find.byType(DiffView), findsOneWidget);
@@ -1682,7 +1645,7 @@ void main() {
         ),
       ),
     );
-    expect(find.text('1m 24s'), findsOneWidget, reason: 'as the Trajectory');
+    expect(find.text('1m 24s'), findsOneWidget);
   });
 
   testWidgets('fits a tool with a 64-character name on its row', (
@@ -1800,7 +1763,7 @@ void main() {
             .bottom
             .color;
     expect(underline('Chat'), WsPalette.light.accent);
-    expect(underline('Trajectory'), Colors.transparent);
+    expect(underline('Diff'), Colors.transparent);
   });
 
   testWidgets('puts app-wide shortcuts into the macOS menu bar', (
@@ -1828,7 +1791,7 @@ void main() {
     await show(tester);
     await tester.pump();
     debugDefaultTargetPlatformOverride = null;
-    expect(labels, containsAll(['Chat', 'Trajectory', 'Diff', 'Focus Input']));
+    expect(labels, containsAll(['Chat', 'Diff', 'Focus Input']));
   });
 
   testWidgets('stops the agent before the app exits', (tester) async {

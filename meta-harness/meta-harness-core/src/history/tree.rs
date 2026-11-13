@@ -170,17 +170,10 @@ fn summary(body: &Body, target: Option<String>) -> (EntryKind, String) {
             };
             (EntryKind::ToolResult, line(&preview))
         }
-        Body::System(_) => (EntryKind::System, String::new()),
-        Body::RequestTiming { .. }
-        | Body::ToolTiming { .. }
-        | Body::Checkpoint { .. }
-        | Body::Custom => (EntryKind::Custom, String::new()),
-        Body::Message { .. }
-        | Body::CustomMessage { .. }
-        | Body::BranchSummary { .. }
-        | Body::Compaction { .. }
-        | Body::ContextEdit { .. }
-        | Body::Label { .. }
-        | Body::Other => (EntryKind::Other, String::new()),
+        Body::System => (EntryKind::System, String::new()),
+        Body::ToolTiming { .. } | Body::Checkpoint { .. } | Body::Custom => {
+            (EntryKind::Custom, String::new())
+        }
+        Body::Label { .. } | Body::Other => (EntryKind::Other, String::new()),
     }
 }

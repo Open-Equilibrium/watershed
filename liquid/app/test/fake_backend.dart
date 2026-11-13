@@ -3,8 +3,6 @@ import 'dart:async';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
     show Int64List;
 
-import 'dart:math' as math;
-
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/rust/api/worktrees.dart';
@@ -20,10 +18,8 @@ class FakeBackend implements SessionBackend {
   /// The files the shown turns changed; none outside Git.
   List<BridgeFileChange>? changed = const [];
   Map<String, String> patches = const {};
-  BridgeHistory stored = historyOf([]);
+  BridgeHistory stored = historyOf();
 
-  /// Histories by the requested leaves, joined by spaces; others get [stored].
-  final histories = <String, BridgeHistory>{};
   bool cancelled = false;
   final _stopped = Completer<void>();
 
@@ -193,15 +189,14 @@ class FakeBackend implements SessionBackend {
   }
 
   @override
-  Future<BridgeHistory> history(List<String> leaves) async {
-    final key = leaves.join(' ');
-    calls.add('history $key'.trim());
+  Future<BridgeHistory> history() async {
+    calls.add('history');
     // What a read held at the gate answers when it began before a session switch.
-    final early = answerAsAtStart ? histories[key] ?? stored : null;
+    final early = answerAsAtStart ? stored : null;
     await gate?.future;
     if (early != null) return early;
     if (historyError case final error?) throw error;
-    return histories[key] ?? stored;
+    return stored;
   }
 
   Object? historyError;
@@ -291,21 +286,6 @@ class FakeBackend implements SessionBackend {
     return transcripts[before ?? ''] ??
         const BridgeTranscript(items: [], more: false);
   }
-
-  /// Context details by response entry.
-  final contexts = <String, BridgeContextDetail>{};
-  Object? contextError;
-
-  @override
-  Future<BridgeContextDetail?> context(String entry) async {
-    calls.add('context $entry');
-    await contextGate?.future;
-    if (contextError case final error?) throw error;
-    return contexts[entry];
-  }
-
-  /// Holds context reads until it completes.
-  Completer<void>? contextGate;
 
   /// The checkout's Git state; null outside Git.
   BridgeGitStatus? git = gitStatusOf();
@@ -855,7 +835,6 @@ class FakeBackend implements SessionBackend {
       stored = BridgeHistory(
         tree: stored.tree,
         leaf: node?.kind == BridgeEntryKind.user ? node?.parent : entry,
-        trajectories: stored.trajectories,
         usage: stored.usage,
       );
     }
@@ -918,49 +897,10 @@ BridgeUsage usage(int input, int output, int cost) => BridgeUsage(
   costMicroUsd: cost,
 );
 
-BridgeRecord record(
-  String entry,
-  int turn,
-  BridgeRecordKind kind,
-  String label,
-  int start, {
-  int? duration,
-  int? firstToken,
-  String detail = '',
-  String target = '',
-  String? changedFile,
-  BridgeUsage? usage,
-  BridgeStepContext? context,
-  bool failed = false,
-  BridgeToolOutcome outcome = const BridgeToolOutcome(),
-  int added = 0,
-  String? model,
-}) => BridgeRecord(
-  entry: entry,
-  turn: turn,
-  kind: kind,
-  label: label,
-  detail: detail,
-  target: target,
-  changedFile: changedFile,
-  startMs: start,
-  durationMs: duration,
-  firstTokenMs: firstToken,
-  model: model ?? (kind == BridgeRecordKind.message ? 'faux-1' : ''),
-  usage: usage,
-  stopReason: '',
-  failed: failed,
-  context: context,
-  outcome: outcome,
-  addedChars: added,
-);
-
-/// A session whose current branch is `records`, as one tree path.
-BridgeHistory historyOf(
-  List<BridgeRecord> records, {
+/// A session with `tree` (by default a bare root) and the leaf `leaf`.
+BridgeHistory historyOf({
   List<BridgeTreeNode>? tree,
   String? leaf,
-  List<List<BridgeRecord>> others = const [],
   BridgeUsage usage = const BridgeUsage(
     input: 0,
     output: 0,
@@ -973,38 +913,15 @@ BridgeHistory historyOf(
   usage: usage,
   tree:
       tree ??
-      [
-        const BridgeTreeNode(
+      const [
+        BridgeTreeNode(
           failed: false,
           id: 'root',
           kind: BridgeEntryKind.other,
           preview: '',
         ),
-        for (final (index, record) in records.indexed)
-          BridgeTreeNode(
-            failed: record.failed,
-            id: record.entry,
-            parent: index == 0 ? 'root' : records[index - 1].entry,
-            kind: switch (record.kind) {
-              BridgeRecordKind.user => BridgeEntryKind.user,
-              BridgeRecordKind.message => BridgeEntryKind.assistant,
-              BridgeRecordKind.tool => BridgeEntryKind.toolResult,
-            },
-            preview: record.label,
-          ),
       ],
-  leaf: leaf ?? records.lastOrNull?.entry ?? 'e1',
-  trajectories: [
-    for (final branch in [records, ...others])
-      BridgeTrajectory(
-        records: branch,
-        durationMs: branch.fold(
-          0,
-          (end, record) =>
-              math.max(end, record.startMs + (record.durationMs ?? 0)),
-        ),
-      ),
-  ],
+  leaf: leaf ?? 'e1',
 );
 
 BridgeTranscriptItem chatItem(

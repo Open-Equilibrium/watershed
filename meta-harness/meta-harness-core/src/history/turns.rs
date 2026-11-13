@@ -1,8 +1,7 @@
 //! A branch's turns with the checkpoints Watershed's extension recorded at their start and end
 //! (ADR-0234).
 
-use super::entry::{Body, Entry, first_line};
-use super::trajectory::path;
+use super::entry::{Body, Entry, first_line, path};
 use crate::Phase;
 
 /// Longest prompt shown for a turn, in characters.
@@ -19,8 +18,8 @@ pub struct TurnCheckpoints {
     pub start_entry: String,
     /// The entry that recorded its end checkpoint, once it ended.
     pub end_entry: Option<String>,
-    /// The Trajectory's turn of its first prompt, counted from 1 on the branch; 0 before a
-    /// prompt was stored.
+    /// The turn of its first prompt, counted from 1 on the branch; 0 before a prompt was
+    /// stored.
     pub number: u64,
     /// The entry of its first prompt; continuing the session from it hands the prompt back.
     pub prompt_entry: Option<String>,

@@ -135,3 +135,145 @@ fn counts_the_lines_of_file_changes() {
         "an edit's patch, the lines written, and nothing for a failed edit"
     );
 }
+
+#[test]
+fn counts_written_and_edited_lines_and_marks_failed_calls() {
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+  {"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Write and test"}},
+  {"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"write","arguments":{"path":"a.ts","content":"one\ntwo\nthree\n"}},{"type":"toolCall","id":"c2","name":"edit","arguments":{"path":"b.ts","edits":[]}},{"type":"toolCall","id":"c3","name":"bash","arguments":{"command":"npm test"}}]}},
+  {"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"c1","toolName":"write","content":[{"type":"text","text":"Successfully wrote to a.ts"}]}},
+  {"type":"message","id":"r2","parentId":"r1","message":{"role":"toolResult","toolCallId":"c2","toolName":"edit","content":[{"type":"text","text":"Replaced 1 block."}],"details":{"patch":"--- b.ts\n+++ b.ts\n@@ -1,2 +1,3 @@\n one\n-two\n+three\n+four\n"}}},
+  {"type":"message","id":"r3","parentId":"r2","message":{"role":"toolResult","toolCallId":"c3","toolName":"bash","isError":true,"content":[{"type":"text","text":"1 failed"}]}}
+],"leafId":"r3"}"#,
+    )
+    .expect("JSON");
+    let tools: Vec<_> = History::from_entries(&data)
+        .transcript(None, 100)
+        .items
+        .into_iter()
+        .filter(|item| item.tool.is_some())
+        .map(|item| (item.tool, item.failed, item.lines))
+        .collect();
+    assert_eq!(
+        tools,
+        [
+            (
+                Some("write".to_owned()),
+                false,
+                Some(ChangedLines {
+                    added: 3,
+                    removed: 0
+                })
+            ),
+            (
+                Some("edit".to_owned()),
+                false,
+                Some(ChangedLines {
+                    added: 2,
+                    removed: 1
+                })
+            ),
+            (Some("bash".to_owned()), true, None),
+        ],
+        "a write counts the lines it wrote, an edit its patch, and a failed command neither"
+    );
+}
+
+#[test]
+fn a_failed_write_counts_no_lines_and_patch_content_counts_as_changes() {
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+      {"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Go"}},
+      {"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"write","arguments":{"path":"a.ts","content":"one\ntwo\n"}},{"type":"toolCall","id":"c2","name":"edit","arguments":{"path":"f.c","edits":[]}},{"type":"toolCall","id":"c3","name":"bash","arguments":{"command":"cat log"}}]}},
+      {"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"c1","toolName":"write","isError":true,"content":[{"type":"text","text":"Permission denied"}]}},
+      {"type":"message","id":"r2","parentId":"r1","message":{"role":"toolResult","toolCallId":"c2","toolName":"edit","content":[],"details":{"patch":"--- f.c\n+++ f.c\n@@ -1,2 +1,2 @@\n keep\n---counter;\n+++counter;\n"}}},
+      {"type":"message","id":"r3","parentId":"r2","message":{"role":"toolResult","toolCallId":"c3","toolName":"bash","content":[{"type":"text","text":"old run"}]}}
+    ],"leafId":"r3"}"#,
+    )
+    .expect("JSON");
+    let tools: Vec<_> = History::from_entries(&data)
+        .transcript(None, 100)
+        .items
+        .into_iter()
+        .filter(|item| item.tool.is_some())
+        .map(|item| (item.target, item.failed, item.lines))
+        .collect();
+    assert_eq!(
+        tools,
+        [
+            (Some("a.ts".to_owned()), true, None),
+            (
+                Some("f.c".to_owned()),
+                false,
+                Some(ChangedLines {
+                    added: 1,
+                    removed: 1
+                })
+            ),
+            (Some("cat log".to_owned()), false, None),
+        ],
+        "a failed write wrote nothing, and lines that start with signs in content are changes"
+    );
+}
+
+#[test]
+fn times_parallel_tools_from_their_own_timing_entries() {
+    // pi runs both tools of one response in parallel and stores their results together.
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+      {"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Read and test"}},
+      {"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"read","arguments":{"path":"a.ts"}},{"type":"toolCall","id":"c2","name":"bash","arguments":{"command":"npm test"}}]}},
+      {"type":"custom","id":"x1","parentId":"a1","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"c1","durationMs":20}},
+      {"type":"custom","id":"x2","parentId":"x1","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"c2","durationMs":6000}},
+      {"type":"message","id":"r1","parentId":"x2","message":{"role":"toolResult","toolCallId":"c1","toolName":"read","content":[]}},
+      {"type":"message","id":"r2","parentId":"r1","message":{"role":"toolResult","toolCallId":"c2","toolName":"bash","content":[]}}
+    ],"leafId":"r2"}"#,
+    )
+    .expect("JSON");
+    let tools: Vec<_> = History::from_entries(&data)
+        .transcript(None, 100)
+        .items
+        .into_iter()
+        .filter(|item| item.tool.is_some())
+        .map(|item| (item.tool, item.duration_ms))
+        .collect();
+    assert_eq!(
+        tools,
+        [
+            (Some("read".to_owned()), Some(20)),
+            (Some("bash".to_owned()), Some(6000)),
+        ],
+        "each tool takes the duration of its own timing entry"
+    );
+}
+
+#[test]
+fn compactions_and_edits_leave_the_chat_of_the_branch_whole() {
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+          {"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Read it"}},
+          {"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"text","text":"On it."}]}},
+          {"type":"compaction","id":"k1","parentId":"a1","summary":"Read it.","firstKeptEntryId":"a1","tokensBefore":900},
+          {"type":"message","id":"u2","parentId":"k1","message":{"role":"user","content":"Now test"}},
+          {"type":"message","id":"a2","parentId":"u2","message":{"role":"assistant","content":[{"type":"text","text":"Tests pass."}]}},
+          {"type":"context_edit","id":"x1","parentId":"a2","targetId":"a2","replacement":null},
+          {"type":"compaction","id":"k2","parentId":"x1","summary":"Read and tested.","firstKeptEntryId":"u2","tokensBefore":800},
+          {"type":"context_edit","id":"x2","parentId":"k2","targetId":"a2","replacement":{"content":[{"type":"text","text":"Done."}]}},
+          {"type":"message","id":"u3","parentId":"x2","message":{"role":"user","content":"Again"}},
+          {"type":"message","id":"a3","parentId":"u3","message":{"role":"assistant","content":[{"type":"text","text":"Done again."}]}}
+        ],"leafId":"a3"}"#,
+    )
+    .expect("JSON");
+    let chat: Vec<String> = History::from_entries(&data)
+        .transcript(None, 100)
+        .items
+        .into_iter()
+        .map(|item| item.entry)
+        .collect();
+    assert_eq!(
+        chat,
+        ["u1", "a1", "u2", "a2", "u3", "a3"],
+        "compactions and edits change what the model sees, not the chat"
+    );
+}

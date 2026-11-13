@@ -67,6 +67,6 @@ Compared? compared(List<BridgeTurn> turns, DiffScope scope) {
   };
 }
 
-/// The turn's name, as the Trajectory numbers it.
+/// The turn's name, numbered by its first prompt on the branch.
 String turnName(BridgeTurn turn) =>
     turn.number > 0 ? 'Turn ${turn.number}' : 'A turn without a prompt';
