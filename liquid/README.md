@@ -20,7 +20,7 @@ The app opens the Workspace, whose replica lives in `~/Library/Application Suppo
 - `LIQUID_PROJECT` — the agent's project directory (required for an agent session).
 - `LIQUID_PI_EXTENSION` — the absolute path of `meta-harness/pi-extension/watershed.ts` (required: without it a turn has no checkpoints, so Liquid does not start a session unless this extension is loaded).
 - `LIQUID_PI` — the pi executable, a name looked up on `PATH` or an absolute path; defaults to `pi`.
-- `LIQUID_PI_SESSION` — the absolute path of a stored pi session file to reopen, with its Trajectory and branches.
+- `LIQUID_PI_SESSION` — the absolute path of a stored pi session file to reopen, with its chat and branches.
 - `LIQUID_KEY_LOG=1` — writes key events to stderr twice, as macOS hands them to the window (`native key`) and as Flutter receives them (`flutter key`), to diagnose shortcuts; only with the Liquid key, or with ⌘ or ⌃ but not ⌥ (which types characters such as @ on many layouts), so plain typing is not recorded.
 
 ## Liquid key
