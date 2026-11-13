@@ -160,13 +160,16 @@ def step_run(workflow: str, name: str) -> str:
     declaration = lines[run_index].removeprefix("        run:").strip()
     if declaration not in ("|", ">-"):
         return declaration
-    body = [
-        line.removeprefix("          ")
-        for line in field_block(lines[run_index + 1 :], "          ")
-        if line.startswith("          ")
-    ]
+    block = field_block(lines[run_index + 1 :], "          ")
     if declaration == ">-":
-        return " ".join(line.strip() for line in body if line.strip())
+        # YAML folds plain lines into single spaces but keeps the break beside a blank or
+        # more-indented line, so any other folded block is refused rather than reconstructed.
+        while block and not block[-1].strip():
+            block.pop()
+        if not all(re.match(r"          \S", line) for line in block):
+            raise AssertionError(f"unsupported folded CI command: {name}")
+        return " ".join(line.removeprefix("          ") for line in block)
+    body = [line.removeprefix("          ") for line in block if line.startswith("          ")]
     return "\n".join(body).rstrip()
 
 
@@ -375,6 +378,15 @@ class CiWorkflowContractTest(unittest.TestCase):
     def test_folded_run_blocks_join_their_lines_with_spaces(self) -> None:
         workflow = "jobs:\n  first:\n    steps:\n      - name: Example\n        run: >-\n          first\n          second\n"
         self.assertEqual(step_run(workflow, "Example"), "first second")
+
+    def test_folded_run_blocks_with_other_line_breaks_are_refused(self) -> None:
+        # YAML keeps the line break beside a blank or more-indented line, so such a command is refused.
+        for body in ("          import sys;\n            # comment\n          sys.exit(7)\n",
+                     "          first\n\n          second\n"):
+            with self.subTest(body=body):
+                workflow = "jobs:\n  first:\n    steps:\n      - name: Example\n        run: >-\n" + body
+                with self.assertRaisesRegex(AssertionError, "folded"):
+                    step_run(workflow, "Example")
 
     def test_feature_gated_evidence_reporters_are_registered(self) -> None:
         manifest = tomllib.loads(
