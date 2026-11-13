@@ -295,6 +295,90 @@ fn definitive_http_failure_reports_status_and_bounded_provider_message() {
 }
 
 #[test]
+fn subscription_provider_errors_never_echo_the_access_token() {
+    let access = fixture_credential().access;
+    let replies = [
+        (
+            "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json",
+            format!("{{\"error\":{{\"message\":\"Rejected bearer {access}\"}}}}"),
+        ),
+        (
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream",
+            format!(
+                "data:{{\"type\":\"response.failed\",\"response\":{{\"id\":\"resp_1\",\"error\":{{\"message\":\"Rejected bearer {access}\"}}}}}}\n\ndata:[DONE]\n\n"
+            ),
+        ),
+    ];
+    for (status_and_type, body) in replies {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("fake provider binds");
+        let endpoint = format!("http://{}/responses", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("one provider request");
+            let mut request = [0_u8; 4096];
+            assert!(stream.read(&mut request).expect("request reads") > 0);
+            write!(
+                stream,
+                "{status_and_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .expect("provider reply writes");
+        });
+        let error = OpenAiCodexProvider::default()
+            .turn_at(&endpoint, &fixture_credential(), &serde_json::json!({}))
+            .expect_err("provider failure is reported");
+        assert!(!error.to_string().contains(&access), "{error}");
+        server.join().expect("fake provider completes");
+    }
+}
+
+#[test]
+fn cancellation_while_reading_an_error_body_reports_cancelled() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("fake provider binds");
+    let endpoint = format!("http://{}/responses", listener.local_addr().unwrap());
+    let (headers_sent, headers_receiver) = mpsc::sync_channel(0);
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("one provider request");
+        let mut request = [0_u8; 4096];
+        assert!(stream.read(&mut request).expect("request reads") > 0);
+        write!(
+            stream,
+            "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{{"
+        )
+        .expect("error headers write");
+        stream.flush().expect("error headers flush");
+        headers_sent.send(()).expect("headers are announced");
+        thread::sleep(Duration::from_secs(2));
+    });
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let client_cancelled = Arc::clone(&cancelled);
+    let client = thread::spawn(move || {
+        request_responses_at_with_deadlines_and_cancellation(
+            &endpoint,
+            &fixture_credential(),
+            &serde_json::json!({}),
+            HttpDeadlines {
+                connect: Duration::from_secs(3),
+                header: Duration::from_secs(3),
+                read: Duration::from_secs(3),
+                overall: Duration::from_secs(5),
+            },
+            &client_cancelled,
+        )
+    });
+    headers_receiver
+        .recv_timeout(Duration::from_secs(4))
+        .expect("error headers are sent");
+    thread::sleep(Duration::from_millis(100));
+    cancelled.store(true, Ordering::Release);
+    let error = client
+        .join()
+        .expect("client completes")
+        .expect_err("cancelled provider request fails");
+    assert!(matches!(error, RuntimeError::Cancelled), "{error}");
+    server.join().expect("fake provider completes");
+}
+
+#[test]
 fn reply_that_is_not_an_event_stream_is_reply_invalid() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("fake provider binds");
     let endpoint = format!("http://{}/responses", listener.local_addr().unwrap());

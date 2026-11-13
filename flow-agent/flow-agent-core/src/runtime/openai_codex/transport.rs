@@ -69,9 +69,11 @@ pub(crate) async fn request_responses_with_client_async(
 ) -> Result<ProviderTurn, RuntimeError> {
     let turn = send_responses_request(client, endpoint, auth, body, deadlines, cancelled).await;
     match auth {
-        // An endpoint may echo the key it received in an error; the key must not reach Run Logs.
+        // A provider may echo the credential it received in an error; it must not reach Run Logs.
         ResponsesAuth::ApiKey(key) => turn.map_err(|error| error.without_secret(key)),
-        ResponsesAuth::Subscription(_) => turn,
+        ResponsesAuth::Subscription(credential) => {
+            turn.map_err(|error| error.without_secret(&credential.access))
+        }
     }
 }
 
@@ -112,7 +114,7 @@ async fn send_responses_request(
         .map_err(|_| RuntimeError::uncertain_provider_error("Responses request failed"))?;
     let status = response.status();
     if !status.is_success() {
-        let message = read_provider_error_message(&mut response, deadlines, cancelled).await;
+        let message = read_provider_error_message(&mut response, deadlines, cancelled).await?;
         return Err(RuntimeError::definitive_provider_error(
             Some(status.as_u16()),
             message,
@@ -180,13 +182,14 @@ async fn read_provider_error_message(
     response: &mut reqwest::Response,
     deadlines: HttpDeadlines,
     cancelled: &AtomicBool,
-) -> String {
+) -> Result<String, RuntimeError> {
     let mut body = Vec::new();
     while body.len() < MAX_PROVIDER_ERROR_BODY_BYTES {
         let chunk =
             match await_deadline_or_cancellation(deadlines.read, cancelled, response.chunk()).await
             {
                 Ok(Ok(Some(chunk))) => chunk,
+                Err(AwaitInterruption::Cancelled) => return Err(RuntimeError::Cancelled),
                 _ => break,
             };
         let remaining = MAX_PROVIDER_ERROR_BODY_BYTES - body.len();
@@ -195,7 +198,7 @@ async fn read_provider_error_message(
             break;
         }
     }
-    direct_provider_message(&body)
+    Ok(direct_provider_message(&body))
 }
 
 fn direct_provider_message(body: &[u8]) -> String {
