@@ -101,7 +101,7 @@ test("hands a prompt back for editing and reports a branch that did not happen",
   assert.deepEqual([failed.drafts, failed.notes], [[], ["Could not branch: compacting"]]);
 });
 
-test("records request and tool timing for the Trajectory", async () => {
+test("records request and tool timing in the session", async () => {
   let now = 1000;
   const { handlers, entries } = load(() => now);
   const ctx = context().ctx;
