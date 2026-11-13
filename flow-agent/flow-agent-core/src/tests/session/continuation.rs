@@ -589,7 +589,7 @@ fn continuation_from_an_earlier_entry_branches_from_that_entry() {
         &workspace,
         &conversation_id,
         None,
-        Some(core_script::FlowValue::String("second".to_owned())),
+        Some(core_script::FlowValue::String("newer-follow-up".to_owned())),
         None,
         false,
         || Ok(credential.clone()),
@@ -601,7 +601,9 @@ fn continuation_from_an_earlier_entry_branches_from_that_entry() {
         &workspace,
         &conversation_id,
         Some(&first_entry),
-        Some(core_script::FlowValue::String("branch".to_owned())),
+        Some(core_script::FlowValue::String(
+            "branch-follow-up".to_owned(),
+        )),
         None,
         false,
         || Ok(credential.clone()),
@@ -615,13 +617,16 @@ fn continuation_from_an_earlier_entry_branches_from_that_entry() {
         branch.parent_entry_id.as_deref(),
         Some(first_entry.as_str())
     );
-    // Each prior interaction appears once in the request. The branch and the earlier continuation
-    // both start from the first entry alone, so they carry the same single interaction.
-    let interactions = |body: &str| body.matches("interaction-").count();
-    assert!(interactions(&provider.bodies[1]) > 0, "history is carried");
-    assert_eq!(
-        interactions(&provider.bodies[2]),
-        interactions(&provider.bodies[1]),
+    // Both continuations start from the first entry. Only the newer one carries the newer input,
+    // so the branch must carry its own input and never the newer one.
+    assert!(
+        provider.bodies[1].contains("interaction-"),
+        "history is carried"
+    );
+    assert!(provider.bodies[1].contains("newer-follow-up"));
+    assert!(provider.bodies[2].contains("branch-follow-up"));
+    assert!(
+        !provider.bodies[2].contains("newer-follow-up"),
         "the branch must not carry the newer entry's history"
     );
 }
