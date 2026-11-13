@@ -384,8 +384,9 @@ impl WorkingTree {
         Ok(advertised)
     }
 
-    /// Whether `git merge` may autostash on `branch`: `merge.autoStash`, or `--autostash` among
-    /// the branch's merge options.
+    /// Whether `git merge` may autostash on `branch`: `merge.autoStash`, or any merge options of
+    /// the branch. Git accepts `--autostash` in many spellings there, such as abbreviations and
+    /// quoted words, so any option counts as possible.
     async fn may_autostash(&self, branch: &str) -> Result<bool, DiffError> {
         let default = git_config(&self.root, &["--bool", "--get", "merge.autoStash"]).await?;
         let options = git_config(
@@ -393,10 +394,7 @@ impl WorkingTree {
             &["--get-all", &format!("branch.{branch}.mergeOptions")],
         )
         .await?;
-        Ok(default.trim() == "true"
-            || options
-                .split_whitespace()
-                .any(|option| option == "--autostash"))
+        Ok(default.trim() == "true" || !options.is_empty())
     }
 
     pub(crate) async fn prepare_pull(&self) -> Result<GitTransfer, DiffError> {
