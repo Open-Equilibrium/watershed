@@ -31,6 +31,12 @@ def contrast(first, second):
     light, dark = sorted([luminance(first), luminance(second)], reverse=True)
     return (light + 0.05) / (dark + 0.05)
 
+
+def text_contrast(tokens, tone, background):
+    """The contrast of a text tone on its background, both drawn over the canvas."""
+    surface = channels(tokens[background], channels(tokens["canvas"]))
+    return contrast(channels(tokens[tone], surface), surface)
+
 SAMPLE = """
 /* comment */
 :root {
@@ -126,12 +132,9 @@ class DesignTokens(unittest.TestCase):
         blocks = TOKENS.blocks(TOKENS.CSS.read_text())
         for theme in [".theme-light", ".theme-dark"]:
             tokens = blocks[theme]
-            canvas = channels(tokens["canvas"])
             for index in range(10):
                 with self.subTest(theme=theme, tag=index):
-                    # A translucent tag shows the canvas through it; its text is drawn over the tag.
-                    tag = channels(tokens[f"tag-{index}"], canvas)
-                    self.assertGreaterEqual(contrast(channels(tokens["tag-text"], tag), tag), 4.5)
+                    self.assertGreaterEqual(text_contrast(tokens, "tag-text", f"tag-{index}"), 4.5)
 
     def test_text_tones_meet_wcag_aa_wherever_they_carry_content(self):
         blocks = TOKENS.blocks(TOKENS.CSS.read_text())
@@ -153,8 +156,12 @@ class DesignTokens(unittest.TestCase):
             tokens = blocks[theme]
             for tone, background in pairs:
                 with self.subTest(theme=theme, tone=tone, background=background):
-                    self.assertGreaterEqual(
-                        contrast(channels(tokens[tone]), channels(tokens[background])), 4.5)
+                    self.assertGreaterEqual(text_contrast(tokens, tone, background), 4.5)
+
+    def test_translucent_backgrounds_are_judged_over_the_canvas(self):
+        # White text on a 30% white tint over a white canvas is white on white.
+        tokens = {"canvas": "#ffffff", "tint": "rgba(255, 255, 255, 0.3)", "text": "#ffffff"}
+        self.assertAlmostEqual(text_contrast(tokens, "text", "tint"), 1.0, places=2)
 
     def test_liquid_sets_font_sizes_only_through_tokens(self):
         raw = re.compile(r"fontSize:\s*[\d.]+")
