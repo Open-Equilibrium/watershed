@@ -203,6 +203,12 @@ struct Shared {
     /// Whether an abort waits for the turn to settle; questions arriving meanwhile are dismissed,
     /// since the agent stops only once they are answered.
     stopping: bool,
+    /// The question whose request the supervisor is reporting. An abort leaves it to the
+    /// supervisor, which answers it once reported, so its resolution never precedes its request.
+    reporting: Option<RequestId>,
+    /// Test-only: pauses the supervisor after it records a question, until the test resumes it.
+    #[cfg(test)]
+    pause_after_insert: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
 }
 
 impl Shared {
@@ -278,8 +284,17 @@ impl Responder {
     pub async fn abort(&self) -> Result<Pending, CommandError> {
         let stopping = |shared: &mut Shared, _| shared.stopping = true;
         let pending = self.submit_as(json!({ "type": "abort" }), stopping).await?;
-        let questions: Vec<_> = self.state.lock().questions.iter().cloned().collect();
-        // One the user answered meanwhile is already resolved.
+        // One being reported is answered by its supervisor once reported; one the user answered
+        // meanwhile is already resolved.
+        let questions: Vec<_> = {
+            let shared = self.state.lock();
+            shared
+                .questions
+                .iter()
+                .filter(|request| shared.reporting.as_ref() != Some(*request))
+                .cloned()
+                .collect()
+        };
         for request in questions {
             let _ = self.answer(&request, Answer::Cancelled).await;
         }
