@@ -225,8 +225,15 @@ class FakeBackend implements SessionBackend {
   /// Whether an extension cancels session switches.
   bool switchCancelled = false;
 
+  /// Holds the recent-sessions read until it completes, and the read answers the list it began with.
+  Completer<void>? recentGate;
+
   @override
-  Future<List<BridgeStoredSession>> recentSessions() async => storedSessions;
+  Future<List<BridgeStoredSession>> recentSessions() async {
+    final answer = storedSessions;
+    await recentGate?.future;
+    return answer;
+  }
 
   /// The open session's title, as pi stored it.
   String? sessionTitle;

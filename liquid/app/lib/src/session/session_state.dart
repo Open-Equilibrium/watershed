@@ -143,12 +143,25 @@ class SessionState {
   /// Reads what the start page offers, and the open session's title.
   Future<void> loadStart() async {
     unawaited(loadTitle());
+    // A switch that finishes meanwhile replaces these reads; its own loadStart reads them again.
+    final generation = _generation;
     try {
-      recent.value = await _backend.recentSessions();
-      models.value = await _backend.models();
-      model.value = await _backend.currentModel();
+      final sessions = await _backend.recentSessions();
+      if (generation != _generation) return;
+      recent.value = sessions;
+      final modelList = await _backend.models();
+      if (generation != _generation) return;
+      models.value = modelList;
+      final selected = await _backend.currentModel();
+      if (generation != _generation) return;
+      model.value = selected;
     } on Object catch (error) {
-      notify(BridgeLevel.warning, 'Could not read the recent sessions: $error');
+      if (generation == _generation) {
+        notify(
+          BridgeLevel.warning,
+          'Could not read the recent sessions: $error',
+        );
+      }
     }
   }
 

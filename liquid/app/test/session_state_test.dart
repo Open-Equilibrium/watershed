@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/history.dart';
+import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/session/session_state.dart';
 
 import 'fake_backend.dart';
@@ -1032,6 +1033,29 @@ void main() {
       backend.sendGate!.complete();
       await sending;
       expect(state.sessionTitle.value, isNull);
+    },
+  );
+
+  test(
+    'a start-page read that began before a switch keeps the new list',
+    () async {
+      BridgeStoredSession session(String name) => BridgeStoredSession(
+        path: '/sessions/$name.jsonl',
+        title: name,
+        modifiedMs: 1,
+      );
+      backend.storedSessions = [session('old')];
+      final gate = backend.recentGate = Completer();
+      final starting = state.loadStart();
+      await pumpEventQueue();
+      backend.recentGate = null;
+      backend.storedSessions = [session('new')];
+      await state.continueSession('/sessions/new.jsonl');
+      gate.complete();
+      await starting;
+      expect(state.recent.value.map((stored) => stored.path), [
+        '/sessions/new.jsonl',
+      ]);
     },
   );
 
