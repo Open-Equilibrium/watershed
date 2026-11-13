@@ -309,9 +309,10 @@ void main() {
     },
   );
 
-  testWidgets(
-    'a requested Fetch shares a fetch in flight for an earlier remote',
-    (tester) async {
+  testWidgets('a requested Fetch queues behind a fetch for another remote', (
+    tester,
+  ) async {
+    for (final stopped in [false, true]) {
       final pending = _QueuedFetchBackend();
       final state = GitState(
         pending,
@@ -329,17 +330,27 @@ void main() {
       final shared = state.fetchNow();
       await tester.pump();
       expect(finished, isFalse);
-      pending.fetches.single.complete('origin');
+      expect(pending.remotes, ['origin']);
+      if (stopped) state.stop();
+      pending.fetches.first.complete('origin');
       await tester.pump();
-      expect(finished, isTrue);
-      expect(pending.remotes, [
-        'origin',
-      ], reason: 'no second fetch was started');
+      if (!stopped) {
+        expect(pending.remotes, ['origin', 'other']);
+        expect(finished, isFalse);
+        expect(state.fetched, isNull);
+        pending.fetches.last.completeError('offline');
+        await tester.pump();
+        expect(notices.single.$1, BridgeLevel.error);
+        expect(notices.single.$2, contains('Could not fetch: “offline”'));
+      } else {
+        expect(pending.remotes, ['origin']);
+      }
       await requested;
       await shared;
       state.stop();
-    },
-  );
+      notices.clear();
+    }
+  });
 
   testWidgets('background fetch waits while a push or pull runs', (
     tester,

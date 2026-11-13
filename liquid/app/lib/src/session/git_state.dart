@@ -64,7 +64,7 @@ class GitState {
   String? _fetchedRemote;
   DateTime? get fetched =>
       _fetchedRemote == status.value?.remote ? _fetched : null;
-  Future<void>? _fetching;
+  Future<String?>? _fetching;
   bool _fetchRequested = false;
 
   /// Reads of the state left until the next fetch; the state is read every [fetchEvery]
@@ -112,22 +112,29 @@ class GitState {
     if (watch == _watches) _next = Timer(fetchEvery, () => _tick(watch));
   }
 
-  /// Shares the fetch in flight, whichever remote the checkout names meanwhile: Git picks the
-  /// remote it fetches, so the cached remote is no key.
+  /// Shares the fetch in flight; when Git fetched another remote than the checkout names after
+  /// it, the request waits its turn. Only Git's answer names the remote it fetched.
   Future<void> _fetch(int watch, {bool requested = false}) async {
     final pending = _fetching;
-    if (pending != null) {
-      _fetchRequested |= requested;
-      return pending;
+    if (pending == null) {
+      _fetchRequested = requested;
+      await (_fetching = _runFetch(watch));
+      return;
     }
-    _fetchRequested = requested;
-    await (_fetching = _runFetch(watch));
+    _fetchRequested |= requested;
+    final fetched = await pending;
+    if (watch != _watches || fetched == null) return;
+    final current = status.value?.remote;
+    if (current != null && current != fetched) {
+      await _fetch(watch, requested: requested);
+    }
   }
 
-  Future<void> _runFetch(int watch) async {
+  /// Fetches, answering the remote Git fetched, or null when the fetch failed or was dropped.
+  Future<String?> _runFetch(int watch) async {
     try {
       final fetched = await _backend.fetch();
-      if (watch != _watches) return;
+      if (watch != _watches) return null;
       _failures = 0;
       // Freshness belongs to the remote Git fetched, which the checkout may no longer name.
       if (fetched != null) {
@@ -135,8 +142,9 @@ class GitState {
         _fetchedRemote = fetched;
       }
       await refresh();
+      return fetched;
     } on Object catch (error) {
-      if (watch != _watches) return;
+      if (watch != _watches) return null;
       // A streak of failures tells once.
       if (_failures++ == 0 || _fetchRequested) {
         final since = switch (fetched) {
@@ -149,6 +157,7 @@ class GitState {
           '${fetchFailure(null, '$error')}.$since',
         );
       }
+      return null;
     } finally {
       _fetching = null;
       _fetchRequested = false;
