@@ -396,7 +396,7 @@ pub enum FlowValue {
 
 /// One typed segment in a logical output path.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(untagged, from = "PathSegmentWire")]
+#[serde(untagged, deny_unknown_fields)]
 pub enum ValuePathSegment {
     /// Selects an exact map field.
     Field {
@@ -408,36 +408,6 @@ pub enum ValuePathSegment {
         /// Item index.
         index: u16,
     },
-}
-
-/// The closed wire form of [`ValuePathSegment`]: serde's untagged variants ignore the
-/// container's `deny_unknown_fields`, so each variant reads through its own closed struct.
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum PathSegmentWire {
-    Field(FieldSegment),
-    Index(IndexSegment),
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FieldSegment {
-    field: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct IndexSegment {
-    index: u16,
-}
-
-impl From<PathSegmentWire> for ValuePathSegment {
-    fn from(wire: PathSegmentWire) -> Self {
-        match wire {
-            PathSegmentWire::Field(FieldSegment { field }) => Self::Field { field },
-            PathSegmentWire::Index(IndexSegment { index }) => Self::Index { index },
-        }
-    }
 }
 
 /// Exact typed equality predicate over a Phase result.

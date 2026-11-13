@@ -117,7 +117,7 @@ fn public_closed_definitions_reject_unknown_fields() {
         "InstructionParameter",
         json!({"name": "ok", "value_contract": boolean.clone(), "extra": 1}),
     );
-    // An untagged segment reports no field name, only that no closed form matches.
+    // An untagged segment names no field, only that no closed form matches.
     serde_json::from_value::<core_script::ValuePathSegment>(json!({"field": "ok", "index": 0}))
         .expect_err("a path segment with both a field and an index is refused");
     rejects_unknown_field::<core_script::ValuePredicate>(

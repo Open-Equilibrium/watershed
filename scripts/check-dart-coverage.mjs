@@ -25,7 +25,10 @@ let linesHit = null;
 let found = 0;
 let hit = 0;
 for (const line of readFileSync(lcov, "utf8").split("\n")) {
-  if (line.startsWith("SF:")) path = line.slice(3);
+  if (line.startsWith("SF:")) {
+    if (path !== null) fail(`unterminated Dart coverage record for ${path} in ${lcov}`);
+    path = line.slice(3);
+  }
   else if (line.startsWith("LF:")) linesFound = counter(line.slice(3));
   else if (line.startsWith("LH:")) linesHit = counter(line.slice(3));
   else if (line === "end_of_record") {

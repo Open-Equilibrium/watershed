@@ -53,6 +53,7 @@ class DartCoverageGateTest(unittest.TestCase):
             "missing counter": "SF:lib/app.dart\nLF:100\nend_of_record\n",
             "hits above found": record("lib/app.dart", 100, 101),
             "truncated last record": record("lib/app.dart", 100, 90) + "SF:lib/other.dart\nLF:100\nLH:90\n",
+            "record cut by the next file": "SF:lib/app.dart\nLF:100\nLH:99\nSF:lib/other.dart\nend_of_record\n",
         }
         for case, lcov in malformed.items():
             with self.subTest(case=case):
