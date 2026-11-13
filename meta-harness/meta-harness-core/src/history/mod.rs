@@ -100,7 +100,9 @@ impl History {
     }
 
     /// What every stored entry cost, on every branch: responses, summaries, cache warming and
-    /// tools' own requests.
+    /// tools' own requests. Entries over
+    /// [`MAX_RECORD_BYTES`](crate::session::MAX_RECORD_BYTES) are skipped when a file is read, so
+    /// their usage is left out.
     pub fn usage(&self) -> Usage {
         self.spent
     }

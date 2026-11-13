@@ -290,7 +290,9 @@ impl PiAdapter {
         ItemId(self.items)
     }
 
-    /// Takes the earliest running call with `id`, dropping the id once none is left.
+    /// Takes the earliest running call with `id`, dropping the id once none is left. pi's tool
+    /// events carry no other identity, so calls that share an id may swap live output and status
+    /// until the stored history is read again.
     fn take_tool(&mut self, id: &str) -> Option<OpenTool> {
         let queue = self.tools.get_mut(id)?;
         let tool = queue.pop_front();
