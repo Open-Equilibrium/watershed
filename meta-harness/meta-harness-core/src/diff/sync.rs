@@ -379,6 +379,21 @@ impl WorkingTree {
         Ok(advertised)
     }
 
+    /// Whether `git merge` may autostash on `branch`: `merge.autoStash`, or `--autostash` among
+    /// the branch's merge options.
+    async fn may_autostash(&self, branch: &str) -> Result<bool, DiffError> {
+        let default = git_config(&self.root, &["--bool", "--get", "merge.autoStash"]).await?;
+        let options = git_config(
+            &self.root,
+            &["--get-all", &format!("branch.{branch}.mergeOptions")],
+        )
+        .await?;
+        Ok(default.trim() == "true"
+            || options
+                .split_whitespace()
+                .any(|option| option == "--autostash"))
+    }
+
     pub(crate) async fn prepare_pull(&self) -> Result<GitTransfer, DiffError> {
         let (transfer, status) = self.destination().await?;
         check_pull_status(&status)?;
@@ -430,6 +445,18 @@ impl WorkingTree {
             let ignored = self.ignored_in_the_way(&changes, &[]).await?;
             if !ignored.is_empty() {
                 return Err(DiffError::WouldOverwrite(ignored.into_iter().collect()));
+            }
+        }
+        // An autostashing merge resets the checkout to HEAD first, so refuse what that reset
+        // would overwrite, as a stash does.
+        if self.may_autostash(&transfer.branch).await? {
+            let blocked = {
+                let _busy = self.busy.lock().await;
+                let index = self.copy_index().await?;
+                self.reset_in_the_way(&index).await?
+            };
+            if !blocked.is_empty() {
+                return Err(DiffError::WouldOverwrite(blocked.into_iter().collect()));
             }
         }
         match user_git(

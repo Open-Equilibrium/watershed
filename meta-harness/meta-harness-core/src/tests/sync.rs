@@ -274,6 +274,35 @@ fn pull_reports_autostash_conflicts_after_advancing_the_branch() {
 }
 
 #[test]
+fn an_autostash_pull_keeps_ignored_files_where_a_tracked_file_returns() {
+    run(async {
+        let remote = Remote::new("pull-autostash-ignored");
+        remote.repo.write(".gitignore", "slot/\n");
+        remote.repo.write("slot", "tracked\n");
+        remote.repo.git(&["add", "."]);
+        remote.repo.git(&["commit", "-qm", "track slot"]);
+        remote.repo.git(&["push", "-q", "origin", "main"]);
+        remote.other.git(&["pull", "-q", "origin", "main"]);
+        remote.advance();
+        remote.repo.git(&["config", "merge.autoStash", "true"]);
+        // Locally, the tracked file is replaced by a folder whose ignored contents autostash
+        // would reset away when the file returns.
+        std::fs::remove_file(remote.repo.path().join("slot")).unwrap();
+        std::fs::create_dir(remote.repo.path().join("slot")).unwrap();
+        remote.repo.write("slot/keep", "ignored\n");
+        let result = Checkpoints::new(remote.repo.path()).pull().await;
+        assert!(
+            matches!(result, Err(DiffError::WouldOverwrite(ref files)) if files == &["slot/"]),
+            "{result:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(remote.repo.path().join("slot/keep")).unwrap(),
+            "ignored\n"
+        );
+    });
+}
+
+#[test]
 fn pull_refuses_a_running_agent_before_fetching() {
     run(async {
         let remote = Remote::new("pull-agent");

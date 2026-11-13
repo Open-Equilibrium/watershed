@@ -216,19 +216,7 @@ impl WorkingTree {
                         .to_owned(),
                 ));
             }
-            // Stash ends with a hard reset to HEAD, which can remove ignored contents where
-            // a tracked file or parent returns. They were excluded from the saved changes.
-            git_path_output(&self.root, &[], &["ls-files", "-z"]).await?;
-            let now = Snapshot(self.capture(&[]).await?);
-            let head = self
-                .checkpointed("HEAD")
-                .await?
-                .ok_or(DiffError::NoBranch)?;
-            self.tree_paths(&now).await?;
-            self.tree_paths(&head).await?;
-            let reset = self.changes(&now, &head, Whitespace::Shown).await?;
-            let mut blocked = self.ignored_in_the_way(&reset, &self.env(&index)).await?;
-            blocked.extend(self.repositories_in_the_way(&reset, false));
+            let blocked = self.reset_in_the_way(&index).await?;
             if !blocked.is_empty() {
                 return Err(DiffError::WouldOverwrite(blocked.into_iter().collect()));
             }
@@ -264,6 +252,29 @@ impl WorkingTree {
         } else {
             Ok(None)
         }
+    }
+
+    /// What a reset to HEAD would overwrite or remove where Git ignores it, or a repository
+    /// would be crossed. Stash ends with such a reset, and so does an autostashing pull; the
+    /// caller holds `busy`, and `index` is the private index copy.
+    pub(super) async fn reset_in_the_way(
+        &self,
+        index: &Path,
+    ) -> Result<BTreeSet<String>, DiffError> {
+        // The reset can remove ignored contents where a tracked file or parent returns. They
+        // were excluded from the saved changes.
+        git_path_output(&self.root, &[], &["ls-files", "-z"]).await?;
+        let now = Snapshot(self.capture(&[]).await?);
+        let head = self
+            .checkpointed("HEAD")
+            .await?
+            .ok_or(DiffError::NoBranch)?;
+        self.tree_paths(&now).await?;
+        self.tree_paths(&head).await?;
+        let reset = self.changes(&now, &head, Whitespace::Shown).await?;
+        let mut blocked = self.ignored_in_the_way(&reset, &self.env(index)).await?;
+        blocked.extend(self.repositories_in_the_way(&reset, false));
+        Ok(blocked)
     }
 
     /// The submodules with changed checked-out or staged commits.
