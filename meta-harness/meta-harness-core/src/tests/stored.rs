@@ -201,6 +201,27 @@ fn leaves_out_the_open_session_also_through_a_link() {
 }
 
 #[test]
+fn linked_aliases_of_one_session_list_once() {
+    let dir = std::env::temp_dir().join(format!("watershed-hard-links-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("directory");
+    let prompt = r#"{"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Again"}}"#;
+    session(&dir, "newer", "/work/acme-api", &[prompt], 3_000);
+    std::fs::hard_link(dir.join("newer.jsonl"), dir.join("alias.jsonl")).expect("hard link");
+    session(&dir, "older", "/work/acme-api", &[prompt], 1_000);
+    let recent = recent_sessions(&dir, Path::new("/work/acme-api"), None, 2);
+    let _ = std::fs::remove_dir_all(&dir);
+    let paths: Vec<_> = recent
+        .expect("listing")
+        .into_iter()
+        .map(|session| session.path)
+        .collect();
+    // Both names of the newer session share one entry, so the older one still fits the limit.
+    assert_eq!(paths.len(), 2, "{paths:?}");
+    assert_eq!(paths.last(), Some(&dir.join("older.jsonl")));
+}
+
+#[test]
 fn names_the_open_session_as_the_start_page_does() {
     let dir = std::env::temp_dir().join(format!("watershed-title-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

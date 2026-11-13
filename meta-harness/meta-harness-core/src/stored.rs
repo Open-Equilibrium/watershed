@@ -1,6 +1,6 @@
 //! pi's stored session files, read only as far as a listing needs.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Read;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
@@ -46,10 +46,13 @@ pub fn recent_sessions(
     let open = exclude
         .and_then(|path| path.metadata().ok())
         .map(|file| (file.dev(), file.ino()));
+    // A session reached through several links is listed once, under the first name read.
+    let mut seen = HashSet::new();
     let mut files: Vec<(u64, PathBuf)> = session_files(dir)?
         .filter_map(|path| {
             let file = path.metadata().ok()?;
-            if Some((file.dev(), file.ino())) == open {
+            let identity = (file.dev(), file.ino());
+            if Some(identity) == open || !seen.insert(identity) {
                 return None;
             }
             let millis = file
