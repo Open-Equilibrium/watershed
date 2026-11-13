@@ -48,7 +48,8 @@ pub(crate) use provider_result::MAX_DURABLE_PROVIDER_OUTPUT_BYTES;
 #[cfg(test)]
 pub(crate) use provider_result::{
     ProviderInput, durable_provider_output, parse_provider_result,
-    provider_turn_from_durable_output, verify_provider_result_session_objects,
+    provider_turn_from_durable_output, verify_leaf_provider_result,
+    verify_provider_result_session_objects,
 };
 pub use reconciliation::{
     MAX_TOOL_RECONCILIATION_BYTES, read_tool_reconciliation_file, reconcile_tool_attempt,

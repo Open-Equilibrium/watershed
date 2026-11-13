@@ -236,6 +236,21 @@ pub(crate) fn parse_provider_result(
     Ok(result)
 }
 
+/// Verifies a leaf provider result against its Phase contract, reading no object before that check.
+pub(crate) fn verify_leaf_provider_result(
+    phase: &core_script::PhaseBlock,
+    result: &core_script::FlowValue,
+    recovery: &dyn ProductiveRecovery,
+) -> Result<(), RuntimeError> {
+    core_script::validate_flow_value_against_contract(result, &phase.output).map_err(|error| {
+        RuntimeError::Protocol(format!(
+            "Phase {} result violates its output contract: {error}",
+            phase.identity.id
+        ))
+    })?;
+    verify_provider_result_session_objects(result, recovery)
+}
+
 pub(crate) fn verify_provider_result_session_objects(
     value: &core_script::FlowValue,
     recovery: &dyn ProductiveRecovery,

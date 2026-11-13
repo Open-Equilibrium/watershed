@@ -4,7 +4,7 @@ use super::observe_productive_result_persist;
 use super::provider_result::{
     ProviderInput, durable_provider_error, durable_provider_output, parse_provider_result,
     provider_error_from_durable_output, provider_turn_from_durable_output,
-    verify_provider_result_session_objects,
+    verify_leaf_provider_result,
 };
 use super::tool::execute_productive_tool;
 use super::{
@@ -397,7 +397,7 @@ where
 
         if turn.tool_calls.is_empty() {
             let result = parse_provider_result(phase, &turn.output_text)?;
-            verify_provider_result_session_objects(&result, context.recovery)?;
+            verify_leaf_provider_result(phase, &result, context.recovery)?;
             return Ok(result);
         }
         for item in turn.retained_items {
