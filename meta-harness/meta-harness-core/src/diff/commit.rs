@@ -1,7 +1,9 @@
 //! Whole-file commits and the checkout compared with its last commit. Explicit writes use
 //! the user's Git and hooks; snapshots keep the user's index intact.
 
-use super::process::{paths as nul_paths, sparse_checkout_enabled, user_git, user_git_input};
+use super::process::{
+    paths as nul_paths, project_bool, sparse_checkout_enabled, user_git, user_git_input,
+};
 use super::*;
 use std::collections::BTreeMap;
 
@@ -178,7 +180,7 @@ impl WorkingTree {
         self.check_commit_request(paths, message, branch).await?;
         // Validate exact file identities against the displayed whole-file list. Literal
         // pathspecs below also keep names such as '*' from selecting other files.
-        let (_, before, files) = self.uncommitted_paths(Whitespace::Shown).await?;
+        let (from, before, files) = self.uncommitted_paths(Whitespace::Shown).await?;
         let changes: BTreeMap<String, ChangeStatus> = files
             .into_iter()
             .map(|file| (file.path, file.status))
@@ -214,6 +216,19 @@ impl WorkingTree {
         {
             return Err(stale());
         }
+        // Git's commit leaves a mode-only change out when core.fileMode is false, and would
+        // succeed without it, so the selection is refused before anything is written.
+        if !self
+            .skipped_mode_changes(&from, &before, &selected)
+            .await?
+            .is_empty()
+        {
+            return Err(DiffError::Git(
+                "Git would skip the mode change of a selected file because core.fileMode is false. \
+                 Set core.fileMode to true, or commit that mode change in Git, first."
+                    .to_owned(),
+            ));
+        }
         if let Some(branch) = branch
             && let Err(error) = self.create(branch).await
         {
@@ -237,6 +252,46 @@ impl WorkingTree {
                 None => error,
             })?;
         Ok(self.inspect_commit(committed, &before).await)
+    }
+
+    /// The selected files whose only change is their executable bit, which Git's commit skips
+    /// while the user's `core.fileMode` is false; Liquid reads modes regardless of that setting.
+    async fn skipped_mode_changes(
+        &self,
+        from: &Snapshot,
+        to: &Snapshot,
+        selected: &BTreeSet<&str>,
+    ) -> Result<Vec<String>, DiffError> {
+        if project_bool(&self.root, "core.fileMode").await? != Some(false) {
+            return Ok(Vec::new());
+        }
+        let raw = process::git_path_output(
+            &self.root,
+            &[],
+            &[
+                "diff-tree",
+                "-r",
+                "--raw",
+                "--no-abbrev",
+                "-z",
+                "--no-renames",
+                &from.0,
+                &to.0,
+            ],
+        )
+        .await?;
+        // Each record is `:<old mode> <new mode> <old object> <new object> <status>`, then its path.
+        let mut records = raw.split('\0');
+        let mut skipped = Vec::new();
+        while let (Some(header), Some(path)) = (records.next(), records.next()) {
+            let mut fields = header.trim_start_matches(':').split(' ');
+            let (old_mode, new_mode) = (fields.next(), fields.next());
+            let (old_object, new_object) = (fields.next(), fields.next());
+            if old_mode != new_mode && old_object == new_object && selected.contains(path) {
+                skipped.push(path.to_owned());
+            }
+        }
+        Ok(skipped)
     }
 
     /// Refuses a commit with no files or no message, during a merge, or with no branch to

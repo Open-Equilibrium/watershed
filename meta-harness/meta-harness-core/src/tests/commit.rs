@@ -960,6 +960,41 @@ fn commit_refuses_selected_content_changed_since_the_plan() {
 }
 
 #[test]
+fn commit_refuses_a_mode_change_git_would_skip() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        let repo = Repo::new("commit-mode-skipped");
+        identity(&repo);
+        repo.write("script.sh", "run\n");
+        repo.git(&["add", "script.sh"]);
+        repo.git(&["commit", "-qm", "script"]);
+        // Git ignores an executable bit when this is false, so a commit would leave it out.
+        repo.git(&["config", "core.fileMode", "false"]);
+        std::fs::set_permissions(
+            repo.path().join("script.sh"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        repo.write("a.txt", "edited\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        let plan = checkpoints.commit_plan(&[]).await.unwrap();
+        let head = repo.git(&["rev-parse", "HEAD"]);
+
+        let result = checkpoints
+            .commit(
+                &plan.snapshot,
+                &["a.txt".into(), "script.sh".into()],
+                "Message",
+                None,
+            )
+            .await;
+
+        assert!(matches!(result, Err(DiffError::Git(_))), "{result:?}");
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    });
+}
+
+#[test]
 fn new_branch_commit_failure_reports_the_branch_after_either_hook() {
     use std::os::unix::fs::PermissionsExt;
     run(async {

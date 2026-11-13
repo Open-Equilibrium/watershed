@@ -83,12 +83,19 @@ pub(super) async fn git_config(dir: &Path, args: &[&str]) -> Result<String, Diff
 /// Whether the project's configuration enables sparse checkout. `git_command` pins
 /// `core.sparseCheckout` for the snapshot's reads, so this asks Git for the project's own value.
 pub(super) async fn sparse_checkout_enabled(dir: &Path) -> Result<bool, DiffError> {
+    Ok(project_bool(dir, "core.sparseCheckout").await? == Some(true))
+}
+
+/// The project's own value of the boolean `key`, or none when unset. `git_command` pins some keys
+/// for the snapshot's reads, so this asks Git for the project's value.
+pub(super) async fn project_bool(dir: &Path, key: &str) -> Result<Option<bool>, DiffError> {
     let mut command = Command::new("git");
     command
-        .args(["config", "--type=bool", "core.sparseCheckout"])
+        .args(["config", "--type=bool", key])
         .current_dir(dir);
     let value = output(piped(command, &[] as &[(&str, &str)]), true, None).await?;
-    Ok(value.trim_ascii() == b"true")
+    let value = value.trim_ascii();
+    Ok((!value.is_empty()).then_some(value == b"true"))
 }
 
 /// Reads pathname output without replacing bytes that the String-based path API cannot name.
