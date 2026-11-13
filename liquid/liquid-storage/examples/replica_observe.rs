@@ -167,12 +167,16 @@ fn reopen(path: &Path) {
         start.elapsed().as_secs_f64() * 1e3
     );
     drop(workspace);
-    // Only the replica's own files go, so a folder that holds other files keeps them.
-    for name in ["replica.db", "replica.db-wal", "replica.db-shm"] {
-        match std::fs::remove_file(path.with_file_name(name)) {
+    // Only the replica's own files go, so a folder that holds other files keeps them. The
+    // replica may have any name, so its files are the given path and its WAL and shared memory.
+    let name = path.file_name().expect("the replica has a file name");
+    for suffix in ["", "-wal", "-shm"] {
+        let mut file = name.to_os_string();
+        file.push(suffix);
+        match std::fs::remove_file(path.with_file_name(&file)) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => panic!("the replica file {name} is removed: {error}"),
+            Err(error) => panic!("the replica file {file:?} is removed: {error}"),
         }
     }
     let _ = std::fs::remove_dir(path.parent().expect("the replica is in its own directory"));
