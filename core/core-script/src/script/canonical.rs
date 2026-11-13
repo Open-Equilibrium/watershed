@@ -33,9 +33,9 @@ fn non_nfc_block_field(block: &Value) -> Option<String> {
 }
 
 fn non_nfc_field(field: &str, value: &Value) -> Option<String> {
-    let reference =
-        (field.ends_with("_ref") || field.ends_with("_refs")) && is_reference_text(value);
-    if field == "result_from" || reference {
+    let reference = (field == "result_from" || field.ends_with("_ref") || field.ends_with("_refs"))
+        && is_reference_text(value);
+    if reference {
         return None;
     }
     match value {

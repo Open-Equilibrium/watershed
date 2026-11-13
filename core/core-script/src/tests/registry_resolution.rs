@@ -330,39 +330,42 @@ fn registry_refuses_non_nfc_definition_text_instead_of_converting_it() {
 
 #[test]
 fn non_nfc_predicate_literal_under_ref_named_field_is_rejected() {
-    let mut phase = test_phase();
-    phase.output = ValueContract::Map {
-        fields: vec![ValueFieldContract {
-            name: "choice".to_owned(),
-            required: true,
-            value_contract: ValueContract::Map {
-                fields: vec![ValueFieldContract {
-                    name: "target_ref".to_owned(),
-                    required: true,
-                    value_contract: ValueContract::String { max_length: None },
-                }],
-            },
-        }],
-    };
-    phase.loop_config = Some(PhaseLoop {
-        max_iterations: 2,
-        until: ValuePredicate {
-            path: vec![ValuePathSegment::Field {
-                field: "choice".to_owned(),
+    // A reference-named key holding data (a FlowValue object) is data, so its text must be NFC.
+    for key in ["target_ref", "result_from"] {
+        let mut phase = test_phase();
+        phase.output = ValueContract::Map {
+            fields: vec![ValueFieldContract {
+                name: "choice".to_owned(),
+                required: true,
+                value_contract: ValueContract::Map {
+                    fields: vec![ValueFieldContract {
+                        name: key.to_owned(),
+                        required: true,
+                        value_contract: ValueContract::String { max_length: None },
+                    }],
+                },
             }],
-            equals: FlowValue::Map(std::collections::BTreeMap::from([(
-                "target_ref".to_owned(),
-                FlowValue::String("Cafe\u{301}".to_owned()),
-            )])),
-        },
-    });
+        };
+        phase.loop_config = Some(PhaseLoop {
+            max_iterations: 2,
+            until: ValuePredicate {
+                path: vec![ValuePathSegment::Field {
+                    field: "choice".to_owned(),
+                }],
+                equals: FlowValue::Map(std::collections::BTreeMap::from([(
+                    key.to_owned(),
+                    FlowValue::String("Cafe\u{301}".to_owned()),
+                )])),
+            },
+        });
 
-    let error = ResolvedRegistry::from_blocks([RegistryBlock::Phase(phase)])
-        .expect_err("non-NFC predicate text is refused, not converted");
-    assert!(
-        matches!(error, RegistryError::NonNfcDefinitionText { .. }),
-        "{error}"
-    );
+        let error = ResolvedRegistry::from_blocks([RegistryBlock::Phase(phase)])
+            .expect_err("non-NFC predicate text is refused, not converted");
+        assert!(
+            matches!(error, RegistryError::NonNfcDefinitionText { .. }),
+            "{key}: {error}"
+        );
+    }
 }
 
 #[test]
