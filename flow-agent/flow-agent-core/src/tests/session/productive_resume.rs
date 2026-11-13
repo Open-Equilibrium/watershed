@@ -142,6 +142,9 @@ impl ProductiveResumeFixture {
 fn executor_readiness_failure_precedes_recovery_reservation() {
     let fixture = ProductiveResumeFixture::new(workspace_copy("smoke-flow"));
     drop(fixture.create_recovery(&ContextHistory::default()));
+    // Another owner holds the recovery reservation, so readiness must fail before any reservation attempt.
+    let held = reserve_conversation_run_recovery(&fixture.workspace, "conversation", "run")
+        .expect("another owner holds the recovery reservation");
     set_productive_executor_readiness_observer(|| {
         Err(RuntimeError::executor(
             proto::ExecutorErrorCodeV0::PolicyUnsupported,
@@ -166,6 +169,7 @@ fn executor_readiness_failure_precedes_recovery_reservation() {
             if failure.code() == proto::ExecutorErrorCodeV0::PolicyUnsupported
     ));
     assert_eq!(provider.calls, 0);
+    held.release().expect("recovery reservation releases");
     reserve_conversation_run_recovery(&fixture.workspace, "conversation", "run")
         .expect("failed readiness leaves recovery reservation available")
         .release()
