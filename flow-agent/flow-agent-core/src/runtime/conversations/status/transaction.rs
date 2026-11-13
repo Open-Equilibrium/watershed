@@ -1,5 +1,4 @@
 use super::super::{
-    RunLogRecord,
     contract::{
         CONVERSATION_HISTORY_LEAF, CONVERSATION_RUNS_DIR, ConversationEntry,
         MAX_CONVERSATION_RECORD_BYTES, MAX_CONVERSATION_SEGMENT_BYTES, RUN_LOG_LEAF, protocol,
@@ -10,6 +9,7 @@ use super::super::{
         append_anchored_canonical_jsonl_batch, conversation_file_sync_checkpoint,
         sync_anchored_stream,
     },
+    run_log::RunLogRecord,
     storage::{canonical_json, required_child},
 };
 use super::{
