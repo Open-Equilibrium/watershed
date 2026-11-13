@@ -640,6 +640,61 @@ void main() {
     );
   });
 
+  testWidgets('a session switch reads a response\'s context again', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      historyOf([
+        record('u1', 1, BridgeRecordKind.user, 'Go', 0),
+        record(
+          'm1',
+          1,
+          BridgeRecordKind.message,
+          'Step 1',
+          100,
+          usage: tokens(4812, 312),
+          context: saw(1, ['prompt']),
+        ),
+      ]),
+    );
+    const detail = BridgeContextDetail(
+      sections: [BridgeContextPart(name: 'AGENTS.md', chars: 920)],
+      tools: [],
+      messages: [],
+    );
+    backend.contexts['m1'] = detail;
+    Future<void> openResponse() async {
+      await press(tester, LogicalKeyboardKey.arrowDown);
+      await press(tester, LogicalKeyboardKey.arrowDown);
+      await press(tester, LogicalKeyboardKey.enter);
+    }
+
+    final gate = backend.contextGate = Completer<void>();
+    await openResponse();
+    // The read began in the first session and answers after a switch to one without it.
+    backend.contexts.clear();
+    await state.newSession();
+    await tester.pumpAndSettle();
+    gate.complete();
+    await tester.pumpAndSettle();
+
+    backend
+      ..contextGate = null
+      ..contexts['m1'] = detail;
+    await state.continueSession('/sessions/first.jsonl');
+    await tester.pumpAndSettle();
+    await openResponse();
+    expect(
+      backend.calls.where((call) => call == 'context m1'),
+      hasLength(2),
+      reason: 'the response is read again in the session it belongs to',
+    );
+    await tester.tap(tab('Context'));
+    await tester.pumpAndSettle();
+    expect(find.text('AGENTS.md'), findsOneWidget);
+  });
+
   testWidgets('the session tree is compact and collapses to a rail', (
     tester,
   ) async {

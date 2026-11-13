@@ -50,6 +50,14 @@ class ContextDetails extends ChangeNotifier {
   /// Why the context of `entry` could not be read.
   String? unread(String entry) => _unread[entry];
 
+  /// Forgets every context read, as a session change does; a read still pending settles nowhere.
+  void clear() {
+    _details.clear();
+    _reads.clear();
+    _unread.clear();
+    notifyListeners();
+  }
+
   /// Applies a finished read, unless its entry was dropped or read again meanwhile.
   void _settle(String entry, Object read, VoidCallback apply) {
     if (_disposed || !identical(_reads[entry], read)) return;

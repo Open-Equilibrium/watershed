@@ -292,9 +292,13 @@ class FakeBackend implements SessionBackend {
   @override
   Future<BridgeContextDetail?> context(String entry) async {
     calls.add('context $entry');
+    await contextGate?.future;
     if (contextError case final error?) throw error;
     return contexts[entry];
   }
+
+  /// Holds context reads until it completes.
+  Completer<void>? contextGate;
 
   /// The checkout's Git state; null outside Git.
   BridgeGitStatus? git = gitStatusOf();

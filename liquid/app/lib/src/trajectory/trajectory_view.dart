@@ -187,6 +187,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   void _sessionSwitched() {
     _generation = widget.state.generation;
     widget.comparing.value = false;
+    _details.clear();
     setState(() {
       _history = null;
       _graph = sessionGraph(const [], null);
