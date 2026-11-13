@@ -178,6 +178,33 @@ fn a_turn_end_names_its_end_checkpoint_only_when_one_was_requested() {
 }
 
 #[test]
+fn a_late_end_checkpoint_is_not_named_by_the_next_turn() {
+    let mut adapter = PiAdapter::new();
+    let mut events = Vec::new();
+    for record in [
+        r#"{"type":"agent_start"}"#,
+        r#"{"type":"agent_settled","aborted":true}"#,
+        r#"{"type":"extension_ui_request","id":"e1","method":"input","title":"watershed.checkpoint {\"session\":\"p1\",\"turn\":\"A\",\"phase\":\"end\"}"}"#,
+        r#"{"type":"agent_start"}"#,
+        r#"{"type":"agent_settled","aborted":false}"#,
+    ] {
+        let record: Map<String, Value> =
+            serde_json::from_str(record).expect("fixture records are JSON objects");
+        if adapter.checkpoint_request(&record).is_none() {
+            events.extend(adapter.translate(&record));
+        }
+    }
+    assert_eq!(
+        events.last(),
+        Some(&AgentEvent::TurnCompleted {
+            turn: TurnId(2),
+            checkpoint: None,
+        }),
+        "an end checkpoint requested after its turn settled belongs to no later turn"
+    );
+}
+
+#[test]
 fn ends_a_failed_responses_open_text_before_its_retry_reuses_the_index() {
     let events = translate(&[
         r#"{"type":"agent_start"}"#,

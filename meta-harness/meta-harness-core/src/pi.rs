@@ -109,6 +109,8 @@ impl PiAdapter {
             self.turns += 1;
             let turn = TurnId(self.turns);
             self.turn = Some(turn);
+            // An end checkpoint requested after its turn settled names no later turn.
+            self.ended_checkpoint = None;
             events.push(AgentEvent::TurnStarted { turn });
         }
         let Some(turn) = self.turn else {
