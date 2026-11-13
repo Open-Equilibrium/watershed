@@ -174,6 +174,7 @@ mod tests {
         report::write_report_with_measurement,
     };
     use serde_json::Value;
+    use sha2::Digest as _;
     use std::{
         ffi::OsStr,
         io,
@@ -214,8 +215,23 @@ mod tests {
         assert!(!flow.exists() && !config.exists() && !home.exists());
     }
 
+    #[test]
+    fn measurement_child_output_over_its_bound_fails_the_workload() {
+        let session = TempRoot::create("flow-m12-output-bound").unwrap();
+        // One byte beyond the 64 KiB per-stream bound, then the child exits on its own.
+        let error = launch_measurement_child(
+            &session,
+            Path::new("/bin/sh"),
+            [OsStr::new("-c"), OsStr::new("head -c 65537 /dev/zero")],
+            ISOLATED_HOMES,
+        )
+        .expect_err("a stream beyond its bound fails the measurement");
+        assert!(error.to_string().contains("wrote more than"), "{error}");
+    }
+
+    // A real absolute image, because the report hashes the selected Executor's bytes.
     fn executor_path() -> PathBuf {
-        PathBuf::from("/flow-executor")
+        PathBuf::from("/bin/sh")
     }
 
     fn config(warmups: usize, samples: usize) -> Config {
@@ -258,6 +274,24 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    #[test]
+    fn startup_report_metadata_identifies_the_selected_executor() {
+        let mut measure = || -> Result<ChildMeasurement, DynError> { Ok(measurement(1)) };
+        let mut writer = Vec::new();
+
+        assert!(write_report_with_measurement(&mut writer, config(1, 1), &mut measure).unwrap());
+
+        let text = String::from_utf8(writer).unwrap();
+        let metadata: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+        assert_eq!(metadata["executor_path"], "/bin/sh");
+        let image = std::fs::read("/bin/sh").unwrap();
+        let digest = sha2::Sha256::digest(image)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(metadata["executor_sha256"], digest);
     }
 
     #[test]
