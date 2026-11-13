@@ -86,10 +86,18 @@ def dart_string(text):
     return f"'{escaped}'"
 
 
+# One CSS font family: a quoted name without escapes or line breaks, or a bare name. The list is
+# matched whole, so escapes and unclosed quotes are refused instead of being split by guessing.
+FAMILY = r"""(?:"[^"\\\r\n]*"|'[^'\\\r\n]*'|[^\s,"'\\][^,"'\\\r\n]*)"""
+FAMILIES = re.compile(rf"{FAMILY}(?:\s*,\s*{FAMILY})*")
+
+
 def metric(name, value):
     """Returns the Dart type and expression of one theme-independent token."""
     if name.startswith("font-"):
-        families = re.findall(r"""(?:"[^"]*"|'[^']*'|[^,])+""", value)
+        if not FAMILIES.fullmatch(value):
+            raise ValueError(f"--ws-{name}: unsupported font family list {value!r}")
+        families = re.findall(FAMILY, value)
         return "List<String>", [dart_string(unquoted(family.strip())) for family in families]
     if name.startswith("fw-") and value.isdigit():
         return "FontWeight", f"FontWeight.w{value}"

@@ -116,6 +116,11 @@ class DesignTokens(unittest.TestCase):
         dart = TOKENS.render(SAMPLE.replace('ui-sans-serif, "Segoe UI", Arial', 'Arial, "ACME, Inc.", sans-serif'))
         self.assertIn("static const List<String> fontUi = ['Arial', 'ACME, Inc.', 'sans-serif'];", dart)
 
+    def test_font_families_outside_the_plain_grammar_fail_instead_of_splitting(self):
+        for families in [r'"Example \"Display, Inc.", Arial', '"Segoe UI, Arial']:
+            with self.subTest(families=families), self.assertRaisesRegex(ValueError, "--ws-font-ui"):
+                TOKENS.render(SAMPLE.replace('ui-sans-serif, "Segoe UI", Arial', families))
+
     def test_check_reports_drift(self):
         with tempfile.TemporaryDirectory() as temporary:
             css, dart = Path(temporary) / "tokens.css", Path(temporary) / "tokens.g.dart"
