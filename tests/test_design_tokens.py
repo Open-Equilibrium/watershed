@@ -93,6 +93,23 @@ class DesignTokens(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "--ws-fs-ui"):
             TOKENS.render(SAMPLE.replace("14px", "1.4em"))
 
+    def test_last_declaration_without_a_semicolon_is_kept(self):
+        dart = TOKENS.render(SAMPLE.replace("cubic-bezier(0, 0, 0.2, 1);", "cubic-bezier(0, 0, 0.2, 1)"))
+        self.assertIn("static const Cubic ease = Cubic(0, 0, 0.2, 1);", dart)
+
+    def test_out_of_range_colors_are_rejected(self):
+        for color in ["rgba(256, 0, 0, 1)", "rgba(0, 0, 0, 1.1)"]:
+            with self.subTest(color=color), self.assertRaisesRegex(ValueError, "--ws-text-muted"):
+                TOKENS.render(SAMPLE.replace("#787774", color))
+
+    def test_repeated_selector_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "repeated selector"):
+            TOKENS.render(SAMPLE + ":root { --ws-fs-ui: 5px; }")
+
+    def test_quoted_font_family_keeps_its_comma(self):
+        dart = TOKENS.render(SAMPLE.replace('ui-sans-serif, "Segoe UI", Arial', 'Arial, "ACME, Inc.", sans-serif'))
+        self.assertIn("static const List<String> fontUi = ['Arial', 'ACME, Inc.', 'sans-serif'];", dart)
+
     def test_check_reports_drift(self):
         with tempfile.TemporaryDirectory() as temporary:
             css, dart = Path(temporary) / "tokens.css", Path(temporary) / "tokens.g.dart"

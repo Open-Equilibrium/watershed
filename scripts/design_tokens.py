@@ -16,7 +16,7 @@ DART = ROOT / "liquid" / "app" / "lib" / "src" / "theme" / "tokens.g.dart"
 # name such as "a/*b*/" keeps what only looks like a comment.
 COMMENT = re.compile(r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|/\*.*?(?:\*/|\Z)", re.S)
 BLOCK = re.compile(r"(:root|\.theme-light|\.theme-dark)\s*\{(.*?)\}", re.S)
-DECLARATION = re.compile(r"--ws-([a-z0-9-]+)\s*:\s*([^;]+);")
+DECLARATION = re.compile(r"--ws-([a-z0-9-]+)\s*:\s*([^;]+?)\s*(?:;|$)")
 COLOR = re.compile(r"#([0-9a-fA-F]{6})|rgba\(\s*(\d+),\s*(\d+),\s*(\d+),\s*([0-9.]+)\s*\)")
 # dart format's line width; the output matches its layout so formatting never changes it.
 WIDTH = 80
@@ -40,6 +40,8 @@ def color(text, name):
     if match.group(1):
         return f"Color(0xFF{match.group(1).upper()})"
     red, green, blue, alpha = match.group(2, 3, 4, 5)
+    if max(int(red), int(green), int(blue)) > 255 or not 0 <= float(alpha) <= 1:
+        raise ValueError(f"--ws-{name}: unsupported color {text!r}")
     # Round half up, as browsers do; round() would round 76.5 down to 76.
     opacity = int(float(alpha) * 255 + 0.5)
     return f"Color(0x{opacity:02X}{int(red):02X}{int(green):02X}{int(blue):02X})"
@@ -87,7 +89,8 @@ def dart_string(text):
 def metric(name, value):
     """Returns the Dart type and expression of one theme-independent token."""
     if name.startswith("font-"):
-        return "List<String>", [dart_string(unquoted(family.strip())) for family in value.split(",")]
+        families = re.findall(r"""(?:"[^"]*"|'[^']*'|[^,])+""", value)
+        return "List<String>", [dart_string(unquoted(family.strip())) for family in families]
     if name.startswith("fw-") and value.isdigit():
         return "FontWeight", f"FontWeight.w{value}"
     if match := re.fullmatch(r"([\d.]+)px", value):
@@ -102,7 +105,12 @@ def metric(name, value):
 def blocks(css):
     """The token declarations of each selector; comments declare nothing."""
     css = COMMENT.sub(lambda match: "" if match[0].startswith("/*") else match[0], css)
-    return {selector: dict(DECLARATION.findall(body)) for selector, body in BLOCK.findall(css)}
+    found = {}
+    for selector, body in BLOCK.findall(css):
+        if selector in found:
+            raise ValueError(f"repeated selector {selector}")
+        found[selector] = dict(DECLARATION.findall(body))
+    return found
 
 
 def render(css):
