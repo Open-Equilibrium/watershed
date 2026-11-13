@@ -5,12 +5,14 @@ use crate::{
         context::{CONTEXT_SAFETY_MARGIN, ContextModelProfile, OPERATOR_MODEL_PROFILE_ID},
         conversations::{
             append_productive_run_checkpoint, conversation_status_page,
-            create_conversation_run_with_model_profile, reserve_conversation_continuation,
+            create_conversation_run_with_model_profile, read_conversation_history,
+            reserve_conversation_continuation,
         },
         fs_guards::AnchoredWorkspace,
         instructions::{read_applicable_agent_instructions, read_workspace_agent_instructions},
         live_events::live_event_channel,
-        productive::ProviderCredential,
+        openai_codex::ProviderTurn,
+        productive::{ProductiveProvider, ProviderCredential},
         session::{
             continue_conversation, continue_conversation_with_execution_activation,
             continue_conversation_with_live_events, continue_conversation_with_provider,
@@ -526,6 +528,101 @@ fn productive_continuation_uses_the_selected_history_input_and_live_checkpoint_s
     assert_ne!(
         page.conversations[0].latest_entry_id.as_deref(),
         Some(selected_entry.as_str())
+    );
+}
+
+/// Keeps the request bodies so a test can see which history each turn carried.
+#[derive(Default)]
+struct BodyRecordingProvider {
+    provider: SessionProvider,
+    bodies: Vec<String>,
+}
+
+impl ProductiveProvider for BodyRecordingProvider {
+    fn turn(
+        &mut self,
+        credential: &ProviderCredential,
+        body: &serde_json::Value,
+    ) -> Result<ProviderTurn, RuntimeError> {
+        self.bodies.push(body.to_string());
+        self.provider.turn(credential, body)
+    }
+}
+
+#[test]
+fn continuation_from_an_earlier_entry_branches_from_that_entry() {
+    let (workspace, fixture) = disabled_configured_smoke_productive_execution_fixture();
+    let config = load_global_config().expect("productive config");
+    let credential = fixture.credential();
+    let mut provider = BodyRecordingProvider::default();
+    let model_profile = ContextModelProfile {
+        context_limit: 128000,
+        id: OPERATOR_MODEL_PROFILE_ID,
+        output_reserve: 16384,
+        safety_margin: CONTEXT_SAFETY_MARGIN,
+    };
+    run_productive_session_with_provider(
+        &workspace,
+        &fixture.anchored,
+        &config,
+        "gpt-fixture",
+        model_profile,
+        &fixture.registry,
+        fixture.smoke_flow(),
+        &fixture.policy,
+        None,
+        false,
+        || Ok(credential.clone()),
+        "Agent guidance.",
+        None,
+        &mut provider,
+    )
+    .expect("initial productive run completes");
+    let page = conversation_status_page(&workspace, None).expect("conversation status");
+    let conversation_id = page.conversations[0].conversation_id.clone();
+    let first_entry = page.conversations[0]
+        .latest_entry_id
+        .clone()
+        .expect("first entry");
+    // Continuing from the newest entry gives the older entry a later sibling to be distinguished from.
+    continue_conversation_with_provider(
+        &workspace,
+        &conversation_id,
+        None,
+        Some(core_script::FlowValue::String("second".to_owned())),
+        None,
+        false,
+        || Ok(credential.clone()),
+        &mut provider,
+    )
+    .expect("newest-entry continuation completes");
+
+    continue_conversation_with_provider(
+        &workspace,
+        &conversation_id,
+        Some(&first_entry),
+        Some(core_script::FlowValue::String("branch".to_owned())),
+        None,
+        false,
+        || Ok(credential.clone()),
+        &mut provider,
+    )
+    .expect("continuation from the earlier entry completes");
+
+    let history = read_conversation_history(&workspace, &conversation_id).expect("history reads");
+    let branch = history.last().expect("branch entry exists");
+    assert_eq!(
+        branch.parent_entry_id.as_deref(),
+        Some(first_entry.as_str())
+    );
+    // Each prior interaction appears once in the request. The branch and the earlier continuation
+    // both start from the first entry alone, so they carry the same single interaction.
+    let interactions = |body: &str| body.matches("interaction-").count();
+    assert!(interactions(&provider.bodies[1]) > 0, "history is carried");
+    assert_eq!(
+        interactions(&provider.bodies[2]),
+        interactions(&provider.bodies[1]),
+        "the branch must not carry the newer entry's history"
     );
 }
 
