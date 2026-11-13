@@ -17,19 +17,32 @@ pub fn visible_name(name: &str) -> String {
 /// Lines as the Diff tab shows them: like [`visible`], but a carriage return that ends a line
 /// stays, as Windows line ends have one, so the tab can mark it.
 pub fn visible_lines(text: &str) -> String {
-    text.split('\n')
-        .map(|line| match line.strip_suffix('\r') {
-            Some(line) => visible(line) + "\r",
-            None => visible(line),
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    let mut shown = String::with_capacity(text.len());
+    for (index, line) in text.split('\n').enumerate() {
+        if index > 0 {
+            shown.push('\n');
+        }
+        match line.strip_suffix('\r') {
+            Some(line) => {
+                push_written_out(&mut shown, line, hides);
+                shown.push('\r');
+            }
+            None => push_written_out(&mut shown, line, hides),
+        }
+    }
+    shown
 }
 
 /// `text` with each character `marked` picks written out as its code point. The `<` of a
 /// literal `<U+` is written out too, so no two texts show alike.
 fn written_out(text: &str, marked: impl Fn(char) -> bool) -> String {
     let mut shown = String::with_capacity(text.len());
+    push_written_out(&mut shown, text, marked);
+    shown
+}
+
+/// Appends `text` to `shown` as [`written_out`] writes it.
+fn push_written_out(shown: &mut String, text: &str, marked: impl Fn(char) -> bool) {
     for (at, character) in text.char_indices() {
         let marker = character == '<' && text[at + 1..].starts_with("U+");
         if marked(character) || marker {
@@ -38,7 +51,6 @@ fn written_out(text: &str, marked: impl Fn(char) -> bool) -> String {
             shown.push(character);
         }
     }
-    shown
 }
 
 /// Whether `character` hides or reorders text, as of Unicode 16.0: control (Cc) characters
