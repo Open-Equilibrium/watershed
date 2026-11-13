@@ -937,6 +937,9 @@ class _TrajectoryViewState extends State<TrajectoryView> {
       // A brush can outlast its records for one frame, after a session switch.
       handleStep: (index) =>
           index < _records.length ? _handleStep(index) : null,
+      stepExtent: (index) => index < _records.length
+          ? stepExtent(_records, index, equalWidth: _equalWidth)
+          : null,
       onLeave: _focus.requestFocus,
       onPan: _scrollTo,
       onJump: _jumpTo,

@@ -106,6 +106,7 @@ class Overview extends StatefulWidget {
     this.onJump,
     this.onHandleStep,
     this.handleStep,
+    this.stepExtent,
     this.onLeave,
     this.matches,
     this.mark,
@@ -140,6 +141,10 @@ class Overview extends StatefulWidget {
   /// What a range handle says at record `index`, for the values assistive technology previews;
   /// null past the records shown.
   final HandleStep? Function(int index)? handleStep;
+
+  /// Where record `index` lies on the axis, which decides whether a handle's key moves it past
+  /// that record; null past the records shown.
+  final (double, double)? Function(int index)? stepExtent;
 
   /// Esc on a focused range handle, which hands the keyboard back to the list.
   final VoidCallback? onLeave;
@@ -293,6 +298,7 @@ class _OverviewState extends State<Overview> {
                           onJump: widget.onJump,
                           onHandleStep: widget.onHandleStep,
                           handleStep: widget.handleStep,
+                          stepExtent: widget.stepExtent,
                           onLeave: widget.onLeave,
                         ),
                 ),
@@ -399,6 +405,7 @@ class _BrushView extends StatefulWidget {
     required this.onJump,
     required this.onHandleStep,
     required this.handleStep,
+    required this.stepExtent,
     required this.onLeave,
   });
 
@@ -415,6 +422,7 @@ class _BrushView extends StatefulWidget {
   final ValueChanged<double>? onJump;
   final void Function(bool start, int step)? onHandleStep;
   final HandleStep? Function(int index)? handleStep;
+  final (double, double)? Function(int index)? stepExtent;
   final VoidCallback? onLeave;
 
   @override
@@ -452,14 +460,39 @@ class _BrushViewState extends State<_BrushView> {
       (context.findRenderObject()! as RenderBox).globalToLocal(global).dx;
 
   /// The record a handle reaches by `delta` records, never past the other handle or the first and
-  /// last record; a handle at its limit stays where it is.
+  /// last record. A record that would not move the handle on from its edge in the key's direction,
+  /// or would reverse the range, is skipped for the next one that does; a handle at its limit, or
+  /// with no such record, stays where it is.
   int _reach(bool start, int delta) {
     final brush = widget.brush;
     final own = (start ? brush.startStep : brush.endStep).index;
     final other = (start ? brush.endStep : brush.startStep).index;
     final low = start ? 0 : other;
     final high = start ? other : brush.startStep.count - 1;
-    return math.max(low, math.min(high, own + delta));
+    final target = math.max(low, math.min(high, own + delta));
+    if (target == own) return own;
+    final step = delta.sign;
+    for (var index = target; index >= low && index <= high; index += step) {
+      if (_moves(start, index, step)) return index;
+    }
+    for (var index = target - step; index != own; index -= step) {
+      if (_moves(start, index, step)) return index;
+    }
+    return own;
+  }
+
+  /// Whether the handle moves to record `index` going `step` ways: its edge lies beyond the
+  /// range's edge that way, and the range stays in order.
+  bool _moves(bool start, int index, int step) {
+    final brush = widget.brush;
+    final extent = widget.stepExtent?.call(index);
+    if (extent == null) return false;
+    final (from, to) = extent;
+    if (start) {
+      return from <= brush.end &&
+          (step > 0 ? from > brush.start : from < brush.start);
+    }
+    return to >= brush.start && (step > 0 ? to > brush.end : to < brush.end);
   }
 
   /// Moves a handle `delta` records, as [_reach] allows.

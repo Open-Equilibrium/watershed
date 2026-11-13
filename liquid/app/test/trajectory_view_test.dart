@@ -1184,6 +1184,39 @@ void main() {
     );
   });
 
+  testWidgets('a range handle skips a step that would reverse the range', (
+    tester,
+  ) async {
+    // In real time the first step covers the second, which ends before the range starts.
+    await show(
+      tester,
+      historyOf([
+        record('long', 1, BridgeRecordKind.tool, 'read', 0, duration: 10000),
+        record('short', 1, BridgeRecordKind.tool, 'read', 2000, duration: 1000),
+        record('later', 1, BridgeRecordKind.tool, 'read', 6000, duration: 1000),
+      ]),
+    );
+    final tracks = tester.getRect(find.byKey(const Key('overview-tracks')));
+    double at(double fraction) => tracks.left + tracks.width * fraction;
+    Future<void> drag(String handle, double fraction) async {
+      final center = tester.getCenter(find.byKey(Key(handle)));
+      await tester.dragFrom(center, Offset(at(fraction) - center.dx, 0));
+      await tester.pumpAndSettle();
+    }
+
+    // The range covers 4.0 s to 4.5 s, which only the first step overlaps.
+    await drag('range-start', 0.4);
+    await drag('range-end', 0.45);
+    Focus.of(tester.element(find.byKey(const Key('range-end')))).requestFocus();
+    await tester.pump();
+    await press(tester, LogicalKeyboardKey.arrowRight);
+    expect(
+      find.text('Step 3 of 3 · 6.0 s'),
+      findsOneWidget,
+      reason: 'the second step would reverse the range, so the handle skips it',
+    );
+  });
+
   testWidgets('assistive adjust moves a range handle one step and back', (
     tester,
   ) async {
