@@ -678,7 +678,8 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   /// Selects a tree row's step, showing its branch when the ledger shows another one.
   void _jump(GraphRow row) {
     final index = _records.indexWhere((record) => record.entry == row.node.id);
-    if (index >= 0) {
+    // Records still show the previous branch while the shown one loads, so the click waits.
+    if (index >= 0 && listEquals(_loaded, _leaves)) {
       setState(() => _selectStep(index));
       _reveal();
       return;

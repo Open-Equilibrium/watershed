@@ -1544,6 +1544,36 @@ void main() {
     );
   });
 
+  testWidgets('a later click on the shown branch wins over a pending branch', (
+    tester,
+  ) async {
+    await showBranches(tester);
+    backend.histories['e6'] = historyOf(
+      branchA,
+      tree: backend.stored.tree,
+      leaf: 'e6',
+    );
+    await tester.tap(find.byKey(const ValueKey('tree-e6')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('session branch A'), findsOneWidget);
+
+    // Branch B loads while the ledger still shows A; the last click is A's own step.
+    final gate = backend.gate = Completer<void>();
+    await tester.tap(find.byKey(const ValueKey('tree-b2')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('tree-e6')));
+    await tester.pump();
+    backend.gate = null;
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('session branch A'),
+      findsOneWidget,
+      reason: 'the branch of the last click is the one shown',
+    );
+    expect(find.byKey(const ValueKey('step-e6')), findsOneWidget);
+  });
+
   testWidgets('opening a turn shows its last request outside the range', (
     tester,
   ) async {
