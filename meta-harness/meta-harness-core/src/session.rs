@@ -307,10 +307,13 @@ impl Responder {
             Answer::Cancelled => json!({ "cancelled": true }),
         };
         room.send(ui_response(request, reply));
-        self.resolved(AgentEvent::UserInputResolved {
+        // Reported by a task of its own, so a caller that stops waiting for room still leaves the
+        // resolution reported; the caller still waits for it, so the order stays the same.
+        let responder = self.clone();
+        let resolution = AgentEvent::UserInputResolved {
             request: request.clone(),
-        })
-        .await;
+        };
+        let _ = tokio::spawn(async move { responder.resolved(resolution).await }).await;
         Ok(())
     }
 

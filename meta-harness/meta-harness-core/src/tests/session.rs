@@ -1220,6 +1220,58 @@ fn answers_extension_questions() {
 }
 
 #[test]
+fn a_cancelled_answer_still_reports_its_resolution() {
+    run(async {
+        let filled = marker("filled");
+        let answered = marker("answered");
+        let script = [
+            question("q1"),
+            // More events than the buffer holds, so the resolution waits for room and the answer
+            // is given up there.
+            r#"i=0; while [ $i -lt 300 ]; do printf '%s\n' '{"type":"extension_ui_request","id":"n","method":"notify","message":"x"}'; i=$((i+1)); done
+"#
+            .to_owned(),
+            format!("touch {}\n", super::shell_word(filled.display())),
+            expect_response(&[r#""id":"q1""#, r#""cancelled":true"#]),
+            format!("touch {}\n", super::shell_word(answered.display())),
+            "IFS= read -r line || exit 0\n".to_owned(),
+        ]
+        .concat();
+        let (mut session, mut events) = fake_agent(&script);
+        let SessionEvent::Agent(AgentEvent::UserInputRequested { request, .. }) =
+            next(&mut events).await
+        else {
+            panic!("the question arrives");
+        };
+        // The session reads the printed events into the buffer after they were written.
+        reached(&filled).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let given_up = timeout(
+            Duration::from_millis(500),
+            session.answer(&request, Answer::Cancelled),
+        )
+        .await;
+        assert!(
+            given_up.is_err(),
+            "the answer waits for room in the full buffer"
+        );
+        reached(&answered).await;
+        let mut resolved = false;
+        while let Ok(Some(event)) = timeout(Duration::from_millis(500), events.recv()).await {
+            resolved |= event
+                == SessionEvent::Agent(AgentEvent::UserInputResolved {
+                    request: request.clone(),
+                });
+        }
+        assert!(
+            resolved,
+            "the agent got the answer, so the resolution is reported"
+        );
+        let _ = session.shutdown(Duration::from_millis(100)).await;
+    });
+}
+
+#[test]
 fn stopping_dismisses_a_question_that_arrives_late() {
     run(async {
         // The agent asked before the abort reached it; the question only arrives afterwards.
