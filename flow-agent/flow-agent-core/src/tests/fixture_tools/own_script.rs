@@ -132,6 +132,26 @@ fn helpers_reject_unsupported_m1_shell_shapes() {
 }
 
 #[test]
+fn own_script_echo_rejects_compound_commands() {
+    for body in [
+        "echo ready; cat ../outside.txt > out/result.txt",
+        "echo ready | cat > out/result.txt",
+        "echo ready && cat > out/result.txt",
+    ] {
+        let error = compile_own_script_operations(body)
+            .expect_err("unquoted shell operators are not literal echo text");
+        assert!(
+            matches!(error, RuntimeError::Protocol(_)),
+            "{body}: {error}"
+        );
+    }
+    let write = compile_own_script_operations("echo 'a; b' > out/r.txt")
+        .expect("quoted operators stay literal")
+        .expect("redirection plans a write");
+    assert_eq!(write.contents, b"a; b\n");
+}
+
+#[test]
 fn printf_uses_bounded_posix_string_conversions() {
     for (command, expected) in [
         ("printf '%s:%s\\n' \"$SUMMARY\"", b"hello:\n".as_slice()),

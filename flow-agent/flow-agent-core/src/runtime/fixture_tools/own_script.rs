@@ -223,11 +223,33 @@ pub fn unquote_script_argument(value: &str) -> Result<String, RuntimeError> {
     } else {
         value
     };
-    if unquoted.chars().any(|ch| matches!(ch, '$' | '`' | '\\')) {
+    if unquoted.chars().any(|ch| matches!(ch, '$' | '`' | '\\'))
+        || has_unquoted_shell_operator(value)
+    {
         Err(RuntimeError::Protocol(format!(
             "unsupported own-script argument {value:?}"
         )))
     } else {
         Ok(unquoted.to_owned())
     }
+}
+
+/// Echo text is literal: an operator outside quotes would be a command list in POSIX sh.
+fn has_unquoted_shell_operator(value: &str) -> bool {
+    let mut quote = None;
+    value.chars().any(|ch| match quote {
+        Some(active) if ch == active => {
+            quote = None;
+            false
+        }
+        Some(_) => false,
+        None if matches!(ch, '\'' | '"') => {
+            quote = Some(ch);
+            false
+        }
+        None => matches!(
+            ch,
+            ';' | '|' | '&' | '<' | '>' | '(' | ')' | '{' | '}' | '\n' | '\r'
+        ),
+    })
 }
