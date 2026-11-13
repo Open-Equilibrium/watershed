@@ -706,6 +706,41 @@ fn a_new_branch_starts_at_the_current_commit_unless_git_refuses_its_name() {
 }
 
 #[test]
+fn a_new_branch_starts_at_the_base_it_reports_when_another_git_moves_head() {
+    run(async {
+        let repo = Repo::new("create-moved-head");
+        let base = repo.git(&["rev-parse", "HEAD"]);
+        let from = repo
+            .git(&["branch", "--show-current"])
+            .trim_end()
+            .to_owned();
+        repo.git(&["switch", "-c", "other"]);
+        repo.git(&["commit", "--allow-empty", "-qm", "other work"]);
+        repo.git(&["switch", &from]);
+        let checkpoints = Checkpoints::new(repo.path());
+        let root = repo.path().to_owned();
+        crate::diff::before_create_base(repo.path(), move || {
+            // Another Git checks out `other` after Liquid read main as the base.
+            let external = Repo(root);
+            external.git(&["switch", "other"]);
+            std::mem::forget(external);
+        });
+
+        let reported = checkpoints
+            .create_branch("feature/race")
+            .await
+            .expect("created");
+
+        assert_eq!(reported.as_deref(), Some(from.as_str()));
+        assert_eq!(
+            repo.git(&["rev-parse", "feature/race"]),
+            base,
+            "the branch starts at the base it reports, not at the commit another Git checked out"
+        );
+    });
+}
+
+#[test]
 fn fetching_updates_only_the_upstreams_remote_tracking_branches() {
     run(async {
         let clone = Clone::new("fetch");

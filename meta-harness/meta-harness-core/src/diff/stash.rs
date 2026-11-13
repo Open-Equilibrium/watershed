@@ -11,7 +11,7 @@ const DROP_TRIES: usize = 5;
 /// Runs before each drop in the checkout at a root, to shift the list there as another Git
 /// would.
 #[cfg(test)]
-type Hook = (PathBuf, Box<dyn FnOnce() + Send>);
+pub(super) type Hook = (PathBuf, Box<dyn FnOnce() + Send>);
 
 #[cfg(test)]
 static BEFORE_DROP: std::sync::Mutex<Vec<Hook>> = std::sync::Mutex::new(Vec::new());
@@ -44,7 +44,7 @@ pub(crate) fn before_stash_identity(root: &Path, hook: impl FnOnce() + Send + 's
 }
 
 #[cfg(test)]
-fn run_hook(hooks: &std::sync::Mutex<Vec<Hook>>, root: &Path) {
+pub(super) fn run_hook(hooks: &std::sync::Mutex<Vec<Hook>>, root: &Path) {
     let root = std::fs::canonicalize(root).expect("root");
     let hook = {
         let mut hooks = hooks.lock().expect("hooks");

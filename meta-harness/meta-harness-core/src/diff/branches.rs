@@ -5,6 +5,20 @@ use super::process::{git_bytes, git_config, git_ref_output, ref_text, timestamp_
 use super::stash::listed_files;
 use super::*;
 
+/// Runs before the next branch creation in the checkout at a root, after its base is read, as
+/// another Git moving HEAD would.
+#[cfg(test)]
+static BEFORE_CREATE: std::sync::Mutex<Vec<super::stash::Hook>> = std::sync::Mutex::new(Vec::new());
+
+/// Runs `hook` once before the next branch creation in the checkout at `root`.
+#[cfg(test)]
+pub(crate) fn before_create_base(root: &Path, hook: impl FnOnce() + Send + 'static) {
+    BEFORE_CREATE
+        .lock()
+        .expect("hooks")
+        .push((std::fs::canonicalize(root).expect("root"), Box::new(hook)));
+}
+
 /// The checkout's branch and how it stands against its upstream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitStatus {
@@ -336,12 +350,20 @@ impl WorkingTree {
             .map_err(|_| DiffError::InvalidBranch(name.to_owned()))?;
         let start = self.head().await?;
         let from = start.0.strip_prefix("refs/heads/").map(str::to_owned);
+        #[cfg(test)]
+        super::stash::run_hook(&BEFORE_CREATE, &self.root);
+        // Git starts the branch where the base it reports is: its branch, or else the commit HEAD
+        // names when detached. Git's own HEAD may have moved since the read above.
+        let base = start.1.as_ref().map(|commit| {
+            if from.is_some() {
+                start.0.as_str()
+            } else {
+                commit.as_str()
+            }
+        });
+        let args: Vec<&str> = ["switch", "-c", name].into_iter().chain(base).collect();
         match self
-            .switching(
-                &["switch", "-c", name],
-                &start,
-                &BranchTarget::Local(name.to_owned()),
-            )
+            .switching(&args, &start, &BranchTarget::Local(name.to_owned()))
             .await
         {
             Ok(()) => Ok(from),

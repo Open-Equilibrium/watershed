@@ -43,6 +43,8 @@ pub use pulls::{
 };
 pub use revert::RevertConfirmation;
 
+#[cfg(test)]
+pub(crate) use branches::before_create_base;
 pub use stash::Stash;
 #[cfg(test)]
 pub(crate) use stash::{before_drop, before_stash_identity};
