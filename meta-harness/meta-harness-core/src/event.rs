@@ -190,11 +190,15 @@ pub enum AgentEvent {
     TurnCompleted {
         /// The turn.
         turn: TurnId,
+        /// The turn's checkpoint id, which names its end checkpoint; absent when it requested none.
+        checkpoint: Option<String>,
     },
     /// A turn ended because it was aborted.
     TurnAborted {
         /// The turn.
         turn: TurnId,
+        /// The turn's checkpoint id, which names its end checkpoint; absent when it requested none.
+        checkpoint: Option<String>,
     },
     /// An item started.
     ItemStarted {

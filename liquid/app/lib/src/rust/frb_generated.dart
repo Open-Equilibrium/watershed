@@ -3748,8 +3748,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeEvent dco_decode_bridge_event(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return BridgeEvent(
       kind: dco_decode_bridge_event_kind(arr[0]),
       item: dco_decode_opt_box_autoadd_bridge_item(arr[1]),
@@ -3759,6 +3759,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       display: dco_decode_opt_box_autoadd_bridge_display(arr[5]),
       success: dco_decode_opt_box_autoadd_bool(arr[6]),
       queue: dco_decode_opt_box_autoadd_bridge_queue(arr[7]),
+      checkpoint: dco_decode_opt_String(arr[8]),
     );
   }
 
@@ -5839,6 +5840,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_display = sse_decode_opt_box_autoadd_bridge_display(deserializer);
     var var_success = sse_decode_opt_box_autoadd_bool(deserializer);
     var var_queue = sse_decode_opt_box_autoadd_bridge_queue(deserializer);
+    var var_checkpoint = sse_decode_opt_String(deserializer);
     return BridgeEvent(
       kind: var_kind,
       item: var_item,
@@ -5848,6 +5850,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       display: var_display,
       success: var_success,
       queue: var_queue,
+      checkpoint: var_checkpoint,
     );
   }
 
@@ -8519,6 +8522,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_bridge_display(self.display, serializer);
     sse_encode_opt_box_autoadd_bool(self.success, serializer);
     sse_encode_opt_box_autoadd_bridge_queue(self.queue, serializer);
+    sse_encode_opt_String(self.checkpoint, serializer);
   }
 
   @protected

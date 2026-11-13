@@ -89,7 +89,10 @@ fn streams_a_turn_with_reasoning_and_text() {
                 stop_reason: String::new(),
                 error: None,
             },
-            AgentEvent::TurnCompleted { turn: TURN },
+            AgentEvent::TurnCompleted {
+                turn: TURN,
+                checkpoint: None
+            },
         ]
     );
 }
@@ -111,7 +114,10 @@ fn keeps_retries_in_one_turn_and_reports_aborts() {
         events,
         [
             AgentEvent::TurnStarted { turn: TURN },
-            AgentEvent::TurnAborted { turn: TURN },
+            AgentEvent::TurnAborted {
+                turn: TURN,
+                checkpoint: None
+            },
             AgentEvent::TurnStarted { turn: second },
             AgentEvent::ItemStarted {
                 turn: second,
@@ -129,6 +135,45 @@ fn keeps_retries_in_one_turn_and_reports_aborts() {
                 lines: None,
             },
         ]
+    );
+}
+
+#[test]
+fn a_turn_end_names_its_end_checkpoint_only_when_one_was_requested() {
+    let mut adapter = PiAdapter::new();
+    let mut events = Vec::new();
+    for record in [
+        r#"{"type":"extension_ui_request","id":"s1","method":"input","title":"watershed.checkpoint {\"session\":\"p1\",\"turn\":\"A\",\"phase\":\"start\"}"}"#,
+        r#"{"type":"agent_start"}"#,
+        r#"{"type":"agent_end","messages":[],"willRetry":false}"#,
+        r#"{"type":"extension_ui_request","id":"e1","method":"input","title":"watershed.checkpoint {\"session\":\"p1\",\"turn\":\"A\",\"phase\":\"end\"}"}"#,
+        r#"{"type":"agent_settled","aborted":false}"#,
+        r#"{"type":"agent_start"}"#,
+        r#"{"type":"agent_end","messages":[],"willRetry":false}"#,
+        r#"{"type":"agent_settled","aborted":true}"#,
+    ] {
+        let record: Map<String, Value> =
+            serde_json::from_str(record).expect("fixture records are JSON objects");
+        // The supervisor answers checkpoint dialogs itself and never translates them.
+        if adapter.checkpoint_request(&record).is_none() {
+            events.extend(adapter.translate(&record));
+        }
+    }
+    assert_eq!(
+        events,
+        [
+            AgentEvent::TurnStarted { turn: TurnId(1) },
+            AgentEvent::TurnCompleted {
+                turn: TurnId(1),
+                checkpoint: Some("A".to_owned()),
+            },
+            AgentEvent::TurnStarted { turn: TurnId(2) },
+            AgentEvent::TurnAborted {
+                turn: TurnId(2),
+                checkpoint: None,
+            },
+        ],
+        "a turn names the checkpoint its end was requested with; a turn without one names none"
     );
 }
 
@@ -175,7 +220,10 @@ fn ends_a_failed_responses_open_text_before_its_retry_reuses_the_index() {
             delta(2, "Hi"),
             completed(2, ItemKind::AssistantMessage, "Hi"),
             request("stop", None),
-            AgentEvent::TurnCompleted { turn: TURN },
+            AgentEvent::TurnCompleted {
+                turn: TURN,
+                checkpoint: None
+            },
         ],
         "the failed response keeps its partial text and the retry's text is its own item"
     );
@@ -792,7 +840,10 @@ fn ends_the_items_an_abort_leaves_open() {
         [
             interrupted(1, ItemKind::AssistantMessage, "Running"),
             interrupted(2, ItemKind::CommandExecution, "waiting"),
-            AgentEvent::TurnAborted { turn: TURN },
+            AgentEvent::TurnAborted {
+                turn: TURN,
+                checkpoint: None
+            },
         ],
         "nothing stays running after the abort, and each keeps its partial output"
     );

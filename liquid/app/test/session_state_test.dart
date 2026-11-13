@@ -373,11 +373,15 @@ void main() {
         removed: 0,
       ),
     ];
-    backend.controller.add(event(BridgeEventKind.turnCompleted));
+    backend.controller.add(
+      event(BridgeEventKind.turnCompleted, checkpoint: 'T2'),
+    );
     await pumpEventQueue();
     expect(state.items.value.map(describe).last, 'T2: 1 files');
     // Ending it again, as after a second read, adds nothing.
-    backend.controller.add(event(BridgeEventKind.turnCompleted));
+    backend.controller.add(
+      event(BridgeEventKind.turnCompleted, checkpoint: 'T2'),
+    );
     await pumpEventQueue();
     expect(
       state.items.value.where((view) => view.turnEnd != null),
@@ -399,7 +403,9 @@ void main() {
     backend.turnList = const [];
     await state.loadChat();
     backend.turnList = [turnOf('T1', number: 1, added: 2, removed: 0)];
-    backend.controller.add(event(BridgeEventKind.turnCompleted));
+    backend.controller.add(
+      event(BridgeEventKind.turnCompleted, checkpoint: 'T1'),
+    );
     await pumpEventQueue();
     await state.loadEarlier();
     expect(
@@ -413,7 +419,9 @@ void main() {
     () async {
       backend.turnList = const [];
       backend.turnsGate = Completer();
-      backend.controller.add(event(BridgeEventKind.turnCompleted));
+      backend.controller.add(
+        event(BridgeEventKind.turnCompleted, checkpoint: 'T1'),
+      );
       // The next turn begins before the ended one was read.
       backend.controller.add(
         event(
@@ -446,7 +454,11 @@ void main() {
         ),
       );
       // Turns 1 and 2 end before their read returns; turn 3 is running.
-      if (id < 3) backend.controller.add(event(BridgeEventKind.turnCompleted));
+      if (id < 3) {
+        backend.controller.add(
+          event(BridgeEventKind.turnCompleted, checkpoint: 'T$id'),
+        );
+      }
     }
     await pumpEventQueue();
     backend.turnList = [
@@ -492,10 +504,39 @@ void main() {
           item: item(3, kind: BridgeItemKind.userMessage),
         ),
       );
-      await emit(event(BridgeEventKind.turnCompleted));
+      await emit(event(BridgeEventKind.turnCompleted, checkpoint: 'T3'));
       expect(
         state.items.value.map((view) => view.turnEnd?.id ?? '${view.id}'),
         ['1', '2', '3', 'T3'],
+      );
+    },
+  );
+
+  test(
+    'a turn without a checkpoint does not take a later turn\'s row place',
+    () async {
+      backend.turnList = const [];
+      await emit(
+        event(
+          BridgeEventKind.itemStarted,
+          item: item(1, kind: BridgeItemKind.userMessage),
+        ),
+      );
+      // Turn 1 took no checkpoint, and the read after its end fails.
+      backend.failTurns = true;
+      await emit(event(BridgeEventKind.turnCompleted));
+      backend.failTurns = false;
+      await emit(
+        event(
+          BridgeEventKind.itemStarted,
+          item: item(2, kind: BridgeItemKind.userMessage),
+        ),
+      );
+      backend.turnList = [turnOf('T2', number: 2, added: 1, removed: 0)];
+      await emit(event(BridgeEventKind.turnCompleted, checkpoint: 'T2'));
+      expect(
+        state.items.value.map((view) => view.turnEnd?.id ?? '${view.id}'),
+        ['1', '2', 'T2'],
       );
     },
   );
@@ -507,7 +548,7 @@ void main() {
         item: item(id, kind: BridgeItemKind.userMessage),
       ),
     );
-    await emit(event(BridgeEventKind.turnCompleted));
+    await emit(event(BridgeEventKind.turnCompleted, checkpoint: 'T$id'));
   }
 
   test('a turn whose end is recorded late keeps its place', () async {
@@ -591,7 +632,9 @@ void main() {
     backend.turnList = [
       turnOf('T1', number: 1, files: 0, added: 0, removed: 0),
     ];
-    backend.controller.add(event(BridgeEventKind.turnCompleted));
+    backend.controller.add(
+      event(BridgeEventKind.turnCompleted, checkpoint: 'T1'),
+    );
     await pumpEventQueue();
     expect(state.items.value.where((view) => view.turnEnd != null), isEmpty);
   });
@@ -790,7 +833,9 @@ void main() {
         ),
       );
       backend.turnsGate = Completer();
-      backend.controller.add(event(BridgeEventKind.turnCompleted));
+      backend.controller.add(
+        event(BridgeEventKind.turnCompleted, checkpoint: 'T9'),
+      );
       await pumpEventQueue();
       await state.loadEarlier();
       backend.turnList = [turnOf('T9', number: 3, added: 1, removed: 0)];

@@ -73,6 +73,9 @@ class BridgeEvent {
   /// The messages waiting for the running agent.
   final BridgeQueue? queue;
 
+  /// The turn's checkpoint id, the same id as its `BridgeTurn`.
+  final String? checkpoint;
+
   const BridgeEvent({
     required this.kind,
     this.item,
@@ -82,6 +85,7 @@ class BridgeEvent {
     this.display,
     this.success,
     this.queue,
+    this.checkpoint,
   });
 
   @override
@@ -93,7 +97,8 @@ class BridgeEvent {
       text.hashCode ^
       display.hashCode ^
       success.hashCode ^
-      queue.hashCode;
+      queue.hashCode ^
+      checkpoint.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -107,7 +112,8 @@ class BridgeEvent {
           text == other.text &&
           display == other.display &&
           success == other.success &&
-          queue == other.queue;
+          queue == other.queue &&
+          checkpoint == other.checkpoint;
 }
 
 /// What happened; the variant names the parts of [`BridgeEvent`] it fills.
@@ -115,10 +121,10 @@ enum BridgeEventKind {
   /// A turn started; no parts.
   turnStarted,
 
-  /// A turn ended; no parts.
+  /// A turn ended; `checkpoint` with its checkpoint id, if it requested one.
   turnCompleted,
 
-  /// A turn was stopped; no parts.
+  /// A turn was stopped; `checkpoint` with its checkpoint id, if it requested one.
   turnAborted,
 
   /// `item` with kind, tool and target.

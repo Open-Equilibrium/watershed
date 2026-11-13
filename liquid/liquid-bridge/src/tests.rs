@@ -173,6 +173,26 @@ fn model_requests_carry_usage_and_how_they_ended() {
 }
 
 #[test]
+fn turn_ends_carry_their_checkpoint_id_to_dart() {
+    let ended = bridge(AgentEvent::TurnCompleted {
+        turn: TurnId(1),
+        checkpoint: Some("T1".to_owned()),
+    });
+    let aborted = bridge(AgentEvent::TurnAborted {
+        turn: TurnId(2),
+        checkpoint: None,
+    });
+    assert_eq!(
+        (ended.kind, ended.checkpoint.as_deref()),
+        (BridgeEventKind::TurnCompleted, Some("T1"))
+    );
+    assert_eq!(
+        (aborted.kind, aborted.checkpoint),
+        (BridgeEventKind::TurnAborted, None)
+    );
+}
+
+#[test]
 fn a_changed_file_shows_its_name_with_hiding_characters_written_out() {
     let change = BridgeFileChange::from(meta_harness_core::FileChange {
         path: "src/a\u{202e}b.ts".to_owned(),
@@ -601,6 +621,7 @@ fn gathers_streaming_text_until_its_window_passes() {
         sender
             .send(SessionEvent::Agent(AgentEvent::TurnCompleted {
                 turn: TurnId(1),
+                checkpoint: None,
             }))
             .await
             .expect("sent");
@@ -648,7 +669,10 @@ fn forwards_streaming_text_once_its_window_passed() {
             // Anything else ends the window at once, with the text before it.
             tokio::time::sleep(ms(10)).await;
             events.send(delta("!")).await.expect("sent");
-            let completed = AgentEvent::TurnCompleted { turn: TurnId(1) };
+            let completed = AgentEvent::TurnCompleted {
+                turn: TurnId(1),
+                checkpoint: None,
+            };
             events
                 .send(SessionEvent::Agent(completed))
                 .await
@@ -674,7 +698,10 @@ fn merges_consecutive_deltas_of_one_item() {
         delta(1, "He"),
         delta(1, "llo"),
         delta(2, "Hi"),
-        bridge(AgentEvent::TurnCompleted { turn: TurnId(1) }),
+        bridge(AgentEvent::TurnCompleted {
+            turn: TurnId(1),
+            checkpoint: None,
+        }),
         delta(2, "!"),
     ] {
         push(&mut merged, event);
@@ -722,7 +749,10 @@ fn keeps_only_the_latest_partial_output_of_adjacent_updates() {
         output(1, "ab"),
         output(2, "x"),
         output(1, "abc"),
-        bridge(AgentEvent::TurnCompleted { turn: TurnId(1) }),
+        bridge(AgentEvent::TurnCompleted {
+            turn: TurnId(1),
+            checkpoint: None,
+        }),
         output(1, "b"),
     ] {
         push(&mut merged, event);
@@ -797,6 +827,7 @@ fn forwards_partial_output_once_its_window_passed() {
             events
                 .send(SessionEvent::Agent(AgentEvent::TurnCompleted {
                     turn: TurnId(1),
+                    checkpoint: None,
                 }))
                 .await
                 .expect("sent");

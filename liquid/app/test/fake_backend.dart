@@ -878,6 +878,7 @@ BridgeEvent event(
   BridgeDisplay? display,
   bool? success,
   BridgeQueue? queue,
+  String? checkpoint,
 }) => BridgeEvent(
   kind: kind,
   item: item,
@@ -887,6 +888,7 @@ BridgeEvent event(
   display: display,
   success: success,
   queue: queue,
+  checkpoint: checkpoint,
 );
 
 BridgeItem item(

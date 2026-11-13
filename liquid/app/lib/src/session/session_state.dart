@@ -961,7 +961,7 @@ class SessionState {
         final readAgain = _readAgainAtEnd;
         _readAgainAtEnd = false;
         unawaited(
-          _endTurn(_chat.turnCompleted()).then((_) {
+          _endTurn(_chat.turnCompleted(event.checkpoint)).then((_) {
             if (readAgain) return loadChat();
           }),
         );

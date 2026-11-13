@@ -28,6 +28,9 @@ pub struct PiAdapter {
     /// Running tool calls, keyed by pi's tool call id. Calls that share an id wait in the order
     /// they started, as the stored history pairs them.
     tools: HashMap<String, VecDeque<OpenTool>>,
+    /// The turn id of the end checkpoint requested for the running turn; pi asks for it before
+    /// it reports the turn settled.
+    ended_checkpoint: Option<String>,
 }
 
 impl PiAdapter {
@@ -39,7 +42,7 @@ impl PiAdapter {
     /// The checkpoint an extension dialog asks for, or why its request is unreadable; `None` for
     /// any other record.
     pub(crate) fn checkpoint_request(
-        &self,
+        &mut self,
         record: &Map<String, Value>,
     ) -> Option<(RequestId, Result<Checkpoint, String>)> {
         if str_field(record, "type") != "extension_ui_request"
@@ -63,6 +66,14 @@ impl PiAdapter {
                     },
                 })
             });
+        if let Some(Checkpoint {
+            turn,
+            phase: Phase::End,
+            ..
+        }) = &checkpoint
+        {
+            self.ended_checkpoint = Some(turn.clone());
+        }
         Some((
             request,
             checkpoint.ok_or_else(|| "the checkpoint request is unreadable".to_owned()),
@@ -114,11 +125,12 @@ impl PiAdapter {
                         .map(|tool| (tool.item, tool.kind, tool.output)),
                 );
                 fail(turn, open, &mut events);
+                let checkpoint = self.ended_checkpoint.take();
                 events.push(
                     if record.get("aborted").and_then(Value::as_bool) == Some(true) {
-                        AgentEvent::TurnAborted { turn }
+                        AgentEvent::TurnAborted { turn, checkpoint }
                     } else {
-                        AgentEvent::TurnCompleted { turn }
+                        AgentEvent::TurnCompleted { turn, checkpoint }
                     },
                 );
             }

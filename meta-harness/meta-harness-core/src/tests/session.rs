@@ -99,7 +99,10 @@ IFS= read -r line || exit 0"#,
                 duration_ms: None,
                 lines: None,
             },
-            AgentEvent::TurnCompleted { turn },
+            AgentEvent::TurnCompleted {
+                turn,
+                checkpoint: None,
+            },
         ] {
             assert_eq!(next(&mut events).await, SessionEvent::Agent(expected));
         }

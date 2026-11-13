@@ -318,6 +318,7 @@ pub(crate) fn event(kind: BridgeEventKind) -> BridgeEvent {
         display: None,
         success: None,
         queue: None,
+        checkpoint: None,
     }
 }
 
@@ -371,8 +372,14 @@ impl From<AgentEvent> for BridgeEvent {
         use BridgeEventKind as Kind;
         match agent {
             AgentEvent::TurnStarted { .. } => event(Kind::TurnStarted),
-            AgentEvent::TurnCompleted { .. } => event(Kind::TurnCompleted),
-            AgentEvent::TurnAborted { .. } => event(Kind::TurnAborted),
+            AgentEvent::TurnCompleted { checkpoint, .. } => BridgeEvent {
+                checkpoint,
+                ..event(Kind::TurnCompleted)
+            },
+            AgentEvent::TurnAborted { checkpoint, .. } => BridgeEvent {
+                checkpoint,
+                ..event(Kind::TurnAborted)
+            },
             AgentEvent::ItemStarted {
                 item: id,
                 kind,

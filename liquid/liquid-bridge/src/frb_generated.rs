@@ -4153,6 +4153,7 @@ impl SseDecode for crate::api::events::BridgeEvent {
         let mut var_display = <Option<crate::api::events::BridgeDisplay>>::sse_decode(deserializer);
         let mut var_success = <Option<bool>>::sse_decode(deserializer);
         let mut var_queue = <Option<crate::api::events::BridgeQueue>>::sse_decode(deserializer);
+        let mut var_checkpoint = <Option<String>>::sse_decode(deserializer);
         return crate::api::events::BridgeEvent {
             kind: var_kind,
             item: var_item,
@@ -4162,6 +4163,7 @@ impl SseDecode for crate::api::events::BridgeEvent {
             display: var_display,
             success: var_success,
             queue: var_queue,
+            checkpoint: var_checkpoint,
         };
     }
 }
@@ -7276,6 +7278,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::events::BridgeEvent {
             self.display.into_into_dart().into_dart(),
             self.success.into_into_dart().into_dart(),
             self.queue.into_into_dart().into_dart(),
+            self.checkpoint.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -9367,6 +9370,7 @@ impl SseEncode for crate::api::events::BridgeEvent {
         <Option<crate::api::events::BridgeDisplay>>::sse_encode(self.display, serializer);
         <Option<bool>>::sse_encode(self.success, serializer);
         <Option<crate::api::events::BridgeQueue>>::sse_encode(self.queue, serializer);
+        <Option<String>>::sse_encode(self.checkpoint, serializer);
     }
 }
 
