@@ -2767,6 +2767,132 @@ fn a_stash_liquid_cannot_put_back_is_named_for_recovery() {
 }
 
 #[test]
+fn a_concurrent_drop_of_liquids_entry_keeps_a_personal_backup_of_its_commit() {
+    run(async {
+        let repo = Repo::new("stash-drop-backup");
+        let branch = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        // A personal stash of a commit, another stash, then Liquid's entry of the same commit.
+        repo.write("a.txt", "mine\n");
+        repo.git(&["stash", "push", "-q", "-m", "personal"]);
+        let commit = repo.git(&["rev-parse", "stash@{0}"]).trim().to_owned();
+        repo.write("a.txt", "theirs\n");
+        repo.git(&["stash", "push", "-q", "-m", "theirs"]);
+        repo.git(&[
+            "stash",
+            "store",
+            "-m",
+            &format!("On {branch}: Liquid: changes left on {branch} · 0123456789abcdef"),
+            &commit,
+        ]);
+        let root = repo.path().to_owned();
+        // Between finding Liquid's entry and dropping it, another Git drops the two entries above
+        // the personal backup, which then sits where Liquid's entry was.
+        crate::diff::before_drop(repo.path(), move || {
+            let external = Repo(root);
+            external.git(&["stash", "drop", "-q", "stash@{0}"]);
+            external.git(&["stash", "drop", "-q", "stash@{0}"]);
+            std::mem::forget(external);
+        });
+
+        Checkpoints::new(repo.path())
+            .discard_stash(&commit)
+            .await
+            .expect("discarded");
+
+        assert_eq!(
+            repo.git(&["stash", "list", "--format=%H %gs"]),
+            format!("{commit} On {branch}: personal\n"),
+            "the personal backup stays under its message"
+        );
+    });
+}
+
+#[test]
+fn a_stash_stored_during_a_drop_is_not_claimed_by_liquid() {
+    run(async {
+        let repo = Repo::new("stash-drop-claimed");
+        let branch = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        // A Liquid stash whose entry goes while its commit stays, and Liquid's stash to discard.
+        repo.write("a.txt", "kept\n");
+        repo.git(&[
+            "stash",
+            "push",
+            "-q",
+            "-m",
+            &format!("Liquid: changes left on {branch} · 0123456789abcdef"),
+        ]);
+        let kept = repo.git(&["rev-parse", "stash@{0}"]).trim().to_owned();
+        repo.git(&["stash", "drop", "-q", "stash@{0}"]);
+        repo.write("a.txt", "mine\n");
+        repo.git(&[
+            "stash",
+            "push",
+            "-q",
+            "-m",
+            &format!("Liquid: changes left on {branch} · fedcba9876543210"),
+        ]);
+        let mine = repo.git(&["rev-parse", "stash@{0}"]).trim().to_owned();
+        let root = repo.path().to_owned();
+        let stored = kept.clone();
+        // Between finding its place and dropping it, another Git stores the commit on top, under a
+        // message of its own; the drop then takes that entry.
+        crate::diff::before_drop(repo.path(), move || {
+            let external = Repo(root);
+            external.git(&["stash", "store", "-m", "manual backup", &stored]);
+            std::mem::forget(external);
+        });
+        let checkpoints = Checkpoints::new(repo.path());
+
+        checkpoints.discard_stash(&mine).await.expect("discarded");
+
+        assert!(
+            checkpoints.stash().await.expect("read").is_none(),
+            "the stored commit is not Liquid's stash on {branch}"
+        );
+    });
+}
+
+#[test]
+fn a_failed_check_after_a_drop_names_the_dropped_commit_instead_of_succeeding() {
+    run(async {
+        let repo = Repo::new("stash-drop-check-fails");
+        let branch = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.write("a.txt", "mine\n");
+        repo.git(&["stash", "push", "-q", "-m", "personal"]);
+        let commit = repo.git(&["rev-parse", "stash@{0}"]).trim().to_owned();
+        repo.write("a.txt", "other\n");
+        repo.git(&["stash", "push", "-q", "-m", "other"]);
+        repo.git(&[
+            "stash",
+            "store",
+            "-m",
+            &format!("On {branch}: Liquid: changes left on {branch} · 0123456789abcdef"),
+            &commit,
+        ]);
+        let root = repo.path().to_owned();
+        // The drop takes the personal backup of Liquid's commit, and the stash list cannot be read
+        // after it.
+        crate::diff::before_drop(repo.path(), move || {
+            let external = Repo(root);
+            external.git(&["stash", "drop", "-q", "stash@{0}"]);
+            external.git(&["stash", "drop", "-q", "stash@{0}"]);
+            external.git(&["config", "log.date", "bogus"]);
+            std::mem::forget(external);
+        });
+
+        let discarded = Checkpoints::new(repo.path()).discard_stash(&commit).await;
+
+        let error = discarded
+            .expect_err("the dropped commit was not checked")
+            .to_string();
+        assert!(
+            error.contains(&format!("git stash store {commit}")),
+            "{error}"
+        );
+    });
+}
+
+#[test]
 fn a_foreign_stash_whose_subject_cannot_be_read_is_named_for_recovery() {
     run(async {
         let repo = Repo::new("stash-subject-unreadable");

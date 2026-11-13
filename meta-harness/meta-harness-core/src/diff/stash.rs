@@ -78,6 +78,8 @@ pub(super) struct Entry {
     pub(super) id: String,
     /// Its place in the list, such as `stash@{0}`, valid until the list changes.
     place: String,
+    /// Its reflog message as Git shows it, which a put-back stores again verbatim.
+    subject: String,
     /// The branch whose changes Liquid left there; none for other entries.
     branch: Option<String>,
     created_ms: i64,
@@ -331,12 +333,18 @@ impl WorkingTree {
     /// Drops the stash commit `id`, wherever it now is in the list.
     ///
     /// Git drops a stash only by its place in the list, which another Git can shift between
-    /// finding and dropping it. Git names the commit it dropped; one not `id`, or `id` while
-    /// Liquid's entry of it stays, was another entry, which goes straight back into the list,
-    /// its commit unchanged, and the drop tries again.
+    /// finding and dropping it, so the drop is judged by the list before and after it. Liquid's
+    /// entry is gone only if it vanished; any other entry of the dropped commit that vanished goes
+    /// straight back into the list under its own message. A drop that took another entry tries
+    /// again, and a list that cannot be read after the drop is an error that names the commit.
     pub(super) async fn drop_stash(&self, id: &str) -> Result<(), DiffError> {
         for _ in 0..DROP_TRIES {
-            let place = self.place_of(id).await?;
+            let before = self.stashes().await?;
+            let own = before
+                .iter()
+                .find(|entry| entry.id == id && entry.branch.is_some())
+                .ok_or(DiffError::NoStash)?;
+            let (place, own_subject) = (own.place.clone(), own.subject.clone());
             #[cfg(test)]
             run_before_drop(&self.root);
             let said = user_git(&self.root, &["stash", "drop", &place]).await?;
@@ -349,43 +357,73 @@ impl WorkingTree {
                     "Git did not say which stash it dropped: {said}"
                 )));
             }
-            let own = dropped == id;
-            if own && self.place_of(id).await.is_err() {
-                return Ok(());
-            }
-            // Its own subject is what the list showed for it. Liquid's commit names Liquid's
-            // entry, so another entry of it goes back under a message of its own.
-            let subject = if own {
-                "Put back by Liquid".to_owned()
-            } else {
-                git(
-                    &self.root,
-                    &[],
-                    &["log", "-1", "--encoding=UTF-8", "--format=%s", dropped],
-                )
-                .await
-                .map_err(|error| lost(dropped, &error.to_string()))?
+            let after = match self.stashes().await {
+                Ok(after) => after,
+                // Which entry the drop took is then unknown, so it is named, not guessed.
+                Err(error) => return Err(lost(dropped, &error.to_string())),
             };
-            user_git(
-                &self.root,
-                &["stash", "store", "-m", subject.trim_end(), dropped],
-            )
-            .await
-            .map_err(|error| lost(dropped, &error.to_string()))?;
-            // Git stores nothing when the list's newest entry already holds the commit.
-            if own
-                && !self
-                    .stashes()
-                    .await?
-                    .iter()
-                    .any(|entry| entry.id == id && entry.branch.is_none())
-            {
-                return Err(lost(dropped, "Git kept only Liquid's entry of its commit"));
+            let own_gone = !after
+                .iter()
+                .any(|entry| entry.id == id && entry.subject == own_subject);
+            let own_dropped = dropped == id && own_gone;
+            let mut gone = vanished(&before, &after, dropped);
+            if own_dropped && let Some(at) = gone.iter().position(|s| *s == own_subject) {
+                gone.remove(at);
+            }
+            if gone.is_empty() && !own_dropped {
+                // The entry that went was not in the list read before the drop, so its own message
+                // is unknown: its commit's subject names it, unless that would make it Liquid's.
+                let message = if dropped == id {
+                    "Put back by Liquid".to_owned()
+                } else {
+                    let subject = git(
+                        &self.root,
+                        &[],
+                        &["log", "-1", "--encoding=UTF-8", "--format=%s", dropped],
+                    )
+                    .await
+                    .map_err(|error| lost(dropped, &error.to_string()))?;
+                    let subject = subject.trim_end();
+                    if liquid_label(subject).is_some() {
+                        format!("Put back by Liquid: {subject}")
+                    } else {
+                        subject.to_owned()
+                    }
+                };
+                gone.push(message);
+            }
+            for message in &gone {
+                self.put_back(dropped, message).await?;
+            }
+            if own_gone {
+                return Ok(());
             }
         }
         Err(DiffError::Git(
             "the stash list kept changing while Liquid dropped its stash".to_owned(),
         ))
+    }
+
+    /// Stores the commit `commit` in the list under `message`, which Git keeps verbatim, and
+    /// checks that it did: Git stores nothing when the newest entry already holds the commit.
+    async fn put_back(&self, commit: &str, message: &str) -> Result<(), DiffError> {
+        let message = message.trim_end();
+        let kept = async {
+            user_git(&self.root, &["stash", "store", "-m", message, commit]).await?;
+            Ok::<_, DiffError>(
+                self.stashes()
+                    .await?
+                    .iter()
+                    .any(|entry| entry.id == commit && entry.subject == message),
+            )
+        }
+        .await
+        .map_err(|error| lost(commit, &error.to_string()))?;
+        if kept {
+            Ok(())
+        } else {
+            Err(lost(commit, "Git kept no entry under its message"))
+        }
     }
 
     /// Moves the stashed changes `id` left on a branch back into the checkout and drops the
@@ -588,11 +626,7 @@ impl WorkingTree {
                 Some((id, place, created, subject))
             })
             .map(|(id, place, created, subject)| {
-                // Git puts `On <branch>: ` before the message.
-                let message = subject
-                    .split_once(": ")
-                    .map_or(subject, |(_, message)| message);
-                let (branch, operation) = match message.strip_prefix(MESSAGE) {
+                let (branch, operation) = match liquid_label(subject) {
                     Some(label) => match label.rsplit_once(" · ") {
                         Some((branch, operation))
                             if operation.len() == 16
@@ -607,6 +641,7 @@ impl WorkingTree {
                 Ok(Entry {
                     id: id.to_owned(),
                     place: place.to_owned(),
+                    subject: subject.to_owned(),
                     branch,
                     operation,
                     created_ms: timestamp_ms(created)?,
@@ -685,6 +720,35 @@ pub(super) fn listed_files(reason: &str) -> Vec<String> {
         .filter_map(|line| line.strip_prefix('\t'))
         .map(str::to_owned)
         .collect()
+}
+
+/// The label Liquid wrote in a reflog message `subject`, which Git shows after `On <branch>: `, or
+/// none for another entry.
+fn liquid_label(subject: &str) -> Option<&str> {
+    subject
+        .split_once(": ")
+        .map_or(subject, |(_, message)| message)
+        .strip_prefix(MESSAGE)
+}
+
+/// The messages of the entries of `commit` that `before` holds and `after` no longer does, one for
+/// each entry that went.
+fn vanished(before: &[Entry], after: &[Entry], commit: &str) -> Vec<String> {
+    let mut left: Vec<&str> = after
+        .iter()
+        .filter(|entry| entry.id == commit)
+        .map(|entry| entry.subject.as_str())
+        .collect();
+    let mut gone = Vec::new();
+    for entry in before.iter().filter(|entry| entry.id == commit) {
+        match left.iter().position(|subject| *subject == entry.subject) {
+            Some(at) => {
+                left.swap_remove(at);
+            }
+            None => gone.push(entry.subject.clone()),
+        }
+    }
+    gone
 }
 
 /// Says that Git dropped the stash `dropped` of someone else and it could not go back.
