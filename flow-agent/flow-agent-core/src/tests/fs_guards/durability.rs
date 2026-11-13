@@ -102,3 +102,21 @@ fn power_loss_restores_an_unsynced_truncation() {
 
     assert_eq!(fs::read(&path).expect("log reads"), b"original");
 }
+
+#[test]
+fn power_loss_restores_an_unsynced_truncation_of_a_file_written_before_the_trace() {
+    let workspace = empty_workspace("power-loss-untraced-truncation");
+    let path = workspace.join("log.jsonl");
+    fs::write(&path, b"original").expect("log is synced before the trace");
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .expect("log opens");
+    start_durable_trace(&workspace, None);
+    truncate_durable(&file, &path, 4).expect("log truncates");
+
+    apply_power_loss(&workspace, PowerLoss::Drop);
+    finish_durable_trace(&workspace);
+
+    assert_eq!(fs::read(&path).expect("log reads"), b"original");
+}

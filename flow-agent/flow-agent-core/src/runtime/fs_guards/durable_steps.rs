@@ -222,22 +222,26 @@ pub(crate) fn record_truncate(path: &Path, file: &fs::File, len: u64) {
     let key = (metadata.dev(), metadata.ino());
     let current = metadata.len();
     with_ledger(path, |ledger| {
-        if let Some(entry) = ledger.files.get_mut(&key) {
-            let lost_until = entry
-                .lost_tail
-                .as_ref()
-                .map_or(entry.synced_len, |tail| tail.offset);
-            if len < lost_until {
-                let mut bytes = vec![0; lost_until.min(current).saturating_sub(len) as usize];
-                // WHY: the traced handle is write-only, and reading it by path leaves its offset alone.
-                fs::File::open(path)
-                    .and_then(|readable| readable.read_exact_at(&mut bytes, len))
-                    .expect("synced bytes read before truncation");
-                if let Some(tail) = entry.lost_tail.take() {
-                    bytes.extend(tail.bytes);
-                }
-                entry.lost_tail = Some(LostTail { offset: len, bytes });
+        // WHY: a file the trace has not written before counts as synced up to its length, as in `record_write`.
+        let entry = ledger.files.entry(key).or_insert_with(|| LedgerFile {
+            file: file.try_clone().expect("truncated file duplicates"),
+            lost_tail: None,
+            synced_len: current,
+        });
+        let lost_until = entry
+            .lost_tail
+            .as_ref()
+            .map_or(entry.synced_len, |tail| tail.offset);
+        if len < lost_until {
+            let mut bytes = vec![0; lost_until.min(current).saturating_sub(len) as usize];
+            // WHY: the traced handle is write-only, and reading it by path leaves its offset alone.
+            fs::File::open(path)
+                .and_then(|readable| readable.read_exact_at(&mut bytes, len))
+                .expect("synced bytes read before truncation");
+            if let Some(tail) = entry.lost_tail.take() {
+                bytes.extend(tail.bytes);
             }
+            entry.lost_tail = Some(LostTail { offset: len, bytes });
         }
         if let Some(last) = ledger.last_write.as_mut().filter(|last| last.key == key) {
             last.end = last.end.min(len);
