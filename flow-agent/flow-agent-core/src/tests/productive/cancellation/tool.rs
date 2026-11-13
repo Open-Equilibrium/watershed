@@ -298,8 +298,9 @@ fn system_productive_tool_executor_runs_the_command_only_at_start() {
         executable: proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0.to_owned(),
         argv: vec![
             "-c".to_owned(),
-            format!("touch {}", marker.display()),
+            "touch \"$1\"".to_owned(),
             "flow-tool:marker".to_owned(),
+            marker.display().to_string(),
         ],
     };
     let prepare = |executor: &mut SystemProductiveToolExecutor| {
@@ -346,12 +347,25 @@ fn system_productive_tool_executor_observes_process_cancellation() {
     }
 
     crate::begin_productive_operation().expect("productive operation begins");
-    let cancellation = std::thread::spawn(|| {
-        std::thread::sleep(Duration::from_millis(50));
-        assert_eq!(
-            crate::request_productive_interrupt(),
-            crate::ProductiveInterruptAction::Cancel
-        );
+    let root = crate::tests::empty_workspace();
+    let started_marker = root.join("cancellation-started");
+    let cancellation = std::thread::spawn({
+        let started_marker = started_marker.clone();
+        move || {
+            // The interrupt must land while the Tool runs, so wait for its marker first.
+            let started = std::time::Instant::now();
+            while !started_marker.exists() {
+                assert!(
+                    started.elapsed() < Duration::from_secs(5),
+                    "the Tool never started"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(
+                crate::request_productive_interrupt(),
+                crate::ProductiveInterruptAction::Cancel
+            );
+        }
     });
     let mut executor = SystemProductiveToolExecutor;
     let workspace = AnchoredDir::workspace(Path::new(".")).expect("workspace anchors");
@@ -361,8 +375,9 @@ fn system_productive_tool_executor_observes_process_cancellation() {
                 executable: proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0.to_owned(),
                 argv: vec![
                     "-c".to_owned(),
-                    "/bin/sleep 5".to_owned(),
+                    "touch \"$1\"; /bin/sleep 5".to_owned(),
                     "flow-tool:cancellation".to_owned(),
+                    started_marker.display().to_string(),
                 ],
             },
             &workspace,

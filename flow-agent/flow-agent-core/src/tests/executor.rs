@@ -184,18 +184,30 @@ fn executor_override_publishes_after_a_contended_lock_is_released() {
         .open(lock_path)
         .expect("lock is staged");
     lock.lock().expect("lock is held");
-    let (ready, receiver) = mpsc::channel();
-    let releaser = thread::spawn(move || {
-        ready.send(()).expect("lock holder signals readiness");
-        thread::sleep(Duration::from_millis(50));
-        drop(lock);
+    let (done_sender, done) = mpsc::channel();
+    let configurer = thread::spawn({
+        let config = config.clone();
+        let executable = executable.clone();
+        move || {
+            let result = ExecutorConfigStore::at(config).configure(&executable);
+            let _ = done_sender.send(());
+            result
+        }
     });
-    receiver.recv().expect("lock holder is ready");
 
-    ExecutorConfigStore::at(config.clone())
-        .configure(&executable)
+    thread::sleep(Duration::from_millis(50));
+    assert!(
+        done.try_recv().is_err(),
+        "configure waits while the lock is held"
+    );
+    assert!(!config.exists(), "no override publishes under the lock");
+    drop(lock);
+    done.recv_timeout(Duration::from_secs(5))
+        .expect("configure completes after the lock is released");
+    configurer
+        .join()
+        .expect("configure thread exits")
         .expect("override publishes after lock release");
-    releaser.join().expect("lock holder exits");
 
     assert_eq!(
         ExecutorConfigStore::at(config)

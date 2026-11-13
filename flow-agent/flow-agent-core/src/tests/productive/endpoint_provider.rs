@@ -9,10 +9,31 @@ use crate::runtime::{
 };
 use crate::tests::helpers::load_productive_execution_fixture_with_provider_credential;
 use std::{
-    io::{Read, Write},
+    io::{self, Read, Write},
     net::{TcpListener, TcpStream},
     thread,
+    time::{Duration, Instant},
 };
+
+/// Accepts one connection, failing instead of waiting forever when the client sends no more.
+fn accept_within(listener: &TcpListener, within: Duration) -> io::Result<TcpStream> {
+    listener.set_nonblocking(true)?;
+    let deadline = Instant::now() + within;
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                stream.set_nonblocking(false)?;
+                return Ok(stream);
+            }
+            Err(error)
+                if error.kind() == io::ErrorKind::WouldBlock && Instant::now() < deadline =>
+            {
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
 
 const ENDPOINT_KEY: &str = "sk-endpoint-e2e-fixture";
 
@@ -77,7 +98,8 @@ fn endpoint_provider_completes_a_flow_through_a_tool_call_over_http() {
         );
         let mut requests = Vec::new();
         for reply in [tool_turn, final_turn] {
-            let (mut stream, _) = listener.accept().expect("one endpoint request");
+            let mut stream =
+                accept_within(&listener, Duration::from_secs(10)).expect("one endpoint request");
             requests.push(read_request(&mut stream));
             write_event_stream(&mut stream, reply);
         }

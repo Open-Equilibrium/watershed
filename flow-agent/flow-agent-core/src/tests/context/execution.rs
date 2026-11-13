@@ -59,8 +59,18 @@ fn run_persists_one_canonical_context_manifest_per_stub_model_turn() {
         .join(format!("{}.contexts.jsonl", output.session_id));
     let text = fs::read_to_string(&manifest_path).expect("context manifests persist");
     let manifests = text
-        .lines()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("manifest parses"))
+        .split_inclusive('\n')
+        .map(|line| {
+            let manifest = serde_json::from_str::<serde_json::Value>(line.trim_end_matches('\n'))
+                .expect("manifest parses");
+            let canonical = proto::canonical_json(&manifest).expect("manifest canonicalizes");
+            assert_eq!(
+                line,
+                format!("{canonical}\n"),
+                "manifest line is canonical JSONL"
+            );
+            manifest
+        })
         .collect::<Vec<_>>();
     let model_turns =
         validate_session_log_text(&output.session_path, &output.session_id, &output.stdout)
@@ -76,10 +86,6 @@ fn run_persists_one_canonical_context_manifest_per_stub_model_turn() {
         assert_eq!(manifest["model_profile_id"], "stub-model-v0");
         assert_eq!(manifest["estimator_id"], CONTEXT_ESTIMATOR_ID);
         assert_eq!(manifest["context_hash"].as_str().map(str::len), Some(64));
-        assert_eq!(
-            proto::canonical_json(&manifest).expect("manifest canonicalizes"),
-            serde_json::to_string(&manifest).expect("manifest serializes canonically")
-        );
     }
 }
 

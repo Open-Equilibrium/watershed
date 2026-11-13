@@ -154,10 +154,16 @@ fn elapsed_deadline_cancels_the_in_flight_future_once() {
 
     let cancelled = Arc::new(AtomicBool::new(false));
     let observed = Arc::clone(&cancelled);
+    let probe = Arc::clone(&cancelled);
     let result = block_on_network(async move {
-        let guard = PendingGuard(observed);
-        let _ = &guard;
-        await_deadline(Duration::from_millis(1), std::future::pending::<()>()).await
+        let result = await_deadline(Duration::from_millis(1), async move {
+            let _guard = PendingGuard(observed);
+            std::future::pending::<()>().await
+        })
+        .await;
+        // The timed-out future must be dropped by the time the deadline returns.
+        assert!(probe.load(Ordering::SeqCst));
+        result
     });
 
     assert!(matches!(result, Ok(Err(DeadlineElapsed))));

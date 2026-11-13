@@ -153,7 +153,14 @@ fn run_input_file_entrypoint_is_bounded_and_uses_workspace_relative_paths() {
             core_script::FlowValue::Integer("42".to_owned()),
         ])
     );
-    assert!(read_flow_run_input_file(&workspace, "../input.json").is_err());
+    let escaped = read_flow_run_input_file(&workspace, "../input.json")
+        .expect_err("a source outside the workspace is refused");
+    assert!(
+        escaped
+            .to_string()
+            .contains("run input source must stay within the workspace"),
+        "{escaped}"
+    );
     assert!(read_flow_run_input_file(&workspace, "missing.json").is_err());
 }
 

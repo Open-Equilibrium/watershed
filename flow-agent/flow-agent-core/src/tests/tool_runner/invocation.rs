@@ -123,7 +123,7 @@ fn tool_parameters_are_typed_complete_and_render_in_canonical_name_order() {
             ("--mode", core_script::FlowValue::String("safe".to_owned())),
             (
                 "--path",
-                core_script::FlowValue::String("../secret".to_owned()),
+                core_script::FlowValue::String("src/lib.rs".to_owned()),
             ),
         ]),
     ] {

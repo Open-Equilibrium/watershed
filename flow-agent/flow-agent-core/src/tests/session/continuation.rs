@@ -85,6 +85,9 @@ fn executor_readiness_failure_precedes_continuation_reservation() {
         "2026-07-30T12:00:01Z",
     )
     .expect("root checkpoint appends");
+    // Another owner holds the reservation, so readiness must fail before any reservation attempt.
+    let held = reserve_conversation_continuation(&workspace, "conversation", None)
+        .expect("another owner holds the continuation reservation");
     set_productive_executor_readiness_observer(|| {
         Err(RuntimeError::executor(
             proto::ExecutorErrorCodeV0::PolicyUnsupported,
@@ -116,6 +119,7 @@ fn executor_readiness_failure_precedes_continuation_reservation() {
             .join("conversation/runs/conversation")
             .exists()
     );
+    held.release().expect("continuation reservation releases");
     reserve_conversation_continuation(&workspace, "conversation", None)
         .expect("failed readiness leaves continuation reservation available")
         .release()
