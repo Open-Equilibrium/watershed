@@ -288,7 +288,13 @@ impl WorkingTree {
         while let (Some(header), Some(path)) = (records.next(), records.next()) {
             let mut fields = header.trim_start_matches(':').split(' ');
             let (old_mode, new_mode) = (fields.next(), fields.next());
-            if old_mode != new_mode && selected.contains(path) {
+            // Only an executable-bit flip depends on core.fileMode; an added or deleted file
+            // (mode 000000) or a type change is committed either way.
+            let flips = matches!(
+                (old_mode, new_mode),
+                (Some("100644"), Some("100755")) | (Some("100755"), Some("100644"))
+            );
+            if flips && selected.contains(path) {
                 skipped.push(path.to_owned());
             }
         }

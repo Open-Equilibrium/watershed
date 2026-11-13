@@ -1025,6 +1025,37 @@ fn commit_refuses_a_content_and_mode_change_git_would_partly_commit() {
 }
 
 #[test]
+fn commit_takes_added_and_deleted_files_when_git_ignores_file_modes() {
+    run(async {
+        let repo = Repo::new("commit-mode-ignored-add-delete");
+        identity(&repo);
+        repo.write("old.txt", "old\n");
+        repo.git(&["add", "old.txt"]);
+        repo.git(&["commit", "-qm", "old"]);
+        // A new or deleted file changes its mode from or to 000000; that is no executable bit.
+        repo.git(&["config", "core.fileMode", "false"]);
+        repo.write("new.txt", "new\n");
+        std::fs::remove_file(repo.path().join("old.txt")).unwrap();
+        let checkpoints = Checkpoints::new(repo.path());
+        let plan = checkpoints.commit_plan(&[]).await.unwrap();
+
+        let result = checkpoints
+            .commit(
+                &plan.snapshot,
+                &["new.txt".into(), "old.txt".into()],
+                "Message",
+                None,
+            )
+            .await;
+
+        assert!(result.is_ok(), "{result:?}");
+        let tracked = repo.git(&["ls-files"]);
+        assert!(tracked.lines().any(|file| file == "new.txt"), "{tracked}");
+        assert!(!tracked.lines().any(|file| file == "old.txt"), "{tracked}");
+    });
+}
+
+#[test]
 fn new_branch_commit_failure_reports_the_branch_after_either_hook() {
     use std::os::unix::fs::PermissionsExt;
     run(async {
