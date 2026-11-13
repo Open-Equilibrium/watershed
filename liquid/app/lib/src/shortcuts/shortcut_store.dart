@@ -153,7 +153,10 @@ class ShortcutController extends SavedSettings<ShortcutSettings> {
           if (await _apply(want)) {
             _applied = want;
           } else {
-            value = want ? _withoutLiquidKey(value) : _settled;
+            // Only the value this turn applied rolls back; a change made meanwhile settles on its own turn.
+            if (identical(value, next)) {
+              value = want ? _withoutLiquidKey(value) : _settled;
+            }
             changed = true;
           }
         }

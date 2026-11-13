@@ -278,6 +278,30 @@ void main() {
     expect(shortcuts.liquidKeyProblem.value, isNotNull);
   });
 
+  test('a failed Liquid key turn-off keeps a change made meanwhile', () async {
+    final host = FakeHost();
+    final store = ShortcutStore(file);
+    final shortcuts = await ShortcutController.load(store, host);
+    await shortcuts.change(ShortcutSettings.liquidKey());
+
+    final disable = Completer<void>();
+    host.gate = disable;
+    final off = shortcuts.change(ShortcutSettings.standard());
+    await pumpEventQueue();
+    // While the host turns the key off, the user keeps it on and gives Diff a key.
+    final diff = ShortcutSettings.liquidKey().change(
+      Command.diff,
+      const Keys(LogicalKeyboardKey.keyD, liquid: true),
+    );
+    final kept = shortcuts.change(diff);
+    host.failure = PlatformException(code: 'approval', message: 'denied');
+    disable.complete();
+    await Future.wait([off, kept]);
+
+    expect(shortcuts.value, diff);
+    expect(await store.load(), diff);
+  });
+
   test('the first frame does not wait for the Liquid key', () async {
     final store = ShortcutStore(file);
     await store.save(ShortcutSettings.liquidKey());
