@@ -15,6 +15,10 @@ const MAX_LIST_BYTES: u64 = 16 * 1024;
 /// Uncommitted files one Git diff names, so a long selection never outgrows a command line.
 const PATHS_PER_DIFF: usize = 100;
 
+/// Command-line bytes one Git diff may take, well under the smallest system limit (1 MiB on
+/// macOS): a selection with many changes below it cuts the patch rather than fail the draft.
+const ARGUMENT_BYTES: usize = 64 * 1024;
+
 /// Git's diff with no program a project names (ADR-0206), and no setting that hides a
 /// submodule's new commits (ADR-0210).
 const DIFF: [&str; 6] = [
@@ -149,17 +153,18 @@ impl WorkingTree {
                 list.extend(format!("{}\t{}\t{}\n", file.added, file.removed, file.path).bytes());
             }
             // A literal pathspec also names what lies below it, such as a folder that replaced
-            // a selected file; changes there that are not selected stay out.
-            let left_out: Vec<String> = changes
+            // a selected file; changes there that are not selected stay out. Each one is excluded
+            // only in the chunk whose selected path it lies below.
+            let below: Vec<(&str, String)> = changes
                 .iter()
                 .map(|file| file.path.as_str())
-                .filter(|path| {
-                    !selected.contains(path)
-                        && path
-                            .match_indices('/')
-                            .any(|(end, _)| selected.contains(&path[..end]))
+                .filter(|path| !selected.contains(path))
+                .flat_map(|path| {
+                    path.match_indices('/')
+                        .map(move |(end, _)| &path[..end])
+                        .filter(|folder| selected.contains(folder))
+                        .map(move |owner| (owner, format!(":(exclude,literal){path}")))
                 })
-                .map(|path| format!(":(exclude,literal){path}"))
                 .collect();
             for chunk in paths.chunks(PATHS_PER_DIFF) {
                 let room = MAX_PATCH_BYTES - patch.len() as u64;
@@ -167,8 +172,18 @@ impl WorkingTree {
                     .iter()
                     .map(|path| format!(":(literal){path}"))
                     .collect();
+                let owned: BTreeSet<&str> = chunk.iter().map(String::as_str).collect();
+                let left_out = below
+                    .iter()
+                    .filter(|(owner, _)| owned.contains(owner))
+                    .map(|(_, exclusion)| exclusion.as_str());
                 let mut args = [&DIFF[..], &[from.0.as_str(), to.0.as_str(), "--"][..]].concat();
-                args.extend(named.iter().chain(&left_out).map(String::as_str));
+                args.extend(named.iter().map(String::as_str).chain(left_out));
+                // Too long for one command line: the patch stops before this chunk.
+                if args.iter().map(|arg| arg.len() + 1).sum::<usize>() > ARGUMENT_BYTES {
+                    patch_cut = true;
+                    break;
+                }
                 let (part, more) = git_start(&self.root, &args, room).await?;
                 patch.extend(part);
                 if more {

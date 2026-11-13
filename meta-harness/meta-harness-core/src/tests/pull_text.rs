@@ -483,3 +483,29 @@ fn a_selection_longer_than_one_diff_reaches_the_model() {
         }
     });
 }
+
+#[test]
+fn a_draft_for_a_file_replaced_by_a_large_folder_still_succeeds() {
+    run(async {
+        let branch = Branch::new("replaced", "foo", "old file\n");
+        std::fs::remove_file(branch.repo.path().join("foo")).unwrap();
+        std::fs::create_dir(branch.repo.path().join("foo")).unwrap();
+        // Long names: the paths left out alone outgrow a command line.
+        let name = "n".repeat(200);
+        for n in 0..10_000 {
+            branch
+                .repo
+                .write(&format!("foo/{name}{n:05}"), "not selected\n");
+        }
+        let checkpoints = Checkpoints::new(branch.repo.path());
+        let snapshot = checkpoints.commit_plan(&[]).await.unwrap().snapshot;
+
+        draft(&branch, &checkpoints, None, &snapshot, &["foo".to_owned()])
+            .await
+            .expect("the draft is written");
+
+        let input = branch.read("input");
+        assert!(!input.contains("not selected"), "{input}");
+        assert!(!input.contains(&name), "a file left out names no path");
+    });
+}
