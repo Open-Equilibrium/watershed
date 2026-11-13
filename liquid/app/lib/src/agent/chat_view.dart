@@ -232,7 +232,13 @@ class ItemTile extends StatelessWidget {
             child: Text(text, style: prose),
           ),
         ),
-        BridgeItemKind.assistantMessage => SelectableText(text, style: prose),
+        // The text's own scrolling must not read earlier entries: it stops here.
+        BridgeItemKind.assistantMessage => NotificationListener<Notification>(
+          onNotification: (notification) =>
+              notification is ScrollNotification ||
+              notification is ScrollMetricsNotification,
+          child: SelectableText(text, style: prose),
+        ),
         BridgeItemKind.reasoning => Text(
           'Thinking',
           style: TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall),

@@ -677,6 +677,58 @@ void main() {
     );
   });
 
+  testWidgets('a streamed reply at the newest messages reads no earlier page', (
+    tester,
+  ) async {
+    await show(tester);
+    backend.transcripts[''] = BridgeTranscript(
+      items: [
+        for (var index = 0; index < 40; index++)
+          chatItem(
+            'm$index',
+            BridgeItemKind.userMessage,
+            text: 'Message $index',
+          ),
+      ],
+      more: true,
+      start: 'm0',
+    );
+    backend.transcripts['m0'] = BridgeTranscript(
+      items: [chatItem('e0', BridgeItemKind.userMessage, text: 'Earliest')],
+      more: false,
+      start: 'e0',
+    );
+    await state.loadChat();
+    await tester.pumpAndSettle();
+    backend.calls.clear();
+
+    await emit(tester, event(BridgeEventKind.turnStarted));
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.itemStarted,
+        item: item(1, kind: BridgeItemKind.assistantMessage),
+      ),
+    );
+    await emit(
+      tester,
+      event(BridgeEventKind.contentDelta, item: item(1), text: 'Streamed reply'),
+    );
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.contentDelta,
+        item: item(1),
+        text: ' keeps growing.',
+      ),
+    );
+    expect(
+      backend.calls,
+      isNot(contains('transcript m0')),
+      reason: 'the reply\'s own selectable text does not scroll the chat',
+    );
+  });
+
   testWidgets('shows notifications in the status bar', (tester) async {
     await show(tester);
     Future<void> notify(BridgeLevel level, String text) => emit(
