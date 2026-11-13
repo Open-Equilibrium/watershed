@@ -232,13 +232,14 @@ impl WorkingTree {
         if let Some(branch) = branch
             && let Err(error) = self.create(branch).await
         {
-            return Err(if matches!(error, DiffError::HookFailed(_)) {
-                DiffError::CommitOnBranchFailed {
-                    branch: branch.to_owned(),
-                    error: Box::new(error),
+            return Err(match error {
+                DiffError::CreatedBranchHookFailed { error, .. } => {
+                    DiffError::CommitOnBranchFailed {
+                        branch: branch.to_owned(),
+                        error,
+                    }
                 }
-            } else {
-                error
+                error => error,
             });
         }
         let committed = self

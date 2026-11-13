@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/rust/api/history.dart';
+import 'package:liquid/src/session/branch_bases.dart';
 import 'package:liquid/src/session/git_state.dart';
 
 import 'fake_backend.dart';

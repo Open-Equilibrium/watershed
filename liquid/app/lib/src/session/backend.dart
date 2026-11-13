@@ -106,7 +106,8 @@ abstract interface class SessionBackend {
     required String? replacingStash,
   });
 
-  /// Creates the branch `name` at the current commit and switches to it.
+  /// Creates the branch `name` at the current commit and switches to it; the outcome names the
+  /// branch it was created from.
   Future<BridgeGitOutcome> createBranch(String name);
 
   /// Captures the current whole files and their checkpoint attribution.

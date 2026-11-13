@@ -249,6 +249,10 @@ class BridgeGitOutcome {
   /// The destination and counts captured for this push or pull.
   final BridgeGitTransfer? transfer;
 
+  /// For a created branch, the branch it was created from, exactly as Git names it, to record
+  /// and look up; never shown. None when HEAD was detached.
+  final String? createdFrom;
+
   const BridgeGitOutcome({
     required this.kind,
     required this.files,
@@ -256,6 +260,7 @@ class BridgeGitOutcome {
     required this.detail,
     this.commit,
     this.transfer,
+    this.createdFrom,
   });
 
   @override
@@ -265,7 +270,8 @@ class BridgeGitOutcome {
       running.hashCode ^
       detail.hashCode ^
       commit.hashCode ^
-      transfer.hashCode;
+      transfer.hashCode ^
+      createdFrom.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -277,7 +283,8 @@ class BridgeGitOutcome {
           running == other.running &&
           detail == other.detail &&
           commit == other.commit &&
-          transfer == other.transfer;
+          transfer == other.transfer &&
+          createdFrom == other.createdFrom;
 }
 
 /// How a Git write the user asked for ended, when not with an error to show as it is.

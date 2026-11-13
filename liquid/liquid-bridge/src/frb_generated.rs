@@ -4280,6 +4280,7 @@ impl SseDecode for crate::api::git::BridgeGitOutcome {
         let mut var_commit = <Option<crate::api::git::BridgeCommit>>::sse_decode(deserializer);
         let mut var_transfer =
             <Option<crate::api::git::BridgeGitTransfer>>::sse_decode(deserializer);
+        let mut var_createdFrom = <Option<String>>::sse_decode(deserializer);
         return crate::api::git::BridgeGitOutcome {
             kind: var_kind,
             files: var_files,
@@ -4287,6 +4288,7 @@ impl SseDecode for crate::api::git::BridgeGitOutcome {
             detail: var_detail,
             commit: var_commit,
             transfer: var_transfer,
+            created_from: var_createdFrom,
         };
     }
 }
@@ -7450,6 +7452,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeGitOutcome {
             self.detail.into_into_dart().into_dart(),
             self.commit.into_into_dart().into_dart(),
             self.transfer.into_into_dart().into_dart(),
+            self.created_from.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -9465,6 +9468,7 @@ impl SseEncode for crate::api::git::BridgeGitOutcome {
         <String>::sse_encode(self.detail, serializer);
         <Option<crate::api::git::BridgeCommit>>::sse_encode(self.commit, serializer);
         <Option<crate::api::git::BridgeGitTransfer>>::sse_encode(self.transfer, serializer);
+        <Option<String>>::sse_encode(self.created_from, serializer);
     }
 }
 

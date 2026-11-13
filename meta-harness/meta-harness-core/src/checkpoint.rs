@@ -450,8 +450,9 @@ impl Checkpoints {
     }
 
     /// Creates the branch `name` at the current commit and switches to it; uncommitted changes
-    /// come along. Refused while an agent runs in the checkout.
-    pub async fn create_branch(&self, name: &str) -> Result<(), DiffError> {
+    /// come along. Refused while an agent runs in the checkout. Returns the branch it was created
+    /// from, or none when HEAD was detached.
+    pub async fn create_branch(&self, name: &str) -> Result<Option<String>, DiffError> {
         let name = name.to_owned();
         self.user_write(move |tree| async move { tree.create(&name).await })
             .await

@@ -328,19 +328,29 @@ impl WorkingTree {
     }
 
     /// Creates the branch `name` at the current commit and switches to it, unless Git refuses
-    /// the name.
-    pub async fn create(&self, name: &str) -> Result<(), DiffError> {
+    /// the name. Returns the branch it was created from, or none when HEAD was detached.
+    pub async fn create(&self, name: &str) -> Result<Option<String>, DiffError> {
         let name = branch_name(name)?;
         git(&self.root, &[], &["check-ref-format", "--branch", name])
             .await
             .map_err(|_| DiffError::InvalidBranch(name.to_owned()))?;
         let start = self.head().await?;
-        self.switching(
-            &["switch", "-c", name],
-            &start,
-            &BranchTarget::Local(name.to_owned()),
-        )
-        .await
+        let from = start.0.strip_prefix("refs/heads/").map(str::to_owned);
+        match self
+            .switching(
+                &["switch", "-c", name],
+                &start,
+                &BranchTarget::Local(name.to_owned()),
+            )
+            .await
+        {
+            Ok(()) => Ok(from),
+            Err(error @ DiffError::HookFailed(_)) => Err(DiffError::CreatedBranchHookFailed {
+                from,
+                error: Box::new(error),
+            }),
+            Err(error) => Err(error),
+        }
     }
 
     /// Runs the switch `args` from HEAD `start`. Git exits with a failing `post-checkout` hook's

@@ -2446,6 +2446,41 @@ fn initialize_bridge_exposes_the_new_repository_without_backfilled_checkpoints()
 }
 
 #[test]
+fn create_bridge_reports_the_branch_it_created_the_branch_from() {
+    use crate::api::git::BridgeGitOutcomeKind;
+    use std::os::unix::fs::PermissionsExt;
+    for (name, hook) in [
+        ("create-done", None),
+        ("create-hook", Some("post-checkout")),
+    ] {
+        let repo = repository(name);
+        git(&repo, &["branch", "-M", "main"]);
+        if let Some(hook) = hook {
+            let path = repo.join(".git/hooks").join(hook);
+            std::fs::write(&path, "#!/bin/sh\nexit 1\n").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let session = launch(
+            gated("IFS= read -r line || exit 0"),
+            repo.display().to_string(),
+        )
+        .unwrap();
+        let created = session.create_branch("feat".into()).unwrap();
+        let expected = if hook.is_some() {
+            BridgeGitOutcomeKind::HookFailed
+        } else {
+            BridgeGitOutcomeKind::Done
+        };
+        assert_eq!(created.kind, expected);
+        assert_eq!(created.created_from.as_deref(), Some("main"));
+        let status = session.git_status().unwrap().unwrap();
+        assert_eq!(status.branch.as_deref(), Some("feat"));
+        assert!(call(session.shutdown()));
+        let _ = std::fs::remove_dir_all(repo);
+    }
+}
+
+#[test]
 fn commit_bridge_names_the_created_branch_when_either_hook_refuses() {
     use crate::api::git::BridgeGitOutcomeKind;
     use std::os::unix::fs::PermissionsExt;

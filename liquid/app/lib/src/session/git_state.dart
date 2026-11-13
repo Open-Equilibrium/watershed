@@ -297,32 +297,34 @@ class GitState {
 
   /// Creates the branch `name` at the current commit and switches to it.
   Future<BridgeGitOutcome?> create(String name) async {
-    // Read when the write starts, after the writes queued before it.
-    BridgeGitStatus? from;
-    final outcome = await _write('create the branch', () {
-      from = status.value;
-      return _backend.createBranch(name);
-    }, done: (_, _) => 'Created and switched to $name.');
+    final outcome = await _write(
+      'create the branch',
+      () => _backend.createBranch(name),
+      done: (_, _) => 'Created and switched to $name.',
+    );
     // Git created the branch, also when a hook failed after.
     if ({
       BridgeGitOutcomeKind.done,
       BridgeGitOutcomeKind.hookFailed,
     }.contains(outcome?.kind)) {
-      await _recordBase(from, name);
+      await _recordBase(status.value?.repository, outcome!.createdFrom, name);
     }
     return outcome;
   }
 
-  /// Remembers the branch `from` was on as the base of the new branch `name`.
-  Future<void> _recordBase(BridgeGitStatus? from, String name) async {
-    final base = from?.rawBranch;
-    if (from == null || base == null) return;
+  /// Remembers that the new branch `name` of `repository` was created from `base`.
+  Future<void> _recordBase(
+    String? repository,
+    String? base,
+    String name,
+  ) async {
+    if (repository == null || base == null) return;
     try {
-      await _bases.record(from.repository, name, base);
+      await _bases.record(repository, name, base);
     } on Object catch (error) {
       notify(
         BridgeLevel.warning,
-        'Could not remember that $name was created from ${from.branch}: $error',
+        'Could not remember where $name was created from: $error',
       );
     }
   }
@@ -386,7 +388,7 @@ class GitState {
           BridgeGitOutcomeKind.hookChanged,
           BridgeGitOutcomeKind.commitBranchFailed,
         }.contains(outcome?.kind)) {
-      await _recordBase(from, branch);
+      await _recordBase(from?.repository, from?.rawBranch, branch);
     }
     return outcome;
   }

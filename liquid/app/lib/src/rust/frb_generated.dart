@@ -3832,8 +3832,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeGitOutcome dco_decode_bridge_git_outcome(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return BridgeGitOutcome(
       kind: dco_decode_bridge_git_outcome_kind(arr[0]),
       files: dco_decode_list_String(arr[1]),
@@ -3841,6 +3841,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       detail: dco_decode_String(arr[3]),
       commit: dco_decode_opt_box_autoadd_bridge_commit(arr[4]),
       transfer: dco_decode_opt_box_autoadd_bridge_git_transfer(arr[5]),
+      createdFrom: dco_decode_opt_String(arr[6]),
     );
   }
 
@@ -5928,6 +5929,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_transfer = sse_decode_opt_box_autoadd_bridge_git_transfer(
       deserializer,
     );
+    var var_createdFrom = sse_decode_opt_String(deserializer);
     return BridgeGitOutcome(
       kind: var_kind,
       files: var_files,
@@ -5935,6 +5937,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       detail: var_detail,
       commit: var_commit,
       transfer: var_transfer,
+      createdFrom: var_createdFrom,
     );
   }
 
@@ -8588,6 +8591,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.detail, serializer);
     sse_encode_opt_box_autoadd_bridge_commit(self.commit, serializer);
     sse_encode_opt_box_autoadd_bridge_git_transfer(self.transfer, serializer);
+    sse_encode_opt_String(self.createdFrom, serializer);
   }
 
   @protected

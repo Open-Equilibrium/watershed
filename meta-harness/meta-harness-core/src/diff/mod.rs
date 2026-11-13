@@ -188,6 +188,13 @@ pub enum DiffError {
         /// The failure after creating it.
         error: Box<DiffError>,
     },
+    /// A branch was created and switched to, but a hook failed after Git switched.
+    CreatedBranchHookFailed {
+        /// The branch it was created from, or none when HEAD was detached.
+        from: Option<String>,
+        /// The hook failure.
+        error: Box<DiffError>,
+    },
     /// Explicit commits do not finish merges.
     MergeInProgress,
     /// Resolved fetch/push endpoints do not name the same single repository.
@@ -263,6 +270,7 @@ impl fmt::Display for DiffError {
             Self::CommitOnBranchFailed { branch, error } => {
                 write!(f, "committing on {branch} failed: {error}")
             }
+            Self::CreatedBranchHookFailed { error, .. } => error.fmt(f),
             Self::MergeInProgress => f.write_str("A merge is in progress."),
             Self::PushDestinations => f.write_str(
                 "This remote pushes to other or several repositories. Push it with Git.",

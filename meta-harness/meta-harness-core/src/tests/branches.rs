@@ -684,10 +684,18 @@ fn a_new_branch_starts_at_the_current_commit_unless_git_refuses_its_name() {
         }
         assert_eq!(repo.git(&["branch", "--list"]).lines().count(), 1);
 
-        checkpoints
-            .create_branch("feature/retry-after")
-            .await
-            .expect("created");
+        let from = repo
+            .git(&["branch", "--show-current"])
+            .trim_end()
+            .to_owned();
+        assert_eq!(
+            checkpoints
+                .create_branch("feature/retry-after")
+                .await
+                .expect("created"),
+            Some(from),
+            "the new branch reports the branch it was created from"
+        );
         assert_eq!(
             repo.git(&["branch", "--show-current"]),
             "feature/retry-after\n"
@@ -1485,7 +1493,8 @@ fn a_hook_failing_after_git_switched_keeps_the_changes_left_on_the_branch() {
         );
         assert!(matches!(
             checkpoints.create_branch("new").await,
-            Err(DiffError::HookFailed(_))
+            Err(DiffError::CreatedBranchHookFailed { from: Some(from), error })
+                if from == "other" && matches!(*error, DiffError::HookFailed(_))
         ));
         assert_eq!(repo.git(&["branch", "--show-current"]), "new\n");
     });

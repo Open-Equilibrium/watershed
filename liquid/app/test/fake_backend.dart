@@ -378,9 +378,22 @@ class FakeBackend implements SessionBackend {
   @override
   Future<BridgeGitOutcome> createBranch(String name) async {
     calls.add('create $name');
+    // Git reports the branch checked out when it created the branch, unless a test says otherwise.
+    final from = createdFrom ?? git?.rawBranch;
     onCreateBranch?.call(name);
-    return outcome;
+    return BridgeGitOutcome(
+      kind: outcome.kind,
+      files: outcome.files,
+      running: outcome.running,
+      detail: outcome.detail,
+      commit: outcome.commit,
+      transfer: outcome.transfer,
+      createdFrom: from,
+    );
   }
+
+  /// The branch a created branch reports it was created from, when it is not the checkout's.
+  String? createdFrom;
 
   /// Runs when a branch is created, as Git would switch to it.
   void Function(String name)? onCreateBranch;

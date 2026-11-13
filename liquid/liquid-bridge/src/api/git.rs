@@ -141,6 +141,9 @@ pub struct BridgeGitOutcome {
     pub commit: Option<BridgeCommit>,
     /// The destination and counts captured for this push or pull.
     pub transfer: Option<BridgeGitTransfer>,
+    /// For a created branch, the branch it was created from, exactly as Git names it, to record
+    /// and look up; never shown. None when HEAD was detached.
+    pub created_from: Option<String>,
 }
 
 /// A push or pull's display names, captured counts and opaque approval identities.
@@ -830,8 +833,17 @@ impl AgentSession {
     /// Creates the branch `name` at the current commit and switches to it.
     pub fn create_branch(&self, name: String) -> Result<BridgeGitOutcome, String> {
         RUNTIME.block_on(async {
-            self.outcome(self.checkpoints.create_branch(&name).await)
-                .await
+            match self.checkpoints.create_branch(&name).await {
+                Ok(from) => Ok(BridgeGitOutcome {
+                    created_from: from,
+                    ..self.outcome(Ok(())).await?
+                }),
+                Err(DiffError::CreatedBranchHookFailed { from, error }) => Ok(BridgeGitOutcome {
+                    created_from: from,
+                    ..self.outcome(Err(*error)).await?
+                }),
+                Err(error) => self.outcome(Err(error)).await,
+            }
         })
     }
 
@@ -1145,6 +1157,7 @@ impl AgentSession {
                     running: Vec::new(),
                     commit: None,
                     transfer: None,
+                    created_from: None,
                 }),
             },
         }
@@ -1159,6 +1172,7 @@ impl AgentSession {
             detail: String::new(),
             commit: None,
             transfer: None,
+            created_from: None,
         };
         match result {
             Ok(()) => Ok(outcome(BridgeGitOutcomeKind::Done, Vec::new())),
