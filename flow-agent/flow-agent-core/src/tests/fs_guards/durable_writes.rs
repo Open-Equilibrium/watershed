@@ -51,6 +51,18 @@ const EXEMPT_FILES: &[(&str, &[&str], &str)] = &[
         WRITE_CALLS_AND_OPENS,
         "dev evidence generator behind the m11-budget-evidence feature; it writes fixtures only",
     ),
+    (
+        "runtime/conversations/conversation_stream/writer.rs",
+        &[
+            ".write(true)",
+            "create_new(true)",
+            ".append(true)",
+            ".write_all(",
+            ".sync_all(",
+            ".sync_data(",
+        ],
+        "append_validated_jsonl_line, the m11-budget-evidence and test append primitive; every other write in this file is test-only",
+    ),
 ];
 
 const WRITE_OPENS: &[&str] = &[
@@ -162,10 +174,7 @@ fn production_lines(source: &str) -> Vec<(usize, &str)> {
 }
 
 fn is_test_attribute(trimmed: &str) -> bool {
-    trimmed == "#[test]"
-        || (trimmed.starts_with("#[cfg(")
-            && trimmed.contains("test")
-            && !trimmed.contains("not(test"))
+    trimmed == "#[test]" || trimmed == "#[cfg(test)]" || trimmed.starts_with("#[cfg(all(test,")
 }
 
 #[test]
@@ -178,4 +187,24 @@ fn production_lines_skip_test_items_and_comments() {
         .collect();
 
     assert_eq!(lines, vec!["fn kept() {", "}", "let kept = 1;"]);
+}
+
+#[test]
+fn production_lines_keep_items_enabled_outside_test() {
+    let source = "#[cfg(any(test, unix))]\nfn p(f:&File){\n    f.sync_all().unwrap();\n}\n";
+
+    let lines: Vec<&str> = production_lines(source)
+        .into_iter()
+        .map(|(_, line)| line)
+        .collect();
+
+    assert_eq!(
+        lines,
+        vec![
+            "#[cfg(any(test, unix))]",
+            "fn p(f:&File){",
+            "    f.sync_all().unwrap();",
+            "}"
+        ]
+    );
 }
