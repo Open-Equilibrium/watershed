@@ -395,6 +395,28 @@ fn incremental_reader_recovers_after_callback_error_or_unwind() {
         }
         assert_eq!(cursor, 2);
 
+        // The delivered sequence 2 stays covered by the retained prefix digest after the failure.
+        fs::write(
+            &path,
+            format!(
+                "{started}{}{completed}",
+                progress.replace("\"value\":1", "\"value\":2")
+            ),
+        )
+        .expect("delivered event is rewritten");
+        let mut delivered = Vec::new();
+        let error = reader
+            .visit_verified_after(cursor, 3, |_event, line| {
+                delivered.push(line.to_owned());
+                Ok(())
+            })
+            .expect_err("a rewritten delivered event is detected after a callback failure");
+        assert!(matches!(
+            error,
+            RuntimeError::Protocol(message) if message.contains("append-only")
+        ));
+        assert!(delivered.is_empty());
+
         let changed = started.replace("evt-started", "evt-mutated");
         fs::write(&path, format!("{changed}{progress}{completed}"))
             .expect("previously observed event is replaced");

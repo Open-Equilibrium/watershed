@@ -389,8 +389,14 @@ impl SessionEventReader {
         } else {
             0
         };
-        let (final_suffix, _) =
-            self.read_incremental_segment(&segments[final_index], final_offset, 0)?;
+        let committed_event_bytes =
+            u64::try_from(self.observed_signature.byte_count).unwrap_or(u64::MAX);
+        let (final_suffix, _) = self.read_incremental_segment(
+            &segments[final_index],
+            final_offset,
+            0,
+            committed_event_bytes,
+        )?;
         let final_complete_len = complete_jsonl_prefix_len(&final_suffix);
         let has_partial_line = final_complete_len != final_suffix.len();
         after_read();
@@ -402,7 +408,6 @@ impl SessionEventReader {
         );
         // Errors and unwinds leave an empty cache for the next verified replay.
         let mut validation = std::mem::replace(&mut self.validation, empty_validation);
-        let mut signature = self.observed_signature.clone();
         let mut discovered_bytes = 0u64;
         let mut current_segment_count = self.observed_segment_count;
         let mut current_segment_bytes = self.observed_current_segment_bytes;
@@ -419,8 +424,12 @@ impl SessionEventReader {
                         .saturating_add(u64::try_from(final_suffix.len()).unwrap_or(u64::MAX)),
                 )
             } else {
-                let (bytes, metadata_len) =
-                    self.read_incremental_segment(segment, offset, discovered_bytes)?;
+                let (bytes, metadata_len) = self.read_incremental_segment(
+                    segment,
+                    offset,
+                    discovered_bytes,
+                    committed_event_bytes,
+                )?;
                 discovered_bytes =
                     discovered_bytes.saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
                 if metadata_len == 0 || complete_jsonl_prefix_len(&bytes) != bytes.len() {
@@ -429,9 +438,10 @@ impl SessionEventReader {
                         segment.diagnostic_path().display()
                     )));
                 }
-                let consumed = self.visit_incremental_records(
+                let consumed = Self::visit_incremental_records(
+                    self.path.diagnostic_path(),
                     &mut validation,
-                    &mut signature,
+                    &mut self.observed_signature,
                     &bytes,
                     cursor,
                     through_sequence,
@@ -448,9 +458,7 @@ impl SessionEventReader {
             };
             discovered_bytes = discovered_bytes
                 .saturating_add(u64::try_from(segment_suffix.len()).unwrap_or(u64::MAX));
-            let observed_event_bytes =
-                u64::try_from(self.observed_signature.byte_count).unwrap_or(u64::MAX);
-            if observed_event_bytes.saturating_add(discovered_bytes) > MAX_SESSION_EVENT_BYTES {
+            if committed_event_bytes.saturating_add(discovered_bytes) > MAX_SESSION_EVENT_BYTES {
                 return Err(RuntimeError::Protocol(format!(
                     "{} session event data exceeds max {MAX_SESSION_EVENT_BYTES}",
                     self.path.diagnostic_path().display()
@@ -463,9 +471,10 @@ impl SessionEventReader {
                     segment.diagnostic_path().display()
                 )));
             }
-            let consumed = self.visit_incremental_records(
+            let consumed = Self::visit_incremental_records(
+                self.path.diagnostic_path(),
                 &mut validation,
-                &mut signature,
+                &mut self.observed_signature,
                 &segment_suffix[..complete_len],
                 cursor,
                 through_sequence,
@@ -488,7 +497,6 @@ impl SessionEventReader {
         self.ensure_cursor(cursor, validation.previous_sequence)?;
         self.observed_current_segment_bytes = current_segment_bytes;
         self.observed_segment_count = current_segment_count;
-        self.observed_signature = signature;
         self.validation = validation;
         Ok(())
     }
@@ -498,6 +506,7 @@ impl SessionEventReader {
         segment: &AnchoredFile,
         offset: u64,
         discovered_bytes: u64,
+        committed_event_bytes: u64,
     ) -> Result<(Vec<u8>, u64), RuntimeError> {
         let (mut file, metadata) = open_anchored_file_for_read(segment)?;
         if metadata.len() < offset {
@@ -506,10 +515,8 @@ impl SessionEventReader {
         file.seek(SeekFrom::Start(offset))
             .map_err(|source| path_io_error(segment.diagnostic_path(), source))?;
         let remaining_segment_bytes = MAX_SESSION_SEGMENT_BYTES.saturating_sub(offset);
-        let observed_event_bytes =
-            u64::try_from(self.observed_signature.byte_count).unwrap_or(u64::MAX);
         let remaining_event_bytes = MAX_SESSION_EVENT_BYTES
-            .saturating_sub(observed_event_bytes)
+            .saturating_sub(committed_event_bytes)
             .saturating_sub(discovered_bytes);
         let mut bytes = Vec::new();
         file.take(
@@ -526,7 +533,7 @@ impl SessionEventReader {
                 segment.diagnostic_path().display()
             )));
         }
-        if observed_event_bytes
+        if committed_event_bytes
             .saturating_add(discovered_bytes)
             .saturating_add(read_bytes)
             > MAX_SESSION_EVENT_BYTES
@@ -541,7 +548,7 @@ impl SessionEventReader {
 
     #[allow(clippy::too_many_arguments)]
     fn visit_incremental_records(
-        &self,
+        path: &Path,
         validation: &mut SessionAppendValidationState,
         signature: &mut RuntimeStreamSignatureBuilder,
         bytes: &[u8],
@@ -556,16 +563,13 @@ impl SessionEventReader {
                 break;
             }
             let text = std::str::from_utf8(record).map_err(|source| {
-                RuntimeError::Protocol(format!(
-                    "{} is not valid UTF-8: {source}",
-                    self.path.diagnostic_path().display()
-                ))
+                RuntimeError::Protocol(format!("{} is not valid UTF-8: {source}", path.display()))
             })?;
-            validation.validate_appended_with(self.path.diagnostic_path(), text, |event| {
-                signature.push(record);
+            validation.validate_appended_with(path, text, |event| {
                 if event.sequence > cursor && event.sequence <= through_sequence {
                     visit(event, text)?;
                 }
+                signature.push(record);
                 Ok(())
             })?;
             consumed = consumed.saturating_add(record.len());
