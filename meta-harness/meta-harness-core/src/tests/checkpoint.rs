@@ -1404,6 +1404,28 @@ fn a_revert_that_git_could_not_finish_names_the_files_left() {
 }
 
 #[test]
+fn a_plan_asks_again_when_fresh_ignored_contents_are_too_large_to_confirm() {
+    run(async {
+        let repo = Repo::new("revert-racy-large");
+        repo.write("f", "returns\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "files"]);
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || repo.write("a.txt", "new\n")).await;
+        // The tracked file is now an ignored file in the way of its return, written just now.
+        repo.git(&["rm", "-q", "--cached", "f"]);
+        repo.write(".git/info/exclude", "/f\n");
+        std::fs::remove_file(repo.path().join("f")).expect("removed");
+        std::fs::File::create(repo.path().join("f"))
+            .expect("file")
+            .set_len(64 * 1024 * 1024 + 1)
+            .expect("sized");
+        let plan = checkpoints.revert_plan(&at("t1", Phase::Start), None).await;
+        assert!(matches!(plan, Err(DiffError::Git(_))), "{plan:?}");
+    });
+}
+
+#[test]
 fn a_revert_lists_ignored_files_in_the_way_of_restored_ones() {
     run(async {
         let repo = Repo::new("revert-ignored");

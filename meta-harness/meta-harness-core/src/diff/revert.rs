@@ -6,6 +6,14 @@ use super::*;
 /// Most folder entries one preflight reads to find repositories in returning files' places.
 const MAX_SEARCHED_ENTRIES: usize = 100_000;
 
+/// Seconds around a plan's reading in which a file's timestamps may not tell its rewrite from
+/// the write before, as they share a timestamp tick; such a file's contents are read too.
+const RACY_SECONDS: i64 = 2;
+
+/// Most bytes of such files one plan reads; past it the plan asks to be made again once they are
+/// older.
+const MAX_RACY_BYTES: u64 = 64 * 1024 * 1024;
+
 /// The exact state a revert plan was read in: the checkpoint, the checkout's branch and files,
 /// and what the revert leaves alone or deletes of what Git ignores. A revert runs only while the
 /// project still matches it (ADR-0256). Return it unchanged; it is not for display.
@@ -112,6 +120,17 @@ impl WorkingTree {
         from: &Snapshot,
         to: &Snapshot,
     ) -> Result<Revertable, DiffError> {
+        self.revert_planned_at(from, to, unix_seconds()).await
+    }
+
+    /// [`Self::revert_planned`] as read at `read_at`, in Unix seconds, which a confirmation's
+    /// digest records.
+    async fn revert_planned_at(
+        &self,
+        from: &Snapshot,
+        to: &Snapshot,
+        read_at: i64,
+    ) -> Result<Revertable, DiffError> {
         let mut planned = self.revertable(from, to).await?;
         (planned.replaced, planned.removed) = self.in_the_way(&planned.changes).await?;
         let mut kept: Vec<String> = planned
@@ -123,7 +142,7 @@ impl WorkingTree {
         let mut ignored: Vec<String> = planned.replaced.iter().cloned().collect();
         ignored.extend(planned.removed.iter().cloned());
         ignored.sort();
-        let ignored_state = ignored_state(&self.root, &ignored);
+        let ignored_state = ignored_state(&self.root, &ignored, read_at)?;
         planned.confirmation = RevertConfirmation {
             target: to.0.clone(),
             // Only the files below the working folder are reverted, so only they count.
@@ -254,12 +273,18 @@ impl WorkingTree {
         // The private index then lists the current files, so `git restore` deletes those `to`
         // lacks, and a file that was untracked before the turn returns untracked.
         let now = Snapshot(self.capture(&[]).await?);
+        // The digest is read as the plan read it, so the same stamps count as racy here.
+        let read_at = confirmed
+            .ignored_state
+            .split_once(':')
+            .and_then(|(read_at, _)| read_at.parse().ok())
+            .ok_or(DiffError::PlanChanged)?;
         let Revertable {
             changes,
             left_alone,
             confirmation,
             ..
-        } = self.revert_planned(&now, to).await?;
+        } = self.revert_planned_at(&now, to, read_at).await?;
         if confirmation != *confirmed {
             return Err(DiffError::PlanChanged);
         }
@@ -311,14 +336,18 @@ impl WorkingTree {
     }
 }
 
-/// A digest of what is at the repository paths `paths` below `root`: each entry's path, type,
-/// size, inode and change and modification times, folders read recursively in name order, without
-/// following links. Past [`MAX_SEARCHED_ENTRIES`] entries the rest of a vast folder goes unread.
-fn ignored_state(root: &Path, paths: &[String]) -> String {
+/// A digest of what is at the repository paths `paths` below `root`, read at `read_at` (Unix
+/// seconds) and prefixed with it: each entry's path, type, size, inode and change and modification
+/// times, folders read recursively in name order, without following links. A regular file stamped
+/// within [`RACY_SECONDS`] of the reading also contributes its contents, since a rewrite in the
+/// same timestamp tick leaves its stamps unchanged. Past [`MAX_SEARCHED_ENTRIES`] entries the rest
+/// of a vast folder goes unread.
+fn ignored_state(root: &Path, paths: &[String], read_at: i64) -> Result<String, DiffError> {
     use std::hash::{DefaultHasher, Hash, Hasher};
     use std::os::unix::fs::MetadataExt;
     let mut digest = DefaultHasher::new();
     let mut budget = MAX_SEARCHED_ENTRIES;
+    let mut racy_bytes = 0;
     let mut entries: Vec<PathBuf> = paths
         .iter()
         .rev()
@@ -336,6 +365,17 @@ fn ignored_state(root: &Path, paths: &[String]) -> String {
             meta.ctime_nsec(),
         ];
         (meta.mode(), meta.ino(), meta.size(), times).hash(&mut digest);
+        let racy = |stamp: i64| stamp >= read_at - RACY_SECONDS;
+        if meta.is_file() && (racy(meta.mtime()) || racy(meta.ctime())) {
+            racy_bytes += meta.size();
+            if racy_bytes > MAX_RACY_BYTES {
+                return Err(DiffError::Git(
+                    "Liquid cannot confirm the ignored files written just now; plan the revert again in a moment."
+                        .to_owned(),
+                ));
+            }
+            hash_contents(&entry, &mut digest)?;
+        }
         if !meta.is_dir() {
             continue;
         }
@@ -352,7 +392,42 @@ fn ignored_state(root: &Path, paths: &[String]) -> String {
         below.sort_by(|a, b| b.cmp(a));
         entries.extend(below);
     }
-    format!("{:016x}", digest.finish())
+    Ok(format!("{read_at}:{:016x}", digest.finish()))
+}
+
+/// Hashes the contents of the regular file at `path` into `digest`, opened without following
+/// links. A file gone since it was listed has no contents to hash.
+fn hash_contents(path: &Path, digest: &mut std::hash::DefaultHasher) -> Result<(), DiffError> {
+    use std::hash::Hasher;
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    let open = std::fs::OpenOptions::new()
+        .read(true)
+        // The platform's no-follow flag, so a link put in place of the file is refused.
+        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+        .open(path);
+    let mut file = match open {
+        Ok(file) => file,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(DiffError::Io(error)),
+    };
+    let mut chunk = [0; 8192];
+    loop {
+        match file.read(&mut chunk) {
+            Ok(0) => return Ok(()),
+            Ok(read) => digest.write(&chunk[..read]),
+            Err(error) => return Err(DiffError::Io(error)),
+        }
+    }
+}
+
+/// The current time in Unix seconds, or zero before the epoch.
+fn unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| {
+            i64::try_from(since.as_secs()).unwrap_or(i64::MAX)
+        })
 }
 
 /// Whether the folder `folder` is a repository as Git finds one: it holds `.git`, a folder or
