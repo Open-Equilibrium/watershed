@@ -674,3 +674,43 @@ fn later_events_do_not_extend_the_dirty_sync_deadline() {
     );
     assert!(state.is_due(first_append + EVENT_WRITER_DIRTY_SYNC_INTERVAL));
 }
+
+#[test]
+fn stopped_writer_does_not_spin_on_an_expired_sync_deadline() {
+    use crate::runtime::{
+        context_persistence::ContextManifestWriter, event_writer::WriterWorker,
+        serial_event_writer::SerialEventBackend, validate::SessionAppendValidationState,
+    };
+
+    let workspace = empty_workspace("stopped-writer-expired-deadline");
+    let reservation = reserve_session_log(&workspace, "stoppedspin001").expect("session reserved");
+    let now = Instant::now();
+    let mut dirty = DirtySyncState::default();
+    dirty.mark_dirty(now - EVENT_WRITER_DIRTY_SYNC_INTERVAL * 2);
+    let worker = WriterWorker {
+        appender: SyncProbeAppender {
+            syncs: Arc::new(AtomicUsize::new(0)),
+        },
+        context_path: &reservation.context_path,
+        context_writer: ContextManifestWriter::open_for_session(
+            &reservation.context_path,
+            reservation.session_path.parent.clone(),
+            &reservation.session_id,
+        )
+        .expect("context writer opens"),
+        dirty,
+        notifier: None,
+        path: &reservation.session_path,
+        pending_error: None,
+        stopped: true,
+        sync_required: true,
+        validation: SessionAppendValidationState::empty(&reservation.session_id),
+    };
+
+    assert!(
+        worker.wait_timeout(now) > Duration::ZERO,
+        "a stopped writer must not spin on an expired sync deadline"
+    );
+    drop(worker);
+    reservation.release_lock().expect("reservation rolls back");
+}

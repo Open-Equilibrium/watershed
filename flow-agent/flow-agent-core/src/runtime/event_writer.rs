@@ -7,10 +7,11 @@ use crate::runtime::{
     productive_capacity::ProductiveDispatchReservation,
     segmented_appender::{EventLogAppender, SessionLogAppender},
     serial_event_writer::{
-        DirtySyncState, EVENT_WRITER_QUEUE_CAPACITY, QueuedEvent, SerialEventBackend,
-        SerialWriterClient, SessionWriterCommand, WriterOutcome, discarded_after_writer_failure,
-        event_writer_failure, is_event_sync_checkpoint, is_micro_batch_event,
-        partition_failed_batch, serial_event_writer_worker, validate_batch, writer_failures_result,
+        DirtySyncState, EVENT_WRITER_DIRTY_SYNC_INTERVAL, EVENT_WRITER_QUEUE_CAPACITY, QueuedEvent,
+        SerialEventBackend, SerialWriterClient, SessionWriterCommand, WriterOutcome,
+        discarded_after_writer_failure, event_writer_failure, is_event_sync_checkpoint,
+        is_micro_batch_event, partition_failed_batch, serial_event_writer_worker, validate_batch,
+        writer_failures_result,
     },
     session_lock::SessionReservation,
     types::RuntimeError,
@@ -364,6 +365,10 @@ impl<A: EventLogAppender> SerialEventBackend for WriterWorker<'_, A> {
     }
 
     fn wait_timeout(&self, now: Instant) -> Duration {
+        // WHY: a stopped or failed writer never syncs, so its expired deadline must not spin the worker.
+        if self.stopped || self.pending_error.is_some() {
+            return EVENT_WRITER_DIRTY_SYNC_INTERVAL;
+        }
         self.dirty.wait_timeout(now)
     }
 
