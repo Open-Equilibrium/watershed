@@ -4,7 +4,7 @@
 //! belongs to the app that created it, so the key is released only to Liquid; on Linux and
 //! Windows any program of the user may read it (ADR-0254).
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 
 /// A place that holds replica keys, each filed under a name.
@@ -82,19 +82,33 @@ pub(crate) fn replica_key(
     Ok(key)
 }
 
-/// The key name in `dir`'s key name file, or none if the folder has no such file.
+/// The key name in `dir`'s key name file, or none if the folder has no such file. The file must be
+/// a plain file, and at most 64 bytes of it are read.
 fn read_key_name(dir: &Path) -> Result<Option<String>, String> {
     let path = dir.join(KEY_NAME_FILE);
-    let text = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
+    let failed =
+        |error: std::io::Error| format!("the replica's key name {}: {error}", path.display());
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    // Non-blocking, so a pipe in the file's place is refused instead of waited for.
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(
+        &mut options,
+        rustix::fs::OFlags::NONBLOCK.bits() as i32,
+    );
+    let file = match options.open(&path) {
+        Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => {
-            return Err(format!(
-                "the replica's key name {}: {error}",
-                path.display()
-            ));
-        }
+        Err(error) => return Err(failed(error)),
     };
+    if !file.metadata().map_err(failed)?.is_file() {
+        return Err(format!(
+            "the replica's key name {} is no plain file",
+            path.display()
+        ));
+    }
+    let mut text = String::new();
+    file.take(64).read_to_string(&mut text).map_err(failed)?;
     let name = text.trim();
     if name.len() != 32
         || !name

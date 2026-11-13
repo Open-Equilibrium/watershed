@@ -298,6 +298,39 @@ fn a_malformed_key_name_file_is_refused() {
     assert!(error.contains("malformed"), "{error}");
 }
 
+#[cfg(unix)]
+#[test]
+fn a_key_name_that_is_no_regular_file_is_refused() {
+    let folder = Folder::new("key-name-pipe");
+    let keys = Memory::default();
+    lisbon(&LiquidWorkspace::open_with(&folder.0, &keys).unwrap());
+    let name = folder.0.join(KEY_NAME_FILE);
+    let pipe = folder.0.join("pipe");
+    let made = std::process::Command::new("mkfifo")
+        .arg(&pipe)
+        .status()
+        .unwrap();
+    assert!(made.success());
+    // Opening a pipe without a writer waits for one, so each open runs apart from the test.
+    let refusal = |dir: PathBuf| {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(LiquidWorkspace::open_with(&dir, &Memory::default()).err());
+        });
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the open returns without waiting for a writer")
+    };
+    std::fs::remove_file(&name).unwrap();
+    std::os::unix::fs::symlink(&pipe, &name).unwrap();
+    let error = refusal(folder.0.clone()).expect("a link to a pipe is refused");
+    assert!(error.contains("no plain file"), "{error}");
+    std::fs::remove_file(&name).unwrap();
+    std::fs::rename(&pipe, &name).unwrap();
+    let error = refusal(folder.0.clone()).expect("a pipe is refused");
+    assert!(error.contains("no plain file"), "{error}");
+}
+
 #[test]
 fn a_write_reaches_only_the_subscribers_of_what_it_changed() {
     let folder = Folder::new("notify");
