@@ -14,6 +14,7 @@ use crate::runtime::{
 use std::{
     cell::{Cell, RefCell},
     fs, io,
+    os::unix::fs::MetadataExt as _,
     time::Duration,
 };
 
@@ -216,6 +217,63 @@ fn published_credential_protection_failure_is_distinct_and_next_lock_finalizes()
         "the credential parent was not finalized: {trace:?}"
     );
     assert_eq!(refreshes.get(), 1);
+}
+
+#[test]
+fn published_credential_finalization_is_retried_by_a_locked_refresh_that_writes_nothing() {
+    let workspace = empty_workspace("credential-published-locked-retry");
+    let parent = workspace.join("private");
+    let path = parent.join("credentials.json");
+    let store = CredentialStore::at(path.clone());
+    store
+        .replace(&credential(300_000))
+        .expect("near-expiry credential stores");
+    // The replacement is also near expiry, so the next resolve must take the lock.
+    let replacement = credential(200_000);
+    let refreshes = Cell::new(0usize);
+    store
+        .resolve_with_clock(
+            || Ok(1),
+            |_| {
+                refreshes.set(refreshes.get() + 1);
+                set_directory_sync_error_for_path_for_test(&parent, io::ErrorKind::Other);
+                Ok(replacement.clone())
+            },
+            || Duration::ZERO,
+            |_| {},
+        )
+        .expect_err("published finalization failure is reported");
+    let published_identity = fs::metadata(&path).expect("replacement is published").ino();
+
+    start_directory_sync_trace_for_test();
+    let error = store
+        .resolve_with_clock(
+            || Ok(1),
+            |_| {
+                refreshes.set(refreshes.get() + 1);
+                Err(RuntimeError::Protocol("refresh is unavailable".to_owned()))
+            },
+            || Duration::ZERO,
+            |_| {},
+        )
+        .expect_err("the failed refresh is reported");
+    let trace = take_directory_sync_trace_for_test();
+
+    assert!(matches!(error, RuntimeError::Protocol(_)));
+    assert_eq!(refreshes.get(), 2, "the locked resolve reached its refresh");
+    assert!(
+        trace.iter().any(|synced| synced == &parent),
+        "the locked resolve did not retry the parent finalization: {trace:?}"
+    );
+    assert_eq!(
+        fs::metadata(&path).expect("replacement remains").ino(),
+        published_identity,
+        "a refresh that fails must not write a new replacement"
+    );
+    assert_eq!(
+        store.read().expect("published replacement reads"),
+        Some(replacement)
+    );
 }
 
 #[test]
