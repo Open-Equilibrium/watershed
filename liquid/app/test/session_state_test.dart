@@ -389,6 +389,57 @@ void main() {
     );
   });
 
+  test(
+    'a turn the restore placed gets no second row from its end event',
+    () async {
+      BridgeTreeNode node(String id, String? parent, BridgeEntryKind kind) =>
+          BridgeTreeNode(
+            failed: false,
+            id: id,
+            parent: parent,
+            kind: kind,
+            preview: id,
+          );
+      backend.stored = historyOf(
+        [],
+        tree: [
+          node('c1', null, BridgeEntryKind.custom),
+          node('u1', 'c1', BridgeEntryKind.user),
+          node('a1', 'u1', BridgeEntryKind.assistant),
+          node('c2', 'a1', BridgeEntryKind.custom),
+        ],
+        leaf: 'c2',
+      );
+      backend.transcripts[''] = BridgeTranscript(
+        items: [
+          chatItem('u1', BridgeItemKind.userMessage, text: 'Go'),
+          chatItem('a1', BridgeItemKind.assistantMessage, text: 'Looked'),
+        ],
+        more: false,
+      );
+      // The restore already reads the turn's end, which pi stores before it reports the end.
+      backend.turnList = [
+        turnOf(
+          'T1',
+          number: 1,
+          startEntry: 'c1',
+          endEntry: 'c2',
+          added: 1,
+          removed: 0,
+        ),
+      ];
+      await state.loadChat();
+      backend.controller.add(
+        event(BridgeEventKind.turnCompleted, checkpoint: 'T1'),
+      );
+      await pumpEventQueue();
+      expect(
+        state.items.value.where((view) => view.turnEnd != null),
+        hasLength(1),
+      );
+    },
+  );
+
   test('keeps the row of a live turn when earlier messages load', () async {
     backend.transcripts[''] = BridgeTranscript(
       items: [chatItem('u1', BridgeItemKind.userMessage, text: 'Go')],

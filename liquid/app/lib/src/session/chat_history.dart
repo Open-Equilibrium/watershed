@@ -85,6 +85,13 @@ class ChatHistory {
     _pendingMark = null;
     _path = _pathIndex(history.tree, history.leaf);
     _turns = turns;
+    // Turns whose end the restore read get their rows from it, not from a later end event.
+    _ended
+      ..clear()
+      ..addAll([
+        for (final turn in turns)
+          if (turn.endEntry != null) turn.id,
+      ]);
     _forget();
     if (branchMarker(history.tree, history.leaf) case final marker?) {
       final mark = (
@@ -141,7 +148,7 @@ class ChatHistory {
     return views;
   }
 
-  /// Turns whose row was placed live, so a repeated end event places none twice.
+  /// Turns whose row was placed, live or by a restore, so a later end event places none twice.
   final _ended = <String>{};
 
   /// Where the chat stood when each turn with a checkpoint ended live, until its row is placed
