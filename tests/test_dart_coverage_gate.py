@@ -49,6 +49,7 @@ class DartCoverageGateTest(unittest.TestCase):
     def test_malformed_records_fail_the_gate_without_a_measurement(self) -> None:
         malformed = {
             "invalid counter": "SF:lib/app.dart\nLF:invalid\nLH:0\nend_of_record\n",
+            "oversized counter": f"SF:lib/app.dart\nLF:1{'0' * 400}\nLH:1{'0' * 399}\nend_of_record\n",
             "missing counter": "SF:lib/app.dart\nLF:100\nend_of_record\n",
             "hits above found": record("lib/app.dart", 100, 101),
             "truncated last record": record("lib/app.dart", 100, 90) + "SF:lib/other.dart\nLF:100\nLH:90\n",
@@ -58,6 +59,15 @@ class DartCoverageGateTest(unittest.TestCase):
                 result = self.run_gate(lcov)
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertEqual(result.stdout, "")
+
+    def test_totals_beyond_the_exact_integer_range_fail(self) -> None:
+        # Each record is exact, but the total 2**53 is not, so the ratio cannot be trusted.
+        result = self.run_gate(
+            record("lib/a.dart", 2**53 - 1, 2**53 - 1),
+            record("lib/b.dart", 1, 0),
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(result.stdout, "")
 
     def test_no_measured_lines_fails(self) -> None:
         result = self.run_gate(record("lib/src/rust/api/git.dart", 500, 500))

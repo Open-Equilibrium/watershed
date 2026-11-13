@@ -13,8 +13,11 @@ function fail(message) {
   process.exit(1);
 }
 function counter(text) {
-  if (!/^\d+$/.test(text)) fail(`invalid Dart coverage counter ${text} in ${lcov}`);
-  return Number(text);
+  const value = Number(text);
+  if (!/^\d+$/.test(text) || !Number.isSafeInteger(value)) {
+    fail(`invalid Dart coverage counter ${text} in ${lcov}`);
+  }
+  return value;
 }
 let path = null;
 let linesFound = null;
@@ -39,6 +42,9 @@ for (const line of readFileSync(lcov, "utf8").split("\n")) {
   }
 }
 if (path !== null) fail(`unterminated Dart coverage record for ${path} in ${lcov}`);
+if (!Number.isSafeInteger(found) || !Number.isSafeInteger(hit)) {
+  fail(`Dart coverage totals exceed the exact integer range in ${lcov}`);
+}
 
 if (found === 0) {
   console.error(`no Dart lines were measured in ${lcov}`);
