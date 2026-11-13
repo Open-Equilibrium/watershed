@@ -65,7 +65,6 @@ class GitState {
   DateTime? get fetched =>
       _fetchedRemote == status.value?.remote ? _fetched : null;
   Future<void>? _fetching;
-  String? _fetchRemote;
   bool _fetchRequested = false;
 
   /// Reads of the state left until the next fetch; the state is read every [fetchEvery]
@@ -107,36 +106,25 @@ class GitState {
         progress.value == null &&
         upstream != null &&
         --_untilFetch <= 0) {
-      unawaited(_fetch(watch, status.value!.remote!));
+      unawaited(_fetch(watch));
     }
     await refresh();
     if (watch == _watches) _next = Timer(fetchEvery, () => _tick(watch));
   }
 
-  /// Shares a fetch for the same remote; a changed destination waits its turn.
-  Future<void> _fetch(
-    int watch,
-    String remote, {
-    bool requested = false,
-  }) async {
+  /// Shares the fetch in flight, whichever remote the checkout names meanwhile: Git picks the
+  /// remote it fetches, so the cached remote is no key.
+  Future<void> _fetch(int watch, {bool requested = false}) async {
     final pending = _fetching;
     if (pending != null) {
-      if (_fetchRemote == remote) {
-        _fetchRequested |= requested;
-        return pending;
-      }
-      await pending;
-      if (watch != _watches) return;
-      final current = status.value?.remote;
-      if (current != null) await _fetch(watch, current, requested: requested);
-      return;
+      _fetchRequested |= requested;
+      return pending;
     }
-    _fetchRemote = remote;
     _fetchRequested = requested;
-    await (_fetching = _runFetch(watch, remote));
+    await (_fetching = _runFetch(watch));
   }
 
-  Future<void> _runFetch(int watch, String remote) async {
+  Future<void> _runFetch(int watch) async {
     try {
       final fetched = await _backend.fetch();
       if (watch != _watches) return;
@@ -151,19 +139,18 @@ class GitState {
       if (watch != _watches) return;
       // A streak of failures tells once.
       if (_failures++ == 0 || _fetchRequested) {
-        final since = switch (_fetchedRemote == remote ? _fetched : null) {
+        final since = switch (fetched) {
           final at? =>
             ' The ahead and behind counts are from ${formatClockMs(at.millisecondsSinceEpoch)}.',
           null => '',
         };
         notify(
           _fetchRequested ? BridgeLevel.error : BridgeLevel.warning,
-          '${fetchFailure(remote, '$error')}.$since',
+          '${fetchFailure(null, '$error')}.$since',
         );
       }
     } finally {
       _fetching = null;
-      _fetchRemote = null;
       _fetchRequested = false;
       if (watch == _watches) {
         _untilFetch = fetchWait(_failures).inSeconds ~/ fetchEvery.inSeconds;
@@ -173,9 +160,8 @@ class GitState {
 
   /// A click bypasses the background retry wait, without overlapping another fetch.
   Future<void> fetchNow() async {
-    final remote = status.value?.remote;
-    if (remote == null) return;
-    await _fetch(_watches, remote, requested: true);
+    if (status.value?.remote == null) return;
+    await _fetch(_watches, requested: true);
   }
 
   Future<BridgeGitOutcome?> push({
@@ -707,8 +693,9 @@ const noRemoteHint =
 const noUpstreamRemoteHint = 'No upstream: set one in Git to push this branch.';
 const noUpstreamHint = 'This branch has no upstream. Push it first.';
 
-String fetchFailure(String remote, String detail) =>
-    'Could not fetch from $remote: “$detail”';
+/// A failed fetch names its remote only when the failure attributes one.
+String fetchFailure(String? remote, String detail) =>
+    'Could not fetch${remote == null ? '' : ' from $remote'}: “$detail”';
 
 String behindHint(String branch, String upstream, int behind) =>
     '$upstream has ${plural(behind, 'commit')} that $branch lacks. Pull them, then push.';

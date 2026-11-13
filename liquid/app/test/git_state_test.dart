@@ -123,6 +123,16 @@ void main() {
     expect(git.fetched, isNotNull, reason: 'backup was fetched');
   });
 
+  test('a failed fetch names no remote the failure cannot attribute', () async {
+    // The cached status names origin, but Git's upstream has moved to backup since.
+    await git.refresh();
+    backend.git = gitStatusOf(remote: 'backup', upstream: 'backup/main');
+    backend.fetchError = 'offline';
+    await git.fetchNow();
+    expect(notices.single.$2, contains('Could not fetch: “offline”'));
+    expect(notices.single.$2, isNot(contains('origin')));
+  });
+
   test('a created branch records the branch Git created it from', () async {
     // The cached status says main, but the checkout moved to other before the branch was created.
     final bases = BranchBases();
@@ -294,18 +304,14 @@ void main() {
       await requested;
       expect(pending.calls.where((call) => call == 'fetch'), hasLength(1));
       expect(notices.single.$1, BridgeLevel.error);
-      expect(
-        notices.single.$2,
-        contains('Could not fetch from origin: “offline”'),
-      );
+      expect(notices.single.$2, contains('Could not fetch: “offline”'));
       state.stop();
     },
   );
 
-  testWidgets('a requested Fetch queues behind a fetch for another remote', (
-    tester,
-  ) async {
-    for (final stopped in [false, true]) {
+  testWidgets(
+    'a requested Fetch shares a fetch in flight for an earlier remote',
+    (tester) async {
       final pending = _QueuedFetchBackend();
       final state = GitState(
         pending,
@@ -323,30 +329,17 @@ void main() {
       final shared = state.fetchNow();
       await tester.pump();
       expect(finished, isFalse);
-      expect(pending.remotes, ['origin']);
-      if (stopped) state.stop();
-      pending.fetches.first.complete('origin');
+      pending.fetches.single.complete('origin');
       await tester.pump();
-      if (!stopped) {
-        expect(pending.remotes, ['origin', 'other']);
-        expect(finished, isFalse);
-        expect(state.fetched, isNull);
-        pending.fetches.last.completeError('offline');
-        await tester.pump();
-        expect(notices.single.$1, BridgeLevel.error);
-        expect(
-          notices.single.$2,
-          contains('Could not fetch from other: “offline”'),
-        );
-      } else {
-        expect(pending.remotes, ['origin']);
-      }
+      expect(finished, isTrue);
+      expect(pending.remotes, [
+        'origin',
+      ], reason: 'no second fetch was started');
       await requested;
       await shared;
       state.stop();
-      notices.clear();
-    }
-  });
+    },
+  );
 
   testWidgets('background fetch waits while a push or pull runs', (
     tester,
@@ -586,7 +579,10 @@ void main() {
     await tester.pump(const Duration(seconds: 15));
     expect(fetches(), 2);
     expect(notices.single.$1, BridgeLevel.warning);
-    expect(notices.single.$2, contains('Could not fetch from origin'));
+    expect(
+      notices.single.$2,
+      contains('Could not fetch: “Could not resolve host: github.com”'),
+    );
     // The wait after a failure doubles from 30 seconds; a streak tells once.
     await tester.pump(const Duration(seconds: 29));
     expect(fetches(), 2);
