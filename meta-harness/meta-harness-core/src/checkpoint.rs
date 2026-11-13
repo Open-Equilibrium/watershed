@@ -253,7 +253,11 @@ impl Checkpoints {
         let _ending = (checkpoint.phase == Phase::End).then(|| {
             self.ending
                 .store(self.guards(checkpoint), Ordering::Relaxed);
-            EndingMark(&self.ending)
+            EndingMark {
+                ending: &self.ending,
+                running: &self.running,
+                end: checkpoint.clone(),
+            }
         });
         if checkpoint.phase == Phase::Start {
             // A start whose run never settled ends that mark first, so it removes no name the
@@ -298,24 +302,13 @@ impl Checkpoints {
         } else {
             tree = self.tree().await;
         }
-        let captured = async {
+        async {
             let _turn = self
                 .until_closed(async { Ok(self.captures.lock().await) })
                 .await?;
             self.bounded(tree?.checkpoint(&reference)).await.map(drop)
         }
-        .await;
-        if checkpoint.phase == Phase::End {
-            // Only its own turn's mark: a later turn's start, perhaps of another session after a
-            // switch, may already have replaced it.
-            let mut slot = self.running.lock().expect("running lock");
-            if slot.as_ref().is_some_and(|(start, _)| {
-                start.session == checkpoint.session && start.turn == checkpoint.turn
-            }) {
-                slot.take();
-            }
-        }
-        captured
+        .await
     }
 
     /// Whether this exact turn acquired and still holds its running checkout guard.
@@ -868,13 +861,27 @@ impl Checkpoints {
     }
 }
 
-/// Marks a turn's end checkpoint as being taken until dropped, so a capture that ends early, or is
-/// dropped while it waits, leaves no mark for a later delete to wait on.
-struct EndingMark<'a>(&'a std::sync::atomic::AtomicBool);
+/// Marks a turn's end checkpoint as being taken until dropped, and then clears the turn's running
+/// mark, so a capture that ends early, or is dropped while it waits, leaves neither a mark for a
+/// later delete to wait on nor a settled turn that blocks the checkout.
+struct EndingMark<'a> {
+    ending: &'a std::sync::atomic::AtomicBool,
+    running: &'a std::sync::Mutex<Option<(Checkpoint, Running)>>,
+    end: Checkpoint,
+}
 
 impl Drop for EndingMark<'_> {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::Relaxed);
+        // Only its own turn's mark: a later turn's start, perhaps of another session after a
+        // switch, may already have replaced it.
+        let mut slot = self.running.lock().expect("running lock");
+        if slot.as_ref().is_some_and(|(start, _)| {
+            start.session == self.end.session && start.turn == self.end.turn
+        }) {
+            slot.take();
+        }
+        drop(slot);
+        self.ending.store(false, Ordering::Relaxed);
     }
 }
 

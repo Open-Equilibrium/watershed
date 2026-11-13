@@ -1178,6 +1178,36 @@ fn a_revert_changes_only_files_below_the_working_folder() {
 }
 
 #[test]
+fn a_cancelled_end_capture_releases_its_running_mark() {
+    run(async {
+        let repo = Repo::new("end-cancelled");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .capture(&at("t1", Phase::Start))
+            .await
+            .expect("started");
+        // The end checkpoint waits for the capture in progress, and dropping it cancels that wait.
+        let held = checkpoints.hold().await;
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(100),
+                checkpoints.capture(&at("t1", Phase::End)),
+            )
+            .await
+            .is_err(),
+            "the end checkpoint waits"
+        );
+        drop(held);
+        // The settled turn no longer runs in the checkout, so nothing refuses a revert for it.
+        let plan = checkpoints
+            .revert_plan(&at("t1", Phase::Start), None)
+            .await
+            .expect("planned");
+        assert!(plan.running.is_empty(), "{:?}", plan.running);
+    });
+}
+
+#[test]
 fn a_revert_is_refused_while_an_agent_runs_in_the_checkout() {
     run(async {
         let repo = Repo::new("revert-running");
