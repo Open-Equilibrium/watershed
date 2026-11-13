@@ -17,8 +17,9 @@ use crate::{
             continue_conversation, continue_conversation_with_execution_activation,
             continue_conversation_with_live_events, continue_conversation_with_provider,
             resume_conversation_run, resume_conversation_run_with_execution_activation,
-            resume_conversation_run_with_live_events, run_flow_with_root_input_and_live_events,
-            run_productive_session_with_provider, set_productive_executor_readiness_observer,
+            resume_conversation_run_with_live_events, run_flow_with_root_input,
+            run_flow_with_root_input_and_live_events, run_productive_session_with_provider,
+            set_productive_executor_readiness_observer,
         },
         session_reading::SessionEventReader,
         session_store::open_flow_agent_home,
@@ -414,6 +415,48 @@ fn typed_live_run_uses_notifications_instead_of_buffered_stdout() {
 
     assert!(output.stdout.is_empty());
     assert!(receiver.highest_committed_sequence() > 0);
+}
+
+#[test]
+fn fixture_resume_refuses_a_partial_run_started_with_a_root_input() {
+    let workspace = workspace_copy("smoke-flow");
+    run_flow_with_root_input(
+        &workspace,
+        "smoke-flow",
+        core_script::FlowValue::String("operator input".to_owned()),
+        EmitMode::Human,
+    )
+    .expect("typed root input run completes");
+    let events_path =
+        crate::tests::helpers::workspace_session_dir(&workspace).join("smoke-flow.jsonl");
+    let partial = fs::read_to_string(&events_path)
+        .expect("session log exists")
+        .lines()
+        .take(2)
+        .map(|line| format!("{line}\n"))
+        .collect::<String>();
+    fs::write(&events_path, &partial).expect("partial session log written");
+    fs::write(
+        crate::tests::helpers::workspace_log_dir(&workspace).join("smoke-flow.contexts.jsonl"),
+        "",
+    )
+    .expect("partial run has no completed turns");
+
+    let error = resume_conversation_run(&workspace, "smoke-flow", "smoke-flow", EmitMode::Human)
+        .expect_err("a Fixture Run started with a root input cannot be resumed");
+
+    assert!(
+        matches!(
+            &error,
+            RuntimeError::Usage(message) if message.contains("started with a root input")
+        ),
+        "{error}"
+    );
+    assert_eq!(
+        fs::read_to_string(&events_path).expect("session log reads"),
+        partial,
+        "the refused resume must not write"
+    );
 }
 
 #[test]

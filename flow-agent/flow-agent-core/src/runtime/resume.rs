@@ -118,6 +118,12 @@ fn resume_locked_session(
     }
     let logs = open_resumable_logs(session)?;
     let metadata = require_anchored_session_log_metadata(&logs, session.session_id)?;
+    if metadata.root_input {
+        return Err(RuntimeError::Usage(format!(
+            "session {} cannot be resumed: resuming a Fixture Run started with a root input is not supported",
+            session.session_id
+        )));
+    }
     let flow_id = resumable_flow_id(
         session.path.diagnostic_path(),
         session.session_id,

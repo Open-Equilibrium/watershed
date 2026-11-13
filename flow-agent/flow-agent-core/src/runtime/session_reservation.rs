@@ -521,6 +521,9 @@ pub fn session_log_metadata_text(
         metadata.push_str("flow_definition_id=");
         metadata.push_str(&definition.flow_definition_id);
         metadata.push('\n');
+        if definition.root_input {
+            metadata.push_str("root_input=present\n");
+        }
     }
     metadata
 }

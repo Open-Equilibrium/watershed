@@ -45,6 +45,7 @@ fn session_definition_metadata(
         flow_definition_id: "smoke-flow".to_owned(),
         registry_hash: registry_hash.to_owned(),
         flow_definition_hash: flow_definition_hash.to_owned(),
+        root_input: false,
     }
 }
 

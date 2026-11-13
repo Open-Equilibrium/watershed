@@ -15,7 +15,7 @@ use crate::runtime::{
     live_events::LiveEventNotifier,
     planning::plan_flow_with_workspace,
     productive::{OpenAiCodexProvider, ensure_productive_execution_platform},
-    session_definition::session_definition_metadata,
+    session_definition::{SessionDefinitionMetadata, session_definition_metadata},
     session_reservation::{
         materialize_session_candidate, reserve_unique_session_candidate_with_anchored_workspace,
         write_reserved_session_metadata,
@@ -284,6 +284,10 @@ fn run_flow_internal_with_cleanup_observer_impl<G>(
     let reservation = materialize_session_candidate(&execution_workspace, candidate)?;
     let mut finalization_result = Ok(());
     let operation_result = (|| {
+        let definition_metadata = SessionDefinitionMetadata {
+            root_input: root_input.is_some(),
+            ..definition_metadata
+        };
         write_reserved_session_metadata(&reservation, Some(&definition_metadata))?;
         let mut serial_writer = SerialSessionWriter::start(&reservation, notifier)?;
         if capture_jsonl {

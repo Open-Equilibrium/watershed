@@ -183,6 +183,7 @@ pub(super) fn conversation_run_definition(
         flow_definition_id: Some(flow_definition_id.clone()),
         registry_hash: Some(registry_hash.clone()),
         flow_definition_hash: Some(flow_definition_hash.clone()),
+        root_input: false,
         model: model.clone(),
         model_profile_id: model_profile_id.clone(),
         model_context_limit: *model_context_limit,
