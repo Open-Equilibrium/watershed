@@ -8,20 +8,37 @@ const EXCLUDED = [/^lib\/src\/rust\//, /\.g\.dart$/, /^lib\/src\/session\/backen
 const DEFAULT_LCOV = fileURLToPath(new URL("../liquid/app/coverage/lcov.info", import.meta.url));
 
 const lcov = process.argv[2] ?? DEFAULT_LCOV;
-let path = "";
-let linesFound = 0;
-let linesHit = 0;
+function fail(message) {
+  console.error(message);
+  process.exit(1);
+}
+function counter(text) {
+  if (!/^\d+$/.test(text)) fail(`invalid Dart coverage counter ${text} in ${lcov}`);
+  return Number(text);
+}
+let path = null;
+let linesFound = null;
+let linesHit = null;
 let found = 0;
 let hit = 0;
 for (const line of readFileSync(lcov, "utf8").split("\n")) {
   if (line.startsWith("SF:")) path = line.slice(3);
-  else if (line.startsWith("LF:")) linesFound = Number(line.slice(3));
-  else if (line.startsWith("LH:")) linesHit = Number(line.slice(3));
-  else if (line === "end_of_record" && !EXCLUDED.some((pattern) => pattern.test(path))) {
-    found += linesFound;
-    hit += linesHit;
+  else if (line.startsWith("LF:")) linesFound = counter(line.slice(3));
+  else if (line.startsWith("LH:")) linesHit = counter(line.slice(3));
+  else if (line === "end_of_record") {
+    if (path === null || linesFound === null || linesHit === null || linesHit > linesFound) {
+      fail(`malformed Dart coverage record for ${path ?? "an unnamed file"} in ${lcov}`);
+    }
+    if (!EXCLUDED.some((pattern) => pattern.test(path))) {
+      found += linesFound;
+      hit += linesHit;
+    }
+    path = null;
+    linesFound = null;
+    linesHit = null;
   }
 }
+if (path !== null) fail(`unterminated Dart coverage record for ${path} in ${lcov}`);
 
 if (found === 0) {
   console.error(`no Dart lines were measured in ${lcov}`);
