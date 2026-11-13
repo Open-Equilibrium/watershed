@@ -5,7 +5,7 @@ use crate::runtime::{
         context_source_bytes,
     },
     digest::sha256_hex,
-    types::{MAX_FLOW_EVENTS, MAX_SESSION_OBJECT_BYTES},
+    types::{MAX_FLOW_EVENTS, MAX_SESSION_OBJECT_BYTES, RuntimeError},
 };
 use proto::{EventEnvelope, EventType};
 
@@ -215,6 +215,21 @@ fn recovery_context_round_trips_active_state_and_rejects_invalid_snapshots() {
         .expect("non-canonical recovery snapshot is rejected")
         .to_string()
         .contains("canonical JSON")
+    );
+}
+
+#[test]
+fn recovery_context_rejects_a_completed_sequence_beyond_the_event_count() {
+    let bytes = br#"{"completed_interactions":1,"latest_completed":{"deltas":[],"payload":{},"sequence":3},"pending_deltas":{},"unresolved_tools":[]}"#;
+    let error = ContextHistory::from_recovery_bytes(bytes, 2)
+        .err()
+        .expect("a completed sequence beyond the event count is rejected");
+    assert!(
+        matches!(error, RuntimeError::Protocol(_))
+            && error
+                .to_string()
+                .contains("completed sequence exceeds the cumulative event count"),
+        "{error}"
     );
 }
 

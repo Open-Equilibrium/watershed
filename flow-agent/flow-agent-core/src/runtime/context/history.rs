@@ -141,6 +141,15 @@ impl ContextHistory {
                     .to_owned(),
             ));
         }
+        if snapshot
+            .latest_completed
+            .as_ref()
+            .is_some_and(|latest| latest.sequence > cumulative_event_count)
+        {
+            return Err(RuntimeError::Protocol(
+                "recovery context completed sequence exceeds the cumulative event count".to_owned(),
+            ));
+        }
         let latest_completed = snapshot
             .latest_completed
             .map(|latest| (latest.sequence, latest.payload, latest.deltas));
