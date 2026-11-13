@@ -184,6 +184,16 @@ void main() {
     );
   });
 
+  test('a repeated entry id that is its own parent builds a finite graph', () {
+    // Both entries are named x, and the second one is stored as its own parent.
+    final graph = sessionGraph([
+      node('x', null, BridgeEntryKind.user, preview: 'Go'),
+      node('x', 'x', BridgeEntryKind.assistant),
+    ], 'x');
+    final ids = [for (final row in graph.rows) row.node.id];
+    expect(ids.toSet(), hasLength(ids.length), reason: 'each entry is one row');
+  });
+
   test('groups records into turns with their tool counts', () {
     final records = [
       record('e1', 1, BridgeRecordKind.user, 'Add rate limiting', 0),

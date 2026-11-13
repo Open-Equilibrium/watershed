@@ -86,7 +86,10 @@ class SessionGraph {
   }
 }
 
-SessionGraph sessionGraph(List<BridgeTreeNode> nodes, String? leaf) {
+SessionGraph sessionGraph(List<BridgeTreeNode> entries, String? leaf) {
+  // A repeated id keeps its last entry, as the backend resolves parent ids. Then each id is one
+  // row, and the walk below ends even when a stored parent leads back to its own entry.
+  final nodes = {for (final entry in entries) entry.id: entry}.values.toList();
   final children = <String, List<BridgeTreeNode>>{};
   final roots = <BridgeTreeNode>[];
   final ids = {for (final node in nodes) node.id};
