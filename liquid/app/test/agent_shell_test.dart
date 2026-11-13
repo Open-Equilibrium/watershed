@@ -430,6 +430,32 @@ void main() {
     expect(composer.focusNode?.hasFocus, isTrue);
   });
 
+  testWidgets('Focus Input from Settings focuses the composer in each tab', (
+    tester,
+  ) async {
+    await show(tester);
+    Future<void> press(LogicalKeyboardKey key) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(key);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+    }
+
+    for (final tab in [LogicalKeyboardKey.digit2, LogicalKeyboardKey.digit3]) {
+      await press(tab);
+      await press(LogicalKeyboardKey.comma);
+      await press(LogicalKeyboardKey.keyL);
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('composer')))
+            .focusNode
+            ?.hasFocus,
+        isTrue,
+        reason: 'the tab that opens again does not take the keys back',
+      );
+    }
+  });
+
   testWidgets('keeps what the user typed when a message comes back', (
     tester,
   ) async {
@@ -712,7 +738,11 @@ void main() {
     );
     await emit(
       tester,
-      event(BridgeEventKind.contentDelta, item: item(1), text: 'Streamed reply'),
+      event(
+        BridgeEventKind.contentDelta,
+        item: item(1),
+        text: 'Streamed reply',
+      ),
     );
     await emit(
       tester,

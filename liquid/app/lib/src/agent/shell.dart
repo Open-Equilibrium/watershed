@@ -291,7 +291,12 @@ class _AgentShellState extends State<AgentShell> {
       Command.diff: () => _showTab(AgentTab.diff),
       Command.focusInput: () {
         _showSession();
-        _composerFocus.requestFocus();
+        // A tab that Settings just gave way to takes the keys when it opens, after this action.
+        unawaited(
+          WidgetsBinding.instance.endOfFrame.then(
+            (_) => _composerFocus.requestFocus(),
+          ),
+        );
       },
       Command.newSession: _newSession,
       Command.dismissNotice: state.dismissNotice,
