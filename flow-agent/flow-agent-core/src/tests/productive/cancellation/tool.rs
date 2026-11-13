@@ -349,6 +349,7 @@ fn system_productive_tool_executor_observes_process_cancellation() {
     crate::begin_productive_operation().expect("productive operation begins");
     let root = crate::tests::empty_workspace();
     let started_marker = root.join("cancellation-started");
+    let pid_marker = root.join("cancellation-pid");
     let cancellation = std::thread::spawn({
         let started_marker = started_marker.clone();
         move || {
@@ -375,9 +376,11 @@ fn system_productive_tool_executor_observes_process_cancellation() {
                 executable: proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0.to_owned(),
                 argv: vec![
                     "-c".to_owned(),
-                    "touch \"$1\"; /bin/sleep 5".to_owned(),
+                    // The shell records its pid, then becomes the sleep, so the pid is the sleep's.
+                    "echo $$ > \"$2\"; touch \"$1\"; exec /bin/sleep 5".to_owned(),
                     "flow-tool:cancellation".to_owned(),
                     started_marker.display().to_string(),
+                    pid_marker.display().to_string(),
                 ],
             },
             &workspace,
@@ -393,4 +396,22 @@ fn system_productive_tool_executor_observes_process_cancellation() {
         Some(ToolTerminalClassification::Cancelled)
     );
     assert_eq!(outcome.exit_code, None);
+
+    // The report alone is not proof: the Tool's own process must end, within a bound.
+    let pid = rustix::process::Pid::from_raw(
+        std::fs::read_to_string(&pid_marker)
+            .expect("Tool records its pid before it runs")
+            .trim()
+            .parse()
+            .expect("recorded pid is an integer"),
+    )
+    .expect("recorded pid is positive");
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while rustix::process::test_kill_process(pid).is_ok() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "cancelled Tool process is still running"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
