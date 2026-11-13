@@ -33,11 +33,19 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
     static READ_VALIDATED_OBSERVER: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
         const { std::cell::RefCell::new(None) };
+    static CONFIGURE_LOCK_OBSERVER: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
 fn set_parent_missing_observer(observer: impl FnOnce() + 'static) {
     PARENT_MISSING_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
+}
+
+/// Runs `observer` on the next `configure` call, just before it waits for the configuration lock.
+#[cfg(test)]
+pub(crate) fn set_configure_lock_observer(observer: impl FnOnce() + 'static) {
+    CONFIGURE_LOCK_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
 }
 
 #[cfg(test)]
@@ -135,6 +143,10 @@ impl ExecutorConfigStore {
             ));
         }
         let parent = self.ensure_parent()?;
+        #[cfg(test)]
+        if let Some(observer) = CONFIGURE_LOCK_OBSERVER.with_borrow_mut(Option::take) {
+            observer();
+        }
         let _lock = acquire_config_lock(&parent.file(".executor.lock"))?;
         recover_abandoned_stages(&parent)?;
         let document = ExecutorConfigDocument {

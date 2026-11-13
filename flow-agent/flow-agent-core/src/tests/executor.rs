@@ -1,5 +1,6 @@
 use crate::runtime::executor::{
     EXECUTOR_CONFIG_MAX_BYTES, ExecutorConfigStore, ExecutorSelectionSource, default_executor_path,
+    set_configure_lock_observer,
 };
 use std::fs;
 use std::{
@@ -184,17 +185,25 @@ fn executor_override_publishes_after_a_contended_lock_is_released() {
         .open(lock_path)
         .expect("lock is staged");
     lock.lock().expect("lock is held");
+    let (reached_sender, reached) = mpsc::channel();
     let (done_sender, done) = mpsc::channel();
     let configurer = thread::spawn({
         let config = config.clone();
         let executable = executable.clone();
         move || {
+            set_configure_lock_observer(move || {
+                let _ = reached_sender.send(());
+            });
             let result = ExecutorConfigStore::at(config).configure(&executable);
             let _ = done_sender.send(());
             result
         }
     });
 
+    // The checks below only mean something once configure is at the held lock, not before it starts.
+    reached
+        .recv_timeout(Duration::from_secs(5))
+        .expect("configure reaches the held lock");
     thread::sleep(Duration::from_millis(50));
     assert!(
         done.try_recv().is_err(),
