@@ -56,6 +56,11 @@ fn unknown_commands_print_readable_global_usage_error() {
     assert_global_usage_error(&["unknown"]);
 }
 
+#[test]
+fn unknown_command_help_is_a_usage_error() {
+    assert_global_usage_error(&["not-a-command", "--help"]);
+}
+
 fn assert_global_usage_error(args: &[&str]) {
     let help = flow_command()
         .arg("--help")

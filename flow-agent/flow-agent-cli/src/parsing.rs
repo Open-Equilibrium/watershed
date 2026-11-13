@@ -23,6 +23,22 @@ pub(crate) fn parse_args(
     args.into_iter().map(os_string_to_string).collect()
 }
 
+/// Top-level commands dispatched in `dispatch.rs`; an unknown command's help is a usage error.
+const COMMANDS: &[&str] = &[
+    "auth",
+    "chat",
+    "create",
+    "executor",
+    "init",
+    "reconcile-tool",
+    "replay",
+    "resume",
+    "run",
+    "sessions",
+    "tail",
+    "validate",
+];
+
 pub(crate) fn informational_output(args: &[String]) -> Option<String> {
     if args
         .first()
@@ -35,7 +51,11 @@ pub(crate) fn informational_output(args: &[String]) -> Option<String> {
     }
     match args {
         [help] if matches!(help.as_str(), "--help" | "-h") => Some(format!("{}\n", usage())),
-        [_, help] if matches!(help.as_str(), "--help" | "-h") => Some(format!("{}\n", usage())),
+        [command, help]
+            if COMMANDS.contains(&command.as_str()) && matches!(help.as_str(), "--help" | "-h") =>
+        {
+            Some(format!("{}\n", usage()))
+        }
         [create, kind, help] if create == "create" && matches!(help.as_str(), "--help" | "-h") => {
             crate::authoring::create_usage(kind).map(|contents| format!("{contents}\n"))
         }
