@@ -258,7 +258,7 @@ fn spend(entry: &Value) -> Option<Box<Spend>> {
         .and_then(Value::as_f64)
         .is_some_and(|total| total > 0.0);
     Some(Box::new(Spend {
-        model,
+        model: visible_name(&model),
         usage: usage(Some(report)),
         cost_by_kind: cost_by_kind(Some(report)),
         priced,

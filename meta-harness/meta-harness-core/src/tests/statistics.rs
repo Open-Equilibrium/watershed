@@ -453,3 +453,15 @@ fn a_response_with_a_recorded_cost_is_priced_however_small_the_cost_rounds() {
         "a recorded cost above zero is priced, though it rounds to no micro-dollar; no cost or a zero one is not"
     );
 }
+
+#[test]
+fn a_model_name_shows_hidden_characters_written_out() {
+    let statistics = counted(
+        r#"{"entries":[
+          {"type":"message","id":"u1","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z","message":{"role":"user","content":"Hi"}},
+          {"type":"message","id":"a1","parentId":"u1","timestamp":"2026-11-01T10:00:01.000Z","message":{"role":"assistant","provider":"fa\u202eux","model":"faux-1","content":[],"usage":{"input":1,"output":1,"cost":{"total":0.001}}}}
+        ],"leafId":"a1"}"#,
+    );
+    assert_eq!(statistics.models[0].model, "fa<U+202E>ux/faux-1");
+    assert_eq!(statistics.turns[0].models[0].model, "fa<U+202E>ux/faux-1");
+}
