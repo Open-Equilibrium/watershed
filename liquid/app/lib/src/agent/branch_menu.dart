@@ -12,6 +12,7 @@ import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import '../workspace/row_menu.dart';
 import 'commit_dialog.dart';
 import 'session_card_rows.dart';
 
@@ -19,14 +20,21 @@ import 'session_card_rows.dart';
 /// session card. Its name and its chevron are two targets that both open the branch menu, split
 /// by a hairline that shows while the row is hovered, as in T3 Code. A right-click on the name
 /// offers to copy it.
-class BranchRow extends StatelessWidget {
+class BranchRow extends StatefulWidget {
   const BranchRow({super.key, required this.state});
 
   final SessionState state;
 
   @override
+  State<BranchRow> createState() => _BranchRowState();
+}
+
+class _BranchRowState extends State<BranchRow> {
+  bool _hovered = false;
+
+  @override
   Widget build(BuildContext context) {
-    final git = state.git;
+    final git = widget.state.git;
     return ListenableBuilder(
       listenable: Listenable.merge([git.status, git.problem]),
       builder: (context, _) {
@@ -51,9 +59,9 @@ class BranchRow extends StatelessWidget {
         final status = git.status.value;
         if (status == null) return const SizedBox.shrink();
         final name = status.branch ?? status.commit ?? 'no commit';
-        void open() => unawaited(showBranchMenu(context, state));
+        void open() => unawaited(showBranchMenu(context, widget.state));
         return Semantics(
-          key: const Key('branch-chip'),
+          key: const Key('branch-row'),
           button: true,
           onTap: open,
           label: [
@@ -67,8 +75,11 @@ class BranchRow extends StatelessWidget {
               'no upstream',
           ].join(', '),
           excludeSemantics: true,
-          child: _Hover(
-            builder: (hovered) => CardRow(
+          child: HoverRegion(
+            onHover: (hovered, _) {
+              if (mounted) setState(() => _hovered = hovered);
+            },
+            child: CardRow(
               onTap: open,
               children: [
                 Icon(LucideIcons.gitBranch, size: 16, color: ws.textFaint),
@@ -111,7 +122,7 @@ class BranchRow extends StatelessWidget {
                   key: const Key('branch-split'),
                   width: 1,
                   height: 16,
-                  color: hovered ? ws.border : Colors.transparent,
+                  color: _hovered ? ws.border : Colors.transparent,
                 ),
                 InkWell(
                   key: const Key('branch-chevron'),
@@ -147,27 +158,6 @@ Future<void> _copyName(BuildContext context, String name, Offset at) async {
         child: const Text('Copy branch name'),
       ),
     ],
-  );
-}
-
-/// Tells its builder whether the pointer is over it, so the row can show its hairline on hover.
-class _Hover extends StatefulWidget {
-  const _Hover({required this.builder});
-
-  final Widget Function(bool hovered) builder;
-
-  @override
-  State<_Hover> createState() => _HoverState();
-}
-
-class _HoverState extends State<_Hover> {
-  bool _hovered = false;
-
-  @override
-  Widget build(BuildContext context) => MouseRegion(
-    onEnter: (_) => setState(() => _hovered = true),
-    onExit: (_) => setState(() => _hovered = false),
-    child: widget.builder(_hovered),
   );
 }
 

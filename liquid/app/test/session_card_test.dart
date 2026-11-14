@@ -192,7 +192,7 @@ void main() {
         findsOneWidget,
       );
       for (final gone in [
-        'branch-chip',
+        'branch-row',
         'pull-request-chip',
         'git-next',
         'changed-files',
@@ -374,7 +374,7 @@ void main() {
     expect(inCard(find.text('fix/login-limit')), findsOneWidget);
     expect(
       find.descendant(
-        of: find.byKey(const Key('branch-chip')),
+        of: find.byKey(const Key('branch-row')),
         matching: find.text('↑2'),
       ),
       findsOneWidget,
@@ -385,7 +385,7 @@ void main() {
     'a checkout outside Git leaves out the branch and offers to initialize Git',
     (tester) async {
       await show(tester, setup: (backend) => backend.git = null);
-      expect(inCard(find.byKey(const Key('branch-chip'))), findsNothing);
+      expect(inCard(find.byKey(const Key('branch-row'))), findsNothing);
       expect(inCard(find.byKey(const Key('changes-row'))), findsNothing);
       expect(inCard(find.text('Initialize Git')), findsOneWidget);
     },
@@ -442,7 +442,7 @@ void main() {
   ) async {
     await pumpCard(tester, height: 100);
     expect(inCard(find.byKey(const Key('git-next'))), findsNothing);
-    expect(inCard(find.byKey(const Key('branch-chip'))), findsOneWidget);
+    expect(inCard(find.byKey(const Key('branch-row'))), findsOneWidget);
 
     await pumpCard(tester, height: 200);
     expect(inCard(find.byKey(const Key('git-next'))), findsOneWidget);

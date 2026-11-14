@@ -115,12 +115,12 @@ void main() {
   }
 
   Finder chipText(String text) => find.descendant(
-    of: find.byKey(const Key('branch-chip')),
+    of: find.byKey(const Key('branch-row')),
     matching: find.text(text),
   );
 
   Future<void> openMenu(WidgetTester tester) async {
-    await tester.tap(find.byKey(const Key('branch-chip')));
+    await tester.tap(find.byKey(const Key('branch-row')));
     await tester.pumpAndSettle();
   }
 
@@ -175,7 +175,7 @@ void main() {
     final semantics = tester.ensureSemantics();
     try {
       await show(tester, git: gitStatusOf());
-      final chip = tester.getSemantics(find.byKey(const Key('branch-chip')));
+      final chip = tester.getSemantics(find.byKey(const Key('branch-row')));
       expect(chip.getSemanticsData().hasAction(SemanticsAction.tap), isTrue);
       tester.binding.renderViews.single.owner!.semanticsOwner!.performAction(
         chip.id,
