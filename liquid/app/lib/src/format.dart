@@ -27,6 +27,34 @@ String formatCost(int microUsd) =>
 String formatCompact(int count) =>
     count >= 1000 ? '${(count / 1000).toStringAsFixed(1)}k' : '$count';
 
+/// A token count with three significant digits and a unit, such as `212 k` or `1.85 M`.
+String formatTokens(int count) {
+  if (count < 1000) return '$count';
+  if (count < 999500) {
+    final thousands = count / 1000;
+    return '${thousands < 100 ? thousands.toStringAsFixed(1) : thousands.round()} k';
+  }
+  final millions = count / 1e6;
+  return '${millions < 10 ? millions.toStringAsFixed(2) : millions.toStringAsFixed(1)} M';
+}
+
+/// A span of time in whole seconds from a minute on, such as `14 min 32 s`; a span of hours
+/// drops its seconds, such as `2 h 05 min`. Below ten seconds it keeps one decimal.
+String formatSpan(int ms) {
+  if (ms < 10000) return '${(ms / 1000).toStringAsFixed(1)} s';
+  final seconds = (ms / 1000).round();
+  if (seconds < 60) return '$seconds s';
+  final minutes = seconds ~/ 60;
+  if (minutes < 60) {
+    return '$minutes min ${(seconds % 60).toString().padLeft(2, '0')} s';
+  }
+  return '${minutes ~/ 60} h ${(minutes % 60).toString().padLeft(2, '0')} min';
+}
+
+/// A part's share of a whole, rounded to a whole percent, such as `95%`.
+String formatShare(int part, int whole) =>
+    whole == 0 ? '0%' : '${(part * 100 / whole).round()}%';
+
 /// A local time of day, such as `10:58`.
 String formatClock(DateTime at) =>
     '${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}';
