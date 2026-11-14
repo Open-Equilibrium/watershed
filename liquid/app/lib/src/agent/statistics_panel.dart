@@ -427,29 +427,29 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
       _top(
         ws,
         title: 'Time per turn',
-        hero: formatSpan(working),
+        hero: formatDuration(working),
         caption: [
           plural(figures.turns.length, 'turn'),
           if (figures.spanMs case final span?)
-            '${formatSpan(span)} from first to last entry',
+            '${formatDuration(span)} from first to last entry',
         ].join(' · '),
         who: [
           _who(
             ws,
             colour: ws.data1,
             name: 'Waiting for the model',
-            value: model == null ? '—' : formatSpan(model),
+            value: model == null ? '—' : formatDuration(model),
             caption: model == null
                 ? 'Not recorded for turns without timing entries'
                 : '${share(model)} · ${plural(figures.responses, 'response')}'
-                      ' · ${formatSpan(model ~/ (figures.responses == 0 ? 1 : figures.responses))}'
+                      ' · ${formatDuration(model ~/ (figures.responses == 0 ? 1 : figures.responses))}'
                       ' each on average',
           ),
           _who(
             ws,
             colour: ws.data2,
             name: 'Running tools',
-            value: tool == null ? '—' : formatSpan(tool),
+            value: tool == null ? '—' : formatDuration(tool),
             caption: tool == null
                 ? 'Not recorded for turns without timing entries'
                 : '${share(tool)} · ${plural(figures.toolCalls, 'call')}',
@@ -458,7 +458,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
             ws,
             colour: ws.textFaint,
             name: 'Other',
-            value: other == null ? '—' : formatSpan(other),
+            value: other == null ? '—' : formatDuration(other),
             caption: other == null
                 ? 'Not recorded for turns without timing entries'
                 : '${share(other)} · in the turn, neither model nor tool',
@@ -473,17 +473,17 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
             turn.otherMs ?? 0,
           ],
           colours: [ws.data1, ws.data2, ws.textFaint],
-          axis: (value) => value == 0
-              ? '0'
-              : value < 60000
-              ? '${(value / 1000).round()} s'
-              : '${(value / 60000).toStringAsFixed(1)} min',
+          axis: formatDuration,
           title: (turn) =>
-              'Turn ${turn.index} · ${formatSpan(turn.workingMs ?? 0)}',
+              'Turn ${turn.index} · ${formatDuration(turn.workingMs ?? 0)}',
           rows: (turn) => [
-            ChartTipRow(ws.data1, 'Model', formatSpan(turn.modelMs ?? 0)),
-            ChartTipRow(ws.data2, 'Tools', formatSpan(turn.toolMs ?? 0)),
-            ChartTipRow(ws.textFaint, 'Other', formatSpan(turn.otherMs ?? 0)),
+            ChartTipRow(ws.data1, 'Model', formatDuration(turn.modelMs ?? 0)),
+            ChartTipRow(ws.data2, 'Tools', formatDuration(turn.toolMs ?? 0)),
+            ChartTipRow(
+              ws.textFaint,
+              'Other',
+              formatDuration(turn.otherMs ?? 0),
+            ),
           ],
           notes: (turn) => [
             turn.prompt,
@@ -654,7 +654,9 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
                 ),
                 _number(
                   ws,
-                  tool.durationMs == null ? '—' : formatSpan(tool.durationMs!),
+                  tool.durationMs == null
+                      ? '—'
+                      : formatDuration(tool.durationMs!),
                 ),
               ],
           ],
@@ -715,7 +717,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
             ),
             _number(
               ws,
-              turn.workingMs == null ? '—' : formatSpan(turn.workingMs!),
+              turn.workingMs == null ? '—' : formatDuration(turn.workingMs!),
             ),
             _number(ws, formatTokens(turn.tokens)),
             _number(ws, '≈ ${formatCost(turn.cost)}'),

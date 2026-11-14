@@ -34,19 +34,6 @@ String formatTokens(int count) {
   return '${millions < 10 ? millions.toStringAsFixed(2) : millions.toStringAsFixed(1)} M';
 }
 
-/// A span of time in whole seconds from a minute on, such as `14 min 32 s`; a span of hours
-/// drops its seconds, such as `2 h 05 min`. Below ten seconds it keeps one decimal.
-String formatSpan(int ms) {
-  if (ms < 10000) return '${(ms / 1000).toStringAsFixed(1)} s';
-  final seconds = (ms / 1000).round();
-  if (seconds < 60) return '$seconds s';
-  final minutes = seconds ~/ 60;
-  if (minutes < 60) {
-    return '$minutes min ${(seconds % 60).toString().padLeft(2, '0')} s';
-  }
-  return '${minutes ~/ 60} h ${(minutes % 60).toString().padLeft(2, '0')} min';
-}
-
 /// A part's share of a whole, rounded to a whole percent, such as `95%`.
 String formatShare(int part, int whole) =>
     whole == 0 ? '0%' : '${(part * 100 / whole).round()}%';

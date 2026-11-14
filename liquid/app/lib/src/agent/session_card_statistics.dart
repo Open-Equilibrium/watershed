@@ -271,7 +271,7 @@ List<Widget> sessionStatisticsRows(
 
 /// The working time row, with its model and tool parts when every turn recorded them.
 List<Widget> _timeRows(WsPalette ws, SessionStatistics figures) {
-  final working = formatSpan(figures.workingMs);
+  final working = formatDuration(figures.workingMs);
   final (model, tool, other) = (
     figures.modelMs,
     figures.toolMs,
@@ -308,9 +308,9 @@ List<Widget> _timeRows(WsPalette ws, SessionStatistics figures) {
       value: Text(working),
       tip: [
         'Working time $working',
-        'Model ${formatSpan(model)}',
-        'Tools ${formatSpan(tool)}',
-        'Other ${formatSpan(other)}',
+        'Model ${formatDuration(model)}',
+        'Tools ${formatDuration(tool)}',
+        'Other ${formatDuration(other)}',
       ],
     ),
   ];

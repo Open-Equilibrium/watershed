@@ -42,22 +42,15 @@ void main() {
     );
     expect(
       [
-        formatSpan(4100),
-        formatSpan(23000),
-        formatSpan(59600),
-        formatSpan(125000),
-        formatSpan(872000),
-        formatSpan(7500000),
+        formatDuration(4100),
+        formatDuration(23000),
+        formatDuration(59600),
+        formatDuration(125000),
+        formatDuration(872000),
+        formatDuration(7500000),
       ],
-      [
-        '4.1 s',
-        '23 s',
-        '1 min 00 s',
-        '2 min 05 s',
-        '14 min 32 s',
-        '2 h 05 min',
-      ],
-      reason: 'a span of minutes keeps its seconds, one of hours drops them',
+      ['4.1 s', '23.0 s', '59.6 s', '2m 05s', '14m 32s', '125m 00s'],
+      reason: 'one style for every duration: minutes count past an hour',
     );
     expect(
       [formatShare(95, 100), formatShare(1, 3), formatShare(0, 0)],

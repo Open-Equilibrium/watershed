@@ -155,7 +155,7 @@ void main() {
     expect(inCard(find.text('68.2 k / 200 k')), findsOneWidget);
     expect(inCard(find.text('1.85 M')), findsOneWidget);
     expect(inCard(find.text('≈ \$1.27')), findsOneWidget);
-    expect(inCard(find.text('14 min 32 s')), findsOneWidget);
+    expect(inCard(find.text('14m 32s')), findsOneWidget);
     expect(inCard(find.textContaining('6 failed · 86')), findsOneWidget);
     expect(inCard(find.text('Statistics')), findsOneWidget);
   });
@@ -244,10 +244,10 @@ void main() {
           backend.stats = sessionStatistics(modelMs: null, toolMs: null),
     );
 
-    expect(inCard(find.text('14 min 32 s')), findsOneWidget);
+    expect(inCard(find.text('14m 32s')), findsOneWidget);
     expect(inCard(find.text('Model and tools')), findsOneWidget);
     expect(inCard(find.text('Working time')), findsOneWidget);
-    expect(find.textContaining('Model 9 min 48 s'), findsNothing);
+    expect(find.textContaining('Model 9m 48s'), findsNothing);
   });
 
   testWidgets('the tool calls tooltip names the failing tools', (tester) async {

@@ -287,11 +287,11 @@ void main() {
 
     await tester.tap(inPanel(find.widgetWithText(InkWell, 'Time')));
     await tester.pumpAndSettle();
-    expect(inPanel(find.text('17 min 53 s')), findsOneWidget);
+    expect(inPanel(find.text('17m 53s')), findsOneWidget);
     expect(inPanel(find.text('Waiting for the model')), findsOneWidget);
-    expect(inPanel(find.text('9 min 48 s')), findsOneWidget);
-    expect(inPanel(find.text('4 min 21 s')), findsOneWidget);
-    expect(inPanel(find.text('3 min 44 s')), findsOneWidget);
+    expect(inPanel(find.text('9m 48s')), findsOneWidget);
+    expect(inPanel(find.text('4m 21s')), findsOneWidget);
+    expect(inPanel(find.text('3m 44s')), findsOneWidget);
   });
 
   testWidgets(
@@ -304,7 +304,7 @@ void main() {
 
       expect(inPanel(find.text('Waiting for the model')), findsOneWidget);
       expect(inPanel(find.text('—')), findsWidgets);
-      expect(inPanel(find.text('9 min 48 s')), findsNothing);
+      expect(inPanel(find.text('9m 48s')), findsNothing);
     },
   );
 
@@ -509,7 +509,7 @@ void main() {
     await show(tester);
     await pressMeta(tester, LogicalKeyboardKey.keyU);
 
-    expect(inPanel(find.text('3 min 53 s')), findsOneWidget, reason: 'bash');
+    expect(inPanel(find.text('3m 53s')), findsOneWidget, reason: 'bash');
     expect(
       inPanel(find.text('—')),
       findsOneWidget,
