@@ -34,6 +34,21 @@ void main() {
     expect(reserved(Command.sessionDetails, commandOptionB), isNull);
   });
 
+  test('the statistics open with ⌘U, as T3 Code usage does', () {
+    expect(ShortcutSettings.standard().label(Command.statistics), '⌘U');
+    expect(ShortcutSettings.liquidKey().bindings(Command.statistics), [
+      const Keys(LogicalKeyboardKey.keyU, liquid: true),
+      const Keys(LogicalKeyboardKey.keyU, meta: true),
+    ]);
+    expect(
+      reserved(
+        Command.statistics,
+        const Keys(LogicalKeyboardKey.keyU, meta: true),
+      ),
+      isNull,
+    );
+  });
+
   test('the Standard profile uses ⌘ only', () {
     final keys = ShortcutSettings.standard();
 

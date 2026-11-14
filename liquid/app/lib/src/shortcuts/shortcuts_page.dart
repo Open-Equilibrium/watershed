@@ -50,6 +50,7 @@ const List<_Group> _left = [
       _Entry(Command.chat),
       _Entry(Command.diff),
       _Entry(Command.sessionDetails),
+      _Entry(Command.statistics),
       _Entry(Command.focusInput),
     ],
   ),

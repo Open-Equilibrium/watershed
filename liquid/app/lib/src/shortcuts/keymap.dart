@@ -303,6 +303,12 @@ enum Command {
     Keys(LogicalKeyboardKey.keyB, meta: true, alt: true),
     liquid: true,
   ),
+  statistics(
+    'Statistics',
+    Area.app,
+    Keys(LogicalKeyboardKey.keyU, meta: true),
+    liquid: true,
+  ),
   focusInput(
     'Focus Input',
     Area.app,
