@@ -292,12 +292,12 @@ class _AgentShellState extends State<AgentShell> {
     state.statisticsOpen.value = !state.statisticsOpen.value;
   }
 
-  /// Shows or hides the session card where it sits: beside the Chat, or as a popover, which takes
-  /// keyboard focus when it opens.
+  /// Shows or hides the session card where it sits: beside the Chat, or as a popover. An opened
+  /// card takes keyboard focus, as T3 Code's details do.
   void _toggleCard() {
     _showSession();
     _card.toggle();
-    if (_card.shown && !_card.beside) {
+    if (_card.shown) {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _card.focusFirstControl(),
       );

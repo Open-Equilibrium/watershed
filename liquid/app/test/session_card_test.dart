@@ -297,6 +297,46 @@ void main() {
     );
   });
 
+  testWidgets('the details button opens the inline card with focus inside it', (
+    tester,
+  ) async {
+    await show(tester);
+    await tester.tap(find.byTooltip('Session details'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Session details'));
+    await tester.pumpAndSettle();
+
+    expect(focusIsIn(const Key('session-details-card')), isTrue);
+  });
+
+  testWidgets('the popover closes when focus leaves it, as in T3 Code', (
+    tester,
+  ) async {
+    await show(tester, size: const Size(1100, 900));
+    await toggleCard(tester);
+    expect(focusIsIn(const Key('session-details-card')), isTrue);
+
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('session-details-card')), findsNothing);
+  });
+
+  testWidgets('an open rows menu keeps the popover when focus leaves it', (
+    tester,
+  ) async {
+    await show(tester, size: const Size(1100, 900));
+    await toggleCard(tester);
+    await tester.tap(
+      find.byKey(const Key('session-details-card')),
+      buttons: kSecondaryButton,
+    );
+    await tester.pumpAndSettle();
+
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('session-details-card')), findsOneWidget);
+  });
+
   testWidgets('the card scrolls within a space smaller than its content', (
     tester,
   ) async {
@@ -861,4 +901,14 @@ void main() {
       expect(width(), 360);
     },
   );
+}
+
+/// Whether keyboard focus is inside the widget with `key`.
+bool focusIsIn(Key key) {
+  var inside = false;
+  FocusManager.instance.primaryFocus?.context?.visitAncestorElements((element) {
+    inside = element.widget.key == key;
+    return !inside;
+  });
+  return inside;
 }

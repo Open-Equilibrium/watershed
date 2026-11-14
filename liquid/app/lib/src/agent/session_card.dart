@@ -93,29 +93,39 @@ class _SessionCardState extends State<SessionCard> {
   Widget build(BuildContext context) {
     final ws = context.ws;
     final route = ModalRoute.of(context);
-    return TapRegion(
-      groupId: cardTapGroup,
-      onTapOutside: (_) {
-        // The rows menu and a dialog the card opened take their own presses.
-        final coveredByRoute = route != null && !route.isCurrent;
-        if (!widget.beside && !_menu.isOpen && !coveredByRoute) {
-          widget.onOutsidePress();
-        }
+    // A popover closes when a press or the focus leaves it, as T3 Code's does. The rows menu and
+    // a dialog the card opened take their own presses and focus.
+    void leave() {
+      final coveredByRoute = route != null && !route.isCurrent;
+      if (!widget.beside && !_menu.isOpen && !coveredByRoute) {
+        widget.onOutsidePress();
+      }
+    }
+
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onFocusChange: (hasFocus) {
+        if (!hasFocus) leave();
       },
-      child: DecoratedBox(
-        key: const Key('session-details-card'),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(WsMetrics.radiusXl),
-          boxShadow: ws.shadow,
-        ),
-        child: Material(
-          color: ws.surface,
-          borderRadius: BorderRadius.circular(WsMetrics.radiusXl),
-          clipBehavior: Clip.antiAlias,
-          child: LayoutBuilder(
-            builder: (context, box) => ListenableBuilder(
-              listenable: _changes,
-              builder: (context, _) => _content(context, box.maxHeight),
+      child: TapRegion(
+        groupId: cardTapGroup,
+        onTapOutside: (_) => leave(),
+        child: DecoratedBox(
+          key: const Key('session-details-card'),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(WsMetrics.radiusXl),
+            boxShadow: ws.shadow,
+          ),
+          child: Material(
+            color: ws.surface,
+            borderRadius: BorderRadius.circular(WsMetrics.radiusXl),
+            clipBehavior: Clip.antiAlias,
+            child: LayoutBuilder(
+              builder: (context, box) => ListenableBuilder(
+                listenable: _changes,
+                builder: (context, _) => _content(context, box.maxHeight),
+              ),
             ),
           ),
         ),
