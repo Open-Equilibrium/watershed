@@ -316,8 +316,7 @@ impl Count {
             models: sorted(self.models),
             tools,
             turns,
-            started_ms: None,
-            ended_ms: None,
+            ..Statistics::default()
         }
     }
 }
