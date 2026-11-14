@@ -150,9 +150,8 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Protected** — A Page, Block or Source that stops inheriting rights from its area or Page, so only Roles allowed on it may change it; the allow-only way to restrict one part of an editable Page (ADR-0235).
 - **History** — Liquid's attributed and reversible record of Workspace Actions; also called **workspace action history / workspace VCS** when distinguishing it from project-code VCS. A revert records a new reversing Action; Restore version returns a Page to an earlier save point (ADR-0235).
 - **Agent surface** — Liquid's view of one agent session: the sidebar, the Chat with its session card, the Diff panel beside it when open, the widget strip, the input area and the status bar; ADR-0239 plans to fold it into Chats.
-- **Session card** — The card at the top right of the Chat that holds a session's Git controls and figures, as T3 Code's thread details card; it sits beside the Chat or opens as a popover.
-- **Session statistics** — What a session's stored entries count to, as tokens, cost, working time and tool calls by outcome, shown in the statistics panel and never estimated (ADR-0279).
-- **Session figures** — The session statistics as the session card's rows show them, with the context window (ADR-0279).
+- **Session card** — The card at the top right of the Chat that holds a session's Git controls and statistics, as T3 Code's thread details card; it sits beside the Chat or opens as a popover.
+- **Session statistics** — What a session's stored entries count to, as tokens, cost, working time and tool calls by outcome, never estimated (ADR-0279). The session card shows them as rows with the context window; the statistics panel shows them in full.
 - **Diff panel** — The Diff of the Chat's turns, shown as a panel beside the Chat (⌘D); it replaces the Diff tab.
 - **Start page** — What the agent surface shows before a session's first message: the project's recent sessions to continue and chips to set the new one up.
 - **Input area** — The fixed-height area at the bottom of the agent surface: the composer, or in its place an agent question.

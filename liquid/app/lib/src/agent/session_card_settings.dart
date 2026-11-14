@@ -8,7 +8,7 @@ enum CardItem {
   branch('branch', 'Branch and pull request'),
   gitActions('gitActions', 'Git actions'),
   changes('changes', 'Changes'),
-  figures('figures', 'Session figures'),
+  figures('figures', 'Statistics'),
   context('context', 'Context window');
 
   const CardItem(this.id, this.label);

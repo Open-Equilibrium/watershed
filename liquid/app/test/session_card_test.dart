@@ -435,7 +435,7 @@ void main() {
         'Branch and pull request',
         'Git actions',
         'Changes',
-        'Session figures',
+        'Statistics',
         'Context window',
       ]) {
         expect(
