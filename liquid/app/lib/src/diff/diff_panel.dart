@@ -108,10 +108,16 @@ class DiffPanel extends StatelessWidget {
                             fontWeight: WsMetrics.fwMedium,
                           ),
                         ),
-                        InkWell(
+                        IconButton(
                           key: const Key('diff-panel-close'),
-                          onTap: onClose,
-                          child: Icon(
+                          tooltip: 'Close the Diff',
+                          onPressed: onClose,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints.tightFor(
+                            width: 24,
+                            height: 24,
+                          ),
+                          icon: Icon(
                             LucideIcons.x,
                             size: 11,
                             color: ws.textFaint,

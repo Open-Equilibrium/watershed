@@ -465,6 +465,22 @@ void main() {
     },
   );
 
+  testWidgets('the Diff panel’s ✕ says what it closes and has a usable hit size', (
+    tester,
+  ) async {
+    await show(tester);
+    await press(tester, LogicalKeyboardKey.keyD);
+
+    final close = find.byTooltip('Close the Diff');
+    expect(close, findsOneWidget);
+    expect(
+      tester.getSize(close).width,
+      greaterThanOrEqualTo(24),
+      reason: 'a target a pointer can hit',
+    );
+    expect(tester.getSize(close).height, greaterThanOrEqualTo(24));
+  });
+
   testWidgets('a hidden row keeps its shortcut', (tester) async {
     await show(
       tester,
