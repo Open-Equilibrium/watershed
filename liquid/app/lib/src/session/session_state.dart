@@ -237,8 +237,10 @@ class SessionState {
     _generation++;
     _failing.clear();
     sessionTitle.value = null;
-    // The previous session's turns no longer apply.
+    // The previous session's turns and figures no longer apply.
     turns.value = const [];
+    statistics.value = null;
+    contextWindow.value = null;
     diffScope.value = const LatestTurn();
     shownScope.value = const LatestTurn();
     shown.value = null;
@@ -426,6 +428,13 @@ class SessionState {
   /// The turns of the current branch, oldest first, with what each changed.
   final turns = ValueNotifier<List<BridgeTurn>>(const []);
 
+  /// What the session's stored entries count to, as last read; null until the first read and
+  /// after a switch, or when the read failed (ADR-0279).
+  final statistics = ValueNotifier<BridgeStatistics?>(null);
+
+  /// The context window the next request fills, as last read with the statistics.
+  final contextWindow = ValueNotifier<BridgeContext?>(null);
+
   /// Which turns the Diff panel compares.
   final diffScope = ValueNotifier<DiffScope>(const LatestTurn());
 
@@ -480,6 +489,47 @@ class SessionState {
 
   Future<void>? _readingChanges;
   bool _changesAgain = false;
+
+  /// Reads the statistics and the context window. A read asked for while one runs makes one
+  /// more after it, so the reads never pile up.
+  Future<void> readFigures() {
+    if (_readingFigures case final reading?) {
+      _figuresAgain = true;
+      return reading;
+    }
+    return _readingFigures = _readFigures();
+  }
+
+  Future<void>? _readingFigures;
+  bool _figuresAgain = false;
+
+  Future<void> _readFigures() async {
+    try {
+      do {
+        _figuresAgain = false;
+        await _readFiguresOnce();
+      } while (_figuresAgain);
+    } finally {
+      _readingFigures = null;
+    }
+  }
+
+  Future<void> _readFiguresOnce() async {
+    final generation = _generation;
+    try {
+      final stats = await _backend.statistics();
+      final window = await _backend.context();
+      if (generation != _generation) return;
+      statistics.value = stats;
+      contextWindow.value = window;
+      reportRead('statistics', null);
+    } on Object catch (error) {
+      if (generation != _generation) return;
+      statistics.value = null;
+      contextWindow.value = null;
+      reportRead('statistics', 'Could not read the statistics: $error');
+    }
+  }
 
   Future<void> _readChanges() async {
     try {
@@ -600,6 +650,7 @@ class SessionState {
     final generation = _generation;
     final asked = _turnReadsStarted;
     unawaited(git.refresh());
+    unawaited(readFigures());
     await readChanges();
     if (generation != _generation) return;
     _chat.endTurns(turns.value, _turnsRead > asked ? ended : 0);
@@ -822,7 +873,10 @@ class SessionState {
 
   /// Rebuilds the chat from the session's current branch, as the model sees it, and marks
   /// where it leaves the other branches. Items that arrive meanwhile stay after it.
-  Future<void> loadChat() => _chat.load();
+  Future<void> loadChat() async {
+    await _chat.load();
+    unawaited(readFigures());
+  }
 
   /// Reads the stored entries before the earliest one the chat covers.
   Future<void> loadEarlier() => _chat.loadEarlier();
@@ -981,6 +1035,7 @@ class SessionState {
         }
       case BridgeEventKind.modelRequestCompleted:
         totals.value = totals.value.add(event.step!.usage);
+        unawaited(readFigures());
         // A request Stop ended reports an abort, some providers as an error.
         if (event.step!.error case final error?
             when event.step!.stopReason != 'aborted' && !_stopping) {

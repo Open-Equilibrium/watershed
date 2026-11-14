@@ -20,6 +20,14 @@ class FakeBackend implements SessionBackend {
   Map<String, String> patches = const {};
   BridgeHistory stored = historyOf();
 
+  /// What statistics() and context() return. Their reads are listed in `figureReads`, apart
+  /// from `calls`, which keeps the commands and the history reads.
+  BridgeStatistics stats = statisticsOf();
+  BridgeContext? contextWindow;
+  final figureReads = <String>[];
+  String? figuresError;
+  Completer<void>? figuresGate;
+
   bool cancelled = false;
   final _stopped = Completer<void>();
 
@@ -197,6 +205,20 @@ class FakeBackend implements SessionBackend {
 
   /// Holds history reads until it completes.
   Completer<void>? gate;
+
+  @override
+  Future<BridgeStatistics> statistics() async {
+    figureReads.add('statistics');
+    await figuresGate?.future;
+    if (figuresError case final error?) throw error;
+    return stats;
+  }
+
+  @override
+  Future<BridgeContext?> context() async {
+    figureReads.add('context');
+    return contextWindow;
+  }
 
   /// Whether [branch] moves the session's leaf, as a successful branch does.
   bool branchMoves = true;
@@ -885,6 +907,21 @@ BridgeUsage usage(int input, int output, int cost) => BridgeUsage(
   cacheWrite: 0,
   reasoning: 0,
   costMicroUsd: cost,
+);
+
+/// Statistics of the given models, tools and turns; the session's span is unknown by default.
+BridgeStatistics statisticsOf({
+  List<BridgeModelUsage> models = const [],
+  List<BridgeToolCalls> tools = const [],
+  List<BridgeTurnStatistics> turns = const [],
+  int? startedMs,
+  int? endedMs,
+}) => BridgeStatistics(
+  models: models,
+  tools: tools,
+  turns: turns,
+  startedMs: startedMs,
+  endedMs: endedMs,
 );
 
 /// A session with `tree` (by default a bare root) and the leaf `leaf`.

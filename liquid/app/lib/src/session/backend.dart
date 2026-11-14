@@ -46,6 +46,13 @@ abstract interface class SessionBackend {
     required bool hideWhitespace,
   });
   Future<BridgeHistory> history();
+
+  /// What the session's stored entries count to, on every branch (ADR-0279).
+  Future<BridgeStatistics> statistics();
+
+  /// The context window the next request fills and when pi compacts it; null when the agent
+  /// reports no window.
+  Future<BridgeContext?> context();
   Future<BridgeTranscript> transcript(String? before);
   Future<void> branch(String entry);
 
@@ -278,6 +285,10 @@ class RustSessionBackend implements SessionBackend {
   );
   @override
   Future<BridgeHistory> history() => _session.history();
+  @override
+  Future<BridgeStatistics> statistics() => _session.statistics();
+  @override
+  Future<BridgeContext?> context() => _session.context();
   @override
   Future<BridgeTranscript> transcript(String? before) =>
       _session.transcript(before: before, limit: chatPage);

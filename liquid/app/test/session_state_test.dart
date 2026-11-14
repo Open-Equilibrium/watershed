@@ -195,6 +195,84 @@ void main() {
     ], reason: 'a branch rebuilds the chat');
   });
 
+  test('reads the statistics and context window with the chat', () async {
+    backend.stats = statisticsOf(
+      models: [
+        BridgeModelUsage(
+          model: 'anthropic/claude-sonnet',
+          usage: usage(212000, 18300, 1270000),
+          responses: 41,
+          unpriced: 0,
+        ),
+      ],
+    );
+    backend.contextWindow = const BridgeContext(
+      tokens: 68200,
+      window: 200000,
+      compactsAt: 180000,
+    );
+    await state.loadChat();
+    await pumpEventQueue();
+    expect(state.statistics.value, backend.stats);
+    expect(state.contextWindow.value, backend.contextWindow);
+    expect(backend.figureReads, ['statistics', 'context']);
+  });
+
+  test('reads the figures when a response or a turn ends', () async {
+    await state.loadChat();
+    await pumpEventQueue();
+    backend.figureReads.clear();
+    await emit(
+      event(
+        BridgeEventKind.modelRequestCompleted,
+        step: BridgeStep(usage: usage(100, 20, 5), stopReason: 'stop'),
+      ),
+    );
+    expect(backend.figureReads, ['statistics', 'context']);
+    backend.figureReads.clear();
+    await emit(event(BridgeEventKind.turnStarted));
+    await emit(event(BridgeEventKind.turnCompleted));
+    expect(backend.figureReads, contains('statistics'));
+  });
+
+  test(
+    'figure reads never pile up: one more runs after a read in flight',
+    () async {
+      await state.loadChat();
+      await pumpEventQueue();
+      backend.figureReads.clear();
+      backend.figuresGate = Completer<void>();
+      for (var response = 0; response < 3; response++) {
+        await emit(
+          event(
+            BridgeEventKind.modelRequestCompleted,
+            step: BridgeStep(usage: usage(100, 20, 5), stopReason: 'stop'),
+          ),
+        );
+      }
+      backend.figuresGate!.complete();
+      await pumpEventQueue();
+      expect(
+        backend.figureReads,
+        ['statistics', 'context', 'statistics', 'context'],
+        reason: 'responses asked for while a read runs share one read after it',
+      );
+    },
+  );
+
+  test('a failed figures read is reported once', () async {
+    backend.figuresError = 'the session file is unreadable';
+    await state.loadChat();
+    await pumpEventQueue();
+    await state.loadChat();
+    await pumpEventQueue();
+    expect(
+      state.notices.value.where((notice) => notice.text.contains('statistics')),
+      hasLength(1),
+    );
+    expect(state.statistics.value, isNull);
+  });
+
   test(
     'a revert continues the chat and the Diff tab on the new branch',
     () async {
