@@ -973,7 +973,7 @@ void main() {
           )
           .dy;
       expect(
-        top(find.byKey(const Key('branch-chip'))),
+        top(find.byKey(const Key('branch-row'))),
         lessThan(top(find.byKey(const Key('pull-request-chip')))),
       );
       expect(
