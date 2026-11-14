@@ -61,6 +61,7 @@ class _ChatViewState extends State<ChatView> {
   void initState() {
     super.initState();
     widget.state.scrollChatTo.addListener(_scrollRequested);
+    widget.state.items.addListener(_pruneItemKeys);
   }
 
   @override
@@ -68,15 +69,24 @@ class _ChatViewState extends State<ChatView> {
     super.didUpdateWidget(old);
     if (old.state != widget.state) {
       old.state.scrollChatTo.removeListener(_scrollRequested);
+      old.state.items.removeListener(_pruneItemKeys);
       widget.state.scrollChatTo.addListener(_scrollRequested);
+      widget.state.items.addListener(_pruneItemKeys);
     }
   }
 
   @override
   void dispose() {
     widget.state.scrollChatTo.removeListener(_scrollRequested);
+    widget.state.items.removeListener(_pruneItemKeys);
     _scroll.dispose();
     super.dispose();
+  }
+
+  /// Forgets the keys of the items that a reload of the chat dropped.
+  void _pruneItemKeys() {
+    final ids = {for (final item in widget.state.items.value) item.id};
+    _itemKeys.removeWhere((id, _) => !ids.contains(id));
   }
 
   void _scrollRequested() {
