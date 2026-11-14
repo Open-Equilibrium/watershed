@@ -49,9 +49,9 @@ pub(crate) fn auth_args(args: &[String]) -> Result<AuthCommand, RuntimeError> {
                 "--device" => Ok(AuthCommand::Login(AuthLogin::Subscription(
                     AuthLoginMode::Device,
                 ))),
-                _ => Err(RuntimeError::Usage(format!(
-                    "unknown authentication login mode {mode:?}"
-                ))),
+                _ => Err(RuntimeError::Usage(
+                    "unknown authentication login mode; use --browser or --device".to_owned(),
+                )),
             }
         }
         [auth, login, provider, base_flag, base_url, key_flag]
@@ -100,7 +100,7 @@ fn usage_error() -> RuntimeError {
 
 #[cfg(test)]
 mod tests {
-    use super::{AuthCommand, AuthLogin, AuthLoginMode, AuthProvider, auth_args};
+    use super::{AuthCommand, AuthLogin, AuthLoginMode, AuthProvider, RuntimeError, auth_args};
     use crate::parsing::strings;
 
     #[test]
@@ -138,6 +138,25 @@ mod tests {
         ] {
             assert!(auth_args(&strings(args)).is_err(), "accepted {args:?}");
         }
+    }
+
+    #[test]
+    fn unknown_login_mode_error_never_echoes_the_argument() {
+        let error = auth_args(&strings(&[
+            "auth",
+            "login",
+            "openai-codex",
+            "--api-key=sk-fixture",
+        ]))
+        .expect_err("an unknown login mode is rejected");
+        let RuntimeError::Usage(message) = error else {
+            panic!("expected a usage error");
+        };
+        assert!(!message.contains("sk-fixture"), "{message}");
+        assert_eq!(
+            message,
+            "unknown authentication login mode; use --browser or --device"
+        );
     }
 
     #[test]
