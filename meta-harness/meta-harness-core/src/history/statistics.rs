@@ -171,7 +171,13 @@ impl Count {
                 ..Turn::default()
             });
         }
-        let current = self.turns.len().checked_sub(1);
+        // The turn an entry belongs to, while its clock runs: from its start to its end checkpoint,
+        // or to the next start when it has none. Later entries count only toward the session.
+        let current = self
+            .turns
+            .len()
+            .checked_sub(1)
+            .filter(|&index| !self.turns[index].ended);
         count_spend(&mut self.models, entry);
         if let Some(index) = current {
             let turn = &mut self.turns[index];
@@ -182,8 +188,7 @@ impl Count {
             Body::User { text } => {
                 if let Some(index) = current {
                     let turn = &mut self.turns[index];
-                    // A prompt after the turn's end checkpoint belongs to no turn.
-                    if !turn.prompted && !turn.ended {
+                    if !turn.prompted {
                         turn.prompted = true;
                         turn.stats.entry = entry.id.clone();
                         turn.stats.prompt = first_line(text, PROMPT_CHARS);

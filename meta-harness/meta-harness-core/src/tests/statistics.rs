@@ -332,3 +332,98 @@ fn splits_each_model_cost_by_kind_of_tokens() {
         "the kinds add up to the model's cost"
     );
 }
+
+/// A turn whose end checkpoint comes before a model change, a label, a request and a response with
+/// a failed call, all stored before the next start. Those entries count only in the session's
+/// totals: they do not move the turn's clock, and their time, usage and calls stay out of the turn.
+const AFTER_END: &str = r#"{"entries":[
+  {"type":"custom","id":"k1","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T1","phase":"start"}},
+  {"type":"message","id":"u1","parentId":"k1","timestamp":"2026-11-01T10:00:01.000Z","message":{"role":"user","content":"Fix it"}},
+  {"type":"message","id":"a1","parentId":"u1","timestamp":"2026-11-01T10:00:02.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[],"usage":{"input":10,"output":1,"cost":{"total":0.001}}}},
+  {"type":"custom","id":"k2","parentId":"a1","timestamp":"2026-11-01T10:00:03.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T1","phase":"end","files":0,"added":0,"removed":0}},
+  {"type":"model_change","id":"m1","parentId":"k2","timestamp":"2026-11-01T10:00:30.000Z"},
+  {"type":"custom","id":"t1","parentId":"m1","timestamp":"2026-11-01T10:00:31.000Z","customType":"watershed.timing","data":{"kind":"request","durationMs":5000}},
+  {"type":"message","id":"a2","parentId":"t1","timestamp":"2026-11-01T10:00:40.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[{"type":"toolCall","id":"c1","name":"bash","arguments":{}}],"usage":{"input":20,"output":2,"cost":{"total":0.002}}}},
+  {"type":"message","id":"r1","parentId":"a2","timestamp":"2026-11-01T10:00:41.000Z","message":{"role":"toolResult","toolCallId":"c1","toolName":"bash","isError":true,"content":[]}},
+  {"type":"label","id":"l1","parentId":"r1","timestamp":"2026-11-01T10:00:45.000Z","targetId":"a1","label":"mark"},
+  {"type":"custom","id":"k3","parentId":"l1","timestamp":"2026-11-01T10:01:00.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T2","phase":"start"}},
+  {"type":"message","id":"u2","parentId":"k3","timestamp":"2026-11-01T10:01:01.000Z","message":{"role":"user","content":"Next"}},
+  {"type":"message","id":"a3","parentId":"u2","timestamp":"2026-11-01T10:01:02.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[],"usage":{"input":5,"output":1,"cost":{"total":0.0005}}}},
+  {"type":"custom","id":"k4","parentId":"a3","timestamp":"2026-11-01T10:01:03.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T2","phase":"end","files":0,"added":0,"removed":0}}
+],"leafId":"k4"}"#;
+
+#[test]
+fn a_turn_clock_stops_at_its_end_and_later_entries_count_only_in_the_totals() {
+    let statistics = counted(AFTER_END);
+    let faux = "faux/faux-1";
+    assert_eq!(
+        statistics.turns,
+        [
+            TurnStatistics {
+                entry: "u1".to_owned(),
+                prompt: "Fix it".to_owned(),
+                started_ms: Some(1_793_527_200_000),
+                ended_ms: Some(1_793_527_203_000),
+                models: vec![model(
+                    faux,
+                    Usage {
+                        input: 10,
+                        output: 1,
+                        cost_micro_usd: 1_000,
+                        ..Usage::default()
+                    },
+                    1,
+                    0,
+                )],
+                model_ms: None,
+                tool_ms: None,
+                ..TurnStatistics::default()
+            },
+            TurnStatistics {
+                entry: "u2".to_owned(),
+                prompt: "Next".to_owned(),
+                started_ms: Some(1_793_527_260_000),
+                ended_ms: Some(1_793_527_263_000),
+                models: vec![model(
+                    faux,
+                    Usage {
+                        input: 5,
+                        output: 1,
+                        cost_micro_usd: 500,
+                        ..Usage::default()
+                    },
+                    1,
+                    0,
+                )],
+                model_ms: None,
+                tool_ms: None,
+                ..TurnStatistics::default()
+            },
+        ],
+        "a turn ends at its end checkpoint, and nothing stored before the next start is in it"
+    );
+    assert_eq!(
+        statistics.models,
+        [model(
+            faux,
+            Usage {
+                input: 35,
+                output: 4,
+                cost_micro_usd: 3_500,
+                ..Usage::default()
+            },
+            3,
+            0,
+        )],
+        "the session's totals keep what the entries after the end spent"
+    );
+    assert_eq!(
+        statistics.tools,
+        [ToolCalls {
+            name: "bash".to_owned(),
+            failed: 1,
+            ..ToolCalls::default()
+        }],
+        "and their calls, whose turn is over"
+    );
+}
