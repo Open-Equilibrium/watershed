@@ -277,7 +277,8 @@ class _DiffViewState extends State<DiffView> {
   void _jump(int step) {
     if (!_scroll.hasClients) return;
     final position = _scroll.position;
-    final offsets = [for (final row in _hunks) row * UnifiedLineRow.height];
+    final height = UnifiedLineRow.heightIn(MediaQuery.textScalerOf(context));
+    final offsets = [for (final row in _hunks) row * height];
     final now = position.pixels;
     final target = step > 0
         ? offsets.where((offset) => offset > now + 1).firstOrNull

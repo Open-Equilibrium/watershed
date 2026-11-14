@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../theme/theme.dart';
@@ -95,6 +97,13 @@ class UnifiedLineRow extends StatelessWidget {
   const UnifiedLineRow({super.key, required this.line});
 
   static const height = 22.0;
+
+  /// The height of a row at the text scale `scaler`: its mono line grows with the scale, and a
+  /// row never gets shorter than [height].
+  static double heightIn(TextScaler scaler) => math.max(
+    height,
+    scaler.scale(WsMetrics.fsMono) * WsMetrics.lhMono / WsMetrics.fsMono,
+  );
 
   /// Width of the two line numbers and the sign before the code.
   static const gutter = 44.0 + 44.0 + 20.0;

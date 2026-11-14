@@ -182,14 +182,6 @@ const _buttonLabel = TextStyle(
 );
 const _buttonPadding = WsMetrics.space4;
 
-/// The width a shared button with `label` takes, for layouts that must know before drawing it.
-double buttonWidth(BuildContext context, String label) =>
-    measureText(
-      label,
-      DefaultTextStyle.of(context).style.merge(_buttonLabel),
-    ).width +
-    2 * _buttonPadding;
-
 class PrimaryButton extends StatelessWidget {
   const PrimaryButton({
     super.key,
@@ -557,11 +549,13 @@ TextEditingController adoptController(
   return fresh;
 }
 
-/// The size `text` takes in `style`; the measuring painter is released at once.
-Size measureText(String text, TextStyle style) {
+/// The size `text` takes in `style` at the text scale `scaler`; the measuring painter is released
+/// at once.
+Size measureText(String text, TextStyle style, TextScaler scaler) {
   final painter = TextPainter(
     text: TextSpan(text: text, style: style),
     textDirection: TextDirection.ltr,
+    textScaler: scaler,
   )..layout();
   final size = painter.size;
   painter.dispose();

@@ -149,13 +149,16 @@ class PatchPane extends StatelessWidget {
 
   /// The lines, unified or split, as wide as the widest of them.
   Widget _lineList(BuildContext context, BoxConstraints constraints) {
-    final style = monoStyle(context);
+    // As the rows draw it: the theme's text style, such as its letter spacing, under the mono one.
+    final style = DefaultTextStyle.of(context).style.merge(monoStyle(context));
+    final scaler = MediaQuery.textScalerOf(context);
     final split = settings.layout == DiffLayout.split;
     // Split shows each side as wide as the unified view's code.
     final code =
         widest.fold(
           0.0,
-          (wide, text) => math.max(wide, measureText(text, style).width),
+          (wide, text) =>
+              math.max(wide, measureText(text, style, scaler).width),
         ) +
         WsMetrics.space6;
     final rows = split ? splitRows(lines) : const <SplitRow>[];
@@ -171,7 +174,7 @@ class PatchPane extends StatelessWidget {
         height: constraints.maxHeight,
         child: ListView.builder(
           controller: scroll,
-          itemExtent: UnifiedLineRow.height,
+          itemExtent: UnifiedLineRow.heightIn(scaler),
           itemCount: split ? rows.length : lines.length,
           itemBuilder: (context, index) => split
               ? SplitLineRow(row: rows[index])
