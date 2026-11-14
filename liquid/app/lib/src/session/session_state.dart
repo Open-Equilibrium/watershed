@@ -243,7 +243,7 @@ class SessionState {
     _generation++;
     _failing.clear();
     sessionTitle.value = null;
-    // The previous session's turns and figures no longer apply.
+    // The previous session's turns and statistics no longer apply.
     turns.value = const [];
     statistics.value = null;
     statisticsProblem.value = null;
@@ -271,7 +271,7 @@ class SessionState {
       await _backend.setModel(next);
       model.value = '${next.provider}/${next.id}';
       // The window and the compaction point belong to the model.
-      unawaited(readFigures());
+      unawaited(readStatistics());
     } on Object catch (error) {
       notify(BridgeLevel.error, 'Could not select ${next.name}: $error');
     }
@@ -494,15 +494,15 @@ class SessionState {
 
   /// Reads the branch's turns and what the shown ones changed between their checkpoints. A
   /// failed read is reported once, and the Diff panel says so instead of showing earlier changes.
-  Future<void> readChanges() => _changes();
-  late final _changes = _ReadLoop(_readChangesOnce);
+  Future<void> readChanges() => _changesRead();
+  late final _changesRead = _ReadLoop(_readChangesOnce);
 
   /// Reads the statistics and the context window, as [readChanges] reads the turns.
-  Future<void> readFigures() => _figures();
-  late final _figures = _ReadLoop(_readFiguresOnce);
+  Future<void> readStatistics() => _statisticsRead();
+  late final _statisticsRead = _ReadLoop(_readStatisticsOnce);
 
   /// Reads the statistics, then the context window, so a window that fails keeps the statistics.
-  Future<void> _readFiguresOnce() async {
+  Future<void> _readStatisticsOnce() async {
     final generation = _generation;
     try {
       final stats = await _backend.statistics();
@@ -637,7 +637,7 @@ class SessionState {
     final generation = _generation;
     final asked = _turnReadsStarted;
     unawaited(git.refresh());
-    unawaited(readFigures());
+    unawaited(readStatistics());
     await readChanges();
     if (generation != _generation) return;
     _chat.endTurns(turns.value, _turnsRead > asked ? ended : 0);
@@ -862,7 +862,7 @@ class SessionState {
   /// where it leaves the other branches. Items that arrive meanwhile stay after it.
   Future<void> loadChat() async {
     await _chat.load();
-    unawaited(readFigures());
+    unawaited(readStatistics());
   }
 
   /// Reads the stored entries before the earliest one the chat covers.
@@ -1022,7 +1022,7 @@ class SessionState {
         }
       case BridgeEventKind.modelRequestCompleted:
         totals.value = totals.value.add(event.step!.usage);
-        unawaited(readFigures());
+        unawaited(readStatistics());
         // A request Stop ended reports an abort, some providers as an error.
         if (event.step!.error case final error?
             when event.step!.stopReason != 'aborted' && !_stopping) {

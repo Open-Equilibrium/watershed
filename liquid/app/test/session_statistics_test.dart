@@ -57,7 +57,7 @@ BridgeTurnStatistics turn({
 
 void main() {
   test('sums tokens, cost and responses over the models', () {
-    final figures = SessionStatistics(
+    final statistics = SessionStatistics(
       BridgeStatistics(
         models: [
           model(
@@ -85,18 +85,18 @@ void main() {
     );
 
     expect(
-      figures.tokens,
+      statistics.tokens,
       4850,
       reason: 'input, cache reads and writes, output',
     );
-    expect(figures.cost, 1000000);
-    expect(figures.responses, 6);
-    expect(figures.unpriced, 3);
-    expect(figures.models.map((it) => it.name), ['claude-sonnet', 'gpt']);
+    expect(statistics.cost, 1000000);
+    expect(statistics.responses, 6);
+    expect(statistics.unpriced, 3);
+    expect(statistics.models.map((it) => it.name), ['claude-sonnet', 'gpt']);
   });
 
   test('splits working time into model, tools and other, clamped at zero', () {
-    final figures = SessionStatistics(
+    final statistics = SessionStatistics(
       BridgeStatistics(
         models: const [],
         tools: const [],
@@ -119,18 +119,18 @@ void main() {
       ),
     );
 
-    expect(figures.workingMs, 15000);
-    expect(figures.modelMs, 12000);
-    expect(figures.toolMs, 3000);
+    expect(statistics.workingMs, 15000);
+    expect(statistics.modelMs, 12000);
+    expect(statistics.toolMs, 3000);
     expect(
-      figures.otherMs,
+      statistics.otherMs,
       1000,
       reason: 'a turn whose requests overlap its clock keeps no negative other time',
     );
   });
 
   test('a turn without timing entries leaves model and tool time unknown', () {
-    final figures = SessionStatistics(
+    final statistics = SessionStatistics(
       BridgeStatistics(
         models: const [],
         tools: const [],
@@ -148,19 +148,19 @@ void main() {
     );
 
     expect(
-      figures.workingMs,
+      statistics.workingMs,
       8000,
       reason: 'the turn clocks need no timing entries',
     );
-    expect(figures.modelMs, isNull);
-    expect(figures.toolMs, isNull);
-    expect(figures.otherMs, isNull);
-    expect(figures.turns.last.workingMs, 4000);
-    expect(figures.turns.last.modelMs, isNull);
+    expect(statistics.modelMs, isNull);
+    expect(statistics.toolMs, isNull);
+    expect(statistics.otherMs, isNull);
+    expect(statistics.turns.last.workingMs, 4000);
+    expect(statistics.turns.last.modelMs, isNull);
   });
 
   test('the session span runs from its first entry to its last', () {
-    final figures = SessionStatistics(
+    final statistics = SessionStatistics(
       const BridgeStatistics(
         models: [],
         tools: [],
@@ -170,7 +170,7 @@ void main() {
       ),
     );
 
-    expect(figures.spanMs, 7499000);
+    expect(statistics.spanMs, 7499000);
     expect(
       SessionStatistics(
         const BridgeStatistics(models: [], tools: [], turns: []),
@@ -239,7 +239,7 @@ void main() {
   test(
     'the three largest models have a series of their own, the rest share one',
     () {
-      final figures = SessionStatistics(
+      final statistics = SessionStatistics(
         BridgeStatistics(
           models: [
             for (final name in ['a', 'b', 'c', 'd'])
@@ -255,11 +255,11 @@ void main() {
       expect(
         [
           for (final name in ['p/a', 'p/b', 'p/c', 'p/d'])
-            figures.seriesOf(name),
+            statistics.seriesOf(name),
         ],
         [0, 1, 2, otherSeries],
       );
-      expect(figures.seriesOf('p/unknown'), otherSeries);
+      expect(statistics.seriesOf('p/unknown'), otherSeries);
     },
   );
 }

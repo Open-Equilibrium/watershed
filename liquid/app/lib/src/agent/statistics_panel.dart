@@ -105,20 +105,20 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
               widget.state.status,
             ]),
             builder: (context, _) {
-              final statistics = widget.state.statistics.value;
+              final stored = widget.state.statistics.value;
               final running = widget.state.status.value == RunStatus.running;
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _header(ws),
                   Expanded(
-                    child: statistics == null
+                    child: stored == null
                         ? _unread(ws, widget.state.statisticsProblem.value)
                         : SingleChildScrollView(
                             padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
                             child: _body(
                               ws,
-                              SessionStatistics(statistics, running: running),
+                              SessionStatistics(stored, running: running),
                             ),
                           ),
                   ),
@@ -195,16 +195,16 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     ),
   );
 
-  Widget _body(WsPalette ws, SessionStatistics figures) {
+  Widget _body(WsPalette ws, SessionStatistics statistics) {
     final children = switch (_view) {
-      _View.cost => _costView(ws, figures),
-      _View.tokens => _tokensView(ws, figures),
-      _View.time => _timeView(ws, figures),
+      _View.cost => _costView(ws, statistics),
+      _View.tokens => _tokensView(ws, statistics),
+      _View.time => _timeView(ws, statistics),
     };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       spacing: 20,
-      children: [...children, _breakdownSection(ws, figures), _askRow(ws)],
+      children: [...children, _breakdownSection(ws, statistics), _askRow(ws)],
     );
   }
 
@@ -263,15 +263,15 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     ],
   );
 
-  List<Widget> _costView(WsPalette ws, SessionStatistics figures) {
-    final models = figures.models;
-    final kinds = figures.costByKind;
+  List<Widget> _costView(WsPalette ws, SessionStatistics statistics) {
+    final models = statistics.models;
+    final kinds = statistics.costByKind;
     return [
       _top(
         ws,
         title: 'Cost per turn',
-        hero: '≈ ${formatCost(figures.cost)}',
-        caption: _responsesAndTurns(figures),
+        hero: '≈ ${formatCost(statistics.cost)}',
+        caption: _responsesAndTurns(statistics),
         who: [
           for (final model in models)
             _who(
@@ -280,14 +280,14 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
               name: model.name,
               value: '≈ ${formatCost(model.cost)}',
               caption:
-                  '${formatShare(model.cost, figures.cost)} of cost · '
+                  '${formatShare(model.cost, statistics.cost)} of cost · '
                   '${formatTokens(model.tokens)} tokens · '
                   '${plural(model.responses, 'response')}',
             ),
         ],
         chart: _chart(
           ws,
-          figures,
+          statistics,
           columnParts: (turn) =>
               turn.bySeries((model) => model.usage.costMicroUsd),
           colours: [..._seriesColours(ws), ws.textFaint],
@@ -296,7 +296,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
             for (final model in turn.stats.models)
               if (model.usage.costMicroUsd > 0)
                 ChartTipRow(
-                  _series(ws, figures.seriesOf(model.model)),
+                  _series(ws, statistics.seriesOf(model.model)),
                   modelName(model.model),
                   '≈ ${formatCost(model.usage.costMicroUsd)}',
                 ),
@@ -307,7 +307,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
           ],
         ),
       ),
-      _totals(ws, figures),
+      _totals(ws, statistics),
       _byType(
         ws,
         'Cost by type',
@@ -352,30 +352,30 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     ],
   );
 
-  List<Widget> _tokensView(WsPalette ws, SessionStatistics figures) {
-    final usage = figures.usage;
+  List<Widget> _tokensView(WsPalette ws, SessionStatistics statistics) {
+    final usage = statistics.usage;
     return [
       _top(
         ws,
         title: 'Tokens per turn',
-        hero: formatTokens(figures.tokens),
-        caption: _responsesAndTurns(figures),
+        hero: formatTokens(statistics.tokens),
+        caption: _responsesAndTurns(statistics),
         who: [
-          for (final model in figures.models)
+          for (final model in statistics.models)
             _who(
               ws,
               colour: _series(ws, model.series),
               name: model.name,
               value: formatTokens(model.tokens),
               caption:
-                  '${formatShare(model.tokens, figures.tokens)} of tokens · '
+                  '${formatShare(model.tokens, statistics.tokens)} of tokens · '
                   '≈ ${formatCost(model.cost)} · '
                   '${plural(model.responses, 'response')}',
             ),
         ],
         chart: _chart(
           ws,
-          figures,
+          statistics,
           columnParts: (turn) => [
             turn.usage.input,
             turn.usage.cacheRead,
@@ -401,7 +401,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
           notes: (turn) => [turn.prompt],
         ),
       ),
-      _totals(ws, figures),
+      _totals(ws, statistics),
       _byType(
         ws,
         'Tokens by type',
@@ -414,12 +414,12 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     ];
   }
 
-  List<Widget> _timeView(WsPalette ws, SessionStatistics figures) {
-    final working = figures.workingMs;
+  List<Widget> _timeView(WsPalette ws, SessionStatistics statistics) {
+    final working = statistics.workingMs;
     final (model, tool, other) = (
-      figures.modelMs,
-      figures.toolMs,
-      figures.otherMs,
+      statistics.modelMs,
+      statistics.toolMs,
+      statistics.otherMs,
     );
     String share(int? part) =>
         part == null || working == 0 ? '—' : formatShare(part, working);
@@ -429,8 +429,8 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
         title: 'Time per turn',
         hero: formatDuration(working),
         caption: [
-          plural(figures.turns.length, 'turn'),
-          if (figures.spanMs case final span?)
+          plural(statistics.turns.length, 'turn'),
+          if (statistics.spanMs case final span?)
             '${formatDuration(span)} from first to last entry',
         ].join(' · '),
         who: [
@@ -441,8 +441,8 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
             value: model == null ? '—' : formatDuration(model),
             caption: model == null
                 ? 'Not recorded for turns without timing entries'
-                : '${share(model)} · ${plural(figures.responses, 'response')}'
-                      ' · ${formatDuration(model ~/ (figures.responses == 0 ? 1 : figures.responses))}'
+                : '${share(model)} · ${plural(statistics.responses, 'response')}'
+                      ' · ${formatDuration(model ~/ (statistics.responses == 0 ? 1 : statistics.responses))}'
                       ' each on average',
           ),
           _who(
@@ -452,7 +452,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
             value: tool == null ? '—' : formatDuration(tool),
             caption: tool == null
                 ? 'Not recorded for turns without timing entries'
-                : '${share(tool)} · ${plural(figures.toolCalls, 'call')}',
+                : '${share(tool)} · ${plural(statistics.toolCalls, 'call')}',
           ),
           _who(
             ws,
@@ -466,7 +466,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
         ],
         chart: _chart(
           ws,
-          figures,
+          statistics,
           columnParts: (turn) => [
             turn.modelMs ?? 0,
             turn.toolMs ?? 0,
@@ -494,25 +494,25 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     ];
   }
 
-  String _responsesAndTurns(SessionStatistics figures) =>
-      '${plural(figures.responses, 'response')} · '
-      '${plural(figures.turns.length, 'turn')} · as pi recorded it';
+  String _responsesAndTurns(SessionStatistics statistics) =>
+      '${plural(statistics.responses, 'response')} · '
+      '${plural(statistics.turns.length, 'turn')} · as pi recorded it';
 
   /// The chart of the turns: one column per turn, its parts stacked as `columnParts` gives them.
   TurnChart _chart(
     WsPalette ws,
-    SessionStatistics figures, {
-    required List<int> Function(TurnFigure turn) columnParts,
+    SessionStatistics statistics, {
+    required List<int> Function(TurnStatistics turn) columnParts,
     required List<Color> colours,
     required String Function(int value) axis,
-    required List<ChartTipRow> Function(TurnFigure turn) rows,
-    required List<String> Function(TurnFigure turn) notes,
-    String Function(TurnFigure turn)? title,
+    required List<ChartTipRow> Function(TurnStatistics turn) rows,
+    required List<String> Function(TurnStatistics turn) notes,
+    String Function(TurnStatistics turn)? title,
   }) => TurnChart(
     colors: colours,
     axis: axis,
     columns: [
-      for (final turn in figures.turns)
+      for (final turn in statistics.turns)
         ChartColumn(
           parts: columnParts(turn),
           tip: ChartTip(
@@ -524,8 +524,8 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     ],
   );
 
-  Widget _totals(WsPalette ws, SessionStatistics figures) {
-    final usage = figures.usage;
+  Widget _totals(WsPalette ws, SessionStatistics statistics) {
+    final usage = statistics.usage;
     final prompt = usage.input + usage.cacheRead;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -572,38 +572,39 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     );
   }
 
-  Widget _breakdownSection(WsPalette ws, SessionStatistics figures) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    spacing: 4,
-    children: [
-      Row(
+  Widget _breakdownSection(WsPalette ws, SessionStatistics statistics) =>
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        spacing: 4,
         children: [
-          _heading(ws, 'Breakdown'),
-          const Spacer(),
-          Segments<_Breakdown>(
-            options: const [
-              (_Breakdown.model, 'Model'),
-              (_Breakdown.tool, 'Tool'),
-              (_Breakdown.turn, 'Turn'),
+          Row(
+            children: [
+              _heading(ws, 'Breakdown'),
+              const Spacer(),
+              Segments<_Breakdown>(
+                options: const [
+                  (_Breakdown.model, 'Model'),
+                  (_Breakdown.tool, 'Tool'),
+                  (_Breakdown.turn, 'Turn'),
+                ],
+                selected: _breakdown,
+                onSelect: (next) => setState(() => _breakdown = next),
+              ),
             ],
-            selected: _breakdown,
-            onSelect: (next) => setState(() => _breakdown = next),
           ),
+          switch (_breakdown) {
+            _Breakdown.model => _modelTable(ws, statistics),
+            _Breakdown.tool => _toolTable(ws, statistics),
+            _Breakdown.turn => _turnTable(ws, statistics),
+          },
         ],
-      ),
-      switch (_breakdown) {
-        _Breakdown.model => _modelTable(ws, figures),
-        _Breakdown.tool => _toolTable(ws, figures),
-        _Breakdown.turn => _turnTable(ws, figures),
-      },
-    ],
-  );
+      );
 
-  Widget _modelTable(WsPalette ws, SessionStatistics figures) =>
+  Widget _modelTable(WsPalette ws, SessionStatistics statistics) =>
       StatisticsTable(
         headers: const ['#', 'Model', 'Responses', 'Tokens', 'Cost'],
         rows: [
-          for (final (index, model) in figures.models.indexed)
+          for (final (index, model) in statistics.models.indexed)
             [
               _index(ws, index),
               _name(ws, model.name),
@@ -614,8 +615,8 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
         ],
       );
 
-  Widget _toolTable(WsPalette ws, SessionStatistics figures) {
-    final tools = figures.tools;
+  Widget _toolTable(WsPalette ws, SessionStatistics statistics) {
+    final tools = statistics.tools;
     final largest = tools.fold(
       1,
       (most, tool) => tool.total > most ? tool.total : most,
@@ -670,21 +671,21 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
   }
 
   /// Shows a turn in the Chat: the Chat scrolls to its prompt and the panel closes.
-  void _selectTurn(TurnFigure turn) {
+  void _selectTurn(TurnStatistics turn) {
     widget.state.scrollChatTo.value = turn.stats.entry;
     widget.onClose();
   }
 
-  Widget _turnTable(WsPalette ws, SessionStatistics figures) {
-    final longest = figures.turns.fold(
+  Widget _turnTable(WsPalette ws, SessionStatistics statistics) {
+    final longest = statistics.turns.fold(
       1,
       (most, turn) => (turn.workingMs ?? 0) > most ? turn.workingMs! : most,
     );
     return StatisticsTable(
       headers: const ['#', 'Turn', 'Time', 'Tokens', 'Cost'],
-      onSelect: (index) => _selectTurn(figures.turns[index]),
+      onSelect: (index) => _selectTurn(statistics.turns[index]),
       rows: [
-        for (final turn in figures.turns)
+        for (final turn in statistics.turns)
           [
             _index(ws, turn.index - 1),
             _name(

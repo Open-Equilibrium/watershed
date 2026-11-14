@@ -16,7 +16,7 @@ void main() {
     expect(formatCount(6140), '6,140');
   });
 
-  test('formats the session figures as the card and panel show them', () {
+  test('formats the session statistics as the card and panel show them', () {
     expect(
       [
         formatTokens(820),

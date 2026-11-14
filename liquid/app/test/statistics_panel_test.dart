@@ -146,13 +146,13 @@ void main() {
   Future<void> show(
     WidgetTester tester, {
     BridgeStatistics? stats,
-    String? figuresError,
+    String? statisticsError,
     void Function(FakeBackend backend)? setup,
   }) async {
     await tester.binding.setSurfaceSize(const Size(1600, 900));
     backend = FakeBackend()
       ..stats = stats ?? statistics()
-      ..figuresError = figuresError;
+      ..statisticsError = statisticsError;
     setup?.call(backend);
     state = SessionState(backend);
     await tester.pumpWidget(
@@ -194,7 +194,7 @@ void main() {
   testWidgets('a failed statistics read says so instead of still reading', (
     tester,
   ) async {
-    await show(tester, figuresError: 'the session file is unreadable');
+    await show(tester, statisticsError: 'the session file is unreadable');
     await pressMeta(tester, LogicalKeyboardKey.keyU);
 
     expect(inPanel(find.text('No statistics shown')), findsOneWidget);
@@ -487,7 +487,7 @@ void main() {
     },
   );
 
-  testWidgets('hovering a turn column shows its figures', (tester) async {
+  testWidgets('hovering a turn column shows its statistics', (tester) async {
     await show(tester);
     await pressMeta(tester, LogicalKeyboardKey.keyU);
 

@@ -146,7 +146,7 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
   }
 
-  testWidgets('the figures show the statistics and the context window', (
+  testWidgets('the rows show the statistics and the context window', (
     tester,
   ) async {
     await show(tester);
@@ -223,7 +223,7 @@ void main() {
     expect(find.textContaining('claude-sonnet-4-5 ≈ \$1.27'), findsOneWidget);
   });
 
-  testWidgets('a figure row explains itself when the keyboard focuses it', (
+  testWidgets('a statistics row explains itself when the keyboard focuses it', (
     tester,
   ) async {
     await show(tester);
@@ -301,36 +301,37 @@ void main() {
     expect(state.statisticsOpen.value, isTrue);
   });
 
-  testWidgets('the figures wait for the first read of the statistics', (
+  testWidgets('the rows wait for the first read of the statistics', (
     tester,
   ) async {
     await show(
       tester,
-      setup: (backend) => backend.figuresGate = Completer<void>(),
+      setup: (backend) => backend.statisticsGate = Completer<void>(),
     );
     await tester.pump();
 
     expect(inCard(find.text('Tokens')), findsNothing);
     expect(inCard(find.text('Statistics')), findsOneWidget);
 
-    backend.figuresGate!.complete();
+    backend.statisticsGate!.complete();
     await tester.pumpAndSettle();
 
     expect(inCard(find.text('Tokens')), findsOneWidget);
   });
 
-  testWidgets('hidden rows leave their figures out, the Statistics row too', (
-    tester,
-  ) async {
-    await show(
-      tester,
-      settings: const SessionCardSettings(hidden: {CardItem.figures}),
-    );
+  testWidgets(
+    'hidden rows leave their statistics out, the Statistics row too',
+    (tester) async {
+      await show(
+        tester,
+        settings: const SessionCardSettings(hidden: {CardItem.statistics}),
+      );
 
-    expect(inCard(find.text('Tokens')), findsNothing);
-    expect(inCard(find.text('Statistics')), findsNothing);
-    expect(inCard(find.text('Context')), findsOneWidget);
-  });
+      expect(inCard(find.text('Tokens')), findsNothing);
+      expect(inCard(find.text('Statistics')), findsNothing);
+      expect(inCard(find.text('Context')), findsOneWidget);
+    },
+  );
 
   testWidgets('a hidden context window leaves its row out', (tester) async {
     await show(

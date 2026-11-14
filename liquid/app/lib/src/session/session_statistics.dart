@@ -7,8 +7,8 @@ import '../rust/api/history.dart';
 /// The chart series of the three largest models; the models after them share the last one.
 const otherSeries = 3;
 
-/// A session's statistics summed for the card and the statistics panel. Each figure adds up
-/// what the stored entries hold; a figure that needs timing a turn lacks is null, never a guess
+/// A session's statistics summed for the card and the statistics panel. Each value adds up
+/// what the stored entries hold; a value that needs timing a turn lacks is null, never a guess
 /// (ADR-0279).
 class SessionStatistics {
   SessionStatistics(this.statistics, {this.running = false});
@@ -22,7 +22,7 @@ class SessionStatistics {
     statistics.models.map((model) => model.usage),
   );
 
-  /// Input, cache reads and writes, and output, as the Tokens figure counts them.
+  /// Input, cache reads and writes, and output, as the Tokens row counts them.
   int get tokens => tokensOf(usage);
   int get cost => usage.costMicroUsd;
 
@@ -41,14 +41,14 @@ class SessionStatistics {
   int _costOf(int Function(BridgeCostByKind kind) of) =>
       statistics.models.fold(0, (sum, model) => sum + of(model.costByKind));
 
-  late final List<ModelFigure> models = [
+  late final List<ModelStatistics> models = [
     for (final stats in statistics.models)
-      ModelFigure(stats, seriesOf(stats.model)),
+      ModelStatistics(stats, seriesOf(stats.model)),
   ];
 
-  late final List<TurnFigure> turns = [
+  late final List<TurnStatistics> turns = [
     for (final (index, stats) in statistics.turns.indexed)
-      TurnFigure(index + 1, stats, seriesOf),
+      TurnStatistics(index + 1, stats, seriesOf),
   ];
 
   /// The chart series of a model: its place among the largest models, or the shared one.
@@ -125,8 +125,8 @@ class SessionStatistics {
 }
 
 /// What one model used over the whole session.
-class ModelFigure {
-  ModelFigure(this.stats, this.series);
+class ModelStatistics {
+  ModelStatistics(this.stats, this.series);
 
   final BridgeModelUsage stats;
 
@@ -169,8 +169,8 @@ class ToolStatistics {
 }
 
 /// One turn of the session, with its time split as the timing entries record it.
-class TurnFigure {
-  TurnFigure(this.index, this.stats, this._seriesOf);
+class TurnStatistics {
+  TurnStatistics(this.index, this.stats, this._seriesOf);
 
   /// The turn's number, from 1.
   final int index;

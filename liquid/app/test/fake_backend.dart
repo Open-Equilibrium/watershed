@@ -20,16 +20,16 @@ class FakeBackend implements SessionBackend {
   Map<String, String> patches = const {};
   BridgeHistory stored = historyOf();
 
-  /// What statistics() and context() return. Their reads are listed in `figureReads`, apart
+  /// What statistics() and context() return. Their reads are listed in `statisticsReads`, apart
   /// from `calls`, which keeps the commands and the history reads.
   BridgeStatistics stats = statisticsOf();
   BridgeContext? contextWindow;
-  final figureReads = <String>[];
-  String? figuresError;
+  final statisticsReads = <String>[];
+  String? statisticsError;
 
   /// What context() fails with, apart from the statistics.
   String? contextError;
-  Completer<void>? figuresGate;
+  Completer<void>? statisticsGate;
 
   bool cancelled = false;
   final _stopped = Completer<void>();
@@ -211,15 +211,15 @@ class FakeBackend implements SessionBackend {
 
   @override
   Future<BridgeStatistics> statistics() async {
-    figureReads.add('statistics');
-    await figuresGate?.future;
-    if (figuresError case final error?) throw error;
+    statisticsReads.add('statistics');
+    await statisticsGate?.future;
+    if (statisticsError case final error?) throw error;
     return stats;
   }
 
   @override
   Future<BridgeContext?> context() async {
-    figureReads.add('context');
+    statisticsReads.add('context');
     if (contextError case final error?) throw error;
     return contextWindow;
   }

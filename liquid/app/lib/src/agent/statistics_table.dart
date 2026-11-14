@@ -4,7 +4,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import '../workspace/row_menu.dart';
 
-/// A breakdown table: a `#` column, a name that takes the rest, then right-aligned figures.
+/// A breakdown table: a `#` column, a name that takes the rest, then right-aligned numbers.
 class StatisticsTable extends StatelessWidget {
   const StatisticsTable({
     super.key,

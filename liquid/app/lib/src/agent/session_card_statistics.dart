@@ -11,13 +11,13 @@ import 'fill_bar.dart';
 import 'segment_bar.dart';
 import 'statistics_chart.dart';
 
-/// The width of a figure row's value column.
+/// The width of a statistics row's value column.
 const _valueWidth = 110.0;
 
-/// A figure row of the session card: label, hairline and value, as T3 Code's usage rows read.
+/// A statistics row of the session card: label, hairline and value, as T3 Code's usage rows read.
 /// The row turns its background on hover, and its tooltip gives the exact parts (ADR-0279).
-class FigureRow extends StatefulWidget {
-  const FigureRow({
+class StatisticsRow extends StatefulWidget {
+  const StatisticsRow({
     super.key,
     required this.label,
     required this.value,
@@ -39,10 +39,10 @@ class FigureRow extends StatefulWidget {
   final bool faint;
 
   @override
-  State<FigureRow> createState() => _FigureRowState();
+  State<StatisticsRow> createState() => _StatisticsRowState();
 }
 
-class _FigureRowState extends State<FigureRow> {
+class _StatisticsRowState extends State<StatisticsRow> {
   bool _hovered = false;
   bool _focused = false;
   final _tip = GlobalKey<TooltipState>();
@@ -147,8 +147,8 @@ class _FigureRowState extends State<FigureRow> {
 
 /// The Context row: the share of the window the next request fills, with a tick where pi
 /// compacts. Its value is a dash while the tokens are not known.
-class ContextFigure extends StatelessWidget {
-  const ContextFigure({super.key, required this.window});
+class ContextRow extends StatelessWidget {
+  const ContextRow({super.key, required this.window});
 
   final BridgeContext window;
 
@@ -158,7 +158,7 @@ class ContextFigure extends StatelessWidget {
     final used = window.tokens;
     final limit = window.window;
     final compacts = window.compactsAt;
-    return FigureRow(
+    return StatisticsRow(
       label: 'Context',
       bar: FillBar(
         fraction: used == null || limit == 0 ? null : used / limit,
@@ -184,19 +184,19 @@ class ContextFigure extends StatelessWidget {
   }
 }
 
-/// The session's figures rows, in the card's order: tokens, cost, working time and tool calls.
+/// The session's statistics rows, in the card's order: tokens, cost, working time and tool calls.
 /// Each row says what its parts are when hovered.
 List<Widget> sessionStatisticsRows(
   BuildContext context,
-  SessionStatistics figures,
+  SessionStatistics statistics,
 ) {
   final ws = context.ws;
-  final usage = figures.usage;
-  final cost = formatCost(figures.cost);
-  final unpriced = figures.unpriced;
-  final failed = figures.toolsFailed;
+  final usage = statistics.usage;
+  final cost = formatCost(statistics.cost);
+  final unpriced = statistics.unpriced;
+  final failed = statistics.toolsFailed;
   return [
-    FigureRow(
+    StatisticsRow(
       label: 'Tokens',
       bar: SegmentBar(
         segments: [
@@ -206,16 +206,16 @@ List<Widget> sessionStatisticsRows(
           BarSegment(usage.output, ws.data3),
         ],
       ),
-      value: Text(formatTokens(figures.tokens)),
+      value: Text(formatTokens(statistics.tokens)),
       tip: [
-        'Tokens: ${formatTokens(figures.tokens)}',
+        'Tokens: ${formatTokens(statistics.tokens)}',
         'Input ${formatTokens(usage.input)}',
         'Cache read ${formatTokens(usage.cacheRead)}',
         'Cache write ${formatTokens(usage.cacheWrite)}',
         'Output ${formatTokens(usage.output)}',
       ],
     ),
-    FigureRow(
+    StatisticsRow(
       label: 'Cost',
       value: Row(
         mainAxisSize: MainAxisSize.min,
@@ -228,7 +228,7 @@ List<Widget> sessionStatisticsRows(
       ),
       tip: [
         '≈ $cost as pi recorded it',
-        for (final model in figures.models)
+        for (final model in statistics.models)
           '${model.name} ≈ ${formatCost(model.cost)}',
         if (unpriced == 1)
           '1 response without a recorded cost is counted in tokens, not in cost'
@@ -236,15 +236,15 @@ List<Widget> sessionStatisticsRows(
           '$unpriced responses without a recorded cost are counted in tokens, not in cost',
       ],
     ),
-    ..._timeRows(ws, figures),
-    FigureRow(
+    ..._timeRows(ws, statistics),
+    StatisticsRow(
       label: 'Tool calls',
       bar: SegmentBar(
         segments: [
-          BarSegment(figures.toolsSucceeded, ws.textFaint),
+          BarSegment(statistics.toolsSucceeded, ws.textFaint),
           BarSegment(failed, ws.danger),
-          BarSegment(figures.toolsCancelled, ws.borderStrong),
-          BarSegment(figures.toolsRunning, ws.textFaint, hatched: true),
+          BarSegment(statistics.toolsCancelled, ws.borderStrong),
+          BarSegment(statistics.toolsRunning, ws.textFaint, hatched: true),
         ],
       ),
       value: Text.rich(
@@ -255,37 +255,37 @@ List<Widget> sessionStatisticsRows(
                 text: '$failed failed · ',
                 style: TextStyle(color: ws.danger),
               ),
-            TextSpan(text: '${figures.toolCalls}'),
+            TextSpan(text: '${statistics.toolCalls}'),
           ],
         ),
       ),
-      tip: figures.toolCalls == 0
+      tip: statistics.toolCalls == 0
           ? null
           : [
-              'Tool calls: ${figures.toolCalls}',
-              _outcomes(figures),
-              ?_failingTools(figures),
+              'Tool calls: ${statistics.toolCalls}',
+              _outcomes(statistics),
+              ?_failingTools(statistics),
             ],
     ),
   ];
 }
 
 /// The working time row, with its model and tool parts when every turn recorded them.
-List<Widget> _timeRows(WsPalette ws, SessionStatistics figures) {
-  final working = formatDuration(figures.workingMs);
+List<Widget> _timeRows(WsPalette ws, SessionStatistics statistics) {
+  final working = formatDuration(statistics.workingMs);
   final (model, tool, other) = (
-    figures.modelMs,
-    figures.toolMs,
-    figures.otherMs,
+    statistics.modelMs,
+    statistics.toolMs,
+    statistics.otherMs,
   );
   if (model == null || tool == null || other == null) {
     return [
-      FigureRow(
+      StatisticsRow(
         label: 'Working time',
         value: Text(working),
         tip: ['Working time $working'],
       ),
-      FigureRow(
+      StatisticsRow(
         label: 'Model and tools',
         faint: true,
         value: const Text('—'),
@@ -297,7 +297,7 @@ List<Widget> _timeRows(WsPalette ws, SessionStatistics figures) {
     ];
   }
   return [
-    FigureRow(
+    StatisticsRow(
       label: 'Working time',
       bar: SegmentBar(
         segments: [
@@ -317,20 +317,20 @@ List<Widget> _timeRows(WsPalette ws, SessionStatistics figures) {
   ];
 }
 
-String _outcomes(SessionStatistics figures) {
-  final running = figures.toolsRunning;
+String _outcomes(SessionStatistics statistics) {
+  final running = statistics.toolsRunning;
   return [
-    '${figures.toolsSucceeded} succeeded',
-    '${figures.toolsFailed} failed',
-    '${figures.toolsCancelled} cancelled',
+    '${statistics.toolsSucceeded} succeeded',
+    '${statistics.toolsFailed} failed',
+    '${statistics.toolsCancelled} cancelled',
     if (running > 0) '$running running',
   ].join(' · ');
 }
 
 /// The tools with failed calls, the most failed first, as a tooltip line.
-String? _failingTools(SessionStatistics figures) {
+String? _failingTools(SessionStatistics statistics) {
   final failing = [
-    for (final tool in figures.tools)
+    for (final tool in statistics.tools)
       if (tool.failed > 0) tool,
   ]..sort((a, b) => b.failed.compareTo(a.failed));
   if (failing.isEmpty) return null;

@@ -221,33 +221,33 @@ void main() {
     await pumpEventQueue();
     expect(state.statistics.value, backend.stats);
     expect(state.contextWindow.value, backend.contextWindow);
-    expect(backend.figureReads, ['statistics', 'context']);
+    expect(backend.statisticsReads, ['statistics', 'context']);
   });
 
-  test('reads the figures when a response or a turn ends', () async {
+  test('reads the statistics when a response or a turn ends', () async {
     await state.loadChat();
     await pumpEventQueue();
-    backend.figureReads.clear();
+    backend.statisticsReads.clear();
     await emit(
       event(
         BridgeEventKind.modelRequestCompleted,
         step: BridgeStep(usage: usage(100, 20, 5), stopReason: 'stop'),
       ),
     );
-    expect(backend.figureReads, ['statistics', 'context']);
-    backend.figureReads.clear();
+    expect(backend.statisticsReads, ['statistics', 'context']);
+    backend.statisticsReads.clear();
     await emit(event(BridgeEventKind.turnStarted));
     await emit(event(BridgeEventKind.turnCompleted));
-    expect(backend.figureReads, contains('statistics'));
+    expect(backend.statisticsReads, contains('statistics'));
   });
 
   test(
-    'figure reads never pile up: one more runs after a read in flight',
+    'statistics reads never pile up: one more runs after a read in flight',
     () async {
       await state.loadChat();
       await pumpEventQueue();
-      backend.figureReads.clear();
-      backend.figuresGate = Completer<void>();
+      backend.statisticsReads.clear();
+      backend.statisticsGate = Completer<void>();
       for (var response = 0; response < 3; response++) {
         await emit(
           event(
@@ -256,18 +256,18 @@ void main() {
           ),
         );
       }
-      backend.figuresGate!.complete();
+      backend.statisticsGate!.complete();
       await pumpEventQueue();
       expect(
-        backend.figureReads,
+        backend.statisticsReads,
         ['statistics', 'context', 'statistics', 'context'],
         reason: 'responses asked for while a read runs share one read after it',
       );
     },
   );
 
-  test('a failed figures read is reported once', () async {
-    backend.figuresError = 'the session file is unreadable';
+  test('a failed statistics read is reported once', () async {
+    backend.statisticsError = 'the session file is unreadable';
     await state.loadChat();
     await pumpEventQueue();
     await state.loadChat();
@@ -280,7 +280,7 @@ void main() {
   });
 
   test('a failed statistics read is shown until a later read works', () async {
-    backend.figuresError = 'the session file is unreadable';
+    backend.statisticsError = 'the session file is unreadable';
     await state.loadChat();
     await pumpEventQueue();
     expect(state.statistics.value, isNull);
@@ -289,8 +289,8 @@ void main() {
       text: 'Could not read the statistics: the session file is unreadable',
     ));
 
-    backend.figuresError = null;
-    await state.readFigures();
+    backend.statisticsError = null;
+    await state.readStatistics();
     expect(state.statistics.value, backend.stats);
     expect(state.statisticsProblem.value, isNull);
   });
@@ -313,12 +313,12 @@ void main() {
   test('choosing a model reads the window of the new model again', () async {
     await state.loadChat();
     await pumpEventQueue();
-    backend.figureReads.clear();
+    backend.statisticsReads.clear();
     await state.setModel(
       BridgeModel(provider: 'faux', id: 'faux-2', name: 'Faux Two'),
     );
     await pumpEventQueue();
-    expect(backend.figureReads, ['statistics', 'context']);
+    expect(backend.statisticsReads, ['statistics', 'context']);
   });
 
   test(

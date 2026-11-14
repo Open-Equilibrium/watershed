@@ -19,7 +19,7 @@ import 'session_card_rows.dart';
 import 'session_card_settings.dart';
 
 /// The session card's rows, in T3 Code's order, shrunk to the space they have: the Version
-/// Control rows, then the session figures and the context window below a divider. A row is left
+/// Control rows, then the session statistics and the context window below a divider. A row is left
 /// out when Liquid has nothing for it, and the Git action row leaves a compact card as T3 Code's
 /// does.
 class SessionCard extends StatefulWidget {
@@ -151,8 +151,8 @@ class _SessionCardState extends State<SessionCard> {
     final window = shown.shows(CardItem.context)
         ? state.contextWindow.value
         : null;
-    final hasFigures = shown.shows(CardItem.figures);
-    final hasUsage = hasFigures && state.statistics.value != null;
+    final hasStatistics = shown.shows(CardItem.statistics);
+    final hasUsage = hasStatistics && state.statistics.value != null;
     // Measurements hold only while the same rows show.
     final signature =
         '$hasBranch $hasPull $hasGit $hasChanges ${window != null} $hasUsage';
@@ -175,7 +175,7 @@ class _SessionCardState extends State<SessionCard> {
         hasPull ||
         hasGit ||
         hasChanges ||
-        hasFigures ||
+        hasStatistics ||
         window != null;
     return MenuAnchor(
       controller: _menu,
@@ -212,8 +212,8 @@ class _SessionCardState extends State<SessionCard> {
                   ],
                 ),
                 if (window != null) _ContextWindow(window: window),
-                if (hasFigures)
-                  _SessionStatistics(state: state, divided: window == null),
+                if (hasStatistics)
+                  _StatisticsSection(state: state, divided: window == null),
               ],
             ),
           ],
@@ -397,11 +397,11 @@ class _Section extends StatelessWidget {
   }
 }
 
-/// The session figures, with the Statistics row that opens the panel. The figures wait for the
+/// The session statistics rows, with the Statistics row that opens the panel. The rows wait for the
 /// first read of the statistics; `divided` is false when the context window above draws the
 /// divider.
-class _SessionStatistics extends StatelessWidget {
-  const _SessionStatistics({required this.state, required this.divided});
+class _StatisticsSection extends StatelessWidget {
+  const _StatisticsSection({required this.state, required this.divided});
 
   final SessionState state;
   final bool divided;
@@ -411,15 +411,15 @@ class _SessionStatistics extends StatelessWidget {
     listenable: Listenable.merge([state.statistics, state.status]),
     builder: (context, _) {
       final ws = context.ws;
-      final statistics = state.statistics.value;
+      final stored = state.statistics.value;
       final running = state.status.value == RunStatus.running;
       return _Section(
         divided: divided,
         rows: [
-          if (statistics != null)
+          if (stored != null)
             ...sessionStatisticsRows(
               context,
-              SessionStatistics(statistics, running: running),
+              SessionStatistics(stored, running: running),
             ),
           // The Statistics row opens the panel, and names the key that opens it.
           CardRow(
@@ -452,7 +452,7 @@ class _ContextWindow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) =>
-      _Section(divided: true, rows: [ContextFigure(window: window)]);
+      _Section(divided: true, rows: [ContextRow(window: window)]);
 }
 
 /// The Changes row: the latest finished turn's lines, which opens the Diff panel.
