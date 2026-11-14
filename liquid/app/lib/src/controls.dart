@@ -123,39 +123,43 @@ class _Button extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final button = Material(
-      color: background,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-        side: outline == null ? BorderSide.none : BorderSide(color: outline!),
-      ),
-      child: InkWell(
-        onTap: onPressed,
-        focusNode: focusNode,
-        canRequestFocus: focusNode != null,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-        child: Container(
-          height: 28,
-          padding: const EdgeInsets.symmetric(horizontal: _buttonPadding),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            // Centered when a layout stretches the button.
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (icon case final icon?) ...[
-                Icon(icon, size: 16, color: foreground),
-                const SizedBox(width: WsMetrics.space2),
-              ],
-              // Cut short only where a layout leaves the button too little room.
-              Flexible(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: _buttonLabel.copyWith(color: foreground),
+    final button = Semantics(
+      button: true,
+      enabled: onPressed != null,
+      child: Material(
+        color: background,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+          side: outline == null ? BorderSide.none : BorderSide(color: outline!),
+        ),
+        child: InkWell(
+          onTap: onPressed,
+          focusNode: focusNode,
+          canRequestFocus: focusNode != null,
+          borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+          child: Container(
+            height: 28,
+            padding: const EdgeInsets.symmetric(horizontal: _buttonPadding),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              // Centered when a layout stretches the button.
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (icon case final icon?) ...[
+                  Icon(icon, size: 16, color: foreground),
+                  const SizedBox(width: WsMetrics.space2),
+                ],
+                // Cut short only where a layout leaves the button too little room.
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: _buttonLabel.copyWith(color: foreground),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
