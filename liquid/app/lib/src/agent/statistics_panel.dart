@@ -8,6 +8,7 @@ import '../session/session_state.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import '../workspace/row_menu.dart';
 import 'segment_bar.dart';
 import 'statistics_chart.dart';
 
@@ -981,18 +982,30 @@ class _BreakdownRow extends StatefulWidget {
 
 class _BreakdownRowState extends State<_BreakdownRow> {
   bool _hovered = false;
+  bool _focused = false;
 
   @override
-  Widget build(BuildContext context) => MouseRegion(
-    cursor: widget.onTap == null ? MouseCursor.defer : SystemMouseCursors.click,
-    onEnter: (_) => setState(() => _hovered = true),
-    onExit: (_) => setState(() => _hovered = false),
-    child: GestureDetector(
-      behavior: HitTestBehavior.opaque,
+  Widget build(BuildContext context) => HoverRegion(
+    onHover: (hovered, _) {
+      if (mounted) setState(() => _hovered = hovered);
+    },
+    child: InkWell(
+      // A row that selects takes the keyboard, and Enter and Space select it, as a button does.
+      canRequestFocus: widget.onTap != null,
       onTap: widget.onTap,
+      onFocusChange: (focused) {
+        if (mounted) setState(() => _focused = focused);
+      },
+      mouseCursor: widget.onTap == null
+          ? MouseCursor.defer
+          : SystemMouseCursors.click,
+      hoverColor: Colors.transparent,
+      focusColor: Colors.transparent,
+      highlightColor: Colors.transparent,
+      splashColor: Colors.transparent,
       child: AnimatedContainer(
         duration: WsMetrics.motionFast,
-        color: _hovered ? context.ws.hover : null,
+        color: _hovered || _focused ? context.ws.hover : null,
         child: widget.child,
       ),
     ),

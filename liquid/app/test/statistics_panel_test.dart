@@ -367,6 +367,24 @@ void main() {
     },
   );
 
+  testWidgets('a turn row takes the keyboard, and Enter shows that turn', (
+    tester,
+  ) async {
+    await show(tester);
+    await pressMeta(tester, LogicalKeyboardKey.keyU);
+    await tester.tap(inPanel(find.text('Time')).first);
+    await tester.pumpAndSettle();
+
+    Focus.of(
+      tester.element(inPanel(find.text('Cover the limiter with tests')).first),
+    ).requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('statistics-panel')), findsNothing);
+  });
+
   testWidgets(
     'a breakdown row takes the hover colour while the pointer is over it',
     (tester) async {
