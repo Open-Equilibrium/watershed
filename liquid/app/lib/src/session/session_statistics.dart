@@ -73,7 +73,8 @@ class SessionStatistics {
 
   /// Each tool's calls by outcome, in the order the statistics list the tools.
   late final List<ToolStatistics> tools = [
-    for (final tool in statistics.tools) ToolStatistics(tool, running: running),
+    for (final tool in statistics.tools)
+      ToolStatistics(tool, turnRunning: running),
   ];
 
   /// Tool calls by outcome, over every tool and the whole session.
@@ -149,17 +150,19 @@ String modelName(String model) {
 /// One tool's calls by outcome. A call still open counts as running while a turn runs and as
 /// cancelled once none does, so the card and the statistics panel agree (ADR-0279).
 class ToolStatistics {
-  ToolStatistics(this.stats, {required bool running}) : _running = running;
+  ToolStatistics(this.stats, {required this.turnRunning});
 
   final BridgeToolCalls stats;
-  final bool _running;
+
+  /// Whether a turn runs, when the open calls count as running rather than cancelled.
+  final bool turnRunning;
 
   String get name => stats.name;
   int? get durationMs => stats.durationMs;
   int get succeeded => stats.succeeded;
   int get failed => stats.failed;
-  int get cancelled => stats.cancelled + (_running ? 0 : stats.open);
-  int get running => _running ? stats.open : 0;
+  int get cancelled => stats.cancelled + (turnRunning ? 0 : stats.open);
+  int get running => turnRunning ? stats.open : 0;
 
   /// Every call of the tool, by any outcome.
   int get total => succeeded + failed + cancelled + running;

@@ -224,12 +224,12 @@ void main() {
       open: 2,
     );
 
-    final idle = ToolStatistics(tool, running: false);
+    final idle = ToolStatistics(tool, turnRunning: false);
     expect(
       [idle.succeeded, idle.failed, idle.cancelled, idle.running, idle.total],
       [16, 5, 3, 0, 24],
     );
-    final busy = ToolStatistics(tool, running: true);
+    final busy = ToolStatistics(tool, turnRunning: true);
     expect(
       [busy.succeeded, busy.failed, busy.cancelled, busy.running, busy.total],
       [16, 5, 1, 2, 24],
