@@ -31,6 +31,7 @@ import 'pull_request_status.dart';
 import 'session_card_area.dart';
 import 'session_card_settings.dart';
 import 'sidebar.dart';
+import 'statistics_panel.dart';
 import 'status_bar.dart';
 import 'worktrees_pane.dart';
 
@@ -283,6 +284,11 @@ class _AgentShellState extends State<AgentShell> {
   }
 
   /// Shows or hides the session card, whether it sits beside the Chat or over it.
+  void _toggleStatistics(SessionState state) {
+    _showSession();
+    state.statisticsOpen.value = !state.statisticsOpen.value;
+  }
+
   void _toggleCard() {
     _showSession();
     _cardOpen.value = !_cardOpen.value;
@@ -312,6 +318,7 @@ class _AgentShellState extends State<AgentShell> {
       Command.chat: _showSession,
       Command.diff: _toggleDiff,
       Command.sessionDetails: _toggleCard,
+      Command.statistics: () => _toggleStatistics(state),
       Command.focusInput: () {
         _showSession();
         // A tab that Settings just gave way to takes the keys when it opens, after this action.
@@ -368,6 +375,7 @@ class _AgentShellState extends State<AgentShell> {
                 item(Command.chat),
                 item(Command.diff),
                 item(Command.sessionDetails),
+                item(Command.statistics),
               ],
             ),
             PlatformMenuItemGroup(members: [item(Command.focusInput)]),
@@ -504,57 +512,88 @@ class _AgentShellState extends State<AgentShell> {
         ),
         const _Tabs(),
         Expanded(
-          child: ValueListenableBuilder(
-            valueListenable: _diffOpen,
-            builder: (context, diffOpen, _) {
-              // The input area stays with the Chat, beside the Diff panel.
-              final input = KeyedSubtree(
-                key: _inputKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    WidgetStrip(state: state),
-                    PushedOffer(state: state, device: info.device),
-                    ActionArea(
-                      state: state,
-                      project: info.project,
-                      composer: _composer,
-                      composerFocus: _composerFocus,
-                      onSent: _sent,
-                    ),
-                  ],
-                ),
-              );
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(
-                    child: SessionCardArea(
-                      state: state,
-                      device: info.device,
-                      settings: _cardSettings,
-                      open: _cardOpen,
-                      diffOpen: diffOpen,
-                      onChanges: () => _openDiff(const LatestTurn()),
-                      child: ChatView(
-                        state: state,
-                        info: info,
-                        input: input,
-                        onOpenDiff: (turn) => _openDiff(OneTurn(turn)),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: ValueListenableBuilder(
+                  valueListenable: _diffOpen,
+                  builder: (context, diffOpen, _) {
+                    // The input area stays with the Chat, beside the Diff panel.
+                    final input = KeyedSubtree(
+                      key: _inputKey,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          WidgetStrip(state: state),
+                          PushedOffer(state: state, device: info.device),
+                          ActionArea(
+                            state: state,
+                            project: info.project,
+                            composer: _composer,
+                            composerFocus: _composerFocus,
+                            onSent: _sent,
+                          ),
+                        ],
                       ),
-                    ),
-                  ),
-                  if (diffOpen)
-                    DiffPanel(
-                      state: state,
-                      settings: _diffSettings,
-                      parse: widget.parseDiff,
-                      onClose: _toggleDiff,
-                    ),
-                ],
-              );
-            },
+                    );
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(
+                          child: SessionCardArea(
+                            state: state,
+                            device: info.device,
+                            settings: _cardSettings,
+                            open: _cardOpen,
+                            diffOpen: diffOpen,
+                            onChanges: () => _openDiff(const LatestTurn()),
+                            child: ChatView(
+                              state: state,
+                              info: info,
+                              input: input,
+                              onOpenDiff: (turn) => _openDiff(OneTurn(turn)),
+                            ),
+                          ),
+                        ),
+                        if (diffOpen)
+                          DiffPanel(
+                            state: state,
+                            settings: _diffSettings,
+                            parse: widget.parseDiff,
+                            onClose: _toggleDiff,
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+              Positioned(
+                top: WsMetrics.space4,
+                right: WsMetrics.space4,
+                bottom: WsMetrics.space4,
+                left: WsMetrics.space4,
+                child: ListenableBuilder(
+                  listenable: state.statisticsOpen,
+                  builder: (context, _) => state.statisticsOpen.value
+                      ? Align(
+                          alignment: Alignment.topRight,
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 660),
+                            child: StatisticsPanel(
+                              state: state,
+                              onClose: () => state.statisticsOpen.value = false,
+                              onAsk: () {
+                                state.statisticsOpen.value = false;
+                                _composerFocus.requestFocus();
+                              },
+                            ),
+                          ),
+                        )
+                      : const SizedBox.shrink(),
+                ),
+              ),
+            ],
           ),
         ),
         ListenableBuilder(
