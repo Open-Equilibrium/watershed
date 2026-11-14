@@ -190,8 +190,8 @@ fn head(path: &Path, project: &Path) -> Option<Head> {
     })
 }
 
-/// Opens a session file pi stored, perhaps linked. pi writes plain files, so a pipe or device
-/// opens without waiting and is refused.
+/// Opens a file pi stored, such as a session or settings file, perhaps linked. pi writes plain
+/// files, so a pipe or device opens without waiting and is refused.
 pub(crate) fn open(path: &Path) -> std::io::Result<File> {
     let file = File::options()
         .read(true)

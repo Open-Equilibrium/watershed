@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
+use super::{pipe, unblocked};
 use crate::{
     History, StoredSession, recent_sessions, session_id, session_title, session_title_of,
     session_titles,
@@ -88,26 +89,6 @@ fn lists_the_projects_recent_sessions_newest_first() {
             },
         ]
     );
-}
-
-/// Makes a named pipe at `path`.
-fn pipe(path: &Path) {
-    let status = std::process::Command::new("mkfifo")
-        .arg(path)
-        .status()
-        .expect("mkfifo runs");
-    assert!(status.success());
-}
-
-/// Runs `read` on its own thread and fails, rather than hangs, when a pipe blocks it.
-fn unblocked<T: Send + 'static>(read: impl FnOnce() -> T + Send + 'static) -> T {
-    let (done, finished) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = done.send(read());
-    });
-    finished
-        .recv_timeout(Duration::from_secs(5))
-        .expect("a pipe must not block the read")
 }
 
 #[test]
