@@ -178,6 +178,12 @@ impl Entry {
     pub fn skipped(start: &[u8], end: &[u8]) -> Option<Self> {
         let start = String::from_utf8_lossy(start);
         let custom = start.starts_with(r#"{"type":"custom","#);
+        // pi writes a label's type first, so a skipped label still hides from the tree.
+        let body = if start.starts_with(r#"{"type":"label","#) {
+            Body::Label
+        } else {
+            Body::Other
+        };
         let fields = if custom {
             String::from_utf8_lossy(end)
         } else {
@@ -202,7 +208,7 @@ impl Entry {
             parent: field("parentId")?,
             at_ms: None,
             spend: None,
-            body: Body::Other,
+            body,
         })
     }
 

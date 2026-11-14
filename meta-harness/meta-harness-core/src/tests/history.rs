@@ -112,6 +112,44 @@ fn an_oversized_custom_message_keeps_its_place_in_the_branch() {
 }
 
 #[test]
+fn an_oversized_label_is_hidden_like_a_normal_one() {
+    // pi writes a label's type first, as it does for every entry but custom ones.
+    let huge = "x".repeat(17_000_000);
+    let tree = |name: &str, label: &str| {
+        let file = std::env::temp_dir().join(format!(
+            "watershed-label-{name}-{}.jsonl",
+            std::process::id()
+        ));
+        std::fs::write(
+            &file,
+            format!(
+                r#"{{"type":"session","version":3,"id":"s1","cwd":"/tmp"}}
+{{"type":"message","id":"u1","parentId":null,"message":{{"role":"user","content":"Go"}}}}
+{{"type":"message","id":"a1","parentId":"u1","message":{{"role":"assistant","content":[{{"type":"text","text":"Seen."}}]}}}}
+{{"type":"label","id":"l1","parentId":"a1","timestamp":"2026-11-01T10:00:45.000Z","targetId":"a1","label":"{label}"}}
+{{"type":"message","id":"m1","parentId":"l1","message":{{"role":"user","content":"More"}}}}
+"#
+            ),
+        )
+        .expect("session file");
+        let history = History::from_file(&file, 16 * 1024 * 1024);
+        let _ = std::fs::remove_file(&file);
+        nodes(history.expect("history"))
+    };
+    let expected = [
+        node("u1", None),
+        node("a1", Some("u1")),
+        node("m1", Some("a1")),
+    ];
+    assert_eq!(tree("normal", "mark"), expected);
+    assert_eq!(
+        tree("oversized", &huge),
+        expected,
+        "an oversized label is no tree node, and the entry after it reaches the label's parent"
+    );
+}
+
+#[test]
 fn sums_usage_pi_records_outside_responses() {
     let usage = |input: u64| format!(r#"{{"input":{input},"output":1,"cost":{{"total":0.001}}}}"#);
     let data: Value = serde_json::from_str(&format!(
