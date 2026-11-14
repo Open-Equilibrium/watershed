@@ -243,6 +243,7 @@ class SessionState {
     // The previous session's turns and figures no longer apply.
     turns.value = const [];
     statistics.value = null;
+    statisticsProblem.value = null;
     contextWindow.value = null;
     statisticsOpen.value = false;
     diffScope.value = const LatestTurn();
@@ -266,6 +267,8 @@ class SessionState {
     try {
       await _backend.setModel(next);
       model.value = '${next.provider}/${next.id}';
+      // The window and the compaction point belong to the model.
+      unawaited(readFigures());
     } on Object catch (error) {
       notify(BridgeLevel.error, 'Could not select ${next.name}: $error');
     }
@@ -436,6 +439,9 @@ class SessionState {
   /// after a switch, or when the read failed (ADR-0279).
   final statistics = ValueNotifier<BridgeStatistics?>(null);
 
+  /// Why the statistics are not shown, with their heading; null once a read works.
+  final statisticsProblem = ValueNotifier<({String title, String text})?>(null);
+
   /// The context window the next request fills, as last read with the statistics.
   final contextWindow = ValueNotifier<BridgeContext?>(null);
 
@@ -521,20 +527,31 @@ class SessionState {
     }
   }
 
+  /// Reads the statistics, then the context window, so a window that fails keeps the statistics.
   Future<void> _readFiguresOnce() async {
     final generation = _generation;
     try {
       final stats = await _backend.statistics();
-      final window = await _backend.context();
       if (generation != _generation) return;
       statistics.value = stats;
-      contextWindow.value = window;
+      statisticsProblem.value = null;
       reportRead('statistics', null);
     } on Object catch (error) {
       if (generation != _generation) return;
+      final problem = 'Could not read the statistics: $error';
       statistics.value = null;
+      statisticsProblem.value = (title: 'No statistics shown', text: problem);
+      reportRead('statistics', problem);
+    }
+    try {
+      final window = await _backend.context();
+      if (generation != _generation) return;
+      contextWindow.value = window;
+      reportRead('context window', null);
+    } on Object catch (error) {
+      if (generation != _generation) return;
       contextWindow.value = null;
-      reportRead('statistics', 'Could not read the statistics: $error');
+      reportRead('context window', 'Could not read the context window: $error');
     }
   }
 

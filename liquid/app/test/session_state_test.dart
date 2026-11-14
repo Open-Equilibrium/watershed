@@ -279,6 +279,48 @@ void main() {
     expect(state.statistics.value, isNull);
   });
 
+  test('a failed statistics read is shown until a later read works', () async {
+    backend.figuresError = 'the session file is unreadable';
+    await state.loadChat();
+    await pumpEventQueue();
+    expect(state.statistics.value, isNull);
+    expect(state.statisticsProblem.value, (
+      title: 'No statistics shown',
+      text: 'Could not read the statistics: the session file is unreadable',
+    ));
+
+    backend.figuresError = null;
+    await state.readFigures();
+    expect(state.statistics.value, backend.stats);
+    expect(state.statisticsProblem.value, isNull);
+  });
+
+  test('a failed context read keeps the statistics', () async {
+    backend.contextError = 'the model has no window size';
+    await state.loadChat();
+    await pumpEventQueue();
+    expect(state.statistics.value, backend.stats);
+    expect(state.statisticsProblem.value, isNull);
+    expect(state.contextWindow.value, isNull);
+    expect(
+      state.notices.value.map((notice) => notice.text),
+      contains(
+        'Could not read the context window: the model has no window size',
+      ),
+    );
+  });
+
+  test('choosing a model reads the window of the new model again', () async {
+    await state.loadChat();
+    await pumpEventQueue();
+    backend.figureReads.clear();
+    await state.setModel(
+      BridgeModel(provider: 'faux', id: 'faux-2', name: 'Faux Two'),
+    );
+    await pumpEventQueue();
+    expect(backend.figureReads, ['statistics', 'context']);
+  });
+
   test(
     'a revert continues the chat and the Diff panel on the new branch',
     () async {

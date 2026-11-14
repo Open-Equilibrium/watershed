@@ -26,6 +26,9 @@ class FakeBackend implements SessionBackend {
   BridgeContext? contextWindow;
   final figureReads = <String>[];
   String? figuresError;
+
+  /// What context() fails with, apart from the statistics.
+  String? contextError;
   Completer<void>? figuresGate;
 
   bool cancelled = false;
@@ -217,6 +220,7 @@ class FakeBackend implements SessionBackend {
   @override
   Future<BridgeContext?> context() async {
     figureReads.add('context');
+    if (contextError case final error?) throw error;
     return contextWindow;
   }
 

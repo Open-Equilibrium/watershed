@@ -99,6 +99,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
           child: ListenableBuilder(
             listenable: Listenable.merge([
               widget.state.statistics,
+              widget.state.statisticsProblem,
               widget.state.status,
             ]),
             builder: (context, _) {
@@ -110,16 +111,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
                   _header(ws),
                   Expanded(
                     child: statistics == null
-                        ? Padding(
-                            padding: const EdgeInsets.all(20),
-                            child: Text(
-                              'Reading the statistics…',
-                              style: TextStyle(
-                                fontSize: WsMetrics.fsSmall,
-                                color: ws.textFaint,
-                              ),
-                            ),
-                          )
+                        ? _unread(ws, widget.state.statisticsProblem.value)
                         : SingleChildScrollView(
                             padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
                             child: _body(
@@ -136,6 +128,34 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
       ),
     );
   }
+
+  /// The panel until the statistics are read: that they are being read, or why they are not.
+  Widget _unread(WsPalette ws, ({String title, String text})? problem) =>
+      Padding(
+        padding: const EdgeInsets.all(20),
+        child: problem == null
+            ? Text(
+                'Reading the statistics…',
+                style: TextStyle(
+                  fontSize: WsMetrics.fsSmall,
+                  color: ws.textFaint,
+                ),
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                spacing: 4,
+                children: [
+                  _heading(ws, problem.title),
+                  Text(
+                    problem.text,
+                    style: TextStyle(
+                      fontSize: WsMetrics.fsSmall,
+                      color: ws.textMuted,
+                    ),
+                  ),
+                ],
+              ),
+      );
 
   Widget _header(WsPalette ws) => Container(
     height: 44,

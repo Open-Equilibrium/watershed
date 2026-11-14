@@ -144,9 +144,15 @@ void main() {
   late FakeBackend backend;
   late SessionState state;
 
-  Future<void> show(WidgetTester tester, {BridgeStatistics? stats}) async {
+  Future<void> show(
+    WidgetTester tester, {
+    BridgeStatistics? stats,
+    String? figuresError,
+  }) async {
     await tester.binding.setSurfaceSize(const Size(1600, 900));
-    backend = FakeBackend()..stats = stats ?? statistics();
+    backend = FakeBackend()
+      ..stats = stats ?? statistics()
+      ..figuresError = figuresError;
     state = SessionState(backend);
     await tester.pumpWidget(
       MaterialApp(
@@ -182,6 +188,24 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('statistics-panel')), findsNothing);
+  });
+
+  testWidgets('a failed statistics read says so instead of still reading', (
+    tester,
+  ) async {
+    await show(tester, figuresError: 'the session file is unreadable');
+    await pressMeta(tester, LogicalKeyboardKey.keyU);
+
+    expect(inPanel(find.text('No statistics shown')), findsOneWidget);
+    expect(
+      inPanel(
+        find.text(
+          'Could not read the statistics: the session file is unreadable',
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(inPanel(find.text('Reading the statistics…')), findsNothing);
   });
 
   testWidgets('the Cost view leads with the cost and splits it by model', (
