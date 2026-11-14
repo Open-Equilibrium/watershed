@@ -20,7 +20,7 @@ import 'start_page.dart';
 /// The chat timeline of the current branch. It builds only visible items, each item rebuilds
 /// alone while its text streams (client architecture rules 5 and 6), and scrolling to the top
 /// reads earlier stored entries.
-class ChatView extends StatelessWidget {
+class ChatView extends StatefulWidget {
   const ChatView({
     super.key,
     required this.state,
@@ -40,13 +40,101 @@ class ChatView extends StatelessWidget {
   /// The input area, floating at the bottom.
   final Widget? input;
 
+  @override
+  State<ChatView> createState() => _ChatViewState();
+}
+
+class _ChatViewState extends State<ChatView> {
   /// How close to the oldest item reading earlier entries starts, in pixels.
   static const _readAhead = 600.0;
 
+  /// Earlier pages a scroll to an entry reads at most, and the jumps it makes to build the entry.
+  static const _revealPages = 50;
+  static const _revealJumps = 6;
+
+  final _scroll = ScrollController();
+
+  /// The widget of each item by its id, so a scroll finds the item it brings into view.
+  final _itemKeys = <int, GlobalKey>{};
+
+  @override
+  void initState() {
+    super.initState();
+    widget.state.scrollChatTo.addListener(_scrollRequested);
+  }
+
+  @override
+  void didUpdateWidget(ChatView old) {
+    super.didUpdateWidget(old);
+    if (old.state != widget.state) {
+      old.state.scrollChatTo.removeListener(_scrollRequested);
+      widget.state.scrollChatTo.addListener(_scrollRequested);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.state.scrollChatTo.removeListener(_scrollRequested);
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _scrollRequested() {
+    final entry = widget.state.scrollChatTo.value;
+    if (entry == null) return;
+    widget.state.scrollChatTo.value = null;
+    unawaited(_scrollTo(entry));
+  }
+
+  /// Reads earlier pages until the chat shows `entry`, then brings its first item into view. A
+  /// list builds only the items near its view, so the scroll first jumps near the item, where
+  /// the item builds, and repeats the jump a few times if the estimate missed.
+  Future<void> _scrollTo(String entry) async {
+    final state = widget.state;
+    for (
+      var page = 0;
+      page < _revealPages && _indexOf(entry) < 0 && state.chatMore.value;
+      page++
+    ) {
+      await state.loadEarlier();
+    }
+    for (var jump = 0; jump < _revealJumps; jump++) {
+      final index = _indexOf(entry);
+      if (index < 0 || !mounted) return;
+      final built = _itemKeys[state.items.value[index].id]?.currentContext;
+      if (built != null && built.mounted) {
+        await Scrollable.ensureVisible(built, alignment: 0.5);
+        return;
+      }
+      _jumpNear(index, state.items.value.length);
+      await WidgetsBinding.instance.endOfFrame;
+    }
+  }
+
+  int _indexOf(String entry) =>
+      widget.state.items.value.indexWhere((item) => item.entry == entry);
+
+  /// Jumps so the item at `index` of `count` lies near the middle of the view. The list is
+  /// reversed, so offset 0 is the newest item and the estimate counts the items newer than it,
+  /// at the average height of the items the list has measured.
+  void _jumpNear(int index, int count) {
+    if (!_scroll.hasClients) return;
+    final position = _scroll.position;
+    final average =
+        (position.maxScrollExtent + position.viewportDimension) / count;
+    final newer = (count - 1 - index) * average;
+    _scroll.jumpTo(
+      (newer - position.viewportDimension / 2)
+          .clamp(0.0, position.maxScrollExtent)
+          .toDouble(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final state = widget.state;
     return InputLane(
-      input: input,
+      input: widget.input,
       child: NotificationListener<Notification>(
         onNotification: (notification) {
           // Layout changes count as well: a newest page that fits the viewport never scrolls.
@@ -63,24 +151,26 @@ class ChatView extends StatelessWidget {
           valueListenable: state.items,
           // A session without a conversation shows the start page.
           builder: (context, items, _) => items.isEmpty
-              ? StartPage(state: state, info: info)
+              ? StartPage(state: state, info: widget.info)
               // Messages start at the top and flow down; a long chat
               // still keeps its newest message above the input.
               : Align(
                   alignment: Alignment.topCenter,
                   child: ListView.builder(
+                    controller: _scroll,
                     shrinkWrap: true,
                     reverse: true,
                     padding: EdgeInsets.only(
                       top: WsMetrics.space5,
                       bottom:
                           WsMetrics.space5 +
-                          (input == null ? 0 : inputClearance),
+                          (widget.input == null ? 0 : inputClearance),
                     ),
                     itemCount: items.length,
                     itemBuilder: (context, index) {
                       final item = items[items.length - 1 - index];
                       return Center(
+                        key: _itemKeys.putIfAbsent(item.id, GlobalKey.new),
                         child: SizedBox(
                           width: readingWidth,
                           child: Padding(
@@ -94,9 +184,9 @@ class ChatView extends StatelessWidget {
                                 ),
                                 (_, final turn?) => TurnChanges(
                                   turn: turn,
-                                  onOpenDiff: onOpenDiff == null
+                                  onOpenDiff: widget.onOpenDiff == null
                                       ? null
-                                      : () => onOpenDiff!(turn.id),
+                                      : () => widget.onOpenDiff!(turn.id),
                                   onRevert: () => unawaited(
                                     confirmRevert(context, state, turn),
                                   ),

@@ -109,6 +109,9 @@ class SessionState {
   /// Whether earlier stored entries of the chat remain to be read.
   ValueNotifier<bool> get chatMore => _chat.more;
 
+  /// The entry the Chat scrolls to next; the Chat clears it once it has scrolled there.
+  final scrollChatTo = ValueNotifier<String?>(null);
+
   /// The checkout's branch, its counts and its stash.
   late final git = GitState(_backend, notify: notify, bases: _bases);
 

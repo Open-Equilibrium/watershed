@@ -960,6 +960,34 @@ void main() {
     expect(state.items.value.single.outcome.value?.failed, isTrue);
   });
 
+  test('a call made during an earlier read waits for that read', () async {
+    backend.transcripts[''] = BridgeTranscript(
+      items: [chatItem('u2', BridgeItemKind.userMessage, text: 'Later')],
+      more: true,
+      start: 'u2',
+    );
+    backend.transcripts['u2'] = BridgeTranscript(
+      items: [chatItem('u1', BridgeItemKind.userMessage, text: 'First')],
+      more: false,
+      start: 'u1',
+    );
+    await state.loadChat();
+    final gate = Completer<void>();
+    backend.earlierGate = gate;
+    final first = state.loadEarlier();
+    var second = false;
+    final waiting = state.loadEarlier().then((_) => second = true);
+    await pumpEventQueue();
+    expect(second, isFalse, reason: 'the page in progress is not read again');
+    gate.complete();
+    await first;
+    await waiting;
+    expect(state.items.value.map((view) => view.text.value), [
+      'First',
+      'Later',
+    ]);
+  });
+
   test('an earlier page read before a branch never doubles the chat', () async {
     backend.transcripts[''] = BridgeTranscript(
       items: [chatItem('u2', BridgeItemKind.userMessage, text: 'Later')],

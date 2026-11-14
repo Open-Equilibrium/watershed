@@ -249,12 +249,27 @@ class ChatHistory {
     return true;
   }
 
+  /// The read of earlier entries in progress, which a call made meanwhile waits for.
+  Future<void>? _earlier;
+
   /// Reads the stored entries before the earliest one the chat covers, passing over pages the
   /// chat shows nothing of, such as tool results only.
-  Future<void> loadEarlier() async {
-    if (_readingVersion == _version) return;
+  Future<void> loadEarlier() {
+    if (_readingVersion == _version) return _earlier!;
     final version = _version;
     _readingVersion = version;
+    final read = _readEarlier(version);
+    _earlier = read;
+    return read.whenComplete(() {
+      // A newer chat may have started its own reading meanwhile; that one stays.
+      if (_readingVersion == version) {
+        _readingVersion = null;
+        _earlier = null;
+      }
+    });
+  }
+
+  Future<void> _readEarlier(int version) async {
     try {
       while (more.value && _start != null) {
         final before = _start;
@@ -289,9 +304,6 @@ class ChatHistory {
       }
     } on Object catch (error) {
       reportRead('earlier messages', 'Could not read earlier messages: $error');
-    } finally {
-      // A newer chat may have started its own reading meanwhile; that one stays.
-      if (_readingVersion == version) _readingVersion = null;
     }
   }
 

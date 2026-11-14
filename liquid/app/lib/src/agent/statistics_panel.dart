@@ -661,6 +661,12 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     );
   }
 
+  /// Shows a turn in the Chat: the Chat scrolls to its prompt and the panel closes.
+  void _selectTurn(TurnFigure turn) {
+    widget.state.scrollChatTo.value = turn.stats.entry;
+    widget.onClose();
+  }
+
   Widget _turnTable(WsPalette ws, SessionFigures figures) {
     final longest = figures.turns.fold(
       1,
@@ -669,6 +675,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     return _table(
       ws,
       headers: const ['#', 'Turn', 'Time', 'Tokens', 'Cost'],
+      onSelect: (index) => _selectTurn(figures.turns[index]),
       rows: [
         for (final turn in figures.turns)
           [
@@ -889,6 +896,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     WsPalette ws, {
     required List<String> headers,
     required List<List<Widget>> rows,
+    ValueChanged<int>? onSelect,
   }) {
     Widget cell(int column, Widget child) => column == 0
         ? SizedBox(width: 22, child: child)
@@ -900,18 +908,26 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
             width: 72,
             child: Align(alignment: Alignment.centerRight, child: child),
           );
-    Widget row(List<Widget> cells, {required bool header}) => Container(
-      padding: const EdgeInsets.symmetric(vertical: 7),
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: ws.border)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (final (column, child) in cells.indexed) cell(column, child),
-        ],
-      ),
-    );
+    Widget row(
+      List<Widget> cells, {
+      required bool header,
+      VoidCallback? onTap,
+    }) {
+      final content = Container(
+        padding: const EdgeInsets.symmetric(vertical: 7),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: ws.border)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final (column, child) in cells.indexed) cell(column, child),
+          ],
+        ),
+      );
+      return onTap == null ? content : InkWell(onTap: onTap, child: content);
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -925,7 +941,12 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
               ),
             ),
         ], header: true),
-        for (final cells in rows) row(cells, header: false),
+        for (final (index, cells) in rows.indexed)
+          row(
+            cells,
+            header: false,
+            onTap: onSelect == null ? null : () => onSelect(index),
+          ),
       ],
     );
   }

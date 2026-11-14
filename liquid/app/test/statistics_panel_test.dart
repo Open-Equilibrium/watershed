@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid/src/agent/chat_view.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/agent/statistics_chart.dart';
@@ -252,6 +253,65 @@ void main() {
       expect(inPanel(find.text('Waiting for the model')), findsOneWidget);
       expect(inPanel(find.text('—')), findsWidgets);
       expect(inPanel(find.text('9 min 48 s')), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'a turn row closes the panel and scrolls the Chat to its prompt',
+    (tester) async {
+      await show(tester);
+      // The second turn's prompt sits on an earlier page than the newest messages.
+      backend.transcripts[''] = BridgeTranscript(
+        items: [
+          for (var index = 0; index < 40; index++)
+            chatItem(
+              'm$index',
+              BridgeItemKind.assistantMessage,
+              text: 'Message $index',
+            ),
+        ],
+        more: true,
+        start: 'm0',
+      );
+      backend.transcripts['m0'] = BridgeTranscript(
+        items: [
+          chatItem(
+            'e1',
+            BridgeItemKind.userMessage,
+            text: 'Add a rate limit to /login',
+          ),
+          chatItem(
+            'e2',
+            BridgeItemKind.userMessage,
+            text: 'Cover the limiter with tests',
+          ),
+        ],
+        more: false,
+        start: 'e1',
+      );
+      await state.loadChat();
+      await tester.pumpAndSettle();
+      await pressMeta(tester, LogicalKeyboardKey.keyU);
+      await tester.tap(inPanel(find.widgetWithText(InkWell, 'Turn')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(inPanel(find.text('Cover the limiter with tests')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('statistics-panel')), findsNothing);
+      expect(backend.calls, contains('transcript m0'));
+      final chat = tester.getRect(find.byType(ChatView));
+      final prompt = tester.getRect(
+        find.descendant(
+          of: find.byType(ChatView),
+          matching: find.text('Cover the limiter with tests'),
+        ),
+      );
+      expect(
+        chat.contains(prompt.center),
+        isTrue,
+        reason: 'the prompt is in view',
+      );
     },
   );
 
