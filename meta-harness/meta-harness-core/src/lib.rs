@@ -5,6 +5,7 @@
 
 mod checkout;
 mod checkpoint;
+mod context;
 mod diff;
 mod event;
 mod framing;
@@ -18,6 +19,7 @@ mod visible;
 pub use checkpoint::{
     Branches, Checkpoint, Checkpoints, CommitFile, CommitPlan, Phase, RevertFile, RevertPlan,
 };
+pub use context::Context;
 pub use diff::{
     Branch, BranchTarget, ChangeStatus, Changes, Commit, Comparison, DiffError, FileChange,
     GitStatus, GitTransfer, PullRequest, PullRequestDraft, PullRequestError, PullRequestPlan,

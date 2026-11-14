@@ -5,9 +5,9 @@ use tokio::sync::mpsc::Receiver;
 use tokio::time::timeout;
 
 use crate::{
-    AgentCommand, AgentEvent, Answer, CommandError, Delivery, EntryKind, History, ItemDetail,
-    ItemId, ItemKind, ItemStatus, Model, NotificationLevel, Pending, Queue, RequestId, Session,
-    SessionEvent, SessionState, SessionTree, TreeNode, TurnId, UserInput,
+    AgentCommand, AgentEvent, Answer, CommandError, Context, Delivery, EntryKind, History,
+    ItemDetail, ItemId, ItemKind, ItemStatus, Model, NotificationLevel, Pending, Queue, RequestId,
+    Session, SessionEvent, SessionState, SessionTree, TreeNode, TurnId, UserInput,
 };
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -2180,5 +2180,58 @@ fn kept_checkpoints_keep_no_event_stream_open_after_the_exit() {
             "the event stream ends while the checkpoints are still held"
         );
         drop(checkpoints);
+    });
+}
+
+#[test]
+fn reads_the_context_window_and_when_pi_compacts_it() {
+    run(async {
+        // What pi answers for the context window, whether auto compaction is on, and what
+        // Watershed reads: no window is no context, and a compaction threshold needs auto
+        // compaction.
+        let cases = [
+            (
+                r#""contextUsage":{"tokens":null,"contextWindow":200000,"percent":null}"#,
+                "true",
+                Some(Context {
+                    tokens: None,
+                    window: 200_000,
+                    compacts_at: Some(200_000 - 16_384),
+                }),
+            ),
+            (
+                r#""contextUsage":{"tokens":1234,"contextWindow":200000,"percent":1}"#,
+                "false",
+                Some(Context {
+                    tokens: Some(1234),
+                    window: 200_000,
+                    compacts_at: None,
+                }),
+            ),
+            ("", "true", None),
+        ];
+        for (usage, enabled, expected) in cases {
+            let answer = |id: u32, command: &str, data: &str| {
+                format!(
+                    "printf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"{command}\",\"success\":true,\"data\":{{{data}}}}}'\n"
+                )
+            };
+            let script = [
+                expect_response(&[r#""type":"get_session_stats""#, r#""id":"1""#]),
+                answer(1, "get_session_stats", usage),
+                expect_response(&[r#""type":"get_state""#, r#""id":"2""#]),
+                answer(
+                    2,
+                    "get_state",
+                    &format!(
+                        r#""model":{{"provider":"faux","id":"faux-1"}},"autoCompactionEnabled":{enabled}"#
+                    ),
+                ),
+                "IFS= read -r line || exit 0\n".to_owned(),
+            ]
+            .concat();
+            let (mut session, _events) = fake_agent(&script);
+            assert_eq!(session.context().await, Ok(expected), "{usage}");
+        }
     });
 }

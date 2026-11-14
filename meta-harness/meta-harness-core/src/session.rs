@@ -15,8 +15,8 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::pi::queue;
 use crate::{
-    AgentEvent, Answer, Checkpoint, Checkpoints, Delivery, History, Phase, PiAdapter, Queue,
-    RequestId, Whitespace,
+    AgentEvent, Answer, Checkpoint, Checkpoints, Context, Delivery, History, Phase, PiAdapter,
+    Queue, RequestId, Whitespace,
 };
 use supervisor::{Supervisor, read_end};
 
@@ -153,6 +153,17 @@ impl Pending {
 /// Whether a session switch's answer says it happened.
 fn switched(data: &Value) -> bool {
     data.get("cancelled").and_then(Value::as_bool) != Some(true)
+}
+
+/// The model `get_state` names, as `provider/id`.
+fn model_of(state: &Value) -> Option<String> {
+    state.get("model").and_then(|model| {
+        Some(format!(
+            "{}/{}",
+            model.get("provider")?.as_str()?,
+            model.get("id")?.as_str()?
+        ))
+    })
 }
 
 /// A model the agent can use.
@@ -597,18 +608,43 @@ impl Session {
     pub async fn state(&mut self) -> Result<SessionState, CommandError> {
         let data = self.command(json!({ "type": "get_state" })).await?;
         let text = |field| data.get(field).and_then(Value::as_str);
-        let model = data.get("model").and_then(|model| {
-            Some(format!(
-                "{}/{}",
-                model.get("provider")?.as_str()?,
-                model.get("id")?.as_str()?
-            ))
-        });
         Ok(SessionState {
             session_file: text("sessionFile").map(|file| self.cwd.join(file)),
-            model,
+            model: model_of(&data),
             session_id: text("sessionId").map(str::to_owned),
         })
+    }
+
+    /// The context window the next request fills and when pi compacts it. `None` when the agent
+    /// reports no window, such as with no model (ADR-0279).
+    pub async fn context(&mut self) -> Result<Option<Context>, CommandError> {
+        let stats = self.command(json!({ "type": "get_session_stats" })).await?;
+        let Some(usage) = stats.get("contextUsage") else {
+            return Ok(None);
+        };
+        let Some(window) = usage.get("contextWindow").and_then(Value::as_u64) else {
+            return Ok(None);
+        };
+        let state = self.command(json!({ "type": "get_state" })).await?;
+        // Only an agent that reports auto compaction off has no threshold; pi's default is on.
+        let compacts_at = if state.get("autoCompactionEnabled") == Some(&json!(false)) {
+            None
+        } else {
+            let model = model_of(&state);
+            let project = self.cwd.clone();
+            tokio::task::spawn_blocking(move || {
+                let global = crate::context::agent_dir()?;
+                crate::context::compacts_at(&global, &project, model.as_deref(), window)
+            })
+            .await
+            .ok()
+            .flatten()
+        };
+        Ok(Some(Context {
+            tokens: usage.get("tokens").and_then(Value::as_u64),
+            window,
+            compacts_at,
+        }))
     }
 
     /// Reads the session's stored entries, including abandoned branches. The first read takes

@@ -1,6 +1,7 @@
 mod branches;
 mod checkpoint;
 mod commit;
+mod context;
 mod diff;
 mod framing;
 mod history;
