@@ -256,12 +256,7 @@ class _ChartPainter extends CustomPainter {
           ..color = grid
           ..strokeWidth = 1,
       );
-      _text(
-        canvas,
-        value == 0 ? axis(0) : axis(value),
-        Offset(plotLeft - 8, y),
-        alignRight: true,
-      );
+      _text(canvas, axis(value), Offset(plotLeft - 8, y), alignRight: true);
     }
     if (columns.isEmpty) return;
 

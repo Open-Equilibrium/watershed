@@ -7,6 +7,7 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import '../workspace/row_menu.dart';
+import 'fill_bar.dart';
 import 'segment_bar.dart';
 import 'statistics_chart.dart';
 
