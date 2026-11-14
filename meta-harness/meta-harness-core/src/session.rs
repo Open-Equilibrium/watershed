@@ -633,8 +633,8 @@ impl Session {
             let model = model_of(&state);
             let project = self.cwd.clone();
             tokio::task::spawn_blocking(move || {
-                let global = crate::context::agent_dir()?;
-                crate::context::compacts_at(&global, &project, model.as_deref(), window)
+                let global = crate::pi::settings::agent_dir()?;
+                crate::pi::settings::compacts_at(&global, &project, model.as_deref(), window)
             })
             .await
             .ok()

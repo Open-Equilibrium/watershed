@@ -1,7 +1,6 @@
 mod branches;
 mod checkpoint;
 mod commit;
-mod context;
 mod diff;
 mod framing;
 mod history;
@@ -10,6 +9,7 @@ mod pull_text;
 mod pulls;
 mod record;
 mod session;
+mod settings;
 mod statistics;
 mod stored;
 mod sync;

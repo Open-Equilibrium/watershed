@@ -12,6 +12,8 @@ use crate::event::{
 use crate::history::{first_line, patch_lines};
 use crate::visible::{visible, visible_name};
 
+pub(crate) mod settings;
+
 /// Title prefix of the input dialog Watershed's pi extension uses to ask for a checkpoint at a
 /// turn's start or end (ADR-0234); the core answers it with `{"ok":true}` or `{"error":…}`.
 const CHECKPOINT_PREFIX: &str = "watershed.checkpoint ";

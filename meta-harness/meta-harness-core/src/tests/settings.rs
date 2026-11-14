@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::context::compacts_at;
+use crate::pi::settings::compacts_at;
 
 const WINDOW: u64 = 200_000;
 const FAUX: &str = "faux/faux-1";
