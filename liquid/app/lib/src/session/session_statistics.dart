@@ -161,7 +161,6 @@ class TurnFigure {
   int get responses =>
       stats.models.fold(0, (sum, model) => sum + model.responses);
   int get failed => stats.failed;
-  int get toolCalls => stats.toolCalls;
 
   /// From the turn's first entry to its last; null when either is unknown.
   int? get workingMs {

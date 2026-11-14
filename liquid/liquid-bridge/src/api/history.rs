@@ -263,8 +263,6 @@ pub struct BridgeTurnStatistics {
     pub model_ms: Option<i64>,
     /// Time its tools took; `None` when the turn has no timing entries.
     pub tool_ms: Option<i64>,
-    /// Tool calls its responses made.
-    pub tool_calls: i64,
     /// Tool calls whose result failed.
     pub failed: i64,
 }

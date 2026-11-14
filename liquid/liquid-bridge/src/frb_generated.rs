@@ -5323,7 +5323,6 @@ impl SseDecode for crate::api::history::BridgeTurnStatistics {
         let mut var_models = <Vec<crate::api::history::BridgeModelUsage>>::sse_decode(deserializer);
         let mut var_modelMs = <Option<i64>>::sse_decode(deserializer);
         let mut var_toolMs = <Option<i64>>::sse_decode(deserializer);
-        let mut var_toolCalls = <i64>::sse_decode(deserializer);
         let mut var_failed = <i64>::sse_decode(deserializer);
         return crate::api::history::BridgeTurnStatistics {
             entry: var_entry,
@@ -5333,7 +5332,6 @@ impl SseDecode for crate::api::history::BridgeTurnStatistics {
             models: var_models,
             model_ms: var_modelMs,
             tool_ms: var_toolMs,
-            tool_calls: var_toolCalls,
             failed: var_failed,
         };
     }
@@ -8680,7 +8678,6 @@ impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeTurnStatistics
             self.models.into_into_dart().into_dart(),
             self.model_ms.into_into_dart().into_dart(),
             self.tool_ms.into_into_dart().into_dart(),
-            self.tool_calls.into_into_dart().into_dart(),
             self.failed.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -10094,7 +10091,6 @@ impl SseEncode for crate::api::history::BridgeTurnStatistics {
         <Vec<crate::api::history::BridgeModelUsage>>::sse_encode(self.models, serializer);
         <Option<i64>>::sse_encode(self.model_ms, serializer);
         <Option<i64>>::sse_encode(self.tool_ms, serializer);
-        <i64>::sse_encode(self.tool_calls, serializer);
         <i64>::sse_encode(self.failed, serializer);
     }
 }

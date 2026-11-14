@@ -62,8 +62,6 @@ pub struct TurnStatistics {
     /// Time its tools took: for each response, the longest of its tools, summed; `None` when the
     /// turn has no timing entries.
     pub tool_ms: Option<u64>,
-    /// Tool calls its responses made.
-    pub tool_calls: u32,
     /// Tool calls whose result failed.
     pub failed: u32,
 }
@@ -228,9 +226,6 @@ impl Count {
                         .or_default()
                         .push_back(index);
                     self.calls.insert(call.id.clone(), index);
-                    if let Some(index) = current {
-                        self.turns[index].stats.tool_calls += 1;
-                    }
                 }
             }
             Body::ToolTiming { call, duration_ms } => {

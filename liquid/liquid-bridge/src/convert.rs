@@ -191,7 +191,6 @@ impl From<TurnStatistics> for BridgeTurnStatistics {
             models: turn.models.into_iter().map(Into::into).collect(),
             model_ms: turn.model_ms.map(int),
             tool_ms: turn.tool_ms.map(int),
-            tool_calls: int(turn.tool_calls),
             failed: int(turn.failed),
         }
     }

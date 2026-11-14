@@ -708,9 +708,6 @@ class BridgeTurnStatistics {
   /// Time its tools took; `None` when the turn has no timing entries.
   final PlatformInt64? toolMs;
 
-  /// Tool calls its responses made.
-  final PlatformInt64 toolCalls;
-
   /// Tool calls whose result failed.
   final PlatformInt64 failed;
 
@@ -722,7 +719,6 @@ class BridgeTurnStatistics {
     required this.models,
     this.modelMs,
     this.toolMs,
-    required this.toolCalls,
     required this.failed,
   });
 
@@ -735,7 +731,6 @@ class BridgeTurnStatistics {
       models.hashCode ^
       modelMs.hashCode ^
       toolMs.hashCode ^
-      toolCalls.hashCode ^
       failed.hashCode;
 
   @override
@@ -750,6 +745,5 @@ class BridgeTurnStatistics {
           models == other.models &&
           modelMs == other.modelMs &&
           toolMs == other.toolMs &&
-          toolCalls == other.toolCalls &&
           failed == other.failed;
 }

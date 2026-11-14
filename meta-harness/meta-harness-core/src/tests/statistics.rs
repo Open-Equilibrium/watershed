@@ -137,7 +137,6 @@ fn turns_start_at_checkpoints_and_split_figures_by_model_tool_and_time() {
                 // Two requests; the tools of the first ran in parallel, so the longer one counts.
                 model_ms: Some(5_000),
                 tool_ms: Some(1_500),
-                tool_calls: 3,
                 failed: 1,
             },
             TurnStatistics {
@@ -159,7 +158,6 @@ fn turns_start_at_checkpoints_and_split_figures_by_model_tool_and_time() {
                 // No timing entry in this turn, so no time is shown rather than a guess.
                 model_ms: None,
                 tool_ms: None,
-                tool_calls: 1,
                 failed: 0,
             },
             TurnStatistics {
@@ -180,7 +178,6 @@ fn turns_start_at_checkpoints_and_split_figures_by_model_tool_and_time() {
                 )],
                 model_ms: None,
                 tool_ms: None,
-                tool_calls: 1,
                 failed: 0,
             },
         ],
@@ -244,7 +241,6 @@ fn without_checkpoints_each_prompt_starts_a_turn_and_missing_timing_stays_none()
                 // Its request was timed, and its one tool was not: the tools took no time.
                 model_ms: Some(2_000),
                 tool_ms: Some(0),
-                tool_calls: 1,
                 failed: 1,
             },
             TurnStatistics {
@@ -265,7 +261,6 @@ fn without_checkpoints_each_prompt_starts_a_turn_and_missing_timing_stays_none()
                 )],
                 model_ms: None,
                 tool_ms: None,
-                tool_calls: 1,
                 failed: 0,
             },
         ],

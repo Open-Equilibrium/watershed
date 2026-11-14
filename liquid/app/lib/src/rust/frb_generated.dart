@@ -4529,8 +4529,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeTurnStatistics dco_decode_bridge_turn_statistics(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 9)
-      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
     return BridgeTurnStatistics(
       entry: dco_decode_String(arr[0]),
       prompt: dco_decode_String(arr[1]),
@@ -4539,8 +4539,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       models: dco_decode_list_bridge_model_usage(arr[4]),
       modelMs: dco_decode_opt_box_autoadd_i_64(arr[5]),
       toolMs: dco_decode_opt_box_autoadd_i_64(arr[6]),
-      toolCalls: dco_decode_i_64(arr[7]),
-      failed: dco_decode_i_64(arr[8]),
+      failed: dco_decode_i_64(arr[7]),
     );
   }
 
@@ -6683,7 +6682,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_models = sse_decode_list_bridge_model_usage(deserializer);
     var var_modelMs = sse_decode_opt_box_autoadd_i_64(deserializer);
     var var_toolMs = sse_decode_opt_box_autoadd_i_64(deserializer);
-    var var_toolCalls = sse_decode_i_64(deserializer);
     var var_failed = sse_decode_i_64(deserializer);
     return BridgeTurnStatistics(
       entry: var_entry,
@@ -6693,7 +6691,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       models: var_models,
       modelMs: var_modelMs,
       toolMs: var_toolMs,
-      toolCalls: var_toolCalls,
       failed: var_failed,
     );
   }
@@ -8993,7 +8990,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_list_bridge_model_usage(self.models, serializer);
     sse_encode_opt_box_autoadd_i_64(self.modelMs, serializer);
     sse_encode_opt_box_autoadd_i_64(self.toolMs, serializer);
-    sse_encode_i_64(self.toolCalls, serializer);
     sse_encode_i_64(self.failed, serializer);
   }
 

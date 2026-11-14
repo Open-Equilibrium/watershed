@@ -1987,7 +1987,6 @@ fn reads_statistics_and_the_context_window_for_liquid() {
                 models: vec![model],
                 model_ms: Some(1_500),
                 tool_ms: Some(700),
-                tool_calls: 1,
                 failed: 1,
             }],
             started_ms: Some(1_793_527_200_000),
