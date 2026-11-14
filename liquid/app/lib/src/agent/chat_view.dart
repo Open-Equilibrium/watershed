@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../controls.dart';
 import '../diff/revert_dialog.dart';
@@ -240,7 +241,7 @@ class ItemTile extends StatelessWidget {
             children: [
               Expanded(child: SelectableText(text, style: prose)),
               if (item.entry case final entry?)
-                _AnswerMenu(state: state, entry: entry),
+                _AnswerMenu(state: state, entry: entry, text: text),
             ],
           ),
         ),
@@ -254,14 +255,22 @@ class ItemTile extends StatelessWidget {
   }
 }
 
-/// An agent answer's ··· menu, whose Branch from here continues the session from the answer.
+/// An agent answer's ··· menu: Copy takes the answer's text, and Branch from here continues the
+/// session from the answer.
 class _AnswerMenu extends StatelessWidget {
-  const _AnswerMenu({required this.state, required this.entry});
+  const _AnswerMenu({
+    required this.state,
+    required this.entry,
+    required this.text,
+  });
 
   final SessionState state;
 
   /// The stored entry the answer comes from.
   final String entry;
+
+  /// The answer's text, which Copy takes.
+  final String text;
 
   @override
   Widget build(BuildContext context) => SizedBox.square(
@@ -271,8 +280,15 @@ class _AnswerMenu extends StatelessWidget {
       tooltip: 'More',
       padding: EdgeInsets.zero,
       icon: Icon(LucideIcons.ellipsis, size: 16, color: context.ws.textFaint),
-      onSelected: (_) => _branch(),
+      onSelected: (action) {
+        if (action == 'copy') {
+          unawaited(Clipboard.setData(ClipboardData(text: text)));
+        } else {
+          _branch();
+        }
+      },
       itemBuilder: (_) => const [
+        PopupMenuItem(value: 'copy', child: Text('Copy')),
         PopupMenuItem(value: 'branch', child: Text('Branch from here')),
       ],
     ),

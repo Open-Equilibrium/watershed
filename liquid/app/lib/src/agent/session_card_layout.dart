@@ -6,6 +6,9 @@ import '../theme/tokens.g.dart';
 // The sizes of T3 Code's thread details card (threadDetailsCardLayout.ts, chatCanvasLayout.ts).
 const double cardWidth = 280;
 
+/// The tap group of the card and its sliders button: a press in either is not outside the card.
+const cardTapGroup = Object();
+
 /// The gap from the card to the top and right edges of the chat.
 const double cardInset = 12;
 
@@ -55,10 +58,4 @@ bool cardFitsBeside(Size canvas) =>
     math.min((canvasWidth - width) / 2, laneRight - width),
   );
   return (left: left, width: width);
-}
-
-/// Where the card sits: beside the chat, or as a popover over it. Written by the layout, read by
-/// a press outside the card.
-class CardPlacement {
-  bool beside = true;
 }

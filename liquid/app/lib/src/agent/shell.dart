@@ -29,6 +29,7 @@ import 'chat_view.dart';
 import 'input_lane.dart';
 import 'pull_request_status.dart';
 import 'session_card_area.dart';
+import 'session_card_layout.dart';
 import 'session_card_settings.dart';
 import 'sidebar.dart';
 import 'statistics_panel.dart';
@@ -89,7 +90,8 @@ class _AgentShellState extends State<AgentShell> {
   /// Keeps the input area's state while it moves into the open tab.
   final _inputKey = GlobalKey(debugLabel: 'input area');
   final _diffOpen = ValueNotifier(false);
-  final _cardOpen = ValueNotifier(true);
+  final _card = CardVisibility();
+  final _cardToggleFocus = FocusNode(debugLabel: 'session details');
   final _settings = ValueNotifier(false);
   final _focus = FocusNode(debugLabel: 'shell');
   late final _shortcuts = widget.shortcuts ?? ShortcutController.memory();
@@ -237,7 +239,8 @@ class _AgentShellState extends State<AgentShell> {
     _composer.dispose();
     _composerFocus.dispose();
     _diffOpen.dispose();
-    _cardOpen.dispose();
+    _card.dispose();
+    _cardToggleFocus.dispose();
     _settings.dispose();
     _focus.dispose();
     for (final settings in _saved.nonNulls) {
@@ -283,15 +286,28 @@ class _AgentShellState extends State<AgentShell> {
     }
   }
 
-  /// Shows or hides the session card, whether it sits beside the Chat or over it.
+  /// Opens or closes the statistics panel over the session's card corner.
   void _toggleStatistics(SessionState state) {
     _showSession();
     state.statisticsOpen.value = !state.statisticsOpen.value;
   }
 
+  /// Shows or hides the session card where it sits: beside the Chat, or as a popover, which takes
+  /// keyboard focus when it opens.
   void _toggleCard() {
     _showSession();
-    _cardOpen.value = !_cardOpen.value;
+    _card.toggle();
+    if (_card.shown && !_card.beside) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _card.focusFirstControl(),
+      );
+    }
+  }
+
+  /// Closes the popover and gives focus back to its button, as Escape does.
+  void _closeCardPopover() {
+    _card.closePopover();
+    _cardToggleFocus.requestFocus();
   }
 
   /// Starts a new session in the chat, ready to describe the task.
@@ -507,7 +523,8 @@ class _AgentShellState extends State<AgentShell> {
         _Header(
           state: state,
           project: info.project,
-          cardOpen: _cardOpen,
+          card: _card,
+          toggleFocus: _cardToggleFocus,
           onDetails: _toggleCard,
         ),
         const _Tabs(),
@@ -537,37 +554,34 @@ class _AgentShellState extends State<AgentShell> {
                         ],
                       ),
                     );
-                    return Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Expanded(
-                          child: SessionCardArea(
-                            state: state,
-                            device: info.device,
-                            settings: _cardSettings,
-                            open: _cardOpen,
-                            diffOpen: diffOpen,
-                            onChanges: () => _openDiff(const LatestTurn()),
-                            child: ChatView(
+                    return SessionCardArea(
+                      state: state,
+                      device: info.device,
+                      settings: _cardSettings,
+                      visibility: _card,
+                      diffSettings: _diffSettings,
+                      viewportWidth: MediaQuery.sizeOf(context).width,
+                      onChanges: () => _openDiff(const LatestTurn()),
+                      onDismiss: _closeCardPopover,
+                      diff: diffOpen
+                          ? DiffPanel(
                               state: state,
-                              info: info,
-                              input: input,
-                              onOpenDiff: (turn) => _openDiff(OneTurn(turn)),
-                            ),
-                          ),
-                        ),
-                        if (diffOpen)
-                          DiffPanel(
-                            state: state,
-                            settings: _diffSettings,
-                            parse: widget.parseDiff,
-                            onClose: _toggleDiff,
-                          ),
-                      ],
+                              settings: _diffSettings,
+                              parse: widget.parseDiff,
+                              onClose: _toggleDiff,
+                            )
+                          : null,
+                      child: ChatView(
+                        state: state,
+                        info: info,
+                        input: input,
+                        onOpenDiff: (turn) => _openDiff(OneTurn(turn)),
+                      ),
                     );
                   },
                 ),
               ),
+              // The statistics panel takes the card's corner over the Chat.
               Positioned(
                 top: WsMetrics.space4,
                 right: WsMetrics.space4,
@@ -612,13 +626,15 @@ class _Header extends StatelessWidget {
   const _Header({
     required this.state,
     required this.project,
-    required this.cardOpen,
+    required this.card,
+    required this.toggleFocus,
     required this.onDetails,
   });
 
   final SessionState state;
   final String project;
-  final ValueNotifier<bool> cardOpen;
+  final CardVisibility card;
+  final FocusNode toggleFocus;
   final VoidCallback onDetails;
 
   @override
@@ -669,53 +685,66 @@ class _Header extends StatelessWidget {
               ],
             ),
           ),
-          _DetailsButton(open: cardOpen, onPressed: onDetails),
+          _DetailsButton(card: card, focus: toggleFocus, onPressed: onDetails),
         ],
       ),
     );
   }
 }
 
-/// The header's button that shows or hides the session card, as T3 Code's sliders button does.
+/// The header's button that shows or hides the session card, as T3 Code's sliders button does. It
+/// shares the card's tap group, so a press here toggles the card instead of closing it first.
 class _DetailsButton extends StatelessWidget {
-  const _DetailsButton({required this.open, required this.onPressed});
+  const _DetailsButton({
+    required this.card,
+    required this.focus,
+    required this.onPressed,
+  });
 
-  final ValueListenable<bool> open;
+  final CardVisibility card;
+  final FocusNode focus;
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    return ValueListenableBuilder(
-      valueListenable: open,
-      builder: (context, shown, _) => CommandHint(
-        command: Command.sessionDetails,
-        child: Tooltip(
-          message: 'Session details',
-          child: Semantics(
-            button: true,
-            selected: shown,
-            child: InkWell(
-              key: const Key('session-details'),
-              borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-              onTap: onPressed,
-              child: Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  color: shown ? ws.hover : null,
+    return ListenableBuilder(
+      listenable: card,
+      builder: (context, _) {
+        final shown = card.shown;
+        return TapRegion(
+          groupId: cardTapGroup,
+          child: CommandHint(
+            command: Command.sessionDetails,
+            child: Tooltip(
+              message: 'Session details',
+              child: Semantics(
+                button: true,
+                selected: shown,
+                child: InkWell(
+                  key: const Key('session-details'),
+                  focusNode: focus,
                   borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-                ),
-                child: Icon(
-                  LucideIcons.slidersHorizontal,
-                  size: 16,
-                  color: shown ? ws.text : ws.textMuted,
+                  onTap: onPressed,
+                  child: Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: shown ? ws.hover : null,
+                      borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+                    ),
+                    child: Icon(
+                      LucideIcons.slidersHorizontal,
+                      size: 16,
+                      color: shown ? ws.text : ws.textMuted,
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

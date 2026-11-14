@@ -16,7 +16,9 @@ import 'commit_dialog.dart';
 import 'session_card_rows.dart';
 
 /// The checkout's branch with its commits ahead and behind its upstream, as the first row of the
-/// session card; it opens the branch menu.
+/// session card. Its name and its chevron are two targets that both open the branch menu, split
+/// by a hairline that shows while the row is hovered, as in T3 Code. A right-click on the name
+/// offers to copy it.
 class BranchRow extends StatelessWidget {
   const BranchRow({super.key, required this.state});
 
@@ -49,10 +51,11 @@ class BranchRow extends StatelessWidget {
         final status = git.status.value;
         if (status == null) return const SizedBox.shrink();
         final name = status.branch ?? status.commit ?? 'no commit';
+        void open() => unawaited(showBranchMenu(context, state));
         return Semantics(
           key: const Key('branch-chip'),
           button: true,
-          onTap: () => unawaited(showBranchMenu(context, state)),
+          onTap: open,
           label: [
             'Branch $name',
             if (status.ahead > 0) '${status.ahead} ahead',
@@ -64,38 +67,108 @@ class BranchRow extends StatelessWidget {
               'no upstream',
           ].join(', '),
           excludeSemantics: true,
-          child: CardRow(
-            onTap: () => unawaited(showBranchMenu(context, state)),
-            children: [
-              Icon(LucideIcons.gitBranch, size: 16, color: ws.textFaint),
-              Flexible(
-                child: Text(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontWeight: WsMetrics.fwRegular),
+          child: _Hover(
+            builder: (hovered) => CardRow(
+              onTap: open,
+              children: [
+                Icon(LucideIcons.gitBranch, size: 16, color: ws.textFaint),
+                Flexible(
+                  child: GestureDetector(
+                    onSecondaryTapUp: (details) => unawaited(
+                      _copyName(context, name, details.globalPosition),
+                    ),
+                    child: Tooltip(
+                      message: name,
+                      child: InkWell(
+                        key: const Key('branch-name'),
+                        hoverColor: Colors.transparent,
+                        highlightColor: Colors.transparent,
+                        onTap: open,
+                        child: Text(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontWeight: WsMetrics.fwRegular),
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-              if (status.merging)
-                Text('merging', style: small.copyWith(color: ws.warning)),
-              if (status.ahead > 0) Text('↑${status.ahead}', style: small),
-              if (status.behind > 0)
-                Text(
-                  '↓${status.behind}',
-                  style: small.copyWith(color: ws.warning),
+                if (status.merging)
+                  Text('merging', style: small.copyWith(color: ws.warning)),
+                if (status.ahead > 0) Text('↑${status.ahead}', style: small),
+                if (status.behind > 0)
+                  Text(
+                    '↓${status.behind}',
+                    style: small.copyWith(color: ws.warning),
+                  ),
+                if (!status.merging &&
+                    status.remote != null &&
+                    status.branch != null &&
+                    status.upstream == null)
+                  Text('no upstream', style: small),
+                Container(
+                  key: const Key('branch-split'),
+                  width: 1,
+                  height: 16,
+                  color: hovered ? ws.border : Colors.transparent,
                 ),
-              if (!status.merging &&
-                  status.remote != null &&
-                  status.branch != null &&
-                  status.upstream == null)
-                Text('no upstream', style: small),
-              Icon(LucideIcons.chevronDown, size: 16, color: ws.textFaint),
-            ],
+                InkWell(
+                  key: const Key('branch-chevron'),
+                  // One stop in the keyboard order, as the row is one control in T3 Code.
+                  canRequestFocus: false,
+                  hoverColor: ws.hover,
+                  borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
+                  onTap: open,
+                  child: Icon(
+                    LucideIcons.chevronDown,
+                    size: 16,
+                    color: ws.textFaint,
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },
     );
   }
+}
+
+/// Offers to copy the branch name where the pointer right-clicked, as T3 Code's branch menu does.
+Future<void> _copyName(BuildContext context, String name, Offset at) async {
+  final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
+  await showMenu<void>(
+    context: context,
+    position: RelativeRect.fromRect(at & Size.zero, Offset.zero & overlay.size),
+    items: [
+      PopupMenuItem<void>(
+        onTap: () => unawaited(Clipboard.setData(ClipboardData(text: name))),
+        child: const Text('Copy branch name'),
+      ),
+    ],
+  );
+}
+
+/// Tells its builder whether the pointer is over it, so the row can show its hairline on hover.
+class _Hover extends StatefulWidget {
+  const _Hover({required this.builder});
+
+  final Widget Function(bool hovered) builder;
+
+  @override
+  State<_Hover> createState() => _HoverState();
+}
+
+class _HoverState extends State<_Hover> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    onEnter: (_) => setState(() => _hovered = true),
+    onExit: (_) => setState(() => _hovered = false),
+    child: widget.builder(_hovered),
+  );
 }
 
 /// What the branch menu was closed with.

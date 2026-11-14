@@ -28,6 +28,18 @@ void main() {
   });
 
   test(
+    'keeps the Diff panel width across a restart, unset until dragged',
+    () async {
+      final first = await DiffSettingsController.load(SettingsFile(file));
+      expect(first.value.width, isNull);
+      await first.change(const DiffSettings(width: 640));
+
+      final again = await DiffSettingsController.load(SettingsFile(file));
+      expect(again.value.width, 640);
+    },
+  );
+
+  test(
     'starts from the defaults when the file says nothing it knows',
     () async {
       file.parent.createSync(recursive: true);

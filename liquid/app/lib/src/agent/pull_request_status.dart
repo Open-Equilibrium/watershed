@@ -47,13 +47,16 @@ class PullRequestRow extends StatelessWidget {
               Icon(LucideIcons.gitPullRequest, size: 16, color: color),
               Text('#${pull.number}'),
               Flexible(
-                child: Text(
-                  pull.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: ws.textMuted,
-                    fontWeight: WsMetrics.fwRegular,
+                child: Tooltip(
+                  message: '#${pull.number} ${pull.title}',
+                  child: Text(
+                    pull.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: ws.textMuted,
+                      fontWeight: WsMetrics.fwRegular,
+                    ),
                   ),
                 ),
               ),

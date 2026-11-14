@@ -17,9 +17,6 @@ import 'session_card_layout.dart';
 import 'session_card_rows.dart';
 import 'session_card_settings.dart';
 
-/// What the card's context menu answered with that is not a row: resetting the choices.
-const _resetChoice = Object();
-
 /// The session card's rows, in T3 Code's order, shrunk to the space they have: the Version
 /// Control rows, then the session figures and the context window below a divider. A row is left
 /// out when Liquid has nothing for it, and the Git action row leaves a compact card as T3 Code's
@@ -31,7 +28,7 @@ class SessionCard extends StatefulWidget {
     required this.device,
     required this.settings,
     required this.onChanges,
-    required this.placement,
+    required this.beside,
     required this.onOutsidePress,
   });
 
@@ -39,7 +36,9 @@ class SessionCard extends StatefulWidget {
   final String device;
   final SessionCardSettingsController settings;
   final VoidCallback onChanges;
-  final CardPlacement placement;
+
+  /// Whether the card sits beside the chat rather than over it as a popover.
+  final bool beside;
 
   /// Closes the card when it is a popover and a press lands outside it.
   final VoidCallback onOutsidePress;
@@ -50,6 +49,19 @@ class SessionCard extends StatefulWidget {
 
 class _SessionCardState extends State<SessionCard> {
   final _contentKey = GlobalKey(debugLabel: 'session card content');
+
+  /// The rows menu, which a right-click or the choose row opens.
+  final _menu = MenuController();
+
+  /// The menu's first row, which takes focus when the menu opens, so Escape and the arrow keys
+  /// work in it.
+  final _menuFirst = FocusNode(debugLabel: 'rows menu');
+
+  @override
+  void dispose() {
+    _menuFirst.dispose();
+    super.dispose();
+  }
 
   /// What changes the rows shown; one listenable, so a rebuild does not subscribe again.
   late Listenable _changes = _changesOf(widget);
@@ -80,9 +92,15 @@ class _SessionCardState extends State<SessionCard> {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
+    final route = ModalRoute.of(context);
     return TapRegion(
+      groupId: cardTapGroup,
       onTapOutside: (_) {
-        if (!widget.placement.beside) widget.onOutsidePress();
+        // The rows menu and a dialog the card opened take their own presses.
+        final coveredByRoute = route != null && !route.isCurrent;
+        if (!widget.beside && !_menu.isOpen && !coveredByRoute) {
+          widget.onOutsidePress();
+        }
       },
       child: DecoratedBox(
         key: const Key('session-details-card'),
@@ -94,14 +112,10 @@ class _SessionCardState extends State<SessionCard> {
           color: ws.surface,
           borderRadius: BorderRadius.circular(WsMetrics.radiusXl),
           clipBehavior: Clip.antiAlias,
-          child: GestureDetector(
-            onSecondaryTapUp: (details) =>
-                unawaited(_choose(context, details.globalPosition)),
-            child: LayoutBuilder(
-              builder: (context, box) => ListenableBuilder(
-                listenable: _changes,
-                builder: (context, _) => _content(context, box.maxHeight),
-              ),
+          child: LayoutBuilder(
+            builder: (context, box) => ListenableBuilder(
+              listenable: _changes,
+              builder: (context, _) => _content(context, box.maxHeight),
             ),
           ),
         ),
@@ -144,31 +158,56 @@ class _SessionCardState extends State<SessionCard> {
     final showGit =
         hasGit &&
         (density == CardDensity.full || state.git.progress.value != null);
-    return ListView(
-      shrinkWrap: true,
-      padding: EdgeInsets.zero,
-      children: [
-        Column(
-          key: _contentKey,
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    // A card with no row left to show keeps one row that opens the rows menu, to refill it.
+    final anyRow =
+        hasBranch ||
+        hasPull ||
+        hasGit ||
+        hasChanges ||
+        hasFigures ||
+        window != null;
+    return MenuAnchor(
+      controller: _menu,
+      style: MenuStyle(
+        backgroundColor: WidgetStatePropertyAll(
+          Theme.of(context).colorScheme.surface,
+        ),
+      ),
+      menuChildren: _menuChildren(),
+      builder: (context, controller, child) => GestureDetector(
+        onSecondaryTapUp: (details) => _openMenu(details.localPosition),
+        child: child,
+      ),
+      child: _ScrollFade(
+        child: ListView(
+          shrinkWrap: true,
+          padding: EdgeInsets.zero,
           children: [
-            _Section(
-              rows: [
-                if (hasBranch) BranchRow(state: state),
-                if (hasPull)
-                  PullRequestRow(state: state, device: widget.device),
-                if (showGit) GitActions(state: state, device: widget.device),
-                if (hasChanges)
-                  _ChangesRow(state: state, onTap: widget.onChanges),
+            Column(
+              key: _contentKey,
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _Section(
+                  rows: [
+                    if (hasBranch) BranchRow(state: state),
+                    if (hasPull)
+                      PullRequestRow(state: state, device: widget.device),
+                    if (showGit)
+                      GitActions(state: state, device: widget.device),
+                    if (hasChanges)
+                      _ChangesRow(state: state, onTap: widget.onChanges),
+                    if (!anyRow) _ChooseRow(onOpen: _openMenuFrom),
+                  ],
+                ),
+                if (window != null) _ContextWindow(window: window),
+                if (hasFigures)
+                  _SessionFigures(state: state, divided: window == null),
               ],
             ),
-            if (window != null) _ContextWindow(window: window),
-            if (hasFigures)
-              _SessionFigures(state: state, divided: window == null),
           ],
         ),
-      ],
+      ),
     );
   }
 
@@ -190,39 +229,132 @@ class _SessionCardState extends State<SessionCard> {
     });
   }
 
-  /// The card's menu: a checked row per item, which a click shows or hides, then Reset.
-  Future<void> _choose(BuildContext context, Offset at) async {
+  /// The rows menu: a checkbox per row, which a click shows or hides and leaves the menu open,
+  /// then Reset to default, which closes it.
+  List<Widget> _menuChildren() {
     final settings = widget.settings;
-    final overlay =
-        Overlay.of(context).context.findRenderObject()! as RenderBox;
-    final choice = await showMenu<Object>(
-      context: context,
-      position: RelativeRect.fromRect(
-        at & Size.zero,
-        Offset.zero & overlay.size,
-      ),
-      items: [
-        for (final item in CardItem.values)
-          CheckedPopupMenuItem<Object>(
-            value: item,
-            checked: settings.value.shows(item),
-            child: Text(item.label),
+    return [
+      for (final item in CardItem.values)
+        CheckboxMenuButton(
+          focusNode: item == CardItem.values.first ? _menuFirst : null,
+          value: settings.value.shows(item),
+          closeOnActivate: false,
+          onChanged: (shown) => unawaited(
+            settings.change(settings.value.withItem(item, shown ?? true)),
           ),
-        const PopupMenuDivider(),
-        PopupMenuItem<Object>(
-          value: _resetChoice,
-          enabled: !settings.value.isDefault,
-          child: const Text('Reset to default'),
+          child: Text(item.label),
         ),
-      ],
+      const Divider(),
+      MenuItemButton(
+        onPressed: settings.value.isDefault
+            ? null
+            : () => unawaited(settings.change(const SessionCardSettings())),
+        child: const Text('Reset to default'),
+      ),
+    ];
+  }
+
+  /// Opens the rows menu at `position`, in the card's coordinates, and moves focus into it.
+  void _openMenu(Offset position) {
+    _menu.open(position: position);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_menu.isOpen) _menuFirst.requestFocus();
+    });
+  }
+
+  /// Opens the rows menu below the row `row` is in.
+  void _openMenuFrom(BuildContext row) {
+    final box = row.findRenderObject()! as RenderBox;
+    final card = context.findRenderObject()! as RenderBox;
+    _openMenu(
+      card.globalToLocal(box.localToGlobal(Offset(0, box.size.height))),
     );
-    if (choice is CardItem) {
-      await settings.change(
-        settings.value.withItem(choice, !settings.value.shows(choice)),
-      );
-    } else if (identical(choice, _resetChoice)) {
-      await settings.change(const SessionCardSettings());
-    }
+  }
+}
+
+/// The row that opens the rows menu when no row is left to show, so the card can be refilled.
+class _ChooseRow extends StatelessWidget {
+  const _ChooseRow({required this.onOpen});
+
+  final void Function(BuildContext row) onOpen;
+
+  @override
+  Widget build(BuildContext context) => CardRow(
+    key: const Key('choose-rows'),
+    onTap: () => onOpen(context),
+    children: [
+      Icon(
+        LucideIcons.slidersHorizontal,
+        size: 16,
+        color: context.ws.textFaint,
+      ),
+      const Flexible(
+        child: Text('Choose what to show', overflow: TextOverflow.ellipsis),
+      ),
+    ],
+  );
+}
+
+/// Fades the edge the card's rows scroll past, as T3 Code's card does: the top once the rows are
+/// scrolled down, the bottom while more lie below. Rows that fit draw without a fade.
+class _ScrollFade extends StatefulWidget {
+  const _ScrollFade({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_ScrollFade> createState() => _ScrollFadeState();
+}
+
+class _ScrollFadeState extends State<_ScrollFade> {
+  /// The fade's depth, as T3 Code's card has it: 1.5 rem.
+  static const _depth = 24.0;
+
+  bool _above = false;
+  bool _below = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final child = NotificationListener<Notification>(
+      onNotification: (notification) {
+        final metrics = switch (notification) {
+          ScrollMetricsNotification(:final metrics) => metrics,
+          ScrollNotification(:final metrics) => metrics,
+          _ => null,
+        };
+        if (metrics != null) {
+          final above = metrics.extentBefore > 0;
+          final below = metrics.extentAfter > 0;
+          if (above != _above || below != _below) {
+            setState(() {
+              _above = above;
+              _below = below;
+            });
+          }
+        }
+        return false;
+      },
+      child: widget.child,
+    );
+    if (!_above && !_below) return child;
+    return ShaderMask(
+      blendMode: BlendMode.dstIn,
+      shaderCallback: (bounds) {
+        final depth = (_depth / bounds.height).clamp(0.0, 0.5);
+        return LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            _above ? Colors.transparent : Colors.black,
+            Colors.black,
+            Colors.black,
+            _below ? Colors.transparent : Colors.black,
+          ],
+          stops: [0, depth, 1 - depth, 1],
+        ).createShader(bounds);
+      },
+      child: child,
+    );
   }
 }
 
@@ -254,6 +386,9 @@ class _Section extends StatelessWidget {
   }
 }
 
+/// The session figures, with the Statistics row that opens the panel. The figures wait for the
+/// first read of the statistics; `divided` is false when the context window above draws the
+/// divider.
 class _SessionFigures extends StatelessWidget {
   const _SessionFigures({required this.state, required this.divided});
 
@@ -281,6 +416,7 @@ class _SessionFigures extends StatelessWidget {
   );
 }
 
+/// The context window, below a divider.
 class _ContextWindow extends StatelessWidget {
   const _ContextWindow({required this.window});
 

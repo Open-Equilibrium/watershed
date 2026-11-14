@@ -551,6 +551,9 @@ void main() {
       await show(tester);
       await tester.binding.setSurfaceSize(const Size(1050, 650));
       await tester.pumpAndSettle();
+      // In this window the card is a popover, which the sliders button opens.
+      await tester.tap(find.byTooltip('Session details'));
+      await tester.pumpAndSettle();
       await open(tester);
       expect(tester.takeException(), isNull);
       expect(find.widgetWithText(PrimaryButton, 'Commit'), findsOneWidget);

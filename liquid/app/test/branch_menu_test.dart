@@ -143,6 +143,9 @@ void main() {
       size: const Size(1050, 900),
       textSize: TextSize.large,
     );
+    // In a window this narrow the card is a popover, which the sliders button opens.
+    await tester.tap(find.byTooltip('Session details'));
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(tester.getSize(chipText('main')).width, greaterThan(0));
     expect(chipText('no upstream'), findsOneWidget);
