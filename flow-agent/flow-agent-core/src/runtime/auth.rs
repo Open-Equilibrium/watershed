@@ -129,22 +129,31 @@ pub fn logout_openai_codex() -> Result<bool, RuntimeError> {
 /// Stores an OpenAI-compatible endpoint key with the base URL it was issued for (ADR-0263).
 pub fn login_openai_compatible(base_url: &str, api_key: &str) -> Result<AuthStatus, RuntimeError> {
     let credential = EndpointCredential::new(base_url, api_key)?;
+    store_endpoint_credential(&CredentialStore::platform_default()?, credential)
+}
+
+pub(crate) fn store_endpoint_credential(
+    store: &CredentialStore,
+    credential: EndpointCredential,
+) -> Result<AuthStatus, RuntimeError> {
     let started = Instant::now();
-    CredentialStore::platform_default()?.replace_endpoint_with_clock(
-        &credential,
-        || started.elapsed(),
-        thread::sleep,
-    )?;
+    store.replace_endpoint_with_clock(&credential, || started.elapsed(), thread::sleep)?;
     Ok(AuthStatus {
         authenticated: true,
         expires_epoch_milliseconds: None,
-        base_url: None,
+        base_url: Some(credential.base_url),
     })
 }
 
 /// Returns redacted OpenAI-compatible authentication status from Flow Agent's own store.
 pub fn openai_compatible_auth_status() -> Result<AuthStatus, RuntimeError> {
-    let endpoint = CredentialStore::platform_default()?.read_endpoint()?;
+    endpoint_auth_status_from_store(&CredentialStore::platform_default()?)
+}
+
+pub(crate) fn endpoint_auth_status_from_store(
+    store: &CredentialStore,
+) -> Result<AuthStatus, RuntimeError> {
+    let endpoint = store.read_endpoint()?;
     Ok(AuthStatus {
         authenticated: endpoint.is_some(),
         expires_epoch_milliseconds: None,
