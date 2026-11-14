@@ -142,6 +142,21 @@ class _TurnChartState extends State<TurnChart> {
 
 const _tipWidth = 196.0;
 
+/// The dark box of a statistics tooltip: the chart's column tip and a session card row's tip
+/// both take it, so they read alike.
+BoxDecoration statisticsTipDecoration(WsPalette ws) => BoxDecoration(
+  color: ws.text,
+  borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+);
+
+const statisticsTipPadding = EdgeInsets.symmetric(horizontal: 10, vertical: 6);
+
+TextStyle statisticsTipStyle(WsPalette ws) => TextStyle(
+  fontSize: WsMetrics.fsSmall,
+  color: ws.canvas,
+  fontFeatures: const [FontFeature.tabularFigures()],
+);
+
 class _Tip extends StatelessWidget {
   const _Tip({required this.tip, required this.ws});
 
@@ -150,18 +165,11 @@ class _Tip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final style = TextStyle(
-      fontSize: WsMetrics.fsSmall,
-      color: ws.canvas,
-      fontFeatures: const [FontFeature.tabularFigures()],
-    );
+    final style = statisticsTipStyle(ws);
     return Container(
       width: _tipWidth,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: ws.text,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-      ),
+      padding: statisticsTipPadding,
+      decoration: statisticsTipDecoration(ws),
       child: DefaultTextStyle.merge(
         style: style,
         child: Column(

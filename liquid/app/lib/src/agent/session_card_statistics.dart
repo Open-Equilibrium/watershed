@@ -7,7 +7,9 @@ import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import '../workspace/row_menu.dart';
 import 'segment_bar.dart';
+import 'statistics_chart.dart';
 
 /// The width of a figure row's value column.
 const _valueWidth = 110.0;
@@ -42,6 +44,20 @@ class FigureRow extends StatefulWidget {
 
 class _FigureRowState extends State<FigureRow> {
   bool _hovered = false;
+  bool _focused = false;
+  final _tip = GlobalKey<TooltipState>();
+
+  /// Explains the row while the keyboard has it, as the pointer does, and hides the explanation
+  /// when the keyboard leaves.
+  void _focusChanged(bool focused) {
+    if (!mounted) return;
+    setState(() => _focused = focused);
+    if (focused) {
+      _tip.currentState?.ensureTooltipVisible();
+    } else {
+      Tooltip.dismissAllToolTips();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -63,14 +79,15 @@ class _FigureRowState extends State<FigureRow> {
       child: widget.value,
     );
     final tip = widget.tip;
-    final row = MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
+    final row = HoverRegion(
+      onHover: (hovered, _) {
+        if (mounted) setState(() => _hovered = hovered);
+      },
       child: Container(
         height: 24,
         padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
-          color: _hovered && tip != null ? ws.hover : null,
+          color: (_hovered || _focused) && tip != null ? ws.hover : null,
           borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
         ),
         child: Row(
@@ -99,23 +116,20 @@ class _FigureRowState extends State<FigureRow> {
       ),
     );
     if (tip == null) return row;
-    return Tooltip(
-      richMessage: _tipSpan(ws, tip),
-      decoration: BoxDecoration(
-        color: ws.text,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+    return Focus(
+      onFocusChange: _focusChanged,
+      child: Tooltip(
+        key: _tip,
+        richMessage: _tipSpan(ws, tip),
+        decoration: statisticsTipDecoration(ws),
+        padding: statisticsTipPadding,
+        child: row,
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      child: row,
     );
   }
 
   static InlineSpan _tipSpan(WsPalette ws, List<String> lines) {
-    final style = TextStyle(
-      fontSize: WsMetrics.fsSmall,
-      color: ws.canvas,
-      height: 1.4,
-    );
+    final style = statisticsTipStyle(ws).copyWith(height: 1.4);
     return TextSpan(
       style: style,
       children: [
@@ -212,14 +226,15 @@ List<Widget> sessionStatisticsRows(
             Icon(LucideIcons.info, size: 13, color: ws.textFaint),
         ],
       ),
-      tip: unpriced == 0
-          ? null
-          : [
-              '≈ $cost as pi recorded it',
-              unpriced == 1
-                  ? '1 response without a recorded cost is counted in tokens, not in cost'
-                  : '$unpriced responses without a recorded cost are counted in tokens, not in cost',
-            ],
+      tip: [
+        '≈ $cost as pi recorded it',
+        for (final model in figures.models)
+          '${model.name} ≈ ${formatCost(model.cost)}',
+        if (unpriced == 1)
+          '1 response without a recorded cost is counted in tokens, not in cost'
+        else if (unpriced > 1)
+          '$unpriced responses without a recorded cost are counted in tokens, not in cost',
+      ],
     ),
     ..._timeRows(ws, figures),
     FigureRow(

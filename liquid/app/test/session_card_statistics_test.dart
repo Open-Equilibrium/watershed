@@ -213,6 +213,28 @@ void main() {
     );
   });
 
+  testWidgets('the cost tooltip names each model’s cost, priced or not', (
+    tester,
+  ) async {
+    await show(tester);
+
+    await hover(tester, inCard(find.text('Cost')));
+
+    expect(find.textContaining('claude-sonnet-4-5 ≈ \$1.27'), findsOneWidget);
+  });
+
+  testWidgets('a figure row explains itself when the keyboard focuses it', (
+    tester,
+  ) async {
+    await show(tester);
+
+    Focus.of(tester.element(inCard(find.text('Tokens')))).requestFocus();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.textContaining('Cache read 1.58 M'), findsOneWidget);
+  });
+
   testWidgets('an older session shows a dash for model and tool time', (
     tester,
   ) async {
