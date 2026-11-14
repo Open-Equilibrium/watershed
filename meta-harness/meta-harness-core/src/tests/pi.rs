@@ -748,3 +748,41 @@ fn ends_the_items_an_abort_leaves_open() {
         "nothing stays running after the abort, and each keeps its partial output"
     );
 }
+
+#[test]
+fn a_block_whose_index_is_reused_before_it_ends_completes_as_failed() {
+    let events = translate(&[
+        r#"{"type":"agent_start"}"#,
+        r#"{"type":"message_start","message":{"role":"assistant","content":[]}}"#,
+        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}"#,
+        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Partial"}}"#,
+        // pi skipped the end of the first block, then reused its content index.
+        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}"#,
+        r#"{"type":"agent_settled","aborted":false}"#,
+    ]);
+    let failed = |item: u64, text: &str| AgentEvent::ItemCompleted {
+        turn: TURN,
+        item: ItemId(item),
+        kind: ItemKind::AssistantMessage,
+        text: text.to_owned(),
+        status: ItemStatus::Failed,
+        duration_ms: None,
+        lines: None,
+    };
+    assert_eq!(
+        events,
+        [
+            AgentEvent::TurnStarted { turn: TURN },
+            started(1, ItemKind::AssistantMessage),
+            delta(1, "Partial"),
+            failed(1, "Partial"),
+            started(2, ItemKind::AssistantMessage),
+            failed(2, ""),
+            AgentEvent::TurnCompleted {
+                turn: TURN,
+                checkpoint: None
+            },
+        ],
+        "the displaced item ends as failed with its partial text before the new item starts, and each item completes once"
+    );
+}

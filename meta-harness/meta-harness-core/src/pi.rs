@@ -248,7 +248,11 @@ impl PiAdapter {
                     ItemKind::Reasoning
                 };
                 let item = self.next_item();
-                self.blocks.insert(index, (item, kind, String::new()));
+                // A block still open under this index never ended, such as when pi skipped its
+                // end; it fails with its partial text before the new block starts.
+                if let Some(open) = self.blocks.insert(index, (item, kind, String::new())) {
+                    fail(turn, std::iter::once(open), events);
+                }
                 events.push(started(turn, item, kind, ItemDetail::None));
             }
             Some("text_delta" | "thinking_delta") => {
