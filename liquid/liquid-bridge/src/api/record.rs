@@ -44,16 +44,45 @@ pub(crate) fn download_dir() -> Option<PathBuf> {
 /// The Downloads folder for a home folder and the text of `user-dirs.dirs`, if any.
 pub(crate) fn download_dir_in(home: &Path, user_dirs: Option<&str>) -> PathBuf {
     user_dirs
+        // The shell reads the file in order, so the last assignment is the one in effect.
         .and_then(|text| {
             text.lines()
+                .rev()
                 .find_map(|line| line.trim().strip_prefix("XDG_DOWNLOAD_DIR="))
         })
-        .map(|value| value.trim_matches('"'))
-        .and_then(|value| match value.strip_prefix("$HOME") {
-            Some(rest) => Some(home.join(rest.trim_start_matches('/'))),
-            None => value.starts_with('/').then(|| PathBuf::from(value)),
+        .and_then(|value| {
+            let quoted = value
+                .strip_prefix('"')
+                .and_then(|rest| rest.strip_suffix('"'))
+                .unwrap_or(value);
+            // `$HOME` expands only where it is not escaped, so it is matched before unescaping.
+            match quoted.strip_prefix("$HOME") {
+                Some(rest) => Some(home.join(unescape(rest).trim_start_matches('/'))),
+                None => {
+                    let path = unescape(quoted);
+                    path.starts_with('/').then(|| PathBuf::from(path))
+                }
+            }
         })
         .unwrap_or_else(|| home.join("Downloads"))
+}
+
+/// The text of a double-quoted `user-dirs.dirs` value with its backslash escapes (`\"`, `\\`,
+/// `\$` and `` \` ``) read as the characters they stand for. The shell is not evaluated; other
+/// backslashes stay.
+fn unescape(text: &str) -> String {
+    let mut unescaped = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match chars.peek() {
+            Some(&next) if c == '\\' && matches!(next, '"' | '\\' | '$' | '`') => {
+                unescaped.push(next);
+                chars.next();
+            }
+            _ => unescaped.push(c),
+        }
+    }
+    unescaped
 }
 
 /// The folder name of a record: the session's title without characters a file name cannot hold,

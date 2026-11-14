@@ -3005,4 +3005,23 @@ fn downloads_go_to_the_folder_the_system_names_or_to_downloads() {
         crate::api::record::download_dir_in(home, Some("XDG_DOWNLOAD_DIR=\"/srv/incoming\"")),
         std::path::PathBuf::from("/srv/incoming")
     );
+    assert_eq!(
+        crate::api::record::download_dir_in(home, Some(r#"XDG_DOWNLOAD_DIR="$HOME/My \$tuff""#)),
+        home.join("My $tuff")
+    );
+    assert_eq!(
+        crate::api::record::download_dir_in(
+            home,
+            Some(r#"XDG_DOWNLOAD_DIR="/srv/\"q\" \\ \`x\`""#)
+        ),
+        std::path::PathBuf::from(r#"/srv/"q" \ `x`"#)
+    );
+    assert_eq!(
+        crate::api::record::download_dir_in(
+            home,
+            Some("XDG_DOWNLOAD_DIR=\"$HOME/First\"\nXDG_DOWNLOAD_DIR=\"$HOME/Second\"\n")
+        ),
+        home.join("Second"),
+        "the shell reads the file in order, so the last assignment is the one in effect"
+    );
 }
