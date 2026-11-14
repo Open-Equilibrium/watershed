@@ -25,10 +25,21 @@ class SessionFigures {
   /// Input, cache reads and writes, and output, as the Tokens figure counts them.
   int get tokens => tokensOf(usage);
   int get cost => usage.costMicroUsd;
+
+  /// What each kind of the session's tokens cost, summed over the models.
+  late final BridgeCostByKind costByKind = BridgeCostByKind(
+    input: _costOf((kind) => kind.input),
+    output: _costOf((kind) => kind.output),
+    cacheRead: _costOf((kind) => kind.cacheRead),
+    cacheWrite: _costOf((kind) => kind.cacheWrite),
+  );
   int get responses =>
       statistics.models.fold(0, (sum, model) => sum + model.responses);
   int get unpriced =>
       statistics.models.fold(0, (sum, model) => sum + model.unpriced);
+
+  int _costOf(int Function(BridgeCostByKind kind) of) =>
+      statistics.models.fold(0, (sum, model) => sum + of(model.costByKind));
 
   late final List<ModelFigure> models = [
     for (final stats in statistics.models)

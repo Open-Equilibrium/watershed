@@ -26,6 +26,12 @@ BridgeModelUsage model(
 }) => BridgeModelUsage(
   model: name,
   usage: usage,
+  costByKind: const BridgeCostByKind(
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+  ),
   responses: responses,
   unpriced: unpriced,
 );

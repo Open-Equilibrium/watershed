@@ -9,7 +9,7 @@ use super::add;
 use super::entry::{Body, Entry};
 use super::first_line;
 use super::turns::PROMPT_CHARS;
-use crate::{Phase, Usage};
+use crate::{CostByKind, Phase, Usage};
 
 /// What one model used.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -18,6 +18,8 @@ pub struct ModelUsage {
     pub model: String,
     /// Tokens and cost.
     pub usage: Usage,
+    /// What each kind of its tokens cost.
+    pub cost_by_kind: CostByKind,
     /// Responses that reported usage.
     pub responses: u32,
     /// Responses that reported tokens but no cost.
@@ -310,12 +312,21 @@ fn count_spend(models: &mut HashMap<String, ModelUsage>, entry: &Entry) {
             ..ModelUsage::default()
         });
     add(&mut model.usage, &spend.usage);
+    add_kinds(&mut model.cost_by_kind, &spend.cost_by_kind);
     if matches!(entry.body, Body::Assistant { .. }) {
         model.responses += 1;
         if spend.usage.cost_micro_usd == 0 && tokens(&spend.usage) > 0 {
             model.unpriced += 1;
         }
     }
+}
+
+/// Adds `spent` to `total`, kind by kind.
+fn add_kinds(total: &mut CostByKind, spent: &CostByKind) {
+    total.input = total.input.saturating_add(spent.input);
+    total.output = total.output.saturating_add(spent.output);
+    total.cache_read = total.cache_read.saturating_add(spent.cache_read);
+    total.cache_write = total.cache_write.saturating_add(spent.cache_write);
 }
 
 /// The models sorted by cost, then tokens, largest first; ties sort by name.

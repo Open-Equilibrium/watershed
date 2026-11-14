@@ -243,6 +243,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
 
   List<Widget> _costView(WsPalette ws, SessionFigures figures) {
     final models = figures.models;
+    final kinds = figures.costByKind;
     return [
       _top(
         ws,
@@ -285,8 +286,49 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
         ),
       ),
       _totals(ws, figures),
+      _byType(
+        ws,
+        'Cost by type',
+        input: kinds.input,
+        cacheRead: kinds.cacheRead,
+        cacheWrite: kinds.cacheWrite,
+        output: kinds.output,
+        format: formatCost,
+      ),
     ];
   }
+
+  /// A total's share bar and legend, split into input, cache read, cache write and output.
+  Widget _byType(
+    WsPalette ws,
+    String title, {
+    required int input,
+    required int cacheRead,
+    required int cacheWrite,
+    required int output,
+    required String Function(int) format,
+  }) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    spacing: 8,
+    children: [
+      _heading(ws, title),
+      SegmentBar(
+        height: 8,
+        segments: [
+          BarSegment(input, ws.data1),
+          BarSegment(cacheRead, ws.data2),
+          BarSegment(cacheWrite, ws.textFaint),
+          BarSegment(output, ws.data3),
+        ],
+      ),
+      _legend(ws, [
+        ('Input', ws.data1, format(input)),
+        ('Cache read', ws.data2, format(cacheRead)),
+        ('Cache write', ws.textFaint, format(cacheWrite)),
+        ('Output', ws.data3, format(output)),
+      ]),
+    ],
+  );
 
   List<Widget> _tokensView(WsPalette ws, SessionFigures figures) {
     final usage = figures.usage;
@@ -338,27 +380,14 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
         ),
       ),
       _totals(ws, figures),
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        spacing: 8,
-        children: [
-          _heading(ws, 'Tokens by type'),
-          SegmentBar(
-            height: 8,
-            segments: [
-              BarSegment(usage.input, ws.data1),
-              BarSegment(usage.cacheRead, ws.data2),
-              BarSegment(usage.cacheWrite, ws.textFaint),
-              BarSegment(usage.output, ws.data3),
-            ],
-          ),
-          _legend(ws, [
-            ('Input', ws.data1, formatTokens(usage.input)),
-            ('Cache read', ws.data2, formatTokens(usage.cacheRead)),
-            ('Cache write', ws.textFaint, formatTokens(usage.cacheWrite)),
-            ('Output', ws.data3, formatTokens(usage.output)),
-          ]),
-        ],
+      _byType(
+        ws,
+        'Tokens by type',
+        input: usage.input,
+        cacheRead: usage.cacheRead,
+        cacheWrite: usage.cacheWrite,
+        output: usage.output,
+        format: formatTokens,
       ),
     ];
   }

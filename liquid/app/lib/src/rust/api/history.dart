@@ -8,7 +8,7 @@ import 'events.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 /// Whether the changes between two checkpoints could be read.
 enum BridgeChangesState {
@@ -47,6 +47,48 @@ class BridgeContext {
           tokens == other.tokens &&
           window == other.window &&
           compactsAt == other.compactsAt;
+}
+
+/// What each kind of a model's tokens cost, in millionths of a US dollar.
+class BridgeCostByKind {
+  /// Input tokens.
+  final PlatformInt64 input;
+
+  /// Output tokens.
+  final PlatformInt64 output;
+
+  /// Input tokens read from the provider's cache.
+  final PlatformInt64 cacheRead;
+
+  /// Input tokens written to the provider's cache.
+  final PlatformInt64 cacheWrite;
+
+  const BridgeCostByKind({
+    required this.input,
+    required this.output,
+    required this.cacheRead,
+    required this.cacheWrite,
+  });
+
+  static Future<BridgeCostByKind> default_() =>
+      RustLib.instance.api.crateApiHistoryBridgeCostByKindDefault();
+
+  @override
+  int get hashCode =>
+      input.hashCode ^
+      output.hashCode ^
+      cacheRead.hashCode ^
+      cacheWrite.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeCostByKind &&
+          runtimeType == other.runtimeType &&
+          input == other.input &&
+          output == other.output &&
+          cacheRead == other.cacheRead &&
+          cacheWrite == other.cacheWrite;
 }
 
 /// What a tree entry holds.
@@ -104,6 +146,9 @@ class BridgeModelUsage {
   /// Tokens and cost.
   final BridgeUsage usage;
 
+  /// What each kind of its tokens cost.
+  final BridgeCostByKind costByKind;
+
   /// Responses that reported usage.
   final PlatformInt64 responses;
 
@@ -113,13 +158,18 @@ class BridgeModelUsage {
   const BridgeModelUsage({
     required this.model,
     required this.usage,
+    required this.costByKind,
     required this.responses,
     required this.unpriced,
   });
 
   @override
   int get hashCode =>
-      model.hashCode ^ usage.hashCode ^ responses.hashCode ^ unpriced.hashCode;
+      model.hashCode ^
+      usage.hashCode ^
+      costByKind.hashCode ^
+      responses.hashCode ^
+      unpriced.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -128,6 +178,7 @@ class BridgeModelUsage {
           runtimeType == other.runtimeType &&
           model == other.model &&
           usage == other.usage &&
+          costByKind == other.costByKind &&
           responses == other.responses &&
           unpriced == other.unpriced;
 }

@@ -56,6 +56,20 @@ pub struct Usage {
     pub cost_micro_usd: u64,
 }
 
+/// What each kind of a request's tokens cost, in millionths of a US dollar. The kinds add up to
+/// the request's cost within rounding.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CostByKind {
+    /// Input tokens.
+    pub input: u64,
+    /// Output tokens.
+    pub output: u64,
+    /// Input tokens read from the provider's cache.
+    pub cache_read: u64,
+    /// Input tokens written to the provider's cache.
+    pub cache_write: u64,
+}
+
 /// The lines a file change added and removed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChangedLines {

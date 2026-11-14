@@ -201,6 +201,12 @@ void main() {
         BridgeModelUsage(
           model: 'anthropic/claude-sonnet',
           usage: usage(212000, 18300, 1270000),
+          costByKind: const BridgeCostByKind(
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+          ),
           responses: 41,
           unpriced: 0,
         ),

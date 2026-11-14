@@ -6,8 +6,8 @@ use serde_json::{Map, Value};
 
 use crate::checkpoint::{Checkpoint, Phase};
 use crate::event::{
-    AgentEvent, ChangedLines, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, Queue,
-    RequestId, TurnId, Usage, UserInput,
+    AgentEvent, ChangedLines, CostByKind, ItemDetail, ItemId, ItemKind, ItemStatus,
+    NotificationLevel, Queue, RequestId, TurnId, Usage, UserInput,
 };
 use crate::history::{first_line, patch_lines};
 use crate::visible::{visible, visible_name};
@@ -520,20 +520,35 @@ pub(crate) fn usage(usage: Option<&Value>) -> Usage {
             .and_then(Value::as_u64)
             .unwrap_or(0)
     };
-    let cost = usage
-        .and_then(|u| u.get("cost"))
-        .and_then(|c| c.get("total"))
-        .and_then(Value::as_f64)
-        .unwrap_or(0.0);
     Usage {
         input: count("input"),
         output: count("output"),
         cache_read: count("cacheRead"),
         cache_write: count("cacheWrite"),
         reasoning: count("reasoning"),
-        // Saturating float-to-integer conversion; costs are small and non-negative.
-        cost_micro_usd: (cost * 1_000_000.0).round() as u64,
+        cost_micro_usd: cost_micro_usd(usage, "total"),
     }
+}
+
+/// What each kind of a usage's tokens cost, as pi reports the cost of each kind.
+pub(crate) fn cost_by_kind(usage: Option<&Value>) -> CostByKind {
+    CostByKind {
+        input: cost_micro_usd(usage, "input"),
+        output: cost_micro_usd(usage, "output"),
+        cache_read: cost_micro_usd(usage, "cacheRead"),
+        cache_write: cost_micro_usd(usage, "cacheWrite"),
+    }
+}
+
+/// A cost field of a usage, in millionths of a US dollar.
+fn cost_micro_usd(usage: Option<&Value>, field: &str) -> u64 {
+    let cost = usage
+        .and_then(|u| u.get("cost"))
+        .and_then(|c| c.get(field))
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    // Saturating float-to-integer conversion; costs are small and non-negative.
+    (cost * 1_000_000.0).round() as u64
 }
 
 /// Reads pi's queues of steering and follow-up messages.

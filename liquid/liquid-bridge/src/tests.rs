@@ -14,9 +14,9 @@ use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use crate::api::history::{
-    BridgeChangesState, BridgeContext, BridgeEntryKind, BridgeModelUsage, BridgeRevertConfirmation,
-    BridgeRevertFile, BridgeRunningAgent, BridgeStatistics, BridgeToolCalls, BridgeTurn,
-    BridgeTurnChanges, BridgeTurnStatistics,
+    BridgeChangesState, BridgeContext, BridgeCostByKind, BridgeEntryKind, BridgeModelUsage,
+    BridgeRevertConfirmation, BridgeRevertFile, BridgeRunningAgent, BridgeStatistics,
+    BridgeToolCalls, BridgeTurn, BridgeTurnChanges, BridgeTurnStatistics,
 };
 use crate::api::session::{
     AgentSession, BridgeCheckpointSession, BridgeModel, BridgeStoredSession, SessionConfig,
@@ -1920,7 +1920,7 @@ fn reads_what_a_write_changed_in_the_chat() {
 
 #[test]
 fn reads_statistics_and_the_context_window_for_liquid() {
-    let entries = r#"{"type":"custom","id":"k1","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T1","phase":"start"}},{"type":"message","id":"u1","parentId":"k1","timestamp":"2026-11-01T10:00:00.100Z","message":{"role":"user","content":"Fix login"}},{"type":"custom","id":"t1","parentId":"u1","timestamp":"2026-11-01T10:00:00.200Z","customType":"watershed.timing","data":{"kind":"request","durationMs":1500}},{"type":"message","id":"a1","parentId":"t1","timestamp":"2026-11-01T10:00:02.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[{"type":"toolCall","id":"c1","name":"edit","arguments":{}}],"usage":{"input":10,"output":4,"cacheRead":2,"cost":{"total":0.5}}}},{"type":"custom","id":"t2","parentId":"a1","timestamp":"2026-11-01T10:00:02.500Z","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"c1","durationMs":700}},{"type":"message","id":"r1","parentId":"t2","timestamp":"2026-11-01T10:00:03.000Z","message":{"role":"toolResult","toolCallId":"c1","toolName":"edit","isError":true,"content":[]}},{"type":"custom","id":"k2","parentId":"r1","timestamp":"2026-11-01T10:00:04.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T1","phase":"end","files":0,"added":0,"removed":0}}"#;
+    let entries = r#"{"type":"custom","id":"k1","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T1","phase":"start"}},{"type":"message","id":"u1","parentId":"k1","timestamp":"2026-11-01T10:00:00.100Z","message":{"role":"user","content":"Fix login"}},{"type":"custom","id":"t1","parentId":"u1","timestamp":"2026-11-01T10:00:00.200Z","customType":"watershed.timing","data":{"kind":"request","durationMs":1500}},{"type":"message","id":"a1","parentId":"t1","timestamp":"2026-11-01T10:00:02.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[{"type":"toolCall","id":"c1","name":"edit","arguments":{}}],"usage":{"input":10,"output":4,"cacheRead":2,"cost":{"input":0.2,"output":0.25,"cacheRead":0.05,"total":0.5}}}},{"type":"custom","id":"t2","parentId":"a1","timestamp":"2026-11-01T10:00:02.500Z","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"c1","durationMs":700}},{"type":"message","id":"r1","parentId":"t2","timestamp":"2026-11-01T10:00:03.000Z","message":{"role":"toolResult","toolCallId":"c1","toolName":"edit","isError":true,"content":[]}},{"type":"custom","id":"k2","parentId":"r1","timestamp":"2026-11-01T10:00:04.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T1","phase":"end","files":0,"added":0,"removed":0}}"#;
     let answer = |id: u32, command: &str, data: &str| {
         let answer = format!(
             r#"{{"id":"{id}","type":"response","command":"{command}","success":true,"data":{data}}}"#
@@ -1957,6 +1957,12 @@ fn reads_statistics_and_the_context_window_for_liquid() {
             cache_read: 2,
             cost_micro_usd: 500_000,
             ..BridgeUsage::default()
+        },
+        cost_by_kind: BridgeCostByKind {
+            input: 200_000,
+            output: 250_000,
+            cache_read: 50_000,
+            cache_write: 0,
         },
         responses: 1,
         unpriced: 0,

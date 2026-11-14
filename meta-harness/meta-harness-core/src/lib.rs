@@ -28,9 +28,9 @@ pub use diff::{
     without_credentials,
 };
 pub use event::{
-    AgentEvent, Answer, ChangedLines, Delivery, EntryKind, ItemDetail, ItemId, ItemKind,
-    ItemStatus, NotificationLevel, Queue, RequestId, SessionTree, TreeNode, TurnId, Usage,
-    UserInput,
+    AgentEvent, Answer, ChangedLines, CostByKind, Delivery, EntryKind, ItemDetail, ItemId,
+    ItemKind, ItemStatus, NotificationLevel, Queue, RequestId, SessionTree, TreeNode, TurnId,
+    Usage, UserInput,
 };
 pub(crate) use framing::{Frame, LineFramer};
 pub use history::{

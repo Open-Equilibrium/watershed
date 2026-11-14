@@ -7,9 +7,9 @@ use serde_json::Value;
 
 use super::ChangeCount;
 use super::outcome::patch_lines;
-use crate::pi::{content_text, usage, written_lines};
+use crate::pi::{content_text, cost_by_kind, usage, written_lines};
 use crate::visible::visible_name;
-use crate::{ChangedLines, Phase, Usage};
+use crate::{ChangedLines, CostByKind, Phase, Usage};
 
 /// Longest text kept per prompt or response, in characters.
 const TEXT_CHARS: usize = 64 * 1024;
@@ -38,6 +38,7 @@ pub(crate) struct Spend {
     /// `provider/id` of the model; empty for an entry no model produced, such as a summary.
     pub model: String,
     pub usage: Usage,
+    pub cost_by_kind: CostByKind,
 }
 
 /// What an entry holds.
@@ -253,6 +254,7 @@ fn spend(entry: &Value) -> Option<Box<Spend>> {
     Some(Box::new(Spend {
         model,
         usage: usage(Some(report)),
+        cost_by_kind: cost_by_kind(Some(report)),
     }))
 }
 

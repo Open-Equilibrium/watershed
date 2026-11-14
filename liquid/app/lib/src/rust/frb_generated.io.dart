@@ -261,6 +261,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeContext dco_decode_bridge_context(dynamic raw);
 
   @protected
+  BridgeCostByKind dco_decode_bridge_cost_by_kind(dynamic raw);
+
+  @protected
   BridgeDatabase dco_decode_bridge_database(dynamic raw);
 
   @protected
@@ -960,6 +963,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeContext sse_decode_bridge_context(SseDeserializer deserializer);
+
+  @protected
+  BridgeCostByKind sse_decode_bridge_cost_by_kind(SseDeserializer deserializer);
 
   @protected
   BridgeDatabase sse_decode_bridge_database(SseDeserializer deserializer);
@@ -1863,6 +1869,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_bridge_context(BridgeContext self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_bridge_cost_by_kind(
+    BridgeCostByKind self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_bridge_database(

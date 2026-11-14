@@ -32,6 +32,12 @@ BridgeStatistics sessionStatistics({
     models: [
       BridgeModelUsage(
         model: 'anthropic/claude-sonnet-4-5',
+        costByKind: const BridgeCostByKind(
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+        ),
         usage: usage,
         responses: 41,
         unpriced: 0,
@@ -62,6 +68,12 @@ BridgeStatistics sessionStatistics({
         models: [
           BridgeModelUsage(
             model: 'anthropic/claude-sonnet-4-5',
+            costByKind: const BridgeCostByKind(
+              input: 0,
+              output: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+            ),
             usage: usage,
             responses: 41,
             unpriced: 0,
@@ -171,6 +183,12 @@ void main() {
         models: [
           BridgeModelUsage(
             model: 'anthropic/claude-sonnet-4-5',
+            costByKind: const BridgeCostByKind(
+              input: 0,
+              output: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+            ),
             usage: BridgeUsage(
               input: 1000,
               output: 100,

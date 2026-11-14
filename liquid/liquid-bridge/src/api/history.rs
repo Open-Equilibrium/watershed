@@ -201,6 +201,19 @@ pub struct BridgeStatistics {
     pub ended_ms: Option<i64>,
 }
 
+/// What each kind of a model's tokens cost, in millionths of a US dollar.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BridgeCostByKind {
+    /// Input tokens.
+    pub input: i64,
+    /// Output tokens.
+    pub output: i64,
+    /// Input tokens read from the provider's cache.
+    pub cache_read: i64,
+    /// Input tokens written to the provider's cache.
+    pub cache_write: i64,
+}
+
 /// What one model used.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeModelUsage {
@@ -208,6 +221,8 @@ pub struct BridgeModelUsage {
     pub model: String,
     /// Tokens and cost.
     pub usage: BridgeUsage,
+    /// What each kind of its tokens cost.
+    pub cost_by_kind: BridgeCostByKind,
     /// Responses that reported usage.
     pub responses: i64,
     /// Responses that reported tokens but no cost.

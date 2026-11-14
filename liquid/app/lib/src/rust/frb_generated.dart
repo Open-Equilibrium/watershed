@@ -73,7 +73,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => 2103512287;
+  int get rustContentHash => -1845105231;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -435,6 +435,8 @@ abstract class RustLibApi extends BaseApi {
     required PlatformInt64 subscription,
     required BridgeResource resource,
   });
+
+  Future<BridgeCostByKind> crateApiHistoryBridgeCostByKindDefault();
 
   Future<BridgeQueue> crateApiEventsBridgeQueueDefault();
 
@@ -3079,7 +3081,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<BridgeQueue> crateApiEventsBridgeQueueDefault() {
+  Future<BridgeCostByKind> crateApiHistoryBridgeCostByKindDefault() {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -3088,6 +3090,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             generalizedFrbRustBinding,
             serializer,
             funcId: 69,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bridge_cost_by_kind,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiHistoryBridgeCostByKindDefaultConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiHistoryBridgeCostByKindDefaultConstMeta =>
+      const TaskConstMeta(
+        debugName: "bridge_cost_by_kind_default",
+        argNames: [],
+      );
+
+  @override
+  Future<BridgeQueue> crateApiEventsBridgeQueueDefault() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 70,
             port: port_,
           );
         },
@@ -3114,7 +3146,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 70,
+            funcId: 71,
             port: port_,
           );
         },
@@ -3669,6 +3701,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeCostByKind dco_decode_bridge_cost_by_kind(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return BridgeCostByKind(
+      input: dco_decode_i_64(arr[0]),
+      output: dco_decode_i_64(arr[1]),
+      cacheRead: dco_decode_i_64(arr[2]),
+      cacheWrite: dco_decode_i_64(arr[3]),
+    );
+  }
+
+  @protected
   BridgeDatabase dco_decode_bridge_database(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -3918,13 +3964,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeModelUsage dco_decode_bridge_model_usage(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return BridgeModelUsage(
       model: dco_decode_String(arr[0]),
       usage: dco_decode_bridge_usage(arr[1]),
-      responses: dco_decode_i_64(arr[2]),
-      unpriced: dco_decode_i_64(arr[3]),
+      costByKind: dco_decode_bridge_cost_by_kind(arr[2]),
+      responses: dco_decode_i_64(arr[3]),
+      unpriced: dco_decode_i_64(arr[4]),
     );
   }
 
@@ -5659,6 +5706,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeCostByKind sse_decode_bridge_cost_by_kind(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_input = sse_decode_i_64(deserializer);
+    var var_output = sse_decode_i_64(deserializer);
+    var var_cacheRead = sse_decode_i_64(deserializer);
+    var var_cacheWrite = sse_decode_i_64(deserializer);
+    return BridgeCostByKind(
+      input: var_input,
+      output: var_output,
+      cacheRead: var_cacheRead,
+      cacheWrite: var_cacheWrite,
+    );
+  }
+
+  @protected
   BridgeDatabase sse_decode_bridge_database(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_name = sse_decode_String(deserializer);
@@ -5943,11 +6007,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_model = sse_decode_String(deserializer);
     var var_usage = sse_decode_bridge_usage(deserializer);
+    var var_costByKind = sse_decode_bridge_cost_by_kind(deserializer);
     var var_responses = sse_decode_i_64(deserializer);
     var var_unpriced = sse_decode_i_64(deserializer);
     return BridgeModelUsage(
       model: var_model,
       usage: var_usage,
+      costByKind: var_costByKind,
       responses: var_responses,
       unpriced: var_unpriced,
     );
@@ -8195,6 +8261,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bridge_cost_by_kind(
+    BridgeCostByKind self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self.input, serializer);
+    sse_encode_i_64(self.output, serializer);
+    sse_encode_i_64(self.cacheRead, serializer);
+    sse_encode_i_64(self.cacheWrite, serializer);
+  }
+
+  @protected
   void sse_encode_bridge_database(
     BridgeDatabase self,
     SseSerializer serializer,
@@ -8416,6 +8494,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.model, serializer);
     sse_encode_bridge_usage(self.usage, serializer);
+    sse_encode_bridge_cost_by_kind(self.costByKind, serializer);
     sse_encode_i_64(self.responses, serializer);
     sse_encode_i_64(self.unpriced, serializer);
   }

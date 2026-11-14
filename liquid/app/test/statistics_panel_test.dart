@@ -57,6 +57,12 @@ BridgeStatistics statistics({bool timed = true}) {
           cacheWrite: 41000,
           cost: 1270000,
         ),
+        costByKind: const BridgeCostByKind(
+          input: 520000,
+          output: 210000,
+          cacheRead: 420000,
+          cacheWrite: 120000,
+        ),
         responses: 41,
         unpriced: 0,
       ),
@@ -87,6 +93,12 @@ BridgeStatistics statistics({bool timed = true}) {
           BridgeModelUsage(
             model: model,
             usage: first,
+            costByKind: const BridgeCostByKind(
+              input: 330000,
+              output: 120000,
+              cacheRead: 200000,
+              cacheWrite: 50000,
+            ),
             responses: 20,
             unpriced: 0,
           ),
@@ -105,6 +117,12 @@ BridgeStatistics statistics({bool timed = true}) {
           BridgeModelUsage(
             model: model,
             usage: second,
+            costByKind: const BridgeCostByKind(
+              input: 190000,
+              output: 90000,
+              cacheRead: 220000,
+              cacheWrite: 70000,
+            ),
             responses: 21,
             unpriced: 0,
           ),
@@ -182,7 +200,24 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(inPanel(find.text('Cache read')), findsOneWidget);
+    expect(
+      inPanel(find.text('Cache read')),
+      findsNWidgets(2),
+      reason: 'the totals and the cost by type legend',
+    );
+  });
+
+  testWidgets('the Cost view splits the cost by type, as the tokens are', (
+    tester,
+  ) async {
+    await show(tester);
+    await pressMeta(tester, LogicalKeyboardKey.keyU);
+
+    expect(inPanel(find.text('Cost by type')), findsOneWidget);
+    expect(inPanel(find.text('\$0.52')), findsOneWidget, reason: 'input');
+    expect(inPanel(find.text('\$0.42')), findsOneWidget, reason: 'cache read');
+    expect(inPanel(find.text('\$0.12')), findsOneWidget, reason: 'cache write');
+    expect(inPanel(find.text('\$0.21')), findsOneWidget, reason: 'output');
   });
 
   testWidgets('the Tokens and Time views lead with their own totals', (

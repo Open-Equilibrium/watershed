@@ -3,10 +3,10 @@
 use std::ffi::OsString;
 
 use meta_harness_core::{
-    AgentEvent, ChangeStatus, CommandError, Context, EntryKind, FileChange, ItemDetail, ItemKind,
-    ItemStatus, MAX_RECORD_BYTES, Model, ModelUsage, NotificationLevel, Queue, RevertConfirmation,
-    RevertFile, SessionEvent, Statistics, StoredSession, ToolCalls, Transcript, TranscriptItem,
-    TreeNode, TurnCheckpoints, TurnStatistics, Usage, UserInput, visible_name,
+    AgentEvent, ChangeStatus, CommandError, Context, CostByKind, EntryKind, FileChange, ItemDetail,
+    ItemKind, ItemStatus, MAX_RECORD_BYTES, Model, ModelUsage, NotificationLevel, Queue,
+    RevertConfirmation, RevertFile, SessionEvent, Statistics, StoredSession, ToolCalls, Transcript,
+    TranscriptItem, TreeNode, TurnCheckpoints, TurnStatistics, Usage, UserInput, visible_name,
 };
 
 use crate::api::events::{
@@ -15,9 +15,9 @@ use crate::api::events::{
     BridgeStep, BridgeUsage,
 };
 use crate::api::history::{
-    BridgeContext, BridgeEntryKind, BridgeModelUsage, BridgeRevertConfirmation, BridgeRevertFile,
-    BridgeStatistics, BridgeToolCalls, BridgeTranscript, BridgeTranscriptItem, BridgeTreeNode,
-    BridgeTurn, BridgeTurnStatistics,
+    BridgeContext, BridgeCostByKind, BridgeEntryKind, BridgeModelUsage, BridgeRevertConfirmation,
+    BridgeRevertFile, BridgeStatistics, BridgeToolCalls, BridgeTranscript, BridgeTranscriptItem,
+    BridgeTreeNode, BridgeTurn, BridgeTurnStatistics,
 };
 use crate::api::session::{BridgeModel, BridgeStoredSession};
 
@@ -145,11 +145,23 @@ impl From<Statistics> for BridgeStatistics {
     }
 }
 
+impl From<CostByKind> for BridgeCostByKind {
+    fn from(cost: CostByKind) -> Self {
+        Self {
+            input: int(cost.input),
+            output: int(cost.output),
+            cache_read: int(cost.cache_read),
+            cache_write: int(cost.cache_write),
+        }
+    }
+}
+
 impl From<ModelUsage> for BridgeModelUsage {
     fn from(model: ModelUsage) -> Self {
         Self {
             model: model.model,
             usage: model.usage.into(),
+            cost_by_kind: model.cost_by_kind.into(),
             responses: int(model.responses),
             unpriced: int(model.unpriced),
         }

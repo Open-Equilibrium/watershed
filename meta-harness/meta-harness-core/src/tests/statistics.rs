@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::{History, ModelUsage, Statistics, ToolCalls, TurnStatistics, Usage};
+use crate::{CostByKind, History, ModelUsage, Statistics, ToolCalls, TurnStatistics, Usage};
 
 /// A session with checkpoints: a compaction before the first turn, three turns and a steering
 /// prompt that stays in turn one. Turn one's end checkpoint comes after its last response, so its
@@ -46,6 +46,7 @@ fn model(model: &str, usage: Usage, responses: u32, unpriced: u32) -> ModelUsage
     ModelUsage {
         model: model.to_owned(),
         usage,
+        cost_by_kind: CostByKind::default(),
         responses,
         unpriced,
     }
@@ -299,5 +300,30 @@ fn without_checkpoints_each_prompt_starts_a_turn_and_missing_timing_stays_none()
                 open: 0,
             },
         ]
+    );
+}
+
+#[test]
+fn splits_each_model_cost_by_kind_of_tokens() {
+    let statistics = counted(
+        r#"{"entries":[
+          {"type":"message","id":"u1","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z","message":{"role":"user","content":"Hi"}},
+          {"type":"message","id":"a1","parentId":"u1","timestamp":"2026-11-01T10:00:01.000Z","message":{"role":"assistant","provider":"anthropic","model":"claude-sonnet-4-5","content":[],"usage":{"input":100,"output":10,"cacheRead":900,"cacheWrite":5,"cost":{"input":0.0005,"output":0.0003,"cacheRead":0.0002,"cacheWrite":0.00001,"total":0.00101}}}},
+          {"type":"message","id":"a2","parentId":"a1","timestamp":"2026-11-01T10:00:02.000Z","message":{"role":"assistant","provider":"anthropic","model":"claude-sonnet-4-5","content":[],"usage":{"input":50,"output":5,"cost":{"input":0.00025,"output":0.00015,"total":0.0004}}}}
+        ],"leafId":"a2"}"#,
+    );
+    assert_eq!(
+        statistics.models[0].cost_by_kind,
+        CostByKind {
+            input: 750,
+            output: 450,
+            cache_read: 200,
+            cache_write: 10,
+        },
+        "each kind's cost is summed over the model's responses, in micro-dollars"
+    );
+    assert_eq!(
+        statistics.models[0].usage.cost_micro_usd, 1_410,
+        "the kinds add up to the model's cost"
     );
 }
