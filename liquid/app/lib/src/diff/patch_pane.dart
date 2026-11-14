@@ -21,7 +21,6 @@ class PatchPane extends StatelessWidget {
     required this.note,
     required this.settings,
     required this.scroll,
-    required this.bottom,
     required this.onLayout,
     required this.onWhitespace,
   });
@@ -39,8 +38,6 @@ class PatchPane extends StatelessWidget {
   final DiffSettings settings;
   final ScrollController scroll;
 
-  /// Room below the last line for the floating input area.
-  final double bottom;
   final ValueChanged<DiffLayout> onLayout;
   final VoidCallback onWhitespace;
 
@@ -174,7 +171,6 @@ class PatchPane extends StatelessWidget {
         height: constraints.maxHeight,
         child: ListView.builder(
           controller: scroll,
-          padding: EdgeInsets.only(bottom: bottom),
           itemExtent: UnifiedLineRow.height,
           itemCount: split ? rows.length : lines.length,
           itemBuilder: (context, index) => split

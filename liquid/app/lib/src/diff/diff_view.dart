@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../agent/input_lane.dart';
 import '../controls.dart';
 import '../format.dart';
 import '../rust/api/events.dart';
@@ -35,7 +34,6 @@ class DiffView extends StatefulWidget {
     super.key,
     required this.state,
     required this.settings,
-    this.input,
     this.parse = parsePatchInBackground,
   });
 
@@ -43,9 +41,6 @@ class DiffView extends StatefulWidget {
 
   /// How the panel shows the changes, kept across restarts.
   final DiffSettingsController settings;
-
-  /// The input area, floating over the diff.
-  final Widget? input;
 
   final PatchParser parse;
 
@@ -314,7 +309,7 @@ class _DiffViewState extends State<DiffView> {
   );
 
   @override
-  Widget build(BuildContext context) => ViewShortcuts(
+  Widget build(BuildContext context) => CallbackShortcuts(
     bindings: {
       ...Fixed.previousOrNextFile.bind([() => _move(-1), () => _move(1)]),
       ...Fixed.foldFolder.bind([_fold, _unfold]),
@@ -410,53 +405,50 @@ class _DiffViewState extends State<DiffView> {
   /// Says why nothing is shown, below the turn menu when a turn ended.
   Widget _empty(BuildContext context, String title, String text) {
     final header = _header();
-    return InputLane(
-      input: widget.input,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (header != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                WsMetrics.space7,
-                WsMetrics.space5,
-                WsMetrics.space7,
-                0,
-              ),
-              child: header,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (header != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              WsMetrics.space7,
+              WsMetrics.space5,
+              WsMetrics.space7,
+              0,
             ),
-          Expanded(
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 420),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      style: Theme.of(context).textTheme.labelMedium
-                          ?.copyWith(fontWeight: WsMetrics.fwMedium),
-                    ),
-                    const SizedBox(height: WsMetrics.space2),
-                    Text(
-                      text,
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ),
+            child: header,
+          ),
+        Expanded(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: Theme.of(context).textTheme.labelMedium
+                        ?.copyWith(fontWeight: WsMetrics.fwMedium),
+                  ),
+                  const SizedBox(height: WsMetrics.space2),
+                  Text(
+                    text,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
               ),
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
   Widget _content(BuildContext context) {
     final ws = context.ws;
     if (!_loaded) {
-      return InputLane(input: widget.input, child: const SizedBox.expand());
+      return const SizedBox.expand();
     }
     if (_changes.isEmpty) {
       final scope = widget.state.shownScope.value;
@@ -523,20 +515,16 @@ class _DiffViewState extends State<DiffView> {
           ),
         ),
         Expanded(
-          child: InputLane(
-            input: widget.input,
-            child: PatchPane(
-              header: _header(),
-              change: _selected,
-              lines: _lines,
-              widest: _widest,
-              note: _note,
-              settings: widget.settings.value,
-              scroll: _scroll,
-              bottom: widget.input == null ? 0 : inputClearance,
-              onLayout: _showLayout,
-              onWhitespace: _switchWhitespace,
-            ),
+          child: PatchPane(
+            header: _header(),
+            change: _selected,
+            lines: _lines,
+            widest: _widest,
+            note: _note,
+            settings: widget.settings.value,
+            scroll: _scroll,
+            onLayout: _showLayout,
+            onWhitespace: _switchWhitespace,
           ),
         ),
       ],
