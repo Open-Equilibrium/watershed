@@ -8,7 +8,7 @@ pub struct Context {
     pub tokens: Option<u64>,
     /// Tokens the model's context window holds.
     pub window: u64,
-    /// Tokens at which pi starts compacting; `None` when auto compaction is off or pi's settings
-    /// cannot be read.
+    /// Tokens at which pi starts compacting; `None` when auto compaction is off, pi's settings
+    /// cannot be read, or the project's settings set compaction.
     pub compacts_at: Option<u64>,
 }

@@ -1,7 +1,7 @@
 //! What a session's stored entries count to: the figures of Liquid's statistics view (ADR-0279).
 //! Every entry counts once, on every branch, in stored order. A turn starts at each start
-//! checkpoint, or at each prompt in a session without checkpoints; entries before the first turn
-//! count only toward the session.
+//! checkpoint, or at each prompt in a session without checkpoints, and its clock runs to its end
+//! checkpoint or the next start; entries outside every turn count only toward the session.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -22,7 +22,7 @@ pub struct ModelUsage {
     pub cost_by_kind: CostByKind,
     /// Responses that reported usage.
     pub responses: u32,
-    /// Responses that reported tokens but no cost.
+    /// Responses that reported tokens but no cost above zero.
     pub unpriced: u32,
 }
 
@@ -53,7 +53,7 @@ pub struct TurnStatistics {
     pub prompt: String,
     /// When its first entry was stored, in Unix milliseconds.
     pub started_ms: Option<u64>,
-    /// When its last entry was stored.
+    /// When its clock stopped: at its end checkpoint, or else at its last entry before the next turn.
     pub ended_ms: Option<u64>,
     /// What each model used, sorted as [`Statistics::models`].
     pub models: Vec<ModelUsage>,
