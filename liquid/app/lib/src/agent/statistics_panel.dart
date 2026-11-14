@@ -8,8 +8,8 @@ import '../session/session_state.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
-import '../workspace/row_menu.dart';
 import 'segment_bar.dart';
+import 'statistics_table.dart';
 import 'statistics_chart.dart';
 
 /// The text the Ask button puts in the input; the user completes it and sends it.
@@ -343,7 +343,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
           BarSegment(output, ws.data3),
         ],
       ),
-      _legend(ws, [
+      StatisticsLegend([
         ('Input', ws.data1, format(input)),
         ('Cache read', ws.data2, format(cacheRead)),
         ('Cache write', ws.textFaint, format(cacheWrite)),
@@ -599,20 +599,20 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     ],
   );
 
-  Widget _modelTable(WsPalette ws, SessionStatistics figures) => _table(
-    ws,
-    headers: const ['#', 'Model', 'Responses', 'Tokens', 'Cost'],
-    rows: [
-      for (final (index, model) in figures.models.indexed)
-        [
-          _index(ws, index),
-          _name(ws, model.name),
-          _number(ws, '${model.responses}'),
-          _number(ws, formatTokens(model.tokens)),
-          _number(ws, '≈ ${formatCost(model.cost)}'),
+  Widget _modelTable(WsPalette ws, SessionStatistics figures) =>
+      StatisticsTable(
+        headers: const ['#', 'Model', 'Responses', 'Tokens', 'Cost'],
+        rows: [
+          for (final (index, model) in figures.models.indexed)
+            [
+              _index(ws, index),
+              _name(ws, model.name),
+              _number(ws, '${model.responses}'),
+              _number(ws, formatTokens(model.tokens)),
+              _number(ws, '≈ ${formatCost(model.cost)}'),
+            ],
         ],
-    ],
-  );
+      );
 
   Widget _toolTable(WsPalette ws, SessionStatistics figures) {
     final tools = figures.tools;
@@ -624,8 +624,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       spacing: 8,
       children: [
-        _table(
-          ws,
+        StatisticsTable(
           headers: const ['#', 'Tool', 'Calls', 'Failed', 'Time'],
           rows: [
             for (final (index, tool) in tools.indexed)
@@ -661,7 +660,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
               ],
           ],
         ),
-        _legend(ws, [
+        StatisticsLegend([
           ('Succeeded', ws.textFaint, ''),
           ('Failed', ws.danger, ''),
           ('Cancelled', ws.borderStrong, ''),
@@ -681,8 +680,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
       1,
       (most, turn) => (turn.workingMs ?? 0) > most ? turn.workingMs! : most,
     );
-    return _table(
-      ws,
+    return StatisticsTable(
       headers: const ['#', 'Turn', 'Time', 'Tokens', 'Cost'],
       onSelect: (index) => _selectTurn(figures.turns[index]),
       rows: [
@@ -763,7 +761,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     children: [
       Row(
         children: [
-          _dot(colour),
+          ColourDot(colour),
           const SizedBox(width: 7),
           Expanded(
             child: Text(
@@ -789,47 +787,6 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
       ),
     ],
   );
-
-  Widget _legend(WsPalette ws, List<(String, Color, String)> items) => Wrap(
-    spacing: 14,
-    runSpacing: 4,
-    children: [
-      for (final (label, colour, value) in items)
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          spacing: 5,
-          children: [
-            _dot(colour, size: 8, radius: 2),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: WsMetrics.fsSmall,
-                color: ws.textFaint,
-              ),
-            ),
-            if (value.isNotEmpty)
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: WsMetrics.fsSmall,
-                  color: ws.text,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
-              ),
-          ],
-        ),
-    ],
-  );
-
-  static Widget _dot(Color colour, {double size = 8, double radius = 4}) =>
-      Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          color: colour,
-          borderRadius: BorderRadius.circular(radius),
-        ),
-      );
 
   Widget _index(WsPalette ws, int index) => Text(
     '${index + 1}',
@@ -887,66 +844,6 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     ),
   );
 
-  /// A breakdown table: a `#` column, a name that takes the rest, then right-aligned figures.
-  Widget _table(
-    WsPalette ws, {
-    required List<String> headers,
-    required List<List<Widget>> rows,
-    ValueChanged<int>? onSelect,
-  }) {
-    Widget cell(int column, Widget child) => column == 0
-        ? SizedBox(width: 22, child: child)
-        : column == 1
-        ? Expanded(
-            child: Align(alignment: Alignment.centerLeft, child: child),
-          )
-        : SizedBox(
-            width: 72,
-            child: Align(alignment: Alignment.centerRight, child: child),
-          );
-    Widget row(
-      List<Widget> cells, {
-      required bool header,
-      VoidCallback? onTap,
-    }) {
-      final content = Container(
-        padding: const EdgeInsets.symmetric(vertical: 7),
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: ws.border)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (final (column, child) in cells.indexed) cell(column, child),
-          ],
-        ),
-      );
-      return header ? content : _BreakdownRow(onTap: onTap, child: content);
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        row([
-          for (final label in headers)
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: WsMetrics.fsSmall,
-                color: ws.textFaint,
-              ),
-            ),
-        ], header: true),
-        for (final (index, cells) in rows.indexed)
-          row(
-            cells,
-            header: false,
-            onTap: onSelect == null ? null : () => onSelect(index),
-          ),
-      ],
-    );
-  }
-
   static Color _series(WsPalette ws, int series) =>
       series >= otherSeries ? ws.textFaint : _seriesColours(ws)[series];
 
@@ -955,48 +852,4 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     ws.data2,
     ws.data3,
   ];
-}
-
-/// A breakdown row: it takes the hover colour while the pointer is over it, and runs `onTap`
-/// when it is selectable.
-class _BreakdownRow extends StatefulWidget {
-  const _BreakdownRow({required this.onTap, required this.child});
-
-  final VoidCallback? onTap;
-  final Widget child;
-
-  @override
-  State<_BreakdownRow> createState() => _BreakdownRowState();
-}
-
-class _BreakdownRowState extends State<_BreakdownRow> {
-  bool _hovered = false;
-  bool _focused = false;
-
-  @override
-  Widget build(BuildContext context) => HoverRegion(
-    onHover: (hovered, _) {
-      if (mounted) setState(() => _hovered = hovered);
-    },
-    child: InkWell(
-      // A row that selects takes the keyboard, and Enter and Space select it, as a button does.
-      canRequestFocus: widget.onTap != null,
-      onTap: widget.onTap,
-      onFocusChange: (focused) {
-        if (mounted) setState(() => _focused = focused);
-      },
-      mouseCursor: widget.onTap == null
-          ? MouseCursor.defer
-          : SystemMouseCursors.click,
-      hoverColor: Colors.transparent,
-      focusColor: Colors.transparent,
-      highlightColor: Colors.transparent,
-      splashColor: Colors.transparent,
-      child: AnimatedContainer(
-        duration: WsMetrics.motionFast,
-        color: _hovered || _focused ? context.ws.hover : null,
-        child: widget.child,
-      ),
-    ),
-  );
 }
