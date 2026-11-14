@@ -15,7 +15,7 @@ import 'fake_backend.dart';
 
 const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
 
-/// One model that used 1.79 M tokens for $1.27, and a turn of 14 min 32 s with 86 tool calls.
+/// One model that used 1.79 M tokens for $1.27, and a turn of 14m 32s with 86 tool calls.
 BridgeStatistics sessionStatistics({
   int? modelMs = 588000,
   int? toolMs = 261000,
