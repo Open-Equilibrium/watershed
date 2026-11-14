@@ -4,13 +4,16 @@ import 'rust/api/events.dart';
 int promptTokens(BridgeUsage usage) =>
     usage.input + usage.cacheRead + usage.cacheWrite;
 
-/// A duration as milliseconds, seconds or minutes and seconds.
+/// A duration as milliseconds, seconds, minutes and seconds, or hours and minutes.
 String formatDuration(int ms) {
   if (ms < 1000) return '$ms ms';
   // Seconds keep one decimal until they would round to a whole minute.
   if (ms < 59950) return '${(ms / 1000).toStringAsFixed(1)} s';
   final seconds = ms < 60000 ? 60 : ms ~/ 1000;
-  return '${seconds ~/ 60}m ${(seconds % 60).toString().padLeft(2, '0')}s';
+  String two(int value) => value.toString().padLeft(2, '0');
+  final hours = seconds ~/ 3600;
+  if (hours > 0) return '${hours}h ${two(seconds % 3600 ~/ 60)}m';
+  return '${seconds ~/ 60}m ${two(seconds % 60)}s';
 }
 
 /// A count with thousands separators.

@@ -47,10 +47,21 @@ void main() {
         formatDuration(59600),
         formatDuration(125000),
         formatDuration(872000),
+        formatDuration(3599000),
+        formatDuration(3600000),
         formatDuration(7500000),
       ],
-      ['4.1 s', '23.0 s', '59.6 s', '2m 05s', '14m 32s', '125m 00s'],
-      reason: 'one style for every duration: minutes count past an hour',
+      [
+        '4.1 s',
+        '23.0 s',
+        '59.6 s',
+        '2m 05s',
+        '14m 32s',
+        '59m 59s',
+        '1h 00m',
+        '2h 05m',
+      ],
+      reason: 'one style for every duration, with hours from the first hour',
     );
     expect(
       [formatShare(95, 100), formatShare(1, 3), formatShare(0, 0)],
