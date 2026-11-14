@@ -391,6 +391,32 @@ void main() {
   });
 
   test(
+    'a default that a binding of the user’s own takes is left unbound on load',
+    () {
+      const commandU = Keys(LogicalKeyboardKey.keyU, meta: true);
+      final json = ShortcutSettings.standard()
+          .change(Command.focusInput, commandU)
+          .toJson();
+
+      final read = ShortcutSettings.fromJson(json)!;
+
+      expect(read.bindings(Command.focusInput), [commandU]);
+      expect(
+        read.bindings(Command.statistics),
+        isEmpty,
+        reason: 'the user’s own ⌘U wins over the Statistics default',
+      );
+      expect(read.label(Command.statistics), '');
+      expect(read.changed(Command.statistics), isTrue);
+      expect(read.defaultLabel(Command.statistics), '⌘U');
+      expect(read.bindings(Command.diff), [
+        const Keys(LogicalKeyboardKey.keyD, meta: true),
+      ], reason: 'a default that nothing takes keeps its keys');
+      expect(ShortcutSettings.fromJson(read.toJson()), read);
+    },
+  );
+
+  test(
     'settings survive a JSON round trip and ignore what they do not know',
     () {
       final keys = ShortcutSettings.liquidKey()

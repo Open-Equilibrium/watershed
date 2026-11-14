@@ -474,17 +474,22 @@ class ShortcutSettings {
   /// Every changed command's keys in the active profile.
   Map<Command, List<Keys>> get changes => _active?.changes ?? const {};
 
-  List<Keys> _defaults(Command command) => [
-    if (command.liquid && liquidKey)
-      Keys(
-        command.keys.key,
-        liquid: true,
-        alt: command.keys.alt,
-        shift: command.keys.shift,
-        control: command.keys.control,
-      ),
-    command.keys,
-  ];
+  List<Keys> _defaults(Command command) =>
+      _defaultKeys(command, liquidKey: liquidKey);
+
+  /// What `command` runs by default, with its Liquid key combination while `liquidKey` is on.
+  static List<Keys> _defaultKeys(Command command, {required bool liquidKey}) =>
+      [
+        if (command.liquid && liquidKey)
+          Keys(
+            command.keys.key,
+            liquid: true,
+            alt: command.keys.alt,
+            shift: command.keys.shift,
+            control: command.keys.control,
+          ),
+        command.keys,
+      ];
 
   /// Every key combination that runs `command`; Liquid key combinations only while it is on.
   List<Keys> bindings(Command command) => [
@@ -713,7 +718,33 @@ class ShortcutSettings {
         changes[command] = keys.nonNulls.toSet().toList();
       }
     }
-    return CustomProfile(base, liquidKey, changes);
+    return CustomProfile(base, liquidKey, _leaveTakenDefaultsUnbound(changes));
+  }
+
+  /// Leaves a default unbound when a binding of the user's own takes its keys: the user's binding
+  /// wins, and Settings shows the command unbound with its default to restore. The Liquid key
+  /// counts as on, so its combinations are checked as well.
+  static Map<Command, List<Keys>> _leaveTakenDefaultsUnbound(
+    Map<Command, List<Keys>> changes,
+  ) {
+    final own = [
+      for (final MapEntry(key: owner, value: bound) in changes.entries)
+        for (final keys in bound) (owner, keys),
+    ];
+    bool taken(Command command, Keys keys) =>
+        own.any((it) => _runsSame(command, keys, it.$1, it.$2));
+    final result = {...changes};
+    for (final command in Command.values) {
+      if (changes.containsKey(command)) continue;
+      final defaults = _defaultKeys(command, liquidKey: true);
+      if (defaults.any((keys) => taken(command, keys))) {
+        result[command] = [
+          for (final keys in defaults)
+            if (!taken(command, keys)) keys,
+        ];
+      }
+    }
+    return result;
   }
 
   @override

@@ -95,6 +95,28 @@ void main() {
     expect(find.text('main checkout · this window'), findsOneWidget);
   });
 
+  testWidgets(
+    'a default that the user’s own ⌘U takes shows unbound in Settings',
+    (tester) async {
+      // Loaded from a stored file, as the app starts, where the default gives way.
+      await show(
+        tester,
+        ShortcutSettings.fromJson(
+          ShortcutSettings.standard()
+              .change(
+                Command.focusInput,
+                const Keys(LogicalKeyboardKey.keyU, meta: true),
+              )
+              .toJson(),
+        ),
+      );
+      await openSettings(tester);
+
+      expect(find.text('⌘U'), findsOneWidget, reason: 'only the user’s own ⌘U');
+      expect(find.text('Reset to ⌘U'), findsOneWidget);
+    },
+  );
+
   testWidgets('recording new keys switches to Custom and offers a reset', (
     tester,
   ) async {
