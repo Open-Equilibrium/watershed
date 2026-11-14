@@ -427,3 +427,29 @@ fn a_turn_clock_stops_at_its_end_and_later_entries_count_only_in_the_totals() {
         "and their calls, whose turn is over"
     );
 }
+
+#[test]
+fn a_response_with_a_recorded_cost_is_priced_however_small_the_cost_rounds() {
+    let statistics = counted(
+        r#"{"entries":[
+          {"type":"message","id":"u1","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z","message":{"role":"user","content":"Hi"}},
+          {"type":"message","id":"a1","parentId":"u1","timestamp":"2026-11-01T10:00:01.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[],"usage":{"input":10,"output":1,"cost":{"total":0.0000004}}}},
+          {"type":"message","id":"a2","parentId":"a1","timestamp":"2026-11-01T10:00:02.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[],"usage":{"input":10,"output":1}}},
+          {"type":"message","id":"a3","parentId":"a2","timestamp":"2026-11-01T10:00:03.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[],"usage":{"input":10,"output":1,"cost":{"total":0}}}}
+        ],"leafId":"a3"}"#,
+    );
+    assert_eq!(
+        statistics.models,
+        [model(
+            "faux/faux-1",
+            Usage {
+                input: 30,
+                output: 3,
+                ..Usage::default()
+            },
+            3,
+            2,
+        )],
+        "a recorded cost above zero is priced, though it rounds to no micro-dollar; no cost or a zero one is not"
+    );
+}

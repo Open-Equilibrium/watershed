@@ -39,6 +39,8 @@ pub(crate) struct Spend {
     pub model: String,
     pub usage: Usage,
     pub cost_by_kind: CostByKind,
+    /// Whether pi recorded a cost above zero; decided before the cost is rounded to micro-dollars.
+    pub priced: bool,
 }
 
 /// What an entry holds.
@@ -251,10 +253,15 @@ fn spend(entry: &Value) -> Option<Box<Spend>> {
         (None, Some(id)) => id.to_owned(),
         _ => String::new(),
     };
+    let priced = report
+        .pointer("/cost/total")
+        .and_then(Value::as_f64)
+        .is_some_and(|total| total > 0.0);
     Some(Box::new(Spend {
         model,
         usage: usage(Some(report)),
         cost_by_kind: cost_by_kind(Some(report)),
+        priced,
     }))
 }
 

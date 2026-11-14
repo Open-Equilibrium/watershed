@@ -337,7 +337,7 @@ fn count_spend(models: &mut HashMap<String, ModelUsage>, entry: &Entry) {
     add_kinds(&mut model.cost_by_kind, &spend.cost_by_kind);
     if matches!(entry.body, Body::Assistant { .. }) {
         model.responses += 1;
-        if spend.usage.cost_micro_usd == 0 && tokens(&spend.usage) > 0 {
+        if !spend.priced && tokens(&spend.usage) > 0 {
             model.unpriced += 1;
         }
     }
