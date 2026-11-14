@@ -56,6 +56,10 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// send that many more. Liquid calls it after applying each batch it received (ADR-0272).
   Future<void> confirmApplied({required PlatformInt64 applied});
 
+  /// The context window the next request fills and when pi compacts it; `None` when the agent
+  /// reports no window.
+  Future<BridgeContext?> context();
+
   /// Creates the branch `name` at the current commit and switches to it.
   Future<BridgeGitOutcome> createBranch({required String name});
 
@@ -216,6 +220,9 @@ abstract class AgentSession implements RustOpaqueInterface {
     required String path,
     required bool hideWhitespace,
   });
+
+  /// What the session's stored entries count to, on every branch (ADR-0279).
+  Future<BridgeStatistics> statistics();
 
   /// Stops waiting for the pull request text being written.
   Future<void> stopPullRequestText();

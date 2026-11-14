@@ -41,7 +41,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1661487890;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 2103512287;
 
 // Section: executor
 
@@ -545,6 +545,55 @@ fn wire__crate__api__session__AgentSession_confirm_applied_impl(
                             api_applied,
                         );
                     })?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__session__AgentSession_context_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "AgentSession_context",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = crate::api::session::AgentSession::context(&*api_that_guard)?;
                     std::result::Result::Ok(output_ok)
                 })())
             }
@@ -2482,6 +2531,56 @@ fn wire__crate__api__session__AgentSession_stash_patch_impl(
         },
     )
 }
+fn wire__crate__api__session__AgentSession_statistics_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "AgentSession_statistics",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok =
+                        crate::api::session::AgentSession::statistics(&*api_that_guard)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__session__AgentSession_stop_pull_request_text_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -3969,6 +4068,20 @@ impl SseDecode for crate::api::git::BridgeComparison {
     }
 }
 
+impl SseDecode for crate::api::history::BridgeContext {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_tokens = <Option<i64>>::sse_decode(deserializer);
+        let mut var_window = <i64>::sse_decode(deserializer);
+        let mut var_compactsAt = <Option<i64>>::sse_decode(deserializer);
+        return crate::api::history::BridgeContext {
+            tokens: var_tokens,
+            window: var_window,
+            compacts_at: var_compactsAt,
+        };
+    }
+}
+
 impl SseDecode for crate::api::database::BridgeDatabase {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4350,6 +4463,22 @@ impl SseDecode for crate::api::session::BridgeModel {
             id: var_id,
             name: var_name,
             context_window: var_contextWindow,
+        };
+    }
+}
+
+impl SseDecode for crate::api::history::BridgeModelUsage {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_model = <String>::sse_decode(deserializer);
+        let mut var_usage = <crate::api::events::BridgeUsage>::sse_decode(deserializer);
+        let mut var_responses = <i64>::sse_decode(deserializer);
+        let mut var_unpriced = <i64>::sse_decode(deserializer);
+        return crate::api::history::BridgeModelUsage {
+            model: var_model,
+            usage: var_usage,
+            responses: var_responses,
+            unpriced: var_unpriced,
         };
     }
 }
@@ -4947,6 +5076,25 @@ impl SseDecode for crate::api::git::BridgeStash {
     }
 }
 
+impl SseDecode for crate::api::history::BridgeStatistics {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_models = <Vec<crate::api::history::BridgeModelUsage>>::sse_decode(deserializer);
+        let mut var_tools = <Vec<crate::api::history::BridgeToolCalls>>::sse_decode(deserializer);
+        let mut var_turns =
+            <Vec<crate::api::history::BridgeTurnStatistics>>::sse_decode(deserializer);
+        let mut var_startedMs = <Option<i64>>::sse_decode(deserializer);
+        let mut var_endedMs = <Option<i64>>::sse_decode(deserializer);
+        return crate::api::history::BridgeStatistics {
+            models: var_models,
+            tools: var_tools,
+            turns: var_turns,
+            started_ms: var_startedMs,
+            ended_ms: var_endedMs,
+        };
+    }
+}
+
 impl SseDecode for crate::api::events::BridgeStep {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4990,6 +5138,24 @@ impl SseDecode for crate::api::workspace::BridgeTextStyle {
             7 => crate::api::workspace::BridgeTextStyle::Done,
             8 => crate::api::workspace::BridgeTextStyle::Quote,
             _ => unreachable!("Invalid variant for BridgeTextStyle: {}", inner),
+        };
+    }
+}
+
+impl SseDecode for crate::api::history::BridgeToolCalls {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_name = <String>::sse_decode(deserializer);
+        let mut var_succeeded = <i64>::sse_decode(deserializer);
+        let mut var_failed = <i64>::sse_decode(deserializer);
+        let mut var_cancelled = <i64>::sse_decode(deserializer);
+        let mut var_open = <i64>::sse_decode(deserializer);
+        return crate::api::history::BridgeToolCalls {
+            name: var_name,
+            succeeded: var_succeeded,
+            failed: var_failed,
+            cancelled: var_cancelled,
+            open: var_open,
         };
     }
 }
@@ -5091,6 +5257,32 @@ impl SseDecode for crate::api::history::BridgeTurnChanges {
         return crate::api::history::BridgeTurnChanges {
             state: var_state,
             files: var_files,
+        };
+    }
+}
+
+impl SseDecode for crate::api::history::BridgeTurnStatistics {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_entry = <String>::sse_decode(deserializer);
+        let mut var_prompt = <String>::sse_decode(deserializer);
+        let mut var_startedMs = <Option<i64>>::sse_decode(deserializer);
+        let mut var_endedMs = <Option<i64>>::sse_decode(deserializer);
+        let mut var_models = <Vec<crate::api::history::BridgeModelUsage>>::sse_decode(deserializer);
+        let mut var_modelMs = <Option<i64>>::sse_decode(deserializer);
+        let mut var_toolMs = <Option<i64>>::sse_decode(deserializer);
+        let mut var_toolCalls = <i64>::sse_decode(deserializer);
+        let mut var_failed = <i64>::sse_decode(deserializer);
+        return crate::api::history::BridgeTurnStatistics {
+            entry: var_entry,
+            prompt: var_prompt,
+            started_ms: var_startedMs,
+            ended_ms: var_endedMs,
+            models: var_models,
+            model_ms: var_modelMs,
+            tool_ms: var_toolMs,
+            tool_calls: var_toolCalls,
+            failed: var_failed,
         };
     }
 }
@@ -5392,6 +5584,20 @@ impl SseDecode for Vec<crate::api::session::BridgeModel> {
     }
 }
 
+impl SseDecode for Vec<crate::api::history::BridgeModelUsage> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::history::BridgeModelUsage>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::git::BridgeName> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -5486,6 +5692,20 @@ impl SseDecode for Vec<crate::api::session::BridgeStoredSession> {
     }
 }
 
+impl SseDecode for Vec<crate::api::history::BridgeToolCalls> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::history::BridgeToolCalls>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::history::BridgeTranscriptItem> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -5521,6 +5741,20 @@ impl SseDecode for Vec<crate::api::history::BridgeTurn> {
         let mut ans_ = Vec::with_capacity(len_ as usize);
         for idx_ in 0..len_ {
             ans_.push(<crate::api::history::BridgeTurn>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::history::BridgeTurnStatistics> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::history::BridgeTurnStatistics>::sse_decode(
+                deserializer,
+            ));
         }
         return ans_;
     }
@@ -5641,6 +5875,19 @@ impl SseDecode for Option<crate::api::git::BridgeComparison> {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<crate::api::git::BridgeComparison>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::history::BridgeContext> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::history::BridgeContext>::sse_decode(
                 deserializer,
             ));
         } else {
@@ -6058,302 +6305,311 @@ fn pde_ffi_dispatcher_primary_impl(
             rust_vec_len,
             data_len,
         ),
-        10 => wire__crate__api__session__AgentSession_create_branch_impl(
+        10 => {
+            wire__crate__api__session__AgentSession_context_impl(port, ptr, rust_vec_len, data_len)
+        }
+        11 => wire__crate__api__session__AgentSession_create_branch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        11 => wire__crate__api__session__AgentSession_create_pull_request_impl(
+        12 => wire__crate__api__session__AgentSession_create_pull_request_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        12 => wire__crate__api__session__AgentSession_current_model_impl(
+        13 => wire__crate__api__session__AgentSession_current_model_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        13 => wire__crate__api__session__AgentSession_delete_session_impl(
+        14 => wire__crate__api__session__AgentSession_delete_session_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        14 => wire__crate__api__session__AgentSession_discard_stash_impl(
+        15 => wire__crate__api__session__AgentSession_discard_stash_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        15 => {
+        16 => {
             wire__crate__api__session__AgentSession_dismiss_impl(port, ptr, rust_vec_len, data_len)
         }
-        16 => {
+        17 => {
             wire__crate__api__session__AgentSession_events_impl(port, ptr, rust_vec_len, data_len)
         }
-        17 => wire__crate__api__session__AgentSession_export_record_impl(
+        18 => wire__crate__api__session__AgentSession_export_record_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        18 => wire__crate__api__session__AgentSession_fetch_impl(port, ptr, rust_vec_len, data_len),
-        19 => wire__crate__api__session__AgentSession_git_branches_impl(
+        19 => wire__crate__api__session__AgentSession_fetch_impl(port, ptr, rust_vec_len, data_len),
+        20 => wire__crate__api__session__AgentSession_git_branches_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        20 => wire__crate__api__session__AgentSession_git_stash_impl(
+        21 => wire__crate__api__session__AgentSession_git_stash_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        21 => wire__crate__api__session__AgentSession_git_status_impl(
+        22 => wire__crate__api__session__AgentSession_git_status_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        22 => {
+        23 => {
             wire__crate__api__session__AgentSession_history_impl(port, ptr, rust_vec_len, data_len)
         }
-        23 => wire__crate__api__session__AgentSession_in_repository_impl(
+        24 => wire__crate__api__session__AgentSession_in_repository_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        24 => wire__crate__api__session__AgentSession_initialize_git_impl(
+        25 => wire__crate__api__session__AgentSession_initialize_git_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        25 => {
+        26 => {
             wire__crate__api__session__AgentSession_models_impl(port, ptr, rust_vec_len, data_len)
         }
-        26 => wire__crate__api__session__AgentSession_new_session_impl(
+        27 => wire__crate__api__session__AgentSession_new_session_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        27 => wire__crate__api__session__AgentSession_pull_impl(port, ptr, rust_vec_len, data_len),
-        28 => wire__crate__api__session__AgentSession_pull_request_impl(
+        28 => wire__crate__api__session__AgentSession_pull_impl(port, ptr, rust_vec_len, data_len),
+        29 => wire__crate__api__session__AgentSession_pull_request_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        29 => wire__crate__api__session__AgentSession_pull_request_base_search_impl(
+        30 => wire__crate__api__session__AgentSession_pull_request_base_search_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        30 => wire__crate__api__session__AgentSession_pull_request_bases_impl(
+        31 => wire__crate__api__session__AgentSession_pull_request_bases_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        31 => wire__crate__api__session__AgentSession_pull_request_plan_impl(
+        32 => wire__crate__api__session__AgentSession_pull_request_plan_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        32 => wire__crate__api__session__AgentSession_pull_request_prepared_impl(
+        33 => wire__crate__api__session__AgentSession_pull_request_prepared_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        33 => wire__crate__api__session__AgentSession_push_impl(port, ptr, rust_vec_len, data_len),
-        34 => wire__crate__api__session__AgentSession_recent_sessions_impl(
+        34 => wire__crate__api__session__AgentSession_push_impl(port, ptr, rust_vec_len, data_len),
+        35 => wire__crate__api__session__AgentSession_recent_sessions_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        35 => wire__crate__api__session__AgentSession_remove_all_checkpoints_impl(
+        36 => wire__crate__api__session__AgentSession_remove_all_checkpoints_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        36 => wire__crate__api__session__AgentSession_remove_worktree_impl(
+        37 => wire__crate__api__session__AgentSession_remove_worktree_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        37 => wire__crate__api__session__AgentSession_restore_stash_impl(
+        38 => wire__crate__api__session__AgentSession_restore_stash_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        38 => wire__crate__api__session__AgentSession_revert_plan_impl(
+        39 => wire__crate__api__session__AgentSession_revert_plan_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        39 => wire__crate__api__session__AgentSession_revert_to_turn_impl(
+        40 => wire__crate__api__session__AgentSession_revert_to_turn_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        40 => wire__crate__api__session__AgentSession_send_impl(port, ptr, rust_vec_len, data_len),
-        41 => wire__crate__api__session__AgentSession_session_file_impl(
+        41 => wire__crate__api__session__AgentSession_send_impl(port, ptr, rust_vec_len, data_len),
+        42 => wire__crate__api__session__AgentSession_session_file_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        42 => wire__crate__api__session__AgentSession_set_model_impl(
+        43 => wire__crate__api__session__AgentSession_set_model_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        43 => {
+        44 => {
             wire__crate__api__session__AgentSession_shutdown_impl(port, ptr, rust_vec_len, data_len)
         }
-        44 => wire__crate__api__session__AgentSession_start_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__api__session__AgentSession_stash_changes_impl(
+        45 => wire__crate__api__session__AgentSession_start_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__api__session__AgentSession_stash_changes_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        46 => wire__crate__api__session__AgentSession_stash_patch_impl(
+        47 => wire__crate__api__session__AgentSession_stash_patch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        47 => wire__crate__api__session__AgentSession_stop_pull_request_text_impl(
+        48 => wire__crate__api__session__AgentSession_statistics_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        48 => wire__crate__api__session__AgentSession_stored_turns_impl(
+        49 => wire__crate__api__session__AgentSession_stop_pull_request_text_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        49 => wire__crate__api__session__AgentSession_switch_branch_impl(
+        50 => wire__crate__api__session__AgentSession_stored_turns_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        50 => wire__crate__api__session__AgentSession_switch_session_impl(
+        51 => wire__crate__api__session__AgentSession_switch_branch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        51 => wire__crate__api__session__AgentSession_title_impl(port, ptr, rust_vec_len, data_len),
-        52 => wire__crate__api__session__AgentSession_transcript_impl(
+        52 => wire__crate__api__session__AgentSession_switch_session_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        53 => wire__crate__api__session__AgentSession_turn_changes_impl(
+        53 => wire__crate__api__session__AgentSession_title_impl(port, ptr, rust_vec_len, data_len),
+        54 => wire__crate__api__session__AgentSession_transcript_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        54 => wire__crate__api__session__AgentSession_turn_patch_impl(
+        55 => wire__crate__api__session__AgentSession_turn_changes_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        55 => wire__crate__api__session__AgentSession_turns_impl(port, ptr, rust_vec_len, data_len),
-        56 => wire__crate__api__session__AgentSession_uncommitted_changes_impl(
+        56 => wire__crate__api__session__AgentSession_turn_patch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        57 => wire__crate__api__session__AgentSession_uncommitted_patch_impl(
+        57 => wire__crate__api__session__AgentSession_turns_impl(port, ptr, rust_vec_len, data_len),
+        58 => wire__crate__api__session__AgentSession_uncommitted_changes_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        58 => wire__crate__api__session__AgentSession_worktree_removal_impl(
+        59 => wire__crate__api__session__AgentSession_uncommitted_patch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        59 => wire__crate__api__session__AgentSession_worktrees_impl(
+        60 => wire__crate__api__session__AgentSession_worktree_removal_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        60 => wire__crate__api__session__AgentSession_write_pull_request_draft_text_impl(
+        61 => wire__crate__api__session__AgentSession_worktrees_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        61 => wire__crate__api__session__AgentSession_write_pull_request_text_impl(
+        62 => wire__crate__api__session__AgentSession_write_pull_request_draft_text_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        62 => wire__crate__api__workspace__LiquidWorkspace_apply_impl(
+        63 => wire__crate__api__session__AgentSession_write_pull_request_text_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        63 => wire__crate__api__workspace__LiquidWorkspace_close_impl(
+        64 => wire__crate__api__workspace__LiquidWorkspace_apply_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        64 => wire__crate__api__workspace__LiquidWorkspace_open_impl(
+        65 => wire__crate__api__workspace__LiquidWorkspace_close_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        65 => wire__crate__api__workspace__LiquidWorkspace_query_impl(
+        66 => wire__crate__api__workspace__LiquidWorkspace_open_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        66 => wire__crate__api__workspace__LiquidWorkspace_subscribe_impl(
+        67 => wire__crate__api__workspace__LiquidWorkspace_query_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        67 => {
+        68 => wire__crate__api__workspace__LiquidWorkspace_subscribe_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        69 => {
             wire__crate__api__events__bridge_queue_default_impl(port, ptr, rust_vec_len, data_len)
         }
-        68 => {
+        70 => {
             wire__crate__api__events__bridge_usage_default_impl(port, ptr, rust_vec_len, data_len)
         }
         _ => unreachable!(),
@@ -6765,6 +7021,28 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::git::BridgeComparison>
     for crate::api::git::BridgeComparison
 {
     fn into_into_dart(self) -> crate::api::git::BridgeComparison {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeContext {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.tokens.into_into_dart().into_dart(),
+            self.window.into_into_dart().into_dart(),
+            self.compacts_at.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::history::BridgeContext
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::history::BridgeContext>
+    for crate::api::history::BridgeContext
+{
+    fn into_into_dart(self) -> crate::api::history::BridgeContext {
         self
     }
 }
@@ -7279,6 +7557,29 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::session::BridgeModel>
     for crate::api::session::BridgeModel
 {
     fn into_into_dart(self) -> crate::api::session::BridgeModel {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeModelUsage {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.model.into_into_dart().into_dart(),
+            self.usage.into_into_dart().into_dart(),
+            self.responses.into_into_dart().into_dart(),
+            self.unpriced.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::history::BridgeModelUsage
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::history::BridgeModelUsage>
+    for crate::api::history::BridgeModelUsage
+{
+    fn into_into_dart(self) -> crate::api::history::BridgeModelUsage {
         self
     }
 }
@@ -8041,6 +8342,30 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::git::BridgeStash>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeStatistics {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.models.into_into_dart().into_dart(),
+            self.tools.into_into_dart().into_dart(),
+            self.turns.into_into_dart().into_dart(),
+            self.started_ms.into_into_dart().into_dart(),
+            self.ended_ms.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::history::BridgeStatistics
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::history::BridgeStatistics>
+    for crate::api::history::BridgeStatistics
+{
+    fn into_into_dart(self) -> crate::api::history::BridgeStatistics {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::events::BridgeStep {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -8109,6 +8434,30 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::workspace::BridgeTextStyle>
     for crate::api::workspace::BridgeTextStyle
 {
     fn into_into_dart(self) -> crate::api::workspace::BridgeTextStyle {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeToolCalls {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.name.into_into_dart().into_dart(),
+            self.succeeded.into_into_dart().into_dart(),
+            self.failed.into_into_dart().into_dart(),
+            self.cancelled.into_into_dart().into_dart(),
+            self.open.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::history::BridgeToolCalls
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::history::BridgeToolCalls>
+    for crate::api::history::BridgeToolCalls
+{
+    fn into_into_dart(self) -> crate::api::history::BridgeToolCalls {
         self
     }
 }
@@ -8234,6 +8583,34 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::history::BridgeTurnChanges>
     for crate::api::history::BridgeTurnChanges
 {
     fn into_into_dart(self) -> crate::api::history::BridgeTurnChanges {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeTurnStatistics {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.entry.into_into_dart().into_dart(),
+            self.prompt.into_into_dart().into_dart(),
+            self.started_ms.into_into_dart().into_dart(),
+            self.ended_ms.into_into_dart().into_dart(),
+            self.models.into_into_dart().into_dart(),
+            self.model_ms.into_into_dart().into_dart(),
+            self.tool_ms.into_into_dart().into_dart(),
+            self.tool_calls.into_into_dart().into_dart(),
+            self.failed.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::history::BridgeTurnStatistics
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::history::BridgeTurnStatistics>
+    for crate::api::history::BridgeTurnStatistics
+{
+    fn into_into_dart(self) -> crate::api::history::BridgeTurnStatistics {
         self
     }
 }
@@ -8730,6 +9107,15 @@ impl SseEncode for crate::api::git::BridgeComparison {
     }
 }
 
+impl SseEncode for crate::api::history::BridgeContext {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Option<i64>>::sse_encode(self.tokens, serializer);
+        <i64>::sse_encode(self.window, serializer);
+        <Option<i64>>::sse_encode(self.compacts_at, serializer);
+    }
+}
+
 impl SseEncode for crate::api::database::BridgeDatabase {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -9037,6 +9423,16 @@ impl SseEncode for crate::api::session::BridgeModel {
         <String>::sse_encode(self.id, serializer);
         <String>::sse_encode(self.name, serializer);
         <Option<i64>>::sse_encode(self.context_window, serializer);
+    }
+}
+
+impl SseEncode for crate::api::history::BridgeModelUsage {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.model, serializer);
+        <crate::api::events::BridgeUsage>::sse_encode(self.usage, serializer);
+        <i64>::sse_encode(self.responses, serializer);
+        <i64>::sse_encode(self.unpriced, serializer);
     }
 }
 
@@ -9470,6 +9866,17 @@ impl SseEncode for crate::api::git::BridgeStash {
     }
 }
 
+impl SseEncode for crate::api::history::BridgeStatistics {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Vec<crate::api::history::BridgeModelUsage>>::sse_encode(self.models, serializer);
+        <Vec<crate::api::history::BridgeToolCalls>>::sse_encode(self.tools, serializer);
+        <Vec<crate::api::history::BridgeTurnStatistics>>::sse_encode(self.turns, serializer);
+        <Option<i64>>::sse_encode(self.started_ms, serializer);
+        <Option<i64>>::sse_encode(self.ended_ms, serializer);
+    }
+}
+
 impl SseEncode for crate::api::events::BridgeStep {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -9508,6 +9915,17 @@ impl SseEncode for crate::api::workspace::BridgeTextStyle {
             },
             serializer,
         );
+    }
+}
+
+impl SseEncode for crate::api::history::BridgeToolCalls {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.name, serializer);
+        <i64>::sse_encode(self.succeeded, serializer);
+        <i64>::sse_encode(self.failed, serializer);
+        <i64>::sse_encode(self.cancelled, serializer);
+        <i64>::sse_encode(self.open, serializer);
     }
 }
 
@@ -9568,6 +9986,21 @@ impl SseEncode for crate::api::history::BridgeTurnChanges {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <crate::api::history::BridgeChangesState>::sse_encode(self.state, serializer);
         <Vec<crate::api::events::BridgeFileChange>>::sse_encode(self.files, serializer);
+    }
+}
+
+impl SseEncode for crate::api::history::BridgeTurnStatistics {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.entry, serializer);
+        <String>::sse_encode(self.prompt, serializer);
+        <Option<i64>>::sse_encode(self.started_ms, serializer);
+        <Option<i64>>::sse_encode(self.ended_ms, serializer);
+        <Vec<crate::api::history::BridgeModelUsage>>::sse_encode(self.models, serializer);
+        <Option<i64>>::sse_encode(self.model_ms, serializer);
+        <Option<i64>>::sse_encode(self.tool_ms, serializer);
+        <i64>::sse_encode(self.tool_calls, serializer);
+        <i64>::sse_encode(self.failed, serializer);
     }
 }
 
@@ -9794,6 +10227,16 @@ impl SseEncode for Vec<crate::api::session::BridgeModel> {
     }
 }
 
+impl SseEncode for Vec<crate::api::history::BridgeModelUsage> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::history::BridgeModelUsage>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::git::BridgeName> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -9864,6 +10307,16 @@ impl SseEncode for Vec<crate::api::session::BridgeStoredSession> {
     }
 }
 
+impl SseEncode for Vec<crate::api::history::BridgeToolCalls> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::history::BridgeToolCalls>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::history::BridgeTranscriptItem> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -9890,6 +10343,16 @@ impl SseEncode for Vec<crate::api::history::BridgeTurn> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::history::BridgeTurn>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::history::BridgeTurnStatistics> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::history::BridgeTurnStatistics>::sse_encode(item, serializer);
         }
     }
 }
@@ -9990,6 +10453,16 @@ impl SseEncode for Option<crate::api::git::BridgeComparison> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::git::BridgeComparison>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::history::BridgeContext> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::history::BridgeContext>::sse_encode(value, serializer);
         }
     }
 }

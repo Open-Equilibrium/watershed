@@ -8,7 +8,7 @@ import 'events.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 /// Whether the changes between two checkpoints could be read.
 enum BridgeChangesState {
@@ -20,6 +20,33 @@ enum BridgeChangesState {
 
   /// A checkpoint was removed.
   removed,
+}
+
+/// The context window the next request fills, and when pi compacts it (ADR-0279).
+class BridgeContext {
+  /// Tokens the window holds now, when pi knows them; `None` right after a compaction.
+  final PlatformInt64? tokens;
+
+  /// Tokens the model's context window holds.
+  final PlatformInt64 window;
+
+  /// Tokens at which pi starts compacting; `None` when auto compaction is off or pi's settings
+  /// cannot be read.
+  final PlatformInt64? compactsAt;
+
+  const BridgeContext({this.tokens, required this.window, this.compactsAt});
+
+  @override
+  int get hashCode => tokens.hashCode ^ window.hashCode ^ compactsAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeContext &&
+          runtimeType == other.runtimeType &&
+          tokens == other.tokens &&
+          window == other.window &&
+          compactsAt == other.compactsAt;
 }
 
 /// What a tree entry holds.
@@ -67,6 +94,42 @@ class BridgeHistory {
           tree == other.tree &&
           leaf == other.leaf &&
           usage == other.usage;
+}
+
+/// What one model used.
+class BridgeModelUsage {
+  /// The model as `provider/id`; empty for usage no model produced, such as a compaction summary.
+  final String model;
+
+  /// Tokens and cost.
+  final BridgeUsage usage;
+
+  /// Responses that reported usage.
+  final PlatformInt64 responses;
+
+  /// Responses that reported tokens but no cost.
+  final PlatformInt64 unpriced;
+
+  const BridgeModelUsage({
+    required this.model,
+    required this.usage,
+    required this.responses,
+    required this.unpriced,
+  });
+
+  @override
+  int get hashCode =>
+      model.hashCode ^ usage.hashCode ^ responses.hashCode ^ unpriced.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeModelUsage &&
+          runtimeType == other.runtimeType &&
+          model == other.model &&
+          usage == other.usage &&
+          responses == other.responses &&
+          unpriced == other.unpriced;
 }
 
 /// Exact identities returned unchanged by the revert dialog.
@@ -235,6 +298,96 @@ class BridgeRunningAgent {
           runtimeType == other.runtimeType &&
           own == other.own &&
           title == other.title;
+}
+
+/// What a session's stored entries count to, on every branch (ADR-0279).
+class BridgeStatistics {
+  /// What each model used over the whole session, sorted by cost and then tokens.
+  final List<BridgeModelUsage> models;
+
+  /// The calls of each tool over the whole session, largest total first.
+  final List<BridgeToolCalls> tools;
+
+  /// The turns, oldest first.
+  final List<BridgeTurnStatistics> turns;
+
+  /// When the session's first entry was stored, in Unix milliseconds.
+  final PlatformInt64? startedMs;
+
+  /// When its last entry was stored.
+  final PlatformInt64? endedMs;
+
+  const BridgeStatistics({
+    required this.models,
+    required this.tools,
+    required this.turns,
+    this.startedMs,
+    this.endedMs,
+  });
+
+  @override
+  int get hashCode =>
+      models.hashCode ^
+      tools.hashCode ^
+      turns.hashCode ^
+      startedMs.hashCode ^
+      endedMs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeStatistics &&
+          runtimeType == other.runtimeType &&
+          models == other.models &&
+          tools == other.tools &&
+          turns == other.turns &&
+          startedMs == other.startedMs &&
+          endedMs == other.endedMs;
+}
+
+/// The calls of one tool, by outcome.
+class BridgeToolCalls {
+  /// The tool's name as Watershed shows it.
+  final String name;
+
+  /// Calls whose result succeeded.
+  final PlatformInt64 succeeded;
+
+  /// Calls whose result failed.
+  final PlatformInt64 failed;
+
+  /// Calls without a result, whose turn ended or was followed by a later turn.
+  final PlatformInt64 cancelled;
+
+  /// Calls without a result in the session's last turn, which may still be running.
+  final PlatformInt64 open;
+
+  const BridgeToolCalls({
+    required this.name,
+    required this.succeeded,
+    required this.failed,
+    required this.cancelled,
+    required this.open,
+  });
+
+  @override
+  int get hashCode =>
+      name.hashCode ^
+      succeeded.hashCode ^
+      failed.hashCode ^
+      cancelled.hashCode ^
+      open.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeToolCalls &&
+          runtimeType == other.runtimeType &&
+          name == other.name &&
+          succeeded == other.succeeded &&
+          failed == other.failed &&
+          cancelled == other.cancelled &&
+          open == other.open;
 }
 
 /// A page of the chat of the session's current branch.
@@ -473,4 +626,73 @@ class BridgeTurnChanges {
           runtimeType == other.runtimeType &&
           state == other.state &&
           files == other.files;
+}
+
+/// One turn and what it counted to.
+class BridgeTurnStatistics {
+  /// The entry of its first prompt, or of its start checkpoint when no prompt was stored yet.
+  final String entry;
+
+  /// The first line of its first prompt.
+  final String prompt;
+
+  /// When its first entry was stored, in Unix milliseconds.
+  final PlatformInt64? startedMs;
+
+  /// When its last entry was stored.
+  final PlatformInt64? endedMs;
+
+  /// What each model used, sorted as the session's models are.
+  final List<BridgeModelUsage> models;
+
+  /// Time its requests took; `None` when the turn has no timing entries.
+  final PlatformInt64? modelMs;
+
+  /// Time its tools took; `None` when the turn has no timing entries.
+  final PlatformInt64? toolMs;
+
+  /// Tool calls its responses made.
+  final PlatformInt64 toolCalls;
+
+  /// Tool calls whose result failed.
+  final PlatformInt64 failed;
+
+  const BridgeTurnStatistics({
+    required this.entry,
+    required this.prompt,
+    this.startedMs,
+    this.endedMs,
+    required this.models,
+    this.modelMs,
+    this.toolMs,
+    required this.toolCalls,
+    required this.failed,
+  });
+
+  @override
+  int get hashCode =>
+      entry.hashCode ^
+      prompt.hashCode ^
+      startedMs.hashCode ^
+      endedMs.hashCode ^
+      models.hashCode ^
+      modelMs.hashCode ^
+      toolMs.hashCode ^
+      toolCalls.hashCode ^
+      failed.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTurnStatistics &&
+          runtimeType == other.runtimeType &&
+          entry == other.entry &&
+          prompt == other.prompt &&
+          startedMs == other.startedMs &&
+          endedMs == other.endedMs &&
+          models == other.models &&
+          modelMs == other.modelMs &&
+          toolMs == other.toolMs &&
+          toolCalls == other.toolCalls &&
+          failed == other.failed;
 }

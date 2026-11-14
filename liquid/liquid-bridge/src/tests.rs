@@ -8,14 +8,15 @@ use meta_harness_core::{
 
 use crate::api::events::{
     BridgeChangeStatus, BridgeEvent, BridgeEventKind, BridgeFileChange, BridgeItemKind,
-    BridgeQuestionKind, BridgeQueue,
+    BridgeQuestionKind, BridgeQueue, BridgeUsage,
 };
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use crate::api::history::{
-    BridgeChangesState, BridgeEntryKind, BridgeRevertConfirmation, BridgeRevertFile,
-    BridgeRunningAgent, BridgeTurn, BridgeTurnChanges,
+    BridgeChangesState, BridgeContext, BridgeEntryKind, BridgeModelUsage, BridgeRevertConfirmation,
+    BridgeRevertFile, BridgeRunningAgent, BridgeStatistics, BridgeToolCalls, BridgeTurn,
+    BridgeTurnChanges, BridgeTurnStatistics,
 };
 use crate::api::session::{
     AgentSession, BridgeCheckpointSession, BridgeModel, BridgeStoredSession, SessionConfig,
@@ -1914,6 +1915,86 @@ fn reads_what_a_write_changed_in_the_chat() {
         .find(|item| item.tool.as_deref() == Some("write"))
         .expect("the write");
     assert_eq!(write.added, Some(2), "lines the write wrote");
+    assert!(call(session.shutdown()));
+}
+
+#[test]
+fn reads_statistics_and_the_context_window_for_liquid() {
+    let entries = r#"{"type":"custom","id":"k1","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T1","phase":"start"}},{"type":"message","id":"u1","parentId":"k1","timestamp":"2026-11-01T10:00:00.100Z","message":{"role":"user","content":"Fix login"}},{"type":"custom","id":"t1","parentId":"u1","timestamp":"2026-11-01T10:00:00.200Z","customType":"watershed.timing","data":{"kind":"request","durationMs":1500}},{"type":"message","id":"a1","parentId":"t1","timestamp":"2026-11-01T10:00:02.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[{"type":"toolCall","id":"c1","name":"edit","arguments":{}}],"usage":{"input":10,"output":4,"cacheRead":2,"cost":{"total":0.5}}}},{"type":"custom","id":"t2","parentId":"a1","timestamp":"2026-11-01T10:00:02.500Z","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"c1","durationMs":700}},{"type":"message","id":"r1","parentId":"t2","timestamp":"2026-11-01T10:00:03.000Z","message":{"role":"toolResult","toolCallId":"c1","toolName":"edit","isError":true,"content":[]}},{"type":"custom","id":"k2","parentId":"r1","timestamp":"2026-11-01T10:00:04.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T1","phase":"end","files":0,"added":0,"removed":0}}"#;
+    let answer = |id: u32, command: &str, data: &str| {
+        let answer = format!(
+            r#"{{"id":"{id}","type":"response","command":"{command}","success":true,"data":{data}}}"#
+        );
+        format!(
+            "IFS= read -r line\ncase \"$line\" in *'\"type\":\"{command}\"'*) ;; *) exit 9 ;; esac\nprintf '%s\\n' {}\n",
+            shell_word(&answer)
+        )
+    };
+    let script = [
+        no_session_file(2),
+        entries_at(3, entries, "k2"),
+        no_session_file(4),
+        answer(
+            5,
+            "get_session_stats",
+            r#"{"contextUsage":{"tokens":4321,"contextWindow":200000,"percent":2}}"#,
+        ),
+        answer(
+            6,
+            "get_state",
+            r#"{"model":{"provider":"faux","id":"faux-1"},"autoCompactionEnabled":true}"#,
+        ),
+        "IFS= read -r line || exit 0".to_owned(),
+    ]
+    .concat();
+    let session =
+        launch(gated(&script), std::env::temp_dir().display().to_string()).expect("agent starts");
+    let model = BridgeModelUsage {
+        model: "faux/faux-1".to_owned(),
+        usage: BridgeUsage {
+            input: 10,
+            output: 4,
+            cache_read: 2,
+            cost_micro_usd: 500_000,
+            ..BridgeUsage::default()
+        },
+        responses: 1,
+        unpriced: 0,
+    };
+    assert_eq!(
+        session.statistics(),
+        Ok(BridgeStatistics {
+            models: vec![model.clone()],
+            tools: vec![BridgeToolCalls {
+                name: "edit".to_owned(),
+                succeeded: 0,
+                failed: 1,
+                cancelled: 0,
+                open: 0,
+            }],
+            turns: vec![BridgeTurnStatistics {
+                entry: "u1".to_owned(),
+                prompt: "Fix login".to_owned(),
+                started_ms: Some(1_793_527_200_000),
+                ended_ms: Some(1_793_527_204_000),
+                models: vec![model],
+                model_ms: Some(1_500),
+                tool_ms: Some(700),
+                tool_calls: 1,
+                failed: 1,
+            }],
+            started_ms: Some(1_793_527_200_000),
+            ended_ms: Some(1_793_527_204_000),
+        })
+    );
+    assert_eq!(
+        session.context(),
+        Ok(Some(BridgeContext {
+            tokens: Some(4_321),
+            window: 200_000,
+            compacts_at: Some(183_616),
+        }))
+    );
     assert!(call(session.shutdown()));
 }
 

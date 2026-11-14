@@ -3,10 +3,10 @@
 use std::ffi::OsString;
 
 use meta_harness_core::{
-    AgentEvent, ChangeStatus, CommandError, EntryKind, FileChange, ItemDetail, ItemKind,
-    ItemStatus, MAX_RECORD_BYTES, Model, NotificationLevel, Queue, RevertConfirmation, RevertFile,
-    SessionEvent, StoredSession, Transcript, TranscriptItem, TreeNode, TurnCheckpoints, Usage,
-    UserInput, visible_name,
+    AgentEvent, ChangeStatus, CommandError, Context, EntryKind, FileChange, ItemDetail, ItemKind,
+    ItemStatus, MAX_RECORD_BYTES, Model, ModelUsage, NotificationLevel, Queue, RevertConfirmation,
+    RevertFile, SessionEvent, Statistics, StoredSession, ToolCalls, Transcript, TranscriptItem,
+    TreeNode, TurnCheckpoints, TurnStatistics, Usage, UserInput, visible_name,
 };
 
 use crate::api::events::{
@@ -15,8 +15,9 @@ use crate::api::events::{
     BridgeStep, BridgeUsage,
 };
 use crate::api::history::{
-    BridgeEntryKind, BridgeRevertConfirmation, BridgeRevertFile, BridgeTranscript,
-    BridgeTranscriptItem, BridgeTreeNode, BridgeTurn,
+    BridgeContext, BridgeEntryKind, BridgeModelUsage, BridgeRevertConfirmation, BridgeRevertFile,
+    BridgeStatistics, BridgeToolCalls, BridgeTranscript, BridgeTranscriptItem, BridgeTreeNode,
+    BridgeTurn, BridgeTurnStatistics,
 };
 use crate::api::session::{BridgeModel, BridgeStoredSession};
 
@@ -128,6 +129,67 @@ impl From<TurnCheckpoints> for BridgeTurn {
             ended_ms: turn.ended_ms.map(int),
             ended: turn.ended,
             failure: turn.failure,
+        }
+    }
+}
+
+impl From<Statistics> for BridgeStatistics {
+    fn from(statistics: Statistics) -> Self {
+        Self {
+            models: statistics.models.into_iter().map(Into::into).collect(),
+            tools: statistics.tools.into_iter().map(Into::into).collect(),
+            turns: statistics.turns.into_iter().map(Into::into).collect(),
+            started_ms: statistics.started_ms.map(int),
+            ended_ms: statistics.ended_ms.map(int),
+        }
+    }
+}
+
+impl From<ModelUsage> for BridgeModelUsage {
+    fn from(model: ModelUsage) -> Self {
+        Self {
+            model: model.model,
+            usage: model.usage.into(),
+            responses: int(model.responses),
+            unpriced: int(model.unpriced),
+        }
+    }
+}
+
+impl From<ToolCalls> for BridgeToolCalls {
+    fn from(tool: ToolCalls) -> Self {
+        Self {
+            name: tool.name,
+            succeeded: int(tool.succeeded),
+            failed: int(tool.failed),
+            cancelled: int(tool.cancelled),
+            open: int(tool.open),
+        }
+    }
+}
+
+impl From<TurnStatistics> for BridgeTurnStatistics {
+    fn from(turn: TurnStatistics) -> Self {
+        Self {
+            entry: turn.entry,
+            prompt: turn.prompt,
+            started_ms: turn.started_ms.map(int),
+            ended_ms: turn.ended_ms.map(int),
+            models: turn.models.into_iter().map(Into::into).collect(),
+            model_ms: turn.model_ms.map(int),
+            tool_ms: turn.tool_ms.map(int),
+            tool_calls: int(turn.tool_calls),
+            failed: int(turn.failed),
+        }
+    }
+}
+
+impl From<Context> for BridgeContext {
+    fn from(context: Context) -> Self {
+        Self {
+            tokens: context.tokens.map(int),
+            window: int(context.window),
+            compacts_at: context.compacts_at.map(int),
         }
     }
 }

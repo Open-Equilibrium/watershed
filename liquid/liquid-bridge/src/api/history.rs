@@ -185,3 +185,81 @@ pub struct BridgeRunningAgent {
     /// Its session's title, when its session file is found.
     pub title: Option<String>,
 }
+
+/// What a session's stored entries count to, on every branch (ADR-0279).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeStatistics {
+    /// What each model used over the whole session, sorted by cost and then tokens.
+    pub models: Vec<BridgeModelUsage>,
+    /// The calls of each tool over the whole session, largest total first.
+    pub tools: Vec<BridgeToolCalls>,
+    /// The turns, oldest first.
+    pub turns: Vec<BridgeTurnStatistics>,
+    /// When the session's first entry was stored, in Unix milliseconds.
+    pub started_ms: Option<i64>,
+    /// When its last entry was stored.
+    pub ended_ms: Option<i64>,
+}
+
+/// What one model used.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeModelUsage {
+    /// The model as `provider/id`; empty for usage no model produced, such as a compaction summary.
+    pub model: String,
+    /// Tokens and cost.
+    pub usage: BridgeUsage,
+    /// Responses that reported usage.
+    pub responses: i64,
+    /// Responses that reported tokens but no cost.
+    pub unpriced: i64,
+}
+
+/// The calls of one tool, by outcome.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeToolCalls {
+    /// The tool's name as Watershed shows it.
+    pub name: String,
+    /// Calls whose result succeeded.
+    pub succeeded: i64,
+    /// Calls whose result failed.
+    pub failed: i64,
+    /// Calls without a result, whose turn ended or was followed by a later turn.
+    pub cancelled: i64,
+    /// Calls without a result in the session's last turn, which may still be running.
+    pub open: i64,
+}
+
+/// One turn and what it counted to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeTurnStatistics {
+    /// The entry of its first prompt, or of its start checkpoint when no prompt was stored yet.
+    pub entry: String,
+    /// The first line of its first prompt.
+    pub prompt: String,
+    /// When its first entry was stored, in Unix milliseconds.
+    pub started_ms: Option<i64>,
+    /// When its last entry was stored.
+    pub ended_ms: Option<i64>,
+    /// What each model used, sorted as the session's models are.
+    pub models: Vec<BridgeModelUsage>,
+    /// Time its requests took; `None` when the turn has no timing entries.
+    pub model_ms: Option<i64>,
+    /// Time its tools took; `None` when the turn has no timing entries.
+    pub tool_ms: Option<i64>,
+    /// Tool calls its responses made.
+    pub tool_calls: i64,
+    /// Tool calls whose result failed.
+    pub failed: i64,
+}
+
+/// The context window the next request fills, and when pi compacts it (ADR-0279).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BridgeContext {
+    /// Tokens the window holds now, when pi knows them; `None` right after a compaction.
+    pub tokens: Option<i64>,
+    /// Tokens the model's context window holds.
+    pub window: i64,
+    /// Tokens at which pi starts compacting; `None` when auto compaction is off or pi's settings
+    /// cannot be read.
+    pub compacts_at: Option<i64>,
+}

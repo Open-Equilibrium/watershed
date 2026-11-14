@@ -15,8 +15,8 @@ use tokio::sync::{Mutex, mpsc};
 
 use crate::api::events::{BridgeEvent, BridgeQueue};
 use crate::api::history::{
-    BridgeChangesState, BridgeHistory, BridgeRevertConfirmation, BridgeRevertPlan,
-    BridgeRunningAgent, BridgeTranscript, BridgeTurn, BridgeTurnChanges,
+    BridgeChangesState, BridgeContext, BridgeHistory, BridgeRevertConfirmation, BridgeRevertPlan,
+    BridgeRunningAgent, BridgeStatistics, BridgeTranscript, BridgeTurn, BridgeTurnChanges,
 };
 use crate::api::record::{README, SESSION_FILE, download_dir, record_name, write_folder};
 use crate::convert::describe;
@@ -611,6 +611,28 @@ impl AgentSession {
                 leaf: tree.leaf,
                 usage: history.usage().into(),
             })
+        })
+    }
+
+    /// What the session's stored entries count to, on every branch (ADR-0279).
+    pub fn statistics(&self) -> Result<BridgeStatistics, String> {
+        RUNTIME.block_on(async {
+            let mut session = self.session.lock().await;
+            let history = open(&mut session)?.history().await.map_err(describe)?;
+            Ok(history.statistics().into())
+        })
+    }
+
+    /// The context window the next request fills and when pi compacts it; `None` when the agent
+    /// reports no window.
+    pub fn context(&self) -> Result<Option<BridgeContext>, String> {
+        RUNTIME.block_on(async {
+            let mut session = self.session.lock().await;
+            Ok(open(&mut session)?
+                .context()
+                .await
+                .map_err(describe)?
+                .map(Into::into))
         })
     }
 
