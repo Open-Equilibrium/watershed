@@ -31,7 +31,10 @@ pub use event::{
     UserInput,
 };
 pub(crate) use framing::{Frame, LineFramer};
-pub use history::{ChangeCount, History, Transcript, TranscriptItem, TurnCheckpoints};
+pub use history::{
+    ChangeCount, History, ModelUsage, Statistics, ToolCalls, Transcript, TranscriptItem,
+    TurnCheckpoints, TurnStatistics,
+};
 pub(crate) use pi::PiAdapter;
 pub use record::session_record;
 pub use session::{

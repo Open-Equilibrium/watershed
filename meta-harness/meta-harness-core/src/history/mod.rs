@@ -2,10 +2,12 @@
 
 mod entry;
 mod outcome;
+mod statistics;
 mod transcript;
 mod tree;
 mod turns;
 
+pub use statistics::{ModelUsage, Statistics, ToolCalls, TurnStatistics};
 pub use turns::{ChangeCount, TurnCheckpoints};
 
 pub(crate) use entry::first_line;
@@ -57,11 +59,12 @@ impl History {
                 match frame {
                     // The first line is the session header, not an entry.
                     Frame::Record(line) => {
-                        if let Ok(entry @ Value::Object(_)) = serde_json::from_slice::<Value>(&line)
-                            && entry.get("type").and_then(Value::as_str) != Some("session")
+                        if let Ok(value @ Value::Object(_)) = serde_json::from_slice::<Value>(&line)
+                            && value.get("type").and_then(Value::as_str) != Some("session")
                         {
-                            add(&mut spent, &Entry::spent(&entry));
-                            entries.push(Entry::parse(&entry));
+                            let entry = Entry::parse(&value);
+                            add(&mut spent, &entry.spent());
+                            entries.push(entry);
                         }
                     }
                     Frame::Oversized { start, end } => {
@@ -84,11 +87,9 @@ impl History {
             .and_then(Value::as_array)
             .map(Vec::as_slice)
             .unwrap_or_default();
-        if !entries.is_empty() {
-            for entry in entries {
-                add(&mut self.spent, &Entry::spent(entry));
-            }
-            self.entries.extend(entries.iter().map(Entry::parse));
+        for entry in entries.iter().map(Entry::parse) {
+            add(&mut self.spent, &entry.spent());
+            self.entries.push(entry);
         }
         self.leaf = data
             .get("leafId")
@@ -124,6 +125,11 @@ impl History {
     /// checkpoints.
     pub fn turns(&self, leaf: Option<&str>) -> Vec<TurnCheckpoints> {
         turns::turns(&self.entries, leaf.or(self.leaf.as_deref()))
+    }
+
+    /// What every stored entry counts to, on every branch: turns, models, tools and time.
+    pub fn statistics(&self) -> Statistics {
+        statistics::statistics(&self.entries)
     }
 }
 

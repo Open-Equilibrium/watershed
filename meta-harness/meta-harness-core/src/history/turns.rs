@@ -5,7 +5,7 @@ use super::entry::{Body, Entry, first_line, path};
 use crate::Phase;
 
 /// Longest prompt shown for a turn, in characters.
-const PROMPT_CHARS: usize = 80;
+pub(super) const PROMPT_CHARS: usize = 80;
 
 /// A turn and its checkpoints.
 #[derive(Debug, Clone, PartialEq, Eq)]

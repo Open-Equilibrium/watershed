@@ -9,6 +9,7 @@ mod pull_text;
 mod pulls;
 mod record;
 mod session;
+mod statistics;
 mod stored;
 mod sync;
 mod transcript;

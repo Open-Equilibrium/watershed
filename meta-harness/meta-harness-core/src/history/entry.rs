@@ -27,7 +27,17 @@ pub(crate) struct Entry {
     pub parent: Option<String>,
     /// Unix milliseconds when it was stored.
     pub at_ms: Option<u64>,
+    /// What it spent, when it reports usage.
+    pub spend: Option<Box<Spend>>,
     pub body: Body,
+}
+
+/// What a stored entry spent and which model produced it.
+#[derive(Debug, Clone)]
+pub(crate) struct Spend {
+    /// `provider/id` of the model; empty for an entry no model produced, such as a summary.
+    pub model: String,
+    pub usage: Usage,
 }
 
 /// What an entry holds.
@@ -55,6 +65,10 @@ pub(crate) enum Body {
     System,
     ToolTiming {
         call: String,
+        duration_ms: Option<u64>,
+    },
+    /// How long a model request took; pi stores it just before the response it produced.
+    RequestTiming {
         duration_ms: Option<u64>,
     },
     /// A checkpoint Watershed's extension recorded at a turn's start or end, or why it could not
@@ -184,6 +198,7 @@ impl Entry {
             id: field("id")??,
             parent: field("parentId")?,
             at_ms: None,
+            spend: None,
             body: Body::Other,
         })
     }
@@ -205,19 +220,40 @@ impl Entry {
                 .get("timestamp")
                 .and_then(Value::as_str)
                 .and_then(iso_millis),
+            spend: spend(entry),
             body,
         }
     }
 
-    /// What producing a stored entry cost: a response, a summary, cache warming or a tool's own
+    /// What producing the entry cost: a response, a summary, cache warming or a tool's own
     /// requests. The history sums it as it reads, so entries stay small.
-    pub fn spent(entry: &Value) -> Usage {
-        usage(
-            entry
-                .get("usage")
-                .or_else(|| entry.pointer("/message/usage")),
-        )
+    pub fn spent(&self) -> Usage {
+        self.spend
+            .as_deref()
+            .map_or_else(Usage::default, |spend| spend.usage)
     }
+}
+
+/// What an entry spent and the model that produced it, when it reports usage.
+fn spend(entry: &Value) -> Option<Box<Spend>> {
+    let report = entry
+        .get("usage")
+        .or_else(|| entry.pointer("/message/usage"))?;
+    let message = entry.get("message");
+    let field = |name| {
+        message
+            .and_then(|message| message.get(name))
+            .and_then(Value::as_str)
+    };
+    let model = match (field("provider"), field("model")) {
+        (Some(provider), Some(id)) => format!("{provider}/{id}"),
+        (None, Some(id)) => id.to_owned(),
+        _ => String::new(),
+    };
+    Some(Box::new(Spend {
+        model,
+        usage: usage(Some(report)),
+    }))
 }
 
 fn message(message: Option<&Value>) -> Body {
@@ -311,6 +347,9 @@ fn custom(kind: String, data: Option<&Value>) -> Body {
         "watershed.timing" => match data.and_then(|d| d.get("kind")).and_then(Value::as_str) {
             Some("tool") => Body::ToolTiming {
                 call: text("toolCallId"),
+                duration_ms: millis("durationMs"),
+            },
+            Some("request") => Body::RequestTiming {
                 duration_ms: millis("durationMs"),
             },
             _ => Body::Custom,

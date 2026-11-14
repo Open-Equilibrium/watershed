@@ -71,7 +71,10 @@ fn entry_kind(body: &Body) -> EntryKind {
         Body::Assistant { .. } => EntryKind::Assistant,
         Body::ToolResult { .. } => EntryKind::ToolResult,
         Body::System => EntryKind::System,
-        Body::ToolTiming { .. } | Body::Checkpoint { .. } | Body::Custom => EntryKind::Custom,
+        Body::ToolTiming { .. }
+        | Body::RequestTiming { .. }
+        | Body::Checkpoint { .. }
+        | Body::Custom => EntryKind::Custom,
         Body::Label | Body::Other => EntryKind::Other,
     }
 }
