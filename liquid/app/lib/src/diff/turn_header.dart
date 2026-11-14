@@ -58,22 +58,20 @@ class TurnHeader extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
+        // A narrow panel wraps the action below the menu rather than cutting either.
+        Wrap(
+          spacing: WsMetrics.space3,
+          runSpacing: WsMetrics.space2,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             _menu(context, label),
-            // A narrow tab shortens the label rather than the menu.
             if (stashed)
-              Expanded(child: _stashActions(stash))
+              _stashActions(stash)
             else if (onRevert case final revert?)
-              Expanded(
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: SecondaryButton(
-                    label: 'Revert files to before this turn…',
-                    icon: LucideIcons.undo2,
-                    onPressed: revert,
-                  ),
-                ),
+              SecondaryButton(
+                label: 'Revert files to before this turn…',
+                icon: LucideIcons.undo2,
+                onPressed: revert,
               ),
           ],
         ),
@@ -206,10 +204,14 @@ class TurnHeader extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              label,
-              style: Theme.of(context).textTheme.labelMedium
-                  ?.copyWith(fontWeight: WsMetrics.fwSemibold),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.labelMedium
+                    ?.copyWith(fontWeight: WsMetrics.fwSemibold),
+              ),
             ),
             const SizedBox(width: WsMetrics.space2),
             Icon(LucideIcons.chevronDown, size: 13, color: ws.textFaint),

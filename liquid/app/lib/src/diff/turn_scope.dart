@@ -1,11 +1,11 @@
 import '../rust/api/history.dart';
 
-/// Which turns the Diff tab compares.
+/// Which turns the Diff panel compares.
 sealed class DiffScope {
   const DiffScope();
 }
 
-/// The latest turn that ended; the Diff tab starts there and follows new turns.
+/// The latest turn that ended; the Diff panel starts there and follows new turns.
 class LatestTurn extends DiffScope {
   const LatestTurn();
 }
@@ -48,7 +48,7 @@ List<BridgeTurn> finished(List<BridgeTurn> turns) => [
 ];
 
 /// What `scope` compares among `turns`, oldest first; none before a turn ended. A turn whose
-/// checkpoint failed stays, so the Diff tab says why. A turn that is no longer on the branch
+/// checkpoint failed stays, so the Diff panel says why. A turn that is no longer on the branch
 /// falls back to the latest.
 Compared? compared(List<BridgeTurn> turns, DiffScope scope) {
   final ended = finished(turns);

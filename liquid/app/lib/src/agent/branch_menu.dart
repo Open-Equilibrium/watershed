@@ -13,11 +13,12 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'commit_dialog.dart';
+import 'session_card_rows.dart';
 
-/// The checkout's branch with its commits ahead and behind its upstream, in the session header;
-/// it opens the branch menu.
-class BranchChip extends StatelessWidget {
-  const BranchChip({super.key, required this.state});
+/// The checkout's branch with its commits ahead and behind its upstream, as the first row of the
+/// session card; it opens the branch menu.
+class BranchRow extends StatelessWidget {
+  const BranchRow({super.key, required this.state});
 
   final SessionState state;
 
@@ -31,21 +32,16 @@ class BranchChip extends StatelessWidget {
         final small = TextStyle(
           color: ws.textFaint,
           fontSize: WsMetrics.fsSmall,
+          fontWeight: WsMetrics.fwRegular,
           fontFeatures: const [FontFeature.tabularFigures()],
         );
         if (git.problem.value case final problem?) {
           return Tooltip(
             message: problem,
-            child: _Frame(
+            child: CardRow(
               children: [
-                Icon(LucideIcons.triangleAlert, size: 13, color: ws.danger),
-                Text(
-                  'Git unavailable',
-                  style: TextStyle(
-                    color: ws.danger,
-                    fontSize: WsMetrics.fsCompact,
-                  ),
-                ),
+                Icon(LucideIcons.triangleAlert, size: 16, color: ws.danger),
+                Text('Git unavailable', style: TextStyle(color: ws.danger)),
               ],
             ),
           );
@@ -68,62 +64,38 @@ class BranchChip extends StatelessWidget {
               'no upstream',
           ].join(', '),
           excludeSemantics: true,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+          child: CardRow(
             onTap: () => unawaited(showBranchMenu(context, state)),
-            child: _Frame(
-              children: [
-                Icon(LucideIcons.gitBranch, size: 14, color: ws.textMuted),
-                Flexible(
-                  child: Text(
-                    name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: monoStyle(context, color: ws.text),
-                  ),
+            children: [
+              Icon(LucideIcons.gitBranch, size: 16, color: ws.textFaint),
+              Flexible(
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontWeight: WsMetrics.fwRegular),
                 ),
-                if (status.merging)
-                  Text('merging', style: small.copyWith(color: ws.warning)),
-                if (status.ahead > 0) Text('↑${status.ahead}', style: small),
-                if (status.behind > 0)
-                  Text(
-                    '↓${status.behind}',
-                    style: small.copyWith(color: ws.warning),
-                  ),
-                if (!status.merging &&
-                    status.remote != null &&
-                    status.branch != null &&
-                    status.upstream == null)
-                  Text('no upstream', style: small),
-                Icon(LucideIcons.chevronDown, size: 13, color: ws.textFaint),
-              ],
-            ),
+              ),
+              if (status.merging)
+                Text('merging', style: small.copyWith(color: ws.warning)),
+              if (status.ahead > 0) Text('↑${status.ahead}', style: small),
+              if (status.behind > 0)
+                Text(
+                  '↓${status.behind}',
+                  style: small.copyWith(color: ws.warning),
+                ),
+              if (!status.merging &&
+                  status.remote != null &&
+                  status.branch != null &&
+                  status.upstream == null)
+                Text('no upstream', style: small),
+              Icon(LucideIcons.chevronDown, size: 16, color: ws.textFaint),
+            ],
           ),
         );
       },
     );
   }
-}
-
-class _Frame extends StatelessWidget {
-  const _Frame({required this.children});
-
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    height: 28,
-    padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
-    decoration: BoxDecoration(
-      border: Border.all(color: context.ws.borderStrong),
-      borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      spacing: WsMetrics.space2,
-      children: children,
-    ),
-  );
 }
 
 /// What the branch menu was closed with.

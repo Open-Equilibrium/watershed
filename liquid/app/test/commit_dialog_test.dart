@@ -459,10 +459,13 @@ void main() {
       await tester.pump();
       expect(
         tester
-            .widget<OutlinedButton>(
-              find.widgetWithText(OutlinedButton, 'Initialize Git'),
+            .widget<InkWell>(
+              find.ancestor(
+                of: find.text('Initialize Git'),
+                matching: find.byType(InkWell),
+              ),
             )
-            .onPressed,
+            .onTap,
         isNull,
       );
       expect(

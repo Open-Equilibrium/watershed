@@ -69,7 +69,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(newSessions(), 2);
 
-      await liquid(tester, LogicalKeyboardKey.digit3);
+      await liquid(tester, LogicalKeyboardKey.keyD);
       expect(find.byType(DiffView), findsOneWidget);
     },
   );
@@ -117,13 +117,13 @@ void main() {
       tester,
       ShortcutSettings.liquidKey().change(
         Command.diff,
-        const Keys(LogicalKeyboardKey.keyD, liquid: true),
+        const Keys(LogicalKeyboardKey.keyE, liquid: true),
       ),
     );
 
-    await liquid(tester, LogicalKeyboardKey.digit3);
-    expect(find.byType(DiffView), findsNothing);
     await liquid(tester, LogicalKeyboardKey.keyD);
+    expect(find.byType(DiffView), findsNothing);
+    await liquid(tester, LogicalKeyboardKey.keyE);
     expect(find.byType(DiffView), findsOneWidget);
   });
 

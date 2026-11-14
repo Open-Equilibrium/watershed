@@ -8,6 +8,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_io.dart'
 import 'src/app.dart';
 import 'src/appearance.dart';
 import 'src/diff/diff_settings.dart';
+import 'src/agent/session_card_settings.dart';
 import 'src/launch.dart';
 import 'src/rust/frb_generated.dart';
 import 'src/session/branch_bases.dart';
@@ -62,6 +63,9 @@ Future<void> main() async {
       ),
       diffSettings: await DiffSettingsController.load(
         SettingsFile(File('$settings/diff.json')),
+      ),
+      cardSettings: await SessionCardSettingsController.load(
+        SettingsFile(File('$settings/session_card.json')),
       ),
       appearance: await AppearanceController.load(
         SettingsFile(File('$settings/appearance.json')),

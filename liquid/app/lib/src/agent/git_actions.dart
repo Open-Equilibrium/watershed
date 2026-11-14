@@ -14,6 +14,7 @@ import '../theme/tokens.g.dart';
 import 'branch_menu.dart';
 import 'commit_dialog.dart';
 import 'pull_request.dart';
+import 'session_card_rows.dart';
 
 /// Pushes the branch, asking first before pushing to the remote's default branch; a completed
 /// push to another branch offers a pull request unless `offer` is false. Returns the last
@@ -216,7 +217,8 @@ class _GitMenu {
   }
 }
 
-/// The next single Git step and the approved, explicitly invoked Git menu.
+/// The session card's Git action row: the next single Git step, and the approved, explicitly
+/// invoked Git menu behind its chevron.
 class GitActions extends StatelessWidget {
   const GitActions({super.key, required this.state, required this.device});
   final SessionState state;
@@ -238,20 +240,13 @@ class GitActions extends StatelessWidget {
         return const SizedBox.shrink();
       }
       final status = git.status.value;
-      if (status == null) return _initialize();
-      final ws = context.ws;
+      if (status == null) return _initialize(context);
       final menu = _GitMenu(status, device);
-      return Container(
-        height: 28,
-        decoration: BoxDecoration(
-          border: Border.all(color: ws.borderStrong),
-          borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-        ),
+      return SizedBox(
+        height: 32,
         child: Row(
-          mainAxisSize: MainAxisSize.min,
           children: [
-            _nextButton(context, menu),
-            Container(width: 1, color: ws.borderStrong),
+            Expanded(child: _nextButton(context, menu)),
             _menuButton(context, menu),
           ],
         ),
@@ -260,12 +255,14 @@ class GitActions extends StatelessWidget {
   );
 
   /// Offers to create a repository in a folder that has none.
-  Widget _initialize() => Tooltip(
+  Widget _initialize(BuildContext context) => Tooltip(
     message: 'This folder has no Git repository. Initialize Git creates one; checkpoints start with the next turn.',
-    child: OutlinedButton.icon(
-      onPressed: state.git.writing.value ? null : state.git.initialize,
-      icon: const Icon(LucideIcons.plus, size: 14),
-      label: const Text('Initialize Git'),
+    child: CardRow(
+      onTap: state.git.writing.value ? null : state.git.initialize,
+      children: [
+        Icon(LucideIcons.plus, size: 16, color: context.ws.textFaint),
+        const Text('Initialize Git'),
+      ],
     ),
   );
 
@@ -291,11 +288,13 @@ class GitActions extends StatelessWidget {
     }
   }
 
-  /// The main half of the button: the next step, with its icon or progress, label and count.
+  /// The row's label: the next step, with its icon or progress, label and count.
   Widget _nextButton(BuildContext context, _GitMenu menu) {
     final git = state.git;
     final ws = context.ws;
     final next = menu.next;
+    final counted =
+        git.progress.value == null && (menu.counts[next] ?? '').isNotEmpty;
     return Tooltip(
       message: menu.hints[next]!,
       child: TextButton(
@@ -304,37 +303,43 @@ class GitActions extends StatelessWidget {
             ? () => _run(context, next)
             : null,
         style: TextButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
+          foregroundColor: ws.text,
+          overlayColor: Colors.transparent,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
           minimumSize: Size.zero,
+          alignment: Alignment.centerLeft,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+          ),
+          textStyle: const TextStyle(
+            fontSize: WsMetrics.fsCompact,
+            fontWeight: WsMetrics.fwMedium,
+          ),
         ),
         child: Row(
-          spacing: WsMetrics.space2,
+          spacing: 10,
           children: [
             if (git.progress.value == null)
-              Icon(_icons[next], size: 14)
+              Icon(_icons[next], size: 16, color: ws.textFaint)
             else
               const SizedBox.square(
                 dimension: 14,
                 child: CircularProgressIndicator(strokeWidth: 1.5),
               ),
-            Text(git.progress.value ?? _labels[next]!),
-            if (git.progress.value == null &&
-                (menu.counts[next] ?? '').isNotEmpty)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: WsMetrics.space2,
-                ),
-                decoration: BoxDecoration(
-                  color: ws.hover,
-                  borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
-                ),
-                child: Text(
-                  menu.counts[next]!,
-                  style: TextStyle(
-                    color: ws.textMuted,
-                    fontSize: WsMetrics.fsSmall,
-                    height: 1.5,
-                  ),
+            Flexible(
+              child: Text(
+                git.progress.value ?? _labels[next]!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (counted)
+              Text(
+                menu.counts[next]!,
+                style: TextStyle(
+                  color: ws.textMuted,
+                  fontSize: WsMetrics.fsSmall,
+                  fontWeight: WsMetrics.fwRegular,
                 ),
               ),
           ],
@@ -351,48 +356,55 @@ class GitActions extends StatelessWidget {
     final fetched = git.fetched;
     final heading =
         '${status.branch ?? status.commit ?? 'no commit'}${status.upstream == null ? '' : ' → ${status.upstream}'}${fetched == null ? '' : ' · fetched ${formatClockMs(fetched.millisecondsSinceEpoch)}'}';
-    return PopupMenuButton<_GitAction>(
-      key: const Key('git-menu'),
-      tooltip: 'Git',
-      enabled: !git.writing.value,
-      padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space2),
-      icon: const Icon(LucideIcons.chevronDown, size: 13),
-      onSelected: (action) => _run(context, action),
-      itemBuilder: (_) => [
-        PopupMenuItem(enabled: false, child: Text(heading)),
-        _item(
-          menu,
-          _GitAction.commit,
-          'Commit…',
-          menu.enabled[_GitAction.commit]!
-              ? plural(status.changed, 'file')
-              : '',
+    return SizedBox(
+      width: 32,
+      child: PopupMenuButton<_GitAction>(
+        key: const Key('git-menu'),
+        tooltip: 'Git',
+        enabled: !git.writing.value,
+        padding: EdgeInsets.zero,
+        icon: Icon(
+          LucideIcons.chevronDown,
+          size: 16,
+          color: context.ws.textFaint,
         ),
-        _item(
-          menu,
-          _GitAction.compose,
-          'Commit, push & create PR…',
-          menu.blockers[_GitAction.compose] == _nothingToCompose
-              ? 'no changes'
-              : '',
-        ),
-        _item(menu, _GitAction.push, 'Push', menu.counts[_GitAction.push]!),
-        _item(menu, _GitAction.pullRequest, 'Create pull request…', ''),
-        _item(
-          menu,
-          _GitAction.pull,
-          'Pull',
-          remote != null &&
-                  status.upstream != null &&
-                  !menu.detached &&
-                  status.behind == 0
-              ? 'up to date'
-              : menu.counts[_GitAction.pull]!,
-        ),
-        _item(menu, _GitAction.fetch, 'Fetch', remote ?? ''),
-        const PopupMenuDivider(),
-        _item(menu, _GitAction.create, 'Create branch…', ''),
-      ],
+        onSelected: (action) => _run(context, action),
+        itemBuilder: (_) => [
+          PopupMenuItem(enabled: false, child: Text(heading)),
+          _item(
+            menu,
+            _GitAction.commit,
+            'Commit…',
+            menu.enabled[_GitAction.commit]!
+                ? plural(status.changed, 'file')
+                : '',
+          ),
+          _item(
+            menu,
+            _GitAction.compose,
+            'Commit, push & create PR…',
+            menu.blockers[_GitAction.compose] == _nothingToCompose
+                ? 'no changes'
+                : '',
+          ),
+          _item(menu, _GitAction.push, 'Push', menu.counts[_GitAction.push]!),
+          _item(menu, _GitAction.pullRequest, 'Create pull request…', ''),
+          _item(
+            menu,
+            _GitAction.pull,
+            'Pull',
+            remote != null &&
+                    status.upstream != null &&
+                    !menu.detached &&
+                    status.behind == 0
+                ? 'up to date'
+                : menu.counts[_GitAction.pull]!,
+          ),
+          _item(menu, _GitAction.fetch, 'Fetch', remote ?? ''),
+          const PopupMenuDivider(),
+          _item(menu, _GitAction.create, 'Create branch…', ''),
+        ],
+      ),
     );
   }
 

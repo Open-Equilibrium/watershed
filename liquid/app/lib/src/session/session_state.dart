@@ -47,7 +47,7 @@ class SessionState {
     git.refreshed.addListener(() {
       if (diffScope.value is UncommittedChanges) unawaited(readChanges());
     });
-    // Stashed changes restored or discarded leave the Diff tab.
+    // Stashed changes restored or discarded leave the Diff panel.
     git.stash.addListener(() {
       if (diffScope.value is StashedChanges) unawaited(readChanges());
     });
@@ -426,13 +426,13 @@ class SessionState {
   /// The turns of the current branch, oldest first, with what each changed.
   final turns = ValueNotifier<List<BridgeTurn>>(const []);
 
-  /// Which turns the Diff tab compares.
+  /// Which turns the Diff panel compares.
   final diffScope = ValueNotifier<DiffScope>(const LatestTurn());
 
-  /// The checkpoints the Diff tab compares, as last read; null while no turn ended.
+  /// The checkpoints the Diff panel compares, as last read; null while no turn ended.
   final shown = ValueNotifier<Compared?>(null);
 
-  /// The turns the Diff tab shows, set with [shown] and their files; [diffScope] holds the
+  /// The turns the Diff panel shows, set with [shown] and their files; [diffScope] holds the
   /// choice still being read.
   final shownScope = ValueNotifier<DiffScope>(const LatestTurn());
 
@@ -441,7 +441,7 @@ class SessionState {
     null,
   );
 
-  /// The files the shown turns changed, as last read; null before the first read. The Diff tab
+  /// The files the shown turns changed, as last read; null before the first read. The Diff panel
   /// and its count show them.
   final changed = ValueNotifier<List<BridgeFileChange>?>(null);
 
@@ -451,14 +451,14 @@ class SessionState {
   /// Tree identities of the published uncommitted list, also validating pending patches.
   String? get uncommittedRevision => _uncommittedRead?.$1;
 
-  /// Why the Diff tab shows no files, with its heading; null while it shows a list.
+  /// Why the Diff panel shows no files, with its heading; null while it shows a list.
   final changesProblem = ValueNotifier<({String title, String text})?>(null);
 
   /// Whether the changes leave out what is only whitespace; a change reads them
   /// again.
   final hideWhitespace = ValueNotifier(false);
 
-  /// Shows `scope` in the Diff tab.
+  /// Shows `scope` in the Diff panel.
   Future<void> showTurns(DiffScope scope) async {
     diffScope.value = scope;
     if (scope is StashedChanges || scope is UncommittedChanges) {
@@ -468,7 +468,7 @@ class SessionState {
   }
 
   /// Reads the branch's turns and what the shown ones changed between their checkpoints. A
-  /// failed read is reported once, and the Diff tab says so instead of showing earlier changes.
+  /// failed read is reported once, and the Diff panel says so instead of showing earlier changes.
   Future<void> readChanges() {
     // A read asked for meanwhile runs once after the current one instead of queueing.
     if (_readingChanges case final reading?) {
@@ -794,7 +794,7 @@ class SessionState {
     try {
       await _backend.revertToTurn(turn.id, confirmation);
     } on Object catch (error) {
-      // The error says whether the files changed; the Diff tab shows them either way.
+      // The error says whether the files changed; the Diff panel shows them either way.
       final said = '$error';
       notify(
         BridgeLevel.error,

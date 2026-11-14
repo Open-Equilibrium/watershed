@@ -20,7 +20,7 @@ import 'revert_dialog.dart';
 import 'turn_header.dart';
 import 'turn_scope.dart';
 
-/// Keys of the Diff tab, for the status bar.
+/// Keys of the Diff panel, for the status bar.
 String diffKeys() =>
     '${Fixed.turnMenu.display} turn · ${Fixed.previousOrNextFile.display} file · '
     '${Fixed.foldFolder.display} folder · ${Fixed.previousOrNextHunk.display} hunk · '
@@ -41,7 +41,7 @@ class DiffView extends StatefulWidget {
 
   final SessionState state;
 
-  /// How the tab shows the changes, kept across restarts.
+  /// How the panel shows the changes, kept across restarts.
   final DiffSettingsController settings;
 
   /// The input area, floating over the diff.
@@ -94,7 +94,7 @@ class _DiffViewState extends State<DiffView> {
     unawaited(widget.state.git.refresh());
     widget.state.shownStash.addListener(_show);
     widget.state.git.stash.addListener(_rebuild);
-    // Opening the tab reads the turns again, so it shows the latest one.
+    // Opening the panel reads the turns again, so it shows the latest one.
     unawaited(widget.state.readChanges());
     // It also shows the last list at once and moves the keyboard to it.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -481,15 +481,17 @@ class _DiffViewState extends State<DiffView> {
     }
     final added = _changes.fold(0, (sum, change) => sum + change.added);
     final removed = _changes.fold(0, (sum, change) => sum + change.removed);
-    return Row(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // The file list sits above the patch, across the Diff panel; a long list scrolls.
         Container(
-          width: 264,
+          constraints: const BoxConstraints(maxHeight: 200),
           decoration: BoxDecoration(
-            border: Border(right: BorderSide(color: ws.border)),
+            border: Border(bottom: BorderSide(color: ws.border)),
           ),
           child: ListView(
+            shrinkWrap: true,
             padding: const EdgeInsets.all(WsMetrics.space3),
             children: [
               Padding(

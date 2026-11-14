@@ -5,7 +5,7 @@ import 'package:liquid/src/shortcuts/keymap.dart';
 void main() {
   const liquidN = Keys(LogicalKeyboardKey.keyN, liquid: true);
   const commandN = Keys(LogicalKeyboardKey.keyN, meta: true);
-  const commandD = Keys(LogicalKeyboardKey.keyD, meta: true);
+  const commandE = Keys(LogicalKeyboardKey.keyE, meta: true);
   const liquidD = Keys(LogicalKeyboardKey.keyD, liquid: true);
 
   test(
@@ -24,25 +24,35 @@ void main() {
     },
   );
 
+  test('Session details takes ⌘⌥B, which no other command runs', () {
+    final keys = ShortcutSettings.standard();
+    const commandOptionB = Keys(LogicalKeyboardKey.keyB, meta: true, alt: true);
+
+    expect(keys.bindings(Command.sessionDetails), [commandOptionB]);
+    expect(keys.label(Command.sessionDetails), '⌥⌘B', reason: 'macOS order');
+    expect(keys.conflicts(Command.sessionDetails, commandOptionB), isEmpty);
+    expect(reserved(Command.sessionDetails, commandOptionB), isNull);
+  });
+
   test('the Standard profile uses ⌘ only', () {
     final keys = ShortcutSettings.standard();
 
     expect(keys.bindings(Command.newSession), [commandN]);
-    expect(keys.label(Command.diff), '⌘3');
+    expect(keys.label(Command.diff), '⌘D');
     expect(keys.liquidKey, isFalse);
   });
 
   test(
     'changing a shortcut switches to Custom based on the profile it came from',
     () {
-      final keys = ShortcutSettings.standard().change(Command.diff, commandD);
+      final keys = ShortcutSettings.standard().change(Command.diff, commandE);
 
       expect(keys.profile, Profile.custom);
       expect(keys.base, Profile.standard);
-      expect(keys.bindings(Command.diff), [commandD]);
+      expect(keys.bindings(Command.diff), [commandE]);
       expect(keys.changed(Command.diff), isTrue);
       expect(keys.reset(Command.diff).bindings(Command.diff), [
-        const Keys(LogicalKeyboardKey.digit3, meta: true),
+        const Keys(LogicalKeyboardKey.keyD, meta: true),
       ]);
       final all = keys.resetAll();
       expect(all.profile, Profile.standard);
@@ -217,7 +227,7 @@ void main() {
     final restored = taken.resetTaking(Command.newSession);
     expect(restored.bindings(Command.newSession), [liquidN, commandN]);
     expect(restored.bindings(Command.diff), [
-      const Keys(LogicalKeyboardKey.digit3, meta: true),
+      const Keys(LogicalKeyboardKey.keyD, meta: true),
     ]);
     expect(restored.changed(Command.newSession), isFalse);
   });
@@ -259,7 +269,7 @@ void main() {
     final standard = custom.choose(Profile.standard);
     expect(standard.liquidKey, isFalse);
     expect(standard.bindings(Command.diff), [
-      const Keys(LogicalKeyboardKey.digit3, meta: true),
+      const Keys(LogicalKeyboardKey.keyD, meta: true),
     ]);
     expect(standard.choose(Profile.custom), custom);
     expect(
@@ -383,8 +393,8 @@ void main() {
       };
       final read = ShortcutSettings.fromJson({...json, 'custom': custom})!;
       expect(read.bindings(Command.diff), [
-        const Keys(LogicalKeyboardKey.digit3, liquid: true),
-        const Keys(LogicalKeyboardKey.digit3, meta: true),
+        const Keys(LogicalKeyboardKey.keyD, liquid: true),
+        const Keys(LogicalKeyboardKey.keyD, meta: true),
       ]);
       expect(read.bindings(Command.focusInput), [
         const Keys(LogicalKeyboardKey.keyL, meta: true),

@@ -30,7 +30,7 @@ class ChatView extends StatelessWidget {
 
   final SessionState state;
 
-  /// Shows the Diff tab with a turn's changes, by the turn's id.
+  /// Shows the Diff panel with a turn's changes, by the turn's id.
   final ValueChanged<String>? onOpenDiff;
 
   /// The session's project, harness and device, as the start page greets with them.
@@ -235,7 +235,14 @@ class ItemTile extends StatelessWidget {
           onNotification: (notification) =>
               notification is ScrollNotification ||
               notification is ScrollMetricsNotification,
-          child: SelectableText(text, style: prose),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: SelectableText(text, style: prose)),
+              if (item.entry case final entry?)
+                _AnswerMenu(state: state, entry: entry),
+            ],
+          ),
         ),
         BridgeItemKind.reasoning => Text(
           'Thinking',
@@ -243,6 +250,46 @@ class ItemTile extends StatelessWidget {
         ),
         _ => ToolRow(item: item),
       },
+    );
+  }
+}
+
+/// An agent answer's ··· menu, whose Branch from here continues the session from the answer.
+class _AnswerMenu extends StatelessWidget {
+  const _AnswerMenu({required this.state, required this.entry});
+
+  final SessionState state;
+
+  /// The stored entry the answer comes from.
+  final String entry;
+
+  @override
+  Widget build(BuildContext context) => SizedBox.square(
+    dimension: 28,
+    child: PopupMenuButton<String>(
+      key: const Key('answer menu'),
+      tooltip: 'More',
+      padding: EdgeInsets.zero,
+      icon: Icon(LucideIcons.ellipsis, size: 16, color: context.ws.textFaint),
+      onSelected: (_) => _branch(),
+      itemBuilder: (_) => const [
+        PopupMenuItem(value: 'branch', child: Text('Branch from here')),
+      ],
+    ),
+  );
+
+  /// Branches once the agent is idle, as the branch is made from stored entries only.
+  void _branch() {
+    final status = state.status.value;
+    if (status == RunStatus.running || status == RunStatus.waitingForYou) {
+      state.notify(BridgeLevel.info, 'Branch once the agent is idle.');
+      return;
+    }
+    unawaited(
+      state.branch(entry).catchError((Object error) {
+        state.notify(BridgeLevel.error, 'The session could not branch: $error');
+        return false;
+      }),
     );
   }
 }

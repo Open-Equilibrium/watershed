@@ -19,7 +19,7 @@ Duration fetchWait(int failures) => failures == 0
     ? fetchEvery
     : Duration(seconds: math.min(30 << math.min(failures - 1, 5), 15 * 60));
 
-/// The checkout's Git state for the session header, the sidebar and the Diff tab, read again
+/// The checkout's Git state for the session header, the sidebar and the Diff panel, read again
 /// after each fetch, turn and Git write.
 class GitState {
   GitState(this._backend, {required this.notify, BranchBases? bases})
@@ -217,7 +217,7 @@ class GitState {
       problem.value = null;
       if (!_sameStatus(status.value, now)) status.value = now;
       loaded.value = true;
-      // The same stash on the same tree keeps its value, so the Diff tab keeps its place.
+      // The same stash on the same tree keeps its value, so the Diff panel keeps its place.
       if (stashed?.id != stash.value?.id ||
           stashed?.current != stash.value?.current) {
         stash.value = stashed;

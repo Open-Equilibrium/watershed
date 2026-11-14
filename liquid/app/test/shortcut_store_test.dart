@@ -220,7 +220,7 @@ void main() {
       final second = shortcuts.change(
         ShortcutSettings.liquidKey().change(
           Command.diff,
-          const Keys(LogicalKeyboardKey.keyD, liquid: true),
+          const Keys(LogicalKeyboardKey.keyE, liquid: true),
         ),
       );
       host.gate!.complete();

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../appearance.dart';
 import '../controls.dart';
 import '../diff/diff_model.dart';
+import '../diff/diff_panel.dart';
 import '../diff/diff_settings.dart';
 import '../diff/diff_view.dart';
 import '../diff/turn_scope.dart';
@@ -18,24 +19,23 @@ import '../shortcuts/first_start.dart';
 import '../shortcuts/keymap.dart';
 import '../shortcuts/shortcut_reveal.dart';
 import '../shortcuts/shortcut_store.dart';
+import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import '../workspace/page_view.dart';
 import '../workspace/workspace_state.dart';
 import 'action_area.dart';
-import 'branch_menu.dart';
 import 'chat_view.dart';
-import 'git_actions.dart';
 import 'input_lane.dart';
 import 'pull_request_status.dart';
+import 'session_card_area.dart';
+import 'session_card_settings.dart';
 import 'sidebar.dart';
 import 'status_bar.dart';
 import 'worktrees_pane.dart';
 
-enum AgentTab { chat, diff }
-
 /// The window: the sidebar with the Explorer and the agent session, and beside it the open
-/// Page or the agent surface with its tabs, the active tab, the widget strip, the input area
+/// Page or the agent surface with its tabs, the Diff panel beside the chat, the widget strip, the input area
 /// and the status bar. Every part keeps its position in every tab (guidelines, principle 8).
 class AgentShell extends StatefulWidget {
   const AgentShell({
@@ -46,6 +46,7 @@ class AgentShell extends StatefulWidget {
     this.workspaceProblem,
     this.shortcuts,
     this.diffSettings,
+    this.cardSettings,
     this.appearance,
     this.parseDiff = parsePatchInBackground,
   }) : assert((state == null) == (info == null));
@@ -64,10 +65,13 @@ class AgentShell extends StatefulWidget {
   /// The shortcut settings; Standard, unsaved, without them.
   final ShortcutController? shortcuts;
 
-  /// How the Diff tab shows changes; the defaults, unsaved, without them.
+  /// How the Diff panel shows changes; the defaults, unsaved, without them.
   final DiffSettingsController? diffSettings;
 
-  /// How the Diff tab reads a patch; tests pass the synchronous parser.
+  /// Which rows the session card shows; all of them, unsaved, without it.
+  final SessionCardSettingsController? cardSettings;
+
+  /// How the Diff panel reads a patch; tests pass the synchronous parser.
   final PatchParser parseDiff;
 
   @override
@@ -83,16 +87,20 @@ class _AgentShellState extends State<AgentShell> {
 
   /// Keeps the input area's state while it moves into the open tab.
   final _inputKey = GlobalKey(debugLabel: 'input area');
-  final _tab = ValueNotifier(AgentTab.chat);
+  final _diffOpen = ValueNotifier(false);
+  final _cardOpen = ValueNotifier(true);
   final _settings = ValueNotifier(false);
   final _focus = FocusNode(debugLabel: 'shell');
   late final _shortcuts = widget.shortcuts ?? ShortcutController.memory();
   late final _diffSettings = widget.diffSettings ?? DiffSettingsController();
+  late final _cardSettings =
+      widget.cardSettings ?? SessionCardSettingsController();
 
   /// The settings whose failed saves the status bar reports.
   late final _saved = <SavedSettings<Object?>?>[
     _shortcuts,
     _diffSettings,
+    _cardSettings,
     widget.appearance,
   ];
 
@@ -117,7 +125,7 @@ class _AgentShellState extends State<AgentShell> {
   void initState() {
     super.initState();
     _lifecycle;
-    // The kept choice counts every change read, also before the Diff tab opens.
+    // The kept choice counts every change read, also before the Diff panel opens.
     _diffSettings.addListener(_hideWhitespace);
     _hideWhitespace();
     if (widget.state case final state?) {
@@ -227,7 +235,8 @@ class _AgentShellState extends State<AgentShell> {
     widget.state?.question.removeListener(_questionChanged);
     _composer.dispose();
     _composerFocus.dispose();
-    _tab.dispose();
+    _diffOpen.dispose();
+    _cardOpen.dispose();
     _settings.dispose();
     _focus.dispose();
     for (final settings in _saved.nonNulls) {
@@ -238,6 +247,7 @@ class _AgentShellState extends State<AgentShell> {
     if (widget.shortcuts == null) _shortcuts.dispose();
     _diffSettings.removeListener(_hideWhitespace);
     if (widget.diffSettings == null) _diffSettings.dispose();
+    if (widget.cardSettings == null) _cardSettings.dispose();
     super.dispose();
   }
 
@@ -252,15 +262,35 @@ class _AgentShellState extends State<AgentShell> {
     widget.workspace?.open.value = null;
   }
 
-  /// Shows the agent session at `tab`.
-  void _showTab(AgentTab tab) {
+  /// Opens the Diff panel beside the Chat, showing `scope`; the Changes row and a turn's Open diff
+  /// do.
+  void _openDiff(DiffScope scope) {
+    widget.state!.diffScope.value = scope;
     _showSession();
-    _tab.value = tab;
+    _diffOpen.value = true;
+  }
+
+  /// Opens or closes the Diff panel, the keys and its close button alike; closing gives the keys
+  /// back to the shell.
+  void _toggleDiff() {
+    _showSession();
+    if (_diffOpen.value) {
+      _diffOpen.value = false;
+      _focus.requestFocus();
+    } else {
+      _diffOpen.value = true;
+    }
+  }
+
+  /// Shows or hides the session card, whether it sits beside the Chat or over it.
+  void _toggleCard() {
+    _showSession();
+    _cardOpen.value = !_cardOpen.value;
   }
 
   /// Starts a new session in the chat, ready to describe the task.
   void _newSession() {
-    _showTab(AgentTab.chat);
+    _showSession();
     _composerFocus.requestFocus();
     unawaited(widget.state!.newSession());
   }
@@ -279,8 +309,9 @@ class _AgentShellState extends State<AgentShell> {
   /// commands only with a session, the Workspace's only with a Workspace.
   late final Map<Command, VoidCallback> _actions = {
     if (widget.state case final state?) ...{
-      Command.chat: () => _showTab(AgentTab.chat),
-      Command.diff: () => _showTab(AgentTab.diff),
+      Command.chat: _showSession,
+      Command.diff: _toggleDiff,
+      Command.sessionDetails: _toggleCard,
       Command.focusInput: () {
         _showSession();
         // A tab that Settings just gave way to takes the keys when it opens, after this action.
@@ -333,7 +364,11 @@ class _AgentShellState extends State<AgentShell> {
           label: 'View',
           menus: [
             PlatformMenuItemGroup(
-              members: [item(Command.chat), item(Command.diff)],
+              members: [
+                item(Command.chat),
+                item(Command.diff),
+                item(Command.sessionDetails),
+              ],
             ),
             PlatformMenuItemGroup(members: [item(Command.focusInput)]),
             provided(PlatformProvidedMenuItemType.toggleFullScreen),
@@ -451,7 +486,8 @@ class _AgentShellState extends State<AgentShell> {
     );
   }
 
-  /// The agent surface: header, tabs, the active tab with the input area, and the status bar.
+  /// The agent surface: header, tabs, the Chat beside the Diff panel with the input area and
+  /// the session card, and the status bar.
   Widget _agentSurface(
     BuildContext context,
     SessionState state,
@@ -460,13 +496,18 @@ class _AgentShellState extends State<AgentShell> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _Header(state: state, project: info.project, device: info.device),
-        _Tabs(tab: _tab, state: state),
+        _Header(
+          state: state,
+          project: info.project,
+          cardOpen: _cardOpen,
+          onDetails: _toggleCard,
+        ),
+        const _Tabs(),
         Expanded(
           child: ValueListenableBuilder(
-            valueListenable: _tab,
-            builder: (context, tab, _) {
-              // The input area floats over the open tab's main column.
+            valueListenable: _diffOpen,
+            builder: (context, diffOpen, _) {
+              // The input area stays with the Chat, beside the Diff panel.
               final input = KeyedSubtree(
                 key: _inputKey,
                 child: Column(
@@ -485,53 +526,61 @@ class _AgentShellState extends State<AgentShell> {
                   ],
                 ),
               );
-              return switch (tab) {
-                AgentTab.chat => ChatView(
-                  state: state,
-                  info: info,
-                  input: input,
-                  onOpenDiff: (turn) {
-                    state.diffScope.value = OneTurn(turn);
-                    _tab.value = AgentTab.diff;
-                  },
-                ),
-                AgentTab.diff => DiffView(
-                  state: state,
-                  settings: _diffSettings,
-                  input: input,
-                  parse: widget.parseDiff,
-                ),
-              };
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: SessionCardArea(
+                      state: state,
+                      device: info.device,
+                      settings: _cardSettings,
+                      open: _cardOpen,
+                      diffOpen: diffOpen,
+                      onChanges: () => _openDiff(const LatestTurn()),
+                      child: ChatView(
+                        state: state,
+                        info: info,
+                        input: input,
+                        onOpenDiff: (turn) => _openDiff(OneTurn(turn)),
+                      ),
+                    ),
+                  ),
+                  if (diffOpen)
+                    DiffPanel(
+                      state: state,
+                      settings: _diffSettings,
+                      parse: widget.parseDiff,
+                      onClose: _toggleDiff,
+                    ),
+                ],
+              );
             },
           ),
         ),
         ListenableBuilder(
-          listenable: _tab,
-          builder: (context, _) => StatusBar(
-            state: state,
-            keys: switch (_tab.value) {
-              AgentTab.chat => '',
-              AgentTab.diff => diffKeys(),
-            },
-          ),
+          listenable: _diffOpen,
+          builder: (context, _) =>
+              StatusBar(state: state, keys: _diffOpen.value ? diffKeys() : ''),
         ),
       ],
     );
   }
 }
 
-/// The session's title with its project and model as chips, and at the
-/// right the checkout's branch, its pull request and the Git action.
+/// The session's title with its project and model as chips, and at the right the button that
+/// shows or hides the session card.
 class _Header extends StatelessWidget {
   const _Header({
     required this.state,
     required this.project,
-    required this.device,
+    required this.cardOpen,
+    required this.onDetails,
   });
 
   final SessionState state;
   final String project;
-  final String device;
+  final ValueNotifier<bool> cardOpen;
+  final VoidCallback onDetails;
 
   @override
   Widget build(BuildContext context) {
@@ -553,7 +602,10 @@ class _Header extends StatelessWidget {
     return Container(
       key: const Key('session-header'),
       height: WsMetrics.rowHeader,
-      padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space7),
+      padding: const EdgeInsets.only(
+        left: WsMetrics.space7,
+        right: WsMetrics.space5,
+      ),
       child: Row(
         children: [
           Expanded(
@@ -578,140 +630,117 @@ class _Header extends StatelessWidget {
               ],
             ),
           ),
-          Flexible(child: BranchChip(state: state)),
-          PullRequestChip(state: state, device: device),
-          const SizedBox(width: WsMetrics.space2),
-          GitActions(state: state, device: device),
+          _DetailsButton(open: cardOpen, onPressed: onDetails),
         ],
       ),
     );
   }
 }
 
-/// How many files the Diff tab shows, beside its name: the shown turns',
-/// the latest by default, counted as the whitespace choice says.
-class _ChangedFiles extends StatelessWidget {
-  const _ChangedFiles({required this.state});
+/// The header's button that shows or hides the session card, as T3 Code's sliders button does.
+class _DetailsButton extends StatelessWidget {
+  const _DetailsButton({required this.open, required this.onPressed});
 
-  final SessionState state;
-
-  @override
-  Widget build(BuildContext context) => ValueListenableBuilder(
-    valueListenable: state.changed,
-    builder: (context, changed, _) {
-      final count = changed?.length ?? 0;
-      if (count == 0) return const SizedBox.shrink();
-      return Container(
-        key: const Key('changed-files'),
-        margin: const EdgeInsets.only(left: WsMetrics.space2),
-        padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space2),
-        decoration: BoxDecoration(
-          color: context.ws.hover,
-          borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
-        ),
-        child: Text(
-          '$count',
-          style: TextStyle(
-            color: context.ws.textMuted,
-            fontSize: WsMetrics.fsSmall,
-          ),
-        ),
-      );
-    },
-  );
-}
-
-class _Tabs extends StatelessWidget {
-  const _Tabs({required this.tab, required this.state});
-
-  final ValueNotifier<AgentTab> tab;
-  final SessionState state;
-
-  static const _commands = {
-    AgentTab.chat: Command.chat,
-    AgentTab.diff: Command.diff,
-  };
+  final ValueListenable<bool> open;
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    final keys = Keymap.of(context);
-    final shown = ShortcutReveal.shown(context);
+    return ValueListenableBuilder(
+      valueListenable: open,
+      builder: (context, shown, _) => CommandHint(
+        command: Command.sessionDetails,
+        child: Tooltip(
+          message: 'Session details',
+          child: Semantics(
+            button: true,
+            selected: shown,
+            child: InkWell(
+              key: const Key('session-details'),
+              borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+              onTap: onPressed,
+              child: Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: shown ? ws.hover : null,
+                  borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+                ),
+                child: Icon(
+                  LucideIcons.slidersHorizontal,
+                  size: 16,
+                  color: shown ? ws.text : ws.textMuted,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The tab strip: the Chat, the session's only tab.
+class _Tabs extends StatelessWidget {
+  const _Tabs();
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
     return Container(
       height: 38,
       padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space6),
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: ws.border)),
       ),
-      child: ValueListenableBuilder(
-        valueListenable: tab,
-        builder: (context, active, _) => Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            for (final entry in _commands.entries)
-              // Which tab is open is told to assistive technology, not only drawn.
-              Semantics(
-                selected: entry.key == active,
-                inMutuallyExclusiveGroup: true,
-                child: InkWell(
-                  canRequestFocus: false,
-                  onTap: () => tab.value = entry.key,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: WsMetrics.space4,
-                    ),
-                    decoration: BoxDecoration(
-                      border: Border(
-                        bottom: BorderSide(
-                          color: entry.key == active
-                              ? ws.accent
-                              : Colors.transparent,
-                          width: 2,
-                        ),
-                      ),
-                    ),
-                    alignment: Alignment.center,
-                    // The hint sits on the label's corner, so the tab keeps its size.
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              entry.value.label,
-                              style: TextStyle(
-                                color: entry.key == active
-                                    ? ws.text
-                                    : ws.textMuted,
-                                fontWeight: entry.key == active
-                                    ? WsMetrics.fwMedium
-                                    : WsMetrics.fwRegular,
-                              ),
-                            ),
-                            if (entry.key == AgentTab.diff)
-                              _ChangedFiles(state: state),
-                          ],
-                        ),
-                        // Keys the menu bar shows stay out of the GUI; the Liquid key,
-                        // which it cannot show, gets a hint.
-                        if (shown &&
-                            keys.label(entry.value).isNotEmpty &&
-                            keys.label(entry.value) !=
-                                keys.menu(entry.value)?.label)
-                          Positioned(
-                            top: -11,
-                            right: -14,
-                            child: KeyBadge(keys.label(entry.value)),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-          ],
+      // Which tab is open is told to assistive technology, not only drawn.
+      child: Semantics(
+        selected: true,
+        inMutuallyExclusiveGroup: true,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: ws.accent, width: 2)),
+          ),
+          child: CommandHint(
+            command: Command.chat,
+            child: Text(
+              'Chat',
+              style: TextStyle(color: ws.text, fontWeight: WsMetrics.fwMedium),
+            ),
+          ),
         ),
       ),
+    );
+  }
+}
+
+/// A command's key, shown on the corner of its control while the reveal key is held. The menu
+/// bar shows the ⌘ keys itself, so they stay out of the GUI.
+class CommandHint extends StatelessWidget {
+  const CommandHint({super.key, required this.command, required this.child});
+
+  final Command command;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final keys = Keymap.of(context);
+    final label = keys.label(command);
+    if (!ShortcutReveal.shown(context) ||
+        label.isEmpty ||
+        label == keys.menu(command)?.label) {
+      return child;
+    }
+    // The hint sits on the control's corner, so the control keeps its size.
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        child,
+        Positioned(top: -11, right: -14, child: KeyBadge(label)),
+      ],
     );
   }
 }

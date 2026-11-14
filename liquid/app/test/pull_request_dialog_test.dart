@@ -34,11 +34,15 @@ void main() {
         home: Scaffold(
           body: Column(
             children: [
-              Row(
-                children: [
-                  PullRequestChip(state: state, device: 'MacBook'),
-                  GitActions(state: state, device: 'MacBook'),
-                ],
+              // The session card's column, which gives the Git action row its width.
+              SizedBox(
+                width: 280,
+                child: Column(
+                  children: [
+                    PullRequestRow(state: state, device: 'MacBook'),
+                    GitActions(state: state, device: 'MacBook'),
+                  ],
+                ),
               ),
               const Spacer(),
               PushedOffer(state: state, device: 'MacBook'),
@@ -109,7 +113,7 @@ void main() {
       expect(draft.identity.headCommit, 'c0ffee');
       expect(find.text('Create pull request'), findsNothing);
       expect(state.pulls.current.value?.number, 42);
-      expect(find.text('Open #42'), findsOneWidget);
+      expect(find.text('#42'), findsOneWidget);
       await tester.pump(const Duration(seconds: 7));
     },
   );
@@ -284,12 +288,13 @@ void main() {
       await tester.pumpAndSettle();
       final reads = backend.pullRequestReads;
 
-      await tester.tap(find.text('Open #42'));
+      await tester.tap(find.byKey(const Key('pull-request-chip')));
       await tester.pumpAndSettle();
       expect(backend.pullRequestReads, reads + 1);
+      // The row names the pull request too, beside the summary that opened.
       expect(
         find.text('Return 429 with Retry-After on /login'),
-        findsOneWidget,
+        findsNWidgets(2),
       );
       expect(find.text('feature/retry-after → main'), findsOneWidget);
       expect(

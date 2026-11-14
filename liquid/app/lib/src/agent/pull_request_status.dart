@@ -10,12 +10,14 @@ import '../session/session_state.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'session_card_rows.dart';
 import 'pull_request.dart';
 import 'session_menus.dart';
 
-/// The PR chip beside the branch chip, and its summary (pull request mockups §4).
-class PullRequestChip extends StatelessWidget {
-  const PullRequestChip({super.key, required this.state, required this.device});
+/// The session card's pull request row: its number, title, state and checks. It opens the
+/// summary.
+class PullRequestRow extends StatelessWidget {
+  const PullRequestRow({super.key, required this.state, required this.device});
 
   final SessionState state;
   final String device;
@@ -29,69 +31,74 @@ class PullRequestChip extends StatelessWidget {
         final pull = pulls.current.value;
         if (pull == null) return const SizedBox.shrink();
         final ws = context.ws;
-        final (mark, color) = _mark(context, pull.state);
+        final (_, color) = _mark(context, pull.state);
         final stale = pulls.failure.value != null;
-        void open() {
-          final box = context.findRenderObject()! as RenderBox;
-          final chip = box.localToGlobal(Offset.zero) & box.size;
-          unawaited(
-            showDialog<void>(
-              context: context,
-              barrierColor: Colors.transparent,
-              builder: (_) =>
-                  _Summary(state: state, device: device, below: chip),
-            ),
-          );
-        }
-
-        return Padding(
-          padding: const EdgeInsets.only(left: WsMetrics.space2),
-          child: Semantics(
-            key: const Key('pull-request-chip'),
-            button: true,
-            label:
-                'Pull request ${stateLabel(pull.state)} #${pull.number}${stale ? ', status unavailable' : ''}',
-            excludeSemantics: true,
+        void open() => showPullRequestSummary(context, state, device);
+        return Semantics(
+          key: const Key('pull-request-chip'),
+          button: true,
+          label:
+              'Pull request ${stateLabel(pull.state)} #${pull.number}${stale ? ', status unavailable' : ''}',
+          excludeSemantics: true,
+          onTap: open,
+          child: CardRow(
             onTap: open,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-              onTap: open,
-              child: Container(
-                height: 28,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: WsMetrics.space3,
-                ),
-                decoration: BoxDecoration(
-                  border: Border.all(color: ws.borderStrong),
-                  borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  spacing: WsMetrics.space2,
-                  children: [
-                    Text(mark, style: TextStyle(color: color)),
-                    Text(
-                      '${stateLabel(pull.state)} #${pull.number}',
-                      style: TextStyle(
-                        color: ws.text,
-                        fontSize: WsMetrics.fsCompact,
-                      ),
-                    ),
-                    if (stale)
-                      Icon(
-                        LucideIcons.triangleAlert,
-                        size: 13,
-                        color: ws.warning,
-                      ),
-                  ],
+            children: [
+              Icon(LucideIcons.gitPullRequest, size: 16, color: color),
+              Text('#${pull.number}'),
+              Flexible(
+                child: Text(
+                  pull.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: ws.textMuted,
+                    fontWeight: WsMetrics.fwRegular,
+                  ),
                 ),
               ),
-            ),
+              if (stale)
+                Icon(LucideIcons.triangleAlert, size: 14, color: ws.warning),
+              ?_checksIcon(context, pull),
+            ],
           ),
         );
       },
     );
   }
+}
+
+/// The checks' outcome as an icon: failed first, then pending, then passed; none when GitHub
+/// reports none.
+Widget? _checksIcon(BuildContext context, BridgePullRequest pull) {
+  final ws = context.ws;
+  if (pull.checksFailed > 0) {
+    return Icon(LucideIcons.circleX, size: 16, color: ws.danger);
+  }
+  if (pull.checksPending > 0) {
+    return Icon(LucideIcons.loader, size: 16, color: ws.textFaint);
+  }
+  if (pull.checksPassed > 0) {
+    return Icon(LucideIcons.checkCircle, size: 16, color: ws.success);
+  }
+  return null;
+}
+
+/// Opens the pull request's summary below the row `context` is in, aligned to its end.
+void showPullRequestSummary(
+  BuildContext context,
+  SessionState state,
+  String device,
+) {
+  final box = context.findRenderObject()! as RenderBox;
+  final row = box.localToGlobal(Offset.zero) & box.size;
+  unawaited(
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.transparent,
+      builder: (_) => _Summary(state: state, device: device, below: row),
+    ),
+  );
 }
 
 String stateLabel(BridgePullRequestState state) => switch (state) {

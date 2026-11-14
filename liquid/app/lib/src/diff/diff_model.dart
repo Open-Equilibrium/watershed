@@ -78,11 +78,11 @@ class DiffLine {
   final int? newNumber;
 }
 
-/// The characters of a line the Diff tab shows; a longer one, such as a minified bundle's,
+/// The characters of a line the Diff panel shows; a longer one, such as a minified bundle's,
 /// shows them and an ellipsis, so laying out one line stays cheap.
 const shownChars = 1000;
 
-/// The start of `text` the Diff tab shows, without a split character pair, and whether it is
+/// The start of `text` the Diff panel shows, without a split character pair, and whether it is
 /// cut.
 ({String text, bool cut}) shownText(String text) {
   if (text.length <= shownChars) return (text: text, cut: false);

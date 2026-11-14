@@ -101,31 +101,31 @@ void main() {
     await show(tester, ShortcutSettings.standard());
     await openSettings(tester);
 
-    await tester.tap(find.text('⌘3'));
+    await tester.tap(find.text('⌘D'));
     await tester.pumpAndSettle();
     expect(find.text('Press keys…'), findsOneWidget);
     await press(
       tester,
-      LogicalKeyboardKey.keyD,
+      LogicalKeyboardKey.keyE,
       holding: LogicalKeyboardKey.metaLeft,
     );
 
     expect(shortcuts.value.bindings(Command.diff), [
-      const Keys(LogicalKeyboardKey.keyD, meta: true),
+      const Keys(LogicalKeyboardKey.keyE, meta: true),
     ]);
     expect(store.saved, shortcuts.value);
     expect(find.text('based on Standard'), findsOneWidget);
     expect(find.text('1 shortcut changed'), findsOneWidget);
 
-    await tester.tap(find.text('Reset to ⌘3'));
+    await tester.tap(find.text('Reset to ⌘D'));
     await tester.pumpAndSettle();
     expect(shortcuts.value.changed(Command.diff), isFalse);
 
-    await tester.tap(find.text('⌘3'));
+    await tester.tap(find.text('⌘D'));
     await tester.pumpAndSettle();
     await press(tester, LogicalKeyboardKey.escape);
     expect(find.text('Press keys…'), findsNothing, reason: 'esc cancels');
-    expect(find.text('⌘3'), findsOneWidget, reason: 'and keeps Settings open');
+    expect(find.text('⌘D'), findsOneWidget, reason: 'and keeps Settings open');
   });
 
   testWidgets('keys another action in the area runs ask before they move', (
@@ -217,7 +217,7 @@ void main() {
     (tester) async {
       await show(tester, ShortcutSettings.liquidKey());
       await openSettings(tester);
-      await tester.tap(find.text('⇪3'));
+      await tester.tap(find.text('⇪D'));
       await tester.pumpAndSettle();
       await press(tester, LogicalKeyboardKey.keyN, holding: liquidKey);
       await tester.tap(find.text('Use anyway, clear New Session'));
@@ -237,7 +237,7 @@ void main() {
         const Keys(LogicalKeyboardKey.keyN, meta: true),
       ]);
       expect(shortcuts.value.bindings(Command.diff), [
-        const Keys(LogicalKeyboardKey.digit3, meta: true),
+        const Keys(LogicalKeyboardKey.keyD, meta: true),
       ]);
     },
   );
@@ -257,7 +257,7 @@ void main() {
           .choose(Profile.standard),
     );
     await openSettings(tester);
-    await tester.tap(find.text('⌘3'));
+    await tester.tap(find.text('⌘D'));
     await tester.pumpAndSettle();
     await press(
       tester,
@@ -274,7 +274,7 @@ void main() {
       reason: 'in Custom, Focus Input owns ⌘N, so the old owner is stale',
     );
     expect(shortcuts.value.bindings(Command.diff), [
-      const Keys(LogicalKeyboardKey.digit3, meta: true),
+      const Keys(LogicalKeyboardKey.keyD, meta: true),
     ]);
     expect(shortcuts.value.bindings(Command.focusInput), [
       const Keys(LogicalKeyboardKey.keyN, meta: true),
@@ -287,11 +287,11 @@ void main() {
     await show(tester, ShortcutSettings.standard());
     await openSettings(tester);
 
-    await tester.tap(find.text('⌘3'));
+    await tester.tap(find.text('⌘D'));
     await tester.pumpAndSettle();
     await press(
       tester,
-      LogicalKeyboardKey.digit3,
+      LogicalKeyboardKey.keyD,
       holding: LogicalKeyboardKey.metaLeft,
     );
     expect(find.text('Press keys…'), findsNothing, reason: 'recording ends');
@@ -339,7 +339,7 @@ void main() {
     await show(tester, ShortcutSettings.standard());
     await openSettings(tester);
 
-    await tester.tap(find.text('⌘3'));
+    await tester.tap(find.text('⌘D'));
     await tester.pumpAndSettle();
     await tester.tap(find.byType(TextField));
     await tester.pumpAndSettle();
@@ -414,7 +414,7 @@ void main() {
     expect(find.text('Hide or show whitespace changes'), findsOneWidget);
     expect(find.text('New Session'), findsNothing);
 
-    await tester.enterText(find.byType(TextField), '⌘3');
+    await tester.enterText(find.byType(TextField), '⌘D');
     await tester.pumpAndSettle();
     expect(find.text('Diff'), findsWidgets);
     expect(find.text('New Session'), findsNothing);
@@ -493,17 +493,17 @@ void main() {
   group('a change that would replace a kept Custom profile', () {
     final kept = ShortcutSettings.liquidKey().change(
       Command.diff,
-      const Keys(LogicalKeyboardKey.keyD, liquid: true),
+      const Keys(LogicalKeyboardKey.keyE, liquid: true),
     );
-    const commandD = Keys(LogicalKeyboardKey.keyD, meta: true);
+    const commandE = Keys(LogicalKeyboardKey.keyE, meta: true);
 
     Future<void> recordDiff(WidgetTester tester) async {
       await openSettings(tester);
-      await tester.tap(find.text('⌘3'));
+      await tester.tap(find.text('⌘D'));
       await tester.pumpAndSettle();
       await press(
         tester,
-        LogicalKeyboardKey.keyD,
+        LogicalKeyboardKey.keyE,
         holding: LogicalKeyboardKey.metaLeft,
       );
     }
@@ -515,7 +515,7 @@ void main() {
         expect(find.text('Replace the Custom profile?'), findsOneWidget);
         expect(
           find.text(
-            'Changing Diff to ⌘D starts a new Custom profile from Standard. '
+            'Changing Diff to ⌘E starts a new Custom profile from Standard. '
             'This replaces your current Custom profile, which has 1 changed '
             'shortcut.',
           ),
@@ -532,11 +532,11 @@ void main() {
       }
 
       // Settings are still open after esc.
-      await tester.tap(find.text('⌘3'));
+      await tester.tap(find.text('⌘D'));
       await tester.pumpAndSettle();
       await press(
         tester,
-        LogicalKeyboardKey.keyD,
+        LogicalKeyboardKey.keyE,
         holding: LogicalKeyboardKey.metaLeft,
       );
       expect(find.text('Replace the Custom profile?'), findsOneWidget);
@@ -565,7 +565,7 @@ void main() {
           }
           expect(shortcuts.value.profile, Profile.custom);
           expect(shortcuts.value.base, Profile.standard);
-          expect(shortcuts.value.bindings(Command.diff), [commandD]);
+          expect(shortcuts.value.bindings(Command.diff), [commandE]);
           expect(shortcuts.value.changes.length, 1);
         },
       );
@@ -591,7 +591,7 @@ void main() {
     ) async {
       await show(tester, kept.choose(Profile.standard));
       await openSettings(tester);
-      await tester.tap(find.text('⌘3'));
+      await tester.tap(find.text('⌘D'));
       await tester.pumpAndSettle();
       await press(
         tester,
@@ -601,7 +601,7 @@ void main() {
       expect(find.text('⌘Q is kept for Quit.'), findsOneWidget);
       await press(
         tester,
-        LogicalKeyboardKey.keyD,
+        LogicalKeyboardKey.keyE,
         holding: LogicalKeyboardKey.metaLeft,
       );
       expect(find.text('Replace the Custom profile?'), findsOneWidget);
@@ -617,7 +617,7 @@ void main() {
       );
       await recordDiff(tester);
       expect(find.text('Replace the Custom profile?'), findsNothing);
-      expect(shortcuts.value.bindings(Command.diff), [commandD]);
+      expect(shortcuts.value.bindings(Command.diff), [commandE]);
     });
   });
 }

@@ -294,7 +294,13 @@ enum Command {
   diff(
     'Diff',
     Area.app,
-    Keys(LogicalKeyboardKey.digit3, meta: true),
+    Keys(LogicalKeyboardKey.keyD, meta: true),
+    liquid: true,
+  ),
+  sessionDetails(
+    'Session details',
+    Area.app,
+    Keys(LogicalKeyboardKey.keyB, meta: true, alt: true),
     liquid: true,
   ),
   focusInput(

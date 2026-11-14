@@ -4,7 +4,7 @@ import '../settings_file.dart';
 
 enum DiffLayout { unified, split }
 
-/// How the Diff tab shows a run's changes; kept across restarts.
+/// How the Diff panel shows a run's changes; kept across restarts.
 @immutable
 class DiffSettings {
   const DiffSettings({
@@ -35,7 +35,7 @@ class DiffSettings {
   };
 }
 
-/// The Diff tab's settings in use; each change is saved.
+/// The Diff panel's settings in use; each change is saved.
 class DiffSettingsController extends SavedSettings<DiffSettings> {
   DiffSettingsController([
     DiffSettings value = const DiffSettings(),
