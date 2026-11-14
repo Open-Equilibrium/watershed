@@ -843,7 +843,11 @@ void main() {
       tester.binding.rootPipelineOwner.flushLayout();
       // Layout builders create their children in layout, so build and layout alternate until
       // the question is in the tree; no frame ends, so no read delay starts yet.
-      for (var pass = 0; pass < 10 && find.text('Yes', skipOffstage: false).evaluate().isEmpty; pass++) {
+      for (
+        var pass = 0;
+        pass < 10 && find.text('Yes', skipOffstage: false).evaluate().isEmpty;
+        pass++
+      ) {
         tester.binding.buildOwner!.buildScope(tester.binding.rootElement!);
         tester.binding.rootPipelineOwner.flushLayout();
       }
@@ -1694,6 +1698,15 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump();
     expect(find.text('⌘⏎'), findsNothing);
+  });
+
+  testWidgets('the status bar counts tokens as the session card does', (
+    tester,
+  ) async {
+    await show(tester);
+    state.totals.value = const SessionTotals(input: 212000, output: 18300);
+    await tester.pumpAndSettle();
+    expect(find.text('212 k in · 18.3 k out'), findsOneWidget);
   });
 
   testWidgets('the status bar names the Diff panel\'s keys while Cmd is held', (
