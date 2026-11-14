@@ -14,7 +14,7 @@ pub fn visible_name(name: &str) -> String {
     })
 }
 
-/// Lines as the Diff tab shows them: like [`visible`], but a carriage return that ends a line
+/// Lines as the Diff panel shows them: like [`visible`], but a carriage return that ends a line
 /// stays, as Windows line ends have one, so the tab can mark it.
 pub fn visible_lines(text: &str) -> String {
     let mut shown = String::with_capacity(text.len());

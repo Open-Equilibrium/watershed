@@ -14,7 +14,7 @@ void main() {
   });
   tearDown(() => temp.deleteSync(recursive: true));
 
-  test('keeps the Diff tab settings across a restart', () async {
+  test('keeps the Diff panel settings across a restart', () async {
     final first = await DiffSettingsController.load(SettingsFile(file));
     expect(first.value.layout, DiffLayout.unified);
     expect(first.value.hideWhitespace, isFalse);

@@ -512,7 +512,7 @@ class BridgeTreeNode {
           kind == other.kind;
 }
 
-/// A turn of the current branch, as the Diff tab lists it (ADR-0234).
+/// A turn of the current branch, as the Diff panel lists it (ADR-0234).
 class BridgeTurn {
   /// The turn's checkpoint id.
   final String id;

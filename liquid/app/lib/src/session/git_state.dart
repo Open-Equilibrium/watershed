@@ -234,7 +234,7 @@ class GitState {
       if (stashed != null) {
         final text =
             '$after has stashed changes from ${formatClockMs(stashed.createdMs)}; the Diff '
-            'tab shows them.';
+            'panel shows them.';
         // A switch of this window tells first that it switched.
         if (_writing) {
           _arrived = text;

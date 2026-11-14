@@ -76,7 +76,7 @@ pub struct BridgeTranscriptItem {
     pub removed: Option<i64>,
 }
 
-/// A turn of the current branch, as the Diff tab lists it (ADR-0234).
+/// A turn of the current branch, as the Diff panel lists it (ADR-0234).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeTurn {
     /// The turn's checkpoint id.

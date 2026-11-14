@@ -17,7 +17,7 @@ import 'package:liquid/src/theme/theme.dart';
 import 'fake_backend.dart';
 
 void main() {
-  /// Shows the Diff tab of a session on [backend].
+  /// Shows the Diff panel of a session on [backend].
   Future<SessionState> show(
     WidgetTester tester,
     FakeBackend backend, {

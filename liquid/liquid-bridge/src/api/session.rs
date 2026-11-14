@@ -207,7 +207,7 @@ impl AgentSession {
 
     /// Sends a message: an idle agent starts a run with it, a running one takes it before its
     /// next model request or, with `follow_up`, once it is done. Each run's start and end are
-    /// checkpointed, so the Diff tab shows what it changed.
+    /// checkpointed, so the Diff panel shows what it changed.
     pub fn send(&self, message: String, follow_up: bool) -> Result<(), String> {
         RUNTIME.block_on(async {
             let pending = {
@@ -271,7 +271,7 @@ impl AgentSession {
 
     /// The unified diff of one file from the start of turn `from` to the end of turn `to`;
     /// characters that could hide or reorder its lines are written out, as in the file's shown
-    /// name, but for the carriage returns of Windows line ends, which the Diff tab marks.
+    /// name, but for the carriage returns of Windows line ends, which the Diff panel marks.
     pub fn turn_patch(
         &self,
         from: String,

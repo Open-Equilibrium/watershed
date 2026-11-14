@@ -484,9 +484,9 @@ void main() {
     await second;
     expect(notices.map((notice) => notice.$2), [
       'Switched to one.',
-      'one has stashed changes from 10:41; the Diff tab shows them.',
+      'one has stashed changes from 10:41; the Diff panel shows them.',
       'Switched to two.',
-      'two has stashed changes from 10:41; the Diff tab shows them.',
+      'two has stashed changes from 10:41; the Diff panel shows them.',
     ]);
   });
 
@@ -711,7 +711,7 @@ void main() {
 
     expect(notices.map((notice) => notice.$2), [
       'Switched to main.',
-      'main has stashed changes from 10:41; the Diff tab shows them.',
+      'main has stashed changes from 10:41; the Diff panel shows them.',
     ]);
   });
 

@@ -274,7 +274,7 @@ void main() {
   });
 
   test(
-    'a revert continues the chat and the Diff tab on the new branch',
+    'a revert continues the chat and the Diff panel on the new branch',
     () async {
       final turn = turnOf('T2', number: 2);
       final confirmed = revertPlanOf().confirmation;
@@ -288,7 +288,7 @@ void main() {
       expect(state.turns.value.map((turn) => turn.id), ['T1']);
       expect(state.shown.value?.to.id, 'T1');
 
-      // The files changed, but the session stayed on its branch: the Diff tab still rereads.
+      // The files changed, but the session stayed on its branch: the Diff panel still rereads.
       backend
         ..revertError =
             'the files were reverted, but the session could not continue from before the '

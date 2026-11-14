@@ -1,5 +1,5 @@
 //! Checkpoints of a session's Git project at each turn's start and end (ADR-0220, ADR-0234): commits
-//! under `refs/watershed/checkpoints/<session>/<turn>/<start|end>` that the Diff tab compares. The
+//! under `refs/watershed/checkpoints/<session>/<turn>/<start|end>` that the Diff panel compares. The
 //! checkout's other Git operations, its branches, stash and fetch, run here too: reads and the
 //! background fetch under the checkpoint time limit, and the Git writes a user asks for to their
 //! end under the lock against running agents.

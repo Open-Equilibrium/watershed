@@ -1696,7 +1696,7 @@ void main() {
     expect(find.text('⌘⏎'), findsNothing);
   });
 
-  testWidgets('the status bar names the Diff tab\'s keys while Cmd is held', (
+  testWidgets('the status bar names the Diff panel\'s keys while Cmd is held', (
     tester,
   ) async {
     await show(tester);

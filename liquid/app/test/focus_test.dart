@@ -17,7 +17,7 @@ import 'focus_kit.dart';
 
 const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
 
-/// Keys in the whole shell, where the shell's own focus is taken first: dialogs, the Diff tab
+/// Keys in the whole shell, where the shell's own focus is taken first: dialogs, the Diff panel
 /// and the input area take the keys without a click, and only keys meant for them.
 void main() {
   late FakeBackend backend;
@@ -155,7 +155,7 @@ void main() {
     expect(focused(tester, const Key('answer')), isTrue);
   });
 
-  testWidgets('the Diff tab takes ↑↓ at once', (tester) async {
+  testWidgets('the Diff panel takes ↑↓ at once', (tester) async {
     await show(tester);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyD);

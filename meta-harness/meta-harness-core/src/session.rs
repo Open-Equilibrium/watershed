@@ -487,7 +487,7 @@ impl Session {
         Ok((session, receiver))
     }
 
-    /// The project's checkpoints, which the Diff tab compares; reading them never holds the
+    /// The project's checkpoints, which the Diff panel compares; reading them never holds the
     /// session.
     pub fn checkpoints(&self) -> Arc<Checkpoints> {
         self.checkpoints.clone()
