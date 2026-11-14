@@ -2,7 +2,7 @@
 //! (ADR-0272).
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use meta_harness_core::SessionEvent;
 use tokio::sync::{Notify, mpsc};
@@ -48,10 +48,12 @@ pub(crate) const WINDOW: usize = 256;
 /// goes and Liquid falls behind; other events are never dropped (ADR-0272).
 pub(crate) const PENDING_LIMIT: usize = 256;
 
-/// How many of the stream's events Liquid applied, as `AgentSession::confirm_applied` reports.
+/// How many of the stream's events Liquid applied, as `AgentSession::confirm_applied` reports,
+/// and whether the session that owns the stream was dropped and no confirmation will come.
 #[derive(Default)]
 pub(crate) struct Credit {
     applied: AtomicU64,
+    closed: AtomicBool,
     notify: Notify,
 }
 
@@ -62,12 +64,23 @@ impl Credit {
         self.notify.notify_one();
     }
 
+    /// Records that the session was dropped, which ends the stream's wait for Liquid.
+    pub(crate) fn close(&self) {
+        self.closed.store(true, Ordering::Release);
+        self.notify.notify_one();
+    }
+
     /// How many events Liquid applied so far.
     fn applied(&self) -> u64 {
         self.applied.load(Ordering::Acquire)
     }
 
-    /// Waits until a confirmation may have reopened the window.
+    /// Whether the session was dropped.
+    fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Acquire)
+    }
+
+    /// Waits until a confirmation may have reopened the window, or the session was dropped.
     async fn wait(&self) {
         self.notify.notified().await;
     }
@@ -157,9 +170,10 @@ async fn next_while_full(
     .await
 }
 
-/// Hands the session's events to `deliver` until it returns `false`, those from before the start
-/// first. It sends at most `WINDOW` events that `credit` has not confirmed; what waits meanwhile
-/// merges, and an overflow ends in one fell-behind event (ADR-0272).
+/// Hands the session's events to `deliver` until it returns `false` or the session is dropped,
+/// those from before the start first. It sends at most `WINDOW` events that `credit` has not
+/// confirmed; what waits meanwhile merges, and an overflow ends in one fell-behind event
+/// (ADR-0272).
 pub(crate) async fn forward(
     early: Vec<SessionEvent>,
     mut receiver: mpsc::Receiver<SessionEvent>,
@@ -172,6 +186,10 @@ pub(crate) async fn forward(
     }
     let mut closed = false;
     loop {
+        if credit.is_closed() {
+            // The session was dropped, so no confirmation comes; what waits is released with it.
+            return;
+        }
         if !outbox.send(credit.applied(), &mut deliver) {
             // Dart closed the stream: stop; dropping the session ends the agent.
             return;

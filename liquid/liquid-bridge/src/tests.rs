@@ -10,6 +10,7 @@ use crate::api::events::{
     BridgeChangeStatus, BridgeEvent, BridgeEventKind, BridgeFileChange, BridgeItemKind,
     BridgeQuestionKind, BridgeQueue, BridgeUsage,
 };
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
@@ -296,6 +297,45 @@ IFS= read -r line || exit 0"#;
         session.send("again".to_owned(), false),
         Err("the session was shut down".to_owned())
     );
+}
+
+#[test]
+fn dropping_a_session_releases_its_stream_when_liquid_confirms_nothing() {
+    // Two events per turn, more than the window, so the stream waits for Liquid.
+    let turns = WINDOW;
+    let script = gated(&format!(
+        "for turn in $(seq 1 {turns}); do printf '%s\\n' '{{\"type\":\"agent_start\"}}' '{{\"type\":\"agent_settled\",\"aborted\":false}}'; done\nIFS= read -r line || exit 0"
+    ));
+    let session = launch(script, std::env::temp_dir().display().to_string()).expect("agent starts");
+    let delivered = Arc::new(AtomicUsize::new(0));
+    let probe = Arc::new(());
+    let (counter, held) = (delivered.clone(), probe.clone());
+    session
+        .forward(move |_event| {
+            let _held = &held;
+            counter.fetch_add(1, Ordering::SeqCst);
+            true
+        })
+        .expect("first subscriber");
+    let wait_until = |condition: &dyn Fn() -> bool| {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !condition() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the condition is reached"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+    wait_until(&|| delivered.load(Ordering::SeqCst) == WINDOW);
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(
+        delivered.load(Ordering::SeqCst),
+        WINDOW,
+        "the window holds until Liquid confirms"
+    );
+    drop(session);
+    wait_until(&|| Arc::strong_count(&probe) == 1);
 }
 
 #[test]
@@ -957,6 +997,42 @@ fn closing_a_full_window_releases_the_forwarder() {
             .expect("forward returns once the window is confirmed and the session ended")
             .expect("forward completes");
         assert_eq!(taken(&mut deliveries).len(), 44);
+    });
+}
+
+#[test]
+fn closing_the_credit_releases_a_forwarder_that_waits_on_a_dropped_session() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let probe = Arc::new(());
+        let held = probe.clone();
+        let (events, receiver) = tokio::sync::mpsc::channel(4096);
+        let forwarding = tokio::spawn(forward(
+            Vec::new(),
+            receiver,
+            credit.clone(),
+            move |_event| {
+                let _held = &held;
+                true
+            },
+        ));
+        for item in 1..=WINDOW as u64 + 1 {
+            events.send(started(item)).await.expect("sent");
+        }
+        settle().await;
+        // Liquid confirms nothing, so the one event past the window waits; the session ends
+        // and dropping it closes the credit.
+        drop(events);
+        credit.close();
+        tokio::time::timeout(Duration::from_secs(1), forwarding)
+            .await
+            .expect("forward returns once the session ended and its credit closed")
+            .expect("forward completes");
+        assert_eq!(
+            Arc::strong_count(&probe),
+            1,
+            "the forwarder released its sink and its pending events"
+        );
     });
 }
 

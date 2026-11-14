@@ -105,6 +105,13 @@ pub struct AgentSession {
     credit: std::sync::Arc<stream::Credit>,
 }
 
+impl Drop for AgentSession {
+    fn drop(&mut self) {
+        // No confirmation comes once the session is gone, so its stream stops waiting for one.
+        self.credit.close();
+    }
+}
+
 impl AgentSession {
     /// Starts pi; subscribe with [`AgentSession::events`].
     pub fn start(config: SessionConfig) -> Result<Self, String> {
