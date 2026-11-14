@@ -6,6 +6,7 @@ import '../diff/turn_scope.dart';
 import '../rust/api/history.dart';
 import '../session/session_statistics.dart';
 import '../session/session_state.dart';
+import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
@@ -409,6 +410,7 @@ class _SessionStatistics extends StatelessWidget {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: Listenable.merge([state.statistics, state.status]),
     builder: (context, _) {
+      final ws = context.ws;
       final statistics = state.statistics.value;
       final running = state.status.value == RunStatus.running;
       return _Section(
@@ -419,7 +421,23 @@ class _SessionStatistics extends StatelessWidget {
               context,
               SessionStatistics(statistics, running: running),
             ),
-          StatisticsRow(onTap: () => state.statisticsOpen.value = true),
+          // The Statistics row opens the panel, and names the key that opens it.
+          CardRow(
+            onTap: () => state.statisticsOpen.value = true,
+            children: [
+              Icon(LucideIcons.barChart3, size: 16, color: ws.textFaint),
+              const Text('Statistics'),
+              const Spacer(),
+              Text(
+                Keymap.of(context).label(Command.statistics),
+                style: TextStyle(
+                  fontSize: WsMetrics.fsSmall,
+                  fontWeight: WsMetrics.fwRegular,
+                  color: ws.textFaint,
+                ),
+              ),
+            ],
+          ),
         ],
       );
     },

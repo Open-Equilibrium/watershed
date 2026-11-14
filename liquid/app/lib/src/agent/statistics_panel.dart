@@ -727,22 +727,9 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
   Widget _askRow(WsPalette ws) => Row(
     spacing: 16,
     children: [
-      InkWell(
-        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-        onTap: _ask,
-        child: Container(
-          height: 28,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-            border: Border.all(color: ws.borderStrong),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            'Ask the agent about this session…',
-            style: TextStyle(fontSize: WsMetrics.fsCompact, color: ws.text),
-          ),
-        ),
+      SecondaryButton(
+        label: 'Ask the agent about this session…',
+        onPressed: _ask,
       ),
       Flexible(
         child: Text(

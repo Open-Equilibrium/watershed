@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../format.dart';
 import '../rust/api/history.dart';
 import '../session/session_statistics.dart';
-import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
@@ -335,52 +334,4 @@ String? _failingTools(SessionStatistics figures) {
   ]..sort((a, b) => b.failed.compareTo(a.failed));
   if (failing.isEmpty) return null;
   return failing.map((tool) => '${tool.name} ${tool.failed} failed').join(', ');
-}
-
-/// The Statistics row, which opens the session's statistics panel.
-class StatisticsRow extends StatelessWidget {
-  const StatisticsRow({super.key, required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    final shortcut = Keymap.of(context).label(Command.statistics);
-    return InkWell(
-      borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-      hoverColor: ws.hover,
-      highlightColor: Colors.transparent,
-      splashColor: Colors.transparent,
-      onTap: onTap,
-      child: SizedBox(
-        height: 32,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          child: Row(
-            spacing: 10,
-            children: [
-              Icon(LucideIcons.barChart3, size: 16, color: ws.textFaint),
-              Text(
-                'Statistics',
-                style: TextStyle(
-                  fontSize: WsMetrics.fsCompact,
-                  fontWeight: WsMetrics.fwMedium,
-                  color: ws.text,
-                ),
-              ),
-              const Spacer(),
-              Text(
-                shortcut,
-                style: TextStyle(
-                  fontSize: WsMetrics.fsSmall,
-                  color: ws.textFaint,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }
