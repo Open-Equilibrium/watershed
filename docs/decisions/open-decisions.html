@@ -72,47 +72,40 @@
   <section id="m2">
     <h2>M2 - Meta-Harness</h2>
     <div class="grid">
-      <details id="d-021" class="decision">
-        <summary><h3>D-021 - Meta-Harness Packaging</h3></summary>
-        <p><strong>Status:</strong> Open implementation detail before M2; Meta-Harness must already run headless, without Liquid (<a href="../concept/V-Spec_MetaHarness.html">Meta-Harness V-Spec</a>).</p>
-        <p><strong>Question:</strong> How should Meta-Harness be packaged for its first release?</p>
-        <ul><li><strong>A:</strong> A command-line app plus a background service. Pro: useful without Liquid and easy to test. Con: no rich interface.</li><li><strong>B:</strong> Add a small status screen once Meta-Harness itself works headless. Pro: easier demonstrations. Con: another part to package and maintain.</li></ul>
-        <p><strong>Recommendation:</strong> A; no competing full standalone GUI in the MVP.</p>
+
+
+
+
+
+
+
+
+
+      <details id="d-099" class="decision wide">
+        <summary><h3>D-099 - Which Tools Start Agents On Another Host</h3></summary>
+        <p class="legend"><span class="key ws">Watershed</span><span class="key t3">T3 Code, unchanged</span><span class="key h">Harness</span><span class="key gone">Switched off</span></p>
+        <p><strong>Status:</strong> Open; the rest of durability level D is decided (ADR-0285). T3 Code gives every agent it starts its own MCP tools: orchestration tools such as <code>delegate_task</code>, <code>t3_thread_launch</code>, <code>t3_thread_send</code> and <code>t3_thread_read</code>, and tools that stay in every option, such as questions, secrets and <code>html_render</code>. With T3's linked environments (beta) the same tools act on another host by its environment id; T3 makes the pairing code itself when it holds a managing session on that host, and a result reaches an offline parent once it is back. T3 has no setting that switches its orchestration tools off.</p>
+        <p><strong>Question:</strong> Which tools does an agent use to start and steer threads on another host?</p>
+        <div class="dia">
+          <div class="opt"><h4>A: Two sets</h4>
+            <div class="row"><div class="b t3">T3 tools: this host</div><div class="b ws">Meta-Harness tools: other hosts</div></div>
+            <ul><li>Pro: no T3 change.</li><li>Con: two similar sets confuse the model; Meta-Harness builds the tools, forwarding and offline delivery T3 already has.</li></ul>
+          </div>
+          <div class="opt"><h4>B: One Meta-Harness set</h4>
+            <div class="b ws">Meta-Harness tools: any host, including this one</div>
+            <div class="b gone">T3's orchestration tools</div>
+            <ul><li>Pro: one set; every call passes Meta-Harness.</li><li>Con: T3 must first accept a switch for its tools, an upstream proposal like those in <a href="#d-102">D-102</a>; Meta-Harness rebuilds what T3 has.</li></ul>
+          </div>
+          <div class="opt rec"><h4>C: T3's set across hosts <span class="tag">Recommended</span></h4>
+            <div class="b t3">T3 host 1</div>
+            <div class="a">T3's peer link, carried by Meta-Harness over the one-sign-in connection; Meta-Harness pairs the T3 servers itself</div>
+            <div class="b t3">T3 host 2</div>
+            <ul><li>Pro: one set, the one T3's agents already know; T3's offline delivery and access levels; no tools to build, and it improves with T3.</li><li>Con: a beta feature; access follows T3's levels (read only, supervised, full); calls go from T3 to T3 through Meta-Harness's connection, not through Meta-Harness itself.</li></ul>
+          </div>
+        </div>
+        <p><strong>Recommendation:</strong> C, with A as the fallback if the spike shows that pairing needs a person.</p>
+        <p><strong>Acceptance criterion:</strong> a Codex thread on a Mac starts a Claude Code subagent on a Windows 11 computer through WSL after only the sign-ins, and its result reaches the Mac after the Mac was offline.</p>
       </details>
-      <details id="d-024" class="decision">
-        <summary><h3>D-024 - Meta-Harness State Storage</h3></summary>
-        <p><strong>Status:</strong> Open before M2 implementation.</p>
-        <p><strong>Question:</strong> Where do session registry, config proposals, audit records and metrics live?</p>
-        <ul><li><strong>A:</strong> SQLite plus append-only transcript/log files. Pro: queryable and local. Con: migration discipline needed.</li><li><strong>B:</strong> JSONL/files only. Pro: transparent. Con: weaker queries and concurrency.</li></ul>
-        <p><strong>Recommendation:</strong> A for registry/config/metrics, while keeping transcripts append-only and exportable.</p>
-      </details>
-      <details id="d-074" class="decision">
-        <summary><h3>D-074 - Who Starts The Local Meta-Harness Service</h3></summary>
-        <p><strong>Status:</strong> Open; decide with the service-mode slice. ADR-0215 settled that Liquid reaches its own host's Meta-Harness as a separate service.</p>
-        <p><strong>Question:</strong> On a Mac or Linux computer, who starts the Meta-Harness service, and does it keep running when Liquid closes?</p>
-        <ul><li><strong>A: Liquid starts it when needed and stops it when it quits</strong>, as T3 Code does with its server, restarting it after a crash. Pro: nothing to install or register, and no background process while Liquid is closed. Con: agents end when Liquid quits or updates, and the CLI needs its own instance or must find Liquid's.</li><li><strong>B: A login service runs it</strong> (a launchd user agent on macOS, a systemd user unit on Linux, both without administrator rights); Liquid and the CLI connect to it. Pro: agents keep running through Liquid closing, crashing or updating; one instance serves Liquid, the CLI and remote clients; the operating system restarts it. Con: installation registers the service and removal must unregister it, a process runs while nobody uses it, and updating it must not end running agents.</li><li><strong>C: Liquid starts it if none runs, and it stays while agents run.</strong> Pro: no installation step, and agents finish after Liquid closes. Con: more lifetime rules to get right, and a service nobody stops if they are wrong.</li></ul>
-        <p><strong>Recommendation:</strong> B, which matches the background service <a href="#d-021">D-021</a> recommends: agents survive the window, and the operating system supervises the service instead of our own restart code.</p>
-        <p><strong>Acceptance criterion:</strong> The ADR log names who starts and stops the service, and tests show Liquid connecting to a running service and reporting one it cannot reach.</p>
-      </details>
-      <details id="d-092" class="decision">
-        <summary><h3>D-092 - Reaching The Person's Agent Hosts With One Sign-In</h3></summary>
-        <p><strong>Status:</strong> Open before M2's remote connection; Meta-Harness, not T3 Code, holds the connection (ADR-0281). ADR-0185 gives Meta-Harness an authenticated remote connection, and ADR-0229 and ADR-0253 assume the person's hosts reach each other, but nothing decides how a phone or another host reaches an agent host outside the local network, or how hosts learn of each other.</p>
-        <p><strong>Goal (maintainer, 2026-11-12):</strong> a person without technical knowledge signs in once on each agent host. Afterwards Liquid on every device shows all of them, and the hosts provide the four durability levels of ADR-0229 and start each other's agents (ADR-0253), without entering an address, port, pairing code or VPN.</p>
-        <p><strong>How T3 Code does it:</strong> with T3 Connect, each host signs in once to a T3 account and gets a tunnel that T3 operates on Cloudflare; other devices sign in to the same account and list the hosts. Without the account it offers the local network, Tailscale or SSH, with a pairing code per device. Linking two hosts for agents needs a pairing code per link either way.</p>
-        <ul>
-          <li><strong>A: The Liquid account (ADR-0224) also registers agent hosts.</strong> A host signs in once, through a browser link with a short code as T3's CLI does. The Sync Server gives the person's devices and hosts each other's identities and keys. They connect directly where they can, otherwise through a relay that forwards only end-to-end encrypted traffic, using an existing NAT-traversal and relay library (for example iroh) rather than our own. Pro: one account for the Workspace and the hosts; self-hostable; no vendor cloud. Con: a relay to build and run beside the Sync Server, whose operator pays its traffic; every host trusts the Sync Server as broker, so its compromise matters as T3's relay signing key does.</li>
-          <li><strong>B: Tailscale, or self-hosted Headscale.</strong> Hosts and devices join the person's tailnet; the Sync Server only lists the hosts. Pro: proven encryption and NAT traversal, nothing to build. Con: a second account and app; Tailscale's coordination server unless Headscale is self-hosted; iOS runs one VPN at a time.</li>
-          <li><strong>C: T3 Connect.</strong> Pro: exists, free for up to three machines. Con: a second account at T3, and more machines need a paid T3 Chat plan; traffic through T3's and Cloudflare's cloud, against self-hosting; Liquid would need T3's sign-in; agent links still need pairing codes.</li>
-          <li><strong>D: Local network and pairing codes only</strong>; internet access through the person's own VPN. Pro: nothing to build. Con: misses the goal.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> A, with B as the interim for engineers until the relay works.</p>
-        <p><strong>Acceptance criterion:</strong> with a laptop and a second computer on different networks, the person signs in once on each; Liquid on a phone lists both hosts and attaches to a session on each; a session continues from one host on the other at a turn boundary; an agent on one host starts a thread on the other; no address, port, code or VPN is entered; removing a host in Liquid ends its access; the relay cannot read session content.</p>
-      </details>
-
-
-
-
-
       <details id="d-102" class="decision">
         <summary><h3>D-102 - Watershed Git Rules T3 Code Does Not Ship</h3></summary>
         <p><strong>Status:</strong> Open; blocks deleting the Git code under ADR-0282. The maintainer wants to discuss each rule separately, and may drop some (2026-11-14). The comparison with T3 Code is still to do.</p>
@@ -121,56 +114,8 @@
         <p><strong>Recommendation:</strong> after the comparison, drop rules that only add convenience, and keep or propose upstream those that prevent losing work.</p>
         <p><strong>Acceptance criterion:</strong> each rule is marked keep, upstream or drop in the ADR log.</p>
       </details>
-      <details id="d-098" class="decision wide">
-        <summary><h3>D-098 - Continuing A Session On Another Host (Durability Level C)</h3></summary>
-        <p class="legend"><span class="key ws">Watershed</span><span class="key t3">T3 Code, unchanged</span><span class="key h">Harness</span><span class="key gone">Removed</span></p>
-        <p><strong>Status:</strong> Open; the deciding reason for ADR-0280; layout in ADR-0281. A T3 thread stays on its machine. At each turn's end Meta-Harness stores the T3 thread record, the harness's own session file and the checkpoint in Liquid's synced agent-session area; one host owns a session at a time, and a host that comes back sees the move and leaves its copy read-only.</p>
-        <div class="dia">
-          <div class="opt"><h4>A: Handoff</h4>
-            <div class="b t3">Host 1: thread, turn ended</div>
-            <div class="a">sync: history and checkpoint</div>
-            <div class="b t3">Host 2: new thread with a text summary and the files at the checkpoint</div>
-            <div class="b ws">full history readable on request</div>
-            <ul><li>Pro: works for every harness now, with T3's portable handoff.</li><li>Con: the harness's own state, such as earlier tool output and reasoning, does not move; the agent continues like a briefed colleague.</li></ul>
-          </div>
-          <div class="opt"><h4>B: Native continue</h4>
-            <div class="b h">Host 1: harness session file</div>
-            <div class="a">sync</div>
-            <div class="b t3">Host 2: T3 adopts the session file as a thread (new T3 function)</div>
-            <ul><li>Pro: the agent continues as if nothing happened.</li><li>Con: needs T3 to accept an "adopt session" feature, or a fork; the same project path and provider account; done per harness.</li></ul>
-          </div>
-          <div class="opt rec"><h4>C: A now, B per harness later <span class="tag">Recommended</span></h4>
-            <div class="b ws">handoff for every harness</div>
-            <div class="a">once T3 accepts the feature</div>
-            <div class="b t3">native continue for pi, Codex, Claude Code</div>
-            <ul><li>Pro: works from the start and improves without changing the model the person sees.</li><li>Con: two paths until every harness has B.</li></ul>
-          </div>
-        </div>
-        <p><strong>Recommendation:</strong> C, and propose the adopt-session feature to T3 now.</p>
-        <p><strong>Acceptance criterion:</strong> after a turn ends on a laptop that then goes offline, the person continues the session on a Mac mini from the phone, with the files at the checkpoint and the full history; with B, a pi session continues with its own history.</p>
-      </details>
-      <details id="d-099" class="decision wide">
-        <summary><h3>D-099 - Hosts Starting Each Other's Agents (Durability Level D)</h3></summary>
-        <p><strong>Status:</strong> Open; follows <a href="#d-092">D-092</a>. ADR-0253 plans agent tools that start and steer threads on other hosts.</p>
-        <div class="dia">
-          <div class="opt rec"><h4>A: Meta-Harness links hosts <span class="tag">Recommended</span></h4>
-            <div class="b h">agent on host 1 calls a Meta-Harness tool</div>
-            <div class="a">its own Meta-Harness</div>
-            <div class="b ws">Meta-Harness 1 ⇄ Meta-Harness 2 over <a href="#d-092">D-092</a></div>
-            <div class="a">loopback</div>
-            <div class="b t3">T3 on host 2 starts the thread</div>
-            <ul><li>Pro: no pairing codes, only the one sign-in; the same for every harness; Meta-Harness keeps the authority rule of ADR-0223.</li><li>Con: Meta-Harness builds the tools and the forwarding, as ADR-0253 plans; agents see T3's local tools beside Meta-Harness's cross-host ones.</li></ul>
-          </div>
-          <div class="opt"><h4>B: T3's linked environments</h4>
-            <div class="b t3">T3 host 1</div>
-            <div class="a">pairing code per link (beta)</div>
-            <div class="b t3">T3 host 2</div>
-            <ul><li>Pro: exists.</li><li>Con: beta; a pairing code per link; T3 servers must reach each other, which ADR-0281 keeps on loopback.</li></ul>
-          </div>
-        </div>
-        <p><strong>Recommendation:</strong> A.</p>
-        <p><strong>Acceptance criterion:</strong> ADR-0253's example, a Codex thread on a Mac starting a Claude Code subagent on a Windows 11 computer through WSL, works after only the sign-ins.</p>
-      </details>
+
+
 
 
     </div>
