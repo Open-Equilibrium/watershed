@@ -337,6 +337,21 @@ void main() {
     expect(find.byKey(const Key('session-details-card')), findsOneWidget);
   });
 
+  testWidgets('a dialog above the popover keeps it open while it shows', (
+    tester,
+  ) async {
+    await show(tester, size: const Size(1100, 900));
+    await toggleCard(tester);
+    showDialog<void>(
+      context: tester.element(find.byKey(const Key('session-details-card'))),
+      builder: (_) => const AlertDialog(content: Text('Covered')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Covered'), findsOneWidget);
+    expect(find.byKey(const Key('session-details-card')), findsOneWidget);
+  });
+
   testWidgets('the card scrolls within a space smaller than its content', (
     tester,
   ) async {
