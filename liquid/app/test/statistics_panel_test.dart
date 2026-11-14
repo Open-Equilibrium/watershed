@@ -31,7 +31,7 @@ BridgeUsage usageOf({
   costMicroUsd: cost,
 );
 
-/// Two turns of one model: 17 min 53 s in all, with 86 tool calls, six of them failed.
+/// Two turns of one model: 17m 53s in all, with 86 tool calls, six of them failed.
 BridgeStatistics statistics({bool timed = true}) {
   final first = usageOf(
     input: 200000,
