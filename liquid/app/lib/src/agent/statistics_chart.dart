@@ -313,7 +313,7 @@ class _ChartPainter extends CustomPainter {
       text: TextSpan(
         text: text,
         style: TextStyle(
-          fontSize: 11,
+          fontSize: WsMetrics.fsCaption,
           color: ink,
           fontFeatures: const [FontFeature.tabularFigures()],
         ),

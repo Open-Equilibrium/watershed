@@ -233,7 +233,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
                 Text(
                   hero,
                   style: TextStyle(
-                    fontSize: 32,
+                    fontSize: WsMetrics.fsH1,
                     height: 40 / 32,
                     fontWeight: WsMetrics.fwSemibold,
                     fontFeatures: const [FontFeature.tabularFigures()],
