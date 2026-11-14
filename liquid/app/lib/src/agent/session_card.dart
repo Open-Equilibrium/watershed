@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../diff/turn_scope.dart';
+import '../rust/api/history.dart';
+import '../session/session_figures.dart';
 import '../session/session_state.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
@@ -10,6 +12,7 @@ import '../theme/tokens.g.dart';
 import 'branch_menu.dart';
 import 'git_actions.dart';
 import 'pull_request_status.dart';
+import 'session_card_figures.dart';
 import 'session_card_layout.dart';
 import 'session_card_rows.dart';
 import 'session_card_settings.dart';
@@ -58,6 +61,8 @@ class _SessionCardState extends State<SessionCard> {
     widget.state.git.loaded,
     widget.state.git.progress,
     widget.state.pulls.current,
+    widget.state.statistics,
+    widget.state.contextWindow,
   ]);
 
   @override
@@ -118,8 +123,14 @@ class _SessionCardState extends State<SessionCard> {
         state.git.loaded.value &&
         problem == null;
     final hasChanges = shown.shows(CardItem.changes) && status != null;
+    final window = shown.shows(CardItem.context)
+        ? state.contextWindow.value
+        : null;
+    final hasFigures = shown.shows(CardItem.figures);
+    final hasUsage = hasFigures && state.statistics.value != null;
     // Measurements hold only while the same rows show.
-    final signature = '$hasBranch $hasPull $hasGit $hasChanges';
+    final signature =
+        '$hasBranch $hasPull $hasGit $hasChanges ${window != null} $hasUsage';
     final measured = _measuredFor == signature
         ? _heights
         : const <CardDensity, double>{};
@@ -152,8 +163,9 @@ class _SessionCardState extends State<SessionCard> {
                   _ChangesRow(state: state, onTap: widget.onChanges),
               ],
             ),
-            const _SessionFigures(),
-            const _ContextWindow(),
+            if (window != null) _ContextWindow(window: window),
+            if (hasFigures)
+              _SessionFigures(state: state, divided: window == null),
           ],
         ),
       ],
@@ -242,24 +254,41 @@ class _Section extends StatelessWidget {
   }
 }
 
-/// The session figures, below a divider. The statistics rows fill this section; until then it
-/// draws nothing.
 class _SessionFigures extends StatelessWidget {
-  const _SessionFigures();
+  const _SessionFigures({required this.state, required this.divided});
+
+  final SessionState state;
+  final bool divided;
 
   @override
-  Widget build(BuildContext context) =>
-      const _Section(divided: true, rows: <Widget>[]);
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: Listenable.merge([state.statistics, state.status]),
+    builder: (context, _) {
+      final statistics = state.statistics.value;
+      final running = state.status.value == RunStatus.running;
+      return _Section(
+        divided: divided,
+        rows: [
+          if (statistics != null)
+            ...sessionFigureRows(
+              context,
+              SessionFigures(statistics, running: running),
+            ),
+          StatisticsRow(onTap: () => state.statisticsOpen.value = true),
+        ],
+      );
+    },
+  );
 }
 
-/// The context window, below the session figures' divider. It draws nothing until its rows are
-/// added.
 class _ContextWindow extends StatelessWidget {
-  const _ContextWindow();
+  const _ContextWindow({required this.window});
+
+  final BridgeContext window;
 
   @override
   Widget build(BuildContext context) =>
-      const _Section(divided: true, rows: <Widget>[]);
+      _Section(divided: true, rows: [ContextFigure(window: window)]);
 }
 
 /// The Changes row: the latest finished turn's lines, which opens the Diff panel.

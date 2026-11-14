@@ -241,6 +241,7 @@ class SessionState {
     turns.value = const [];
     statistics.value = null;
     contextWindow.value = null;
+    statisticsOpen.value = false;
     diffScope.value = const LatestTurn();
     shownScope.value = const LatestTurn();
     shown.value = null;
@@ -434,6 +435,9 @@ class SessionState {
 
   /// The context window the next request fills, as last read with the statistics.
   final contextWindow = ValueNotifier<BridgeContext?>(null);
+
+  /// Whether the statistics panel is open over the session's card; a switch closes it.
+  final statisticsOpen = ValueNotifier(false);
 
   /// Which turns the Diff panel compares.
   final diffScope = ValueNotifier<DiffScope>(const LatestTurn());

@@ -52,6 +52,7 @@ abstract final class LucideIcons {
   static const textQuote = IconData(0xe49e, fontFamily: _family);
   static const slidersHorizontal = IconData(0xe29a, fontFamily: _family);
   static const fileDiff = IconData(0xe317, fontFamily: _family);
+  static const barChart3 = IconData(0xe2a3, fontFamily: _family);
   static const checkCircle = IconData(0xe07c, fontFamily: _family);
   static const circleX = IconData(0xe084, fontFamily: _family);
 }
