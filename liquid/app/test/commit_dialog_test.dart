@@ -552,7 +552,7 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(1050, 650));
       await tester.pumpAndSettle();
       // In this window the card is a popover, which the sliders button opens.
-      await tester.tap(find.byTooltip('Session details'));
+      await tester.tap(find.byTooltip('Session card'));
       await tester.pumpAndSettle();
       await open(tester);
       expect(tester.takeException(), isNull);

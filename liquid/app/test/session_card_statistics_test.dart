@@ -130,7 +130,7 @@ void main() {
   }
 
   Finder inCard(Finder finder) => find.descendant(
-    of: find.byKey(const Key('session-details-card')),
+    of: find.byKey(const Key('session-card-frame')),
     matching: finder,
   );
 

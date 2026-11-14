@@ -112,7 +112,7 @@ class _SessionCardState extends State<SessionCard> {
         groupId: cardTapGroup,
         onTapOutside: (_) => leave(),
         child: DecoratedBox(
-          key: const Key('session-details-card'),
+          key: const Key('session-card-frame'),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(WsMetrics.radiusXl),
             boxShadow: ws.shadow,

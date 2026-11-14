@@ -144,7 +144,7 @@ void main() {
       textSize: TextSize.large,
     );
     // In a window this narrow the card is a popover, which the sliders button opens.
-    await tester.tap(find.byTooltip('Session details'));
+    await tester.tap(find.byTooltip('Session card'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(tester.getSize(chipText('main')).width, greaterThan(0));

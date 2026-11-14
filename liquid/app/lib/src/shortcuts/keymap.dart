@@ -297,8 +297,9 @@ enum Command {
     Keys(LogicalKeyboardKey.keyD, meta: true),
     liquid: true,
   ),
+  // Stored by enum name in shortcuts.json, so the name stays while the label says Session card.
   sessionDetails(
-    'Session details',
+    'Session card',
     Area.app,
     Keys(LogicalKeyboardKey.keyB, meta: true, alt: true),
     liquid: true,

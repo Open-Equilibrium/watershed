@@ -91,7 +91,7 @@ class _AgentShellState extends State<AgentShell> {
   final _inputKey = GlobalKey(debugLabel: 'input area');
   final _diffOpen = ValueNotifier(false);
   final _card = CardVisibility();
-  final _cardToggleFocus = FocusNode(debugLabel: 'session details');
+  final _cardToggleFocus = FocusNode(debugLabel: 'session card');
   final _settings = ValueNotifier(false);
   final _focus = FocusNode(debugLabel: 'shell');
   late final _shortcuts = widget.shortcuts ?? ShortcutController.memory();
@@ -717,12 +717,12 @@ class _DetailsButton extends StatelessWidget {
           child: CommandHint(
             command: Command.sessionDetails,
             child: Tooltip(
-              message: 'Session details',
+              message: 'Session card',
               child: Semantics(
                 button: true,
                 selected: shown,
                 child: InkWell(
-                  key: const Key('session-details'),
+                  key: const Key('session-card-toggle'),
                   focusNode: focus,
                   borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
                   onTap: onPressed,

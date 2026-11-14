@@ -24,7 +24,7 @@ void main() {
     },
   );
 
-  test('Session details takes ⌘⌥B, which no other command runs', () {
+  test('Session card takes ⌘⌥B, which no other command runs', () {
     final keys = ShortcutSettings.standard();
     const commandOptionB = Keys(LogicalKeyboardKey.keyB, meta: true, alt: true);
 

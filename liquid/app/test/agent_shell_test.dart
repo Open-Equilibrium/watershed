@@ -967,7 +967,7 @@ void main() {
       double top(Finder finder) => tester
           .getTopLeft(
             find.descendant(
-              of: find.byKey(const Key('session-details-card')),
+              of: find.byKey(const Key('session-card-frame')),
               matching: finder,
             ),
           )
@@ -1782,7 +1782,7 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
     expect(
       labels,
-      containsAll(['Chat', 'Diff', 'Session details', 'Focus Input']),
+      containsAll(['Chat', 'Diff', 'Session card', 'Focus Input']),
     );
   });
 

@@ -61,13 +61,13 @@ void main() {
 
   /// Opens the card's popover from the sliders button, or closes it.
   Future<void> toggleCard(WidgetTester tester) async {
-    await tester.tap(find.byTooltip('Session details'));
+    await tester.tap(find.byTooltip('Session card'));
     await tester.pumpAndSettle();
   }
 
   Future<void> rightClickCard(WidgetTester tester) async {
     await tester.tap(
-      find.byKey(const Key('session-details-card')),
+      find.byKey(const Key('session-card-frame')),
       buttons: kSecondaryButton,
     );
     await tester.pumpAndSettle();
@@ -175,7 +175,7 @@ void main() {
   }
 
   Finder inCard(Finder finder) => find.descendant(
-    of: find.byKey(const Key('session-details-card')),
+    of: find.byKey(const Key('session-card-frame')),
     matching: finder,
   );
 
@@ -205,7 +205,7 @@ void main() {
       }
       final button = find.descendant(
         of: header,
-        matching: find.byTooltip('Session details'),
+        matching: find.byTooltip('Session card'),
       );
       expect(button, findsOneWidget);
       expect(
@@ -226,13 +226,13 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    expect(find.byKey(const Key('session-details-card')), findsOneWidget);
-    await tester.tap(find.byTooltip('Session details'));
+    expect(find.byKey(const Key('session-card-frame')), findsOneWidget);
+    await tester.tap(find.byTooltip('Session card'));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('session-details-card')), findsNothing);
-    await tester.tap(find.byTooltip('Session details'));
+    expect(find.byKey(const Key('session-card-frame')), findsNothing);
+    await tester.tap(find.byTooltip('Session card'));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('session-details-card')), findsOneWidget);
+    expect(find.byKey(const Key('session-card-frame')), findsOneWidget);
   });
 
   testWidgets('⌘⌥B shows and hides the session card', (tester) async {
@@ -247,16 +247,16 @@ void main() {
     }
 
     await chord();
-    expect(find.byKey(const Key('session-details-card')), findsNothing);
+    expect(find.byKey(const Key('session-card-frame')), findsNothing);
     await chord();
-    expect(find.byKey(const Key('session-details-card')), findsOneWidget);
+    expect(find.byKey(const Key('session-card-frame')), findsOneWidget);
   });
 
   testWidgets('the card is 280 wide, 12 from the top and right of the chat', (
     tester,
   ) async {
     await show(tester);
-    final card = tester.getRect(find.byKey(const Key('session-details-card')));
+    final card = tester.getRect(find.byKey(const Key('session-card-frame')));
     final column = chatColumn(tester);
     expect(card.width, 280);
     expect(card.right, closeTo(column.right - 12, 0.5));
@@ -269,7 +269,7 @@ void main() {
       await show(tester, size: const Size(1100, 900));
       await toggleCard(tester);
       expect(
-        tester.getRect(find.byKey(const Key('session-details-card'))).top,
+        tester.getRect(find.byKey(const Key('session-card-frame'))).top,
         closeTo(chatColumn(tester).top + 4, 0.5),
         reason: 'a popover, under the tabs',
       );
@@ -281,18 +281,18 @@ void main() {
   ) async {
     await show(tester, size: const Size(2000, 900));
     expect(
-      tester.getRect(find.byKey(const Key('session-details-card'))).top,
+      tester.getRect(find.byKey(const Key('session-card-frame'))).top,
       closeTo(chatColumn(tester).top + 12, 0.5),
     );
     await press(tester, LogicalKeyboardKey.keyD);
     expect(
-      find.byKey(const Key('session-details-card')),
+      find.byKey(const Key('session-card-frame')),
       findsNothing,
       reason: 'the popover waits closed, as in T3 Code',
     );
     await toggleCard(tester);
     expect(
-      tester.getRect(find.byKey(const Key('session-details-card'))).top,
+      tester.getRect(find.byKey(const Key('session-card-frame'))).top,
       closeTo(chatColumn(tester).top + 4, 0.5),
     );
   });
@@ -301,12 +301,12 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    await tester.tap(find.byTooltip('Session details'));
+    await tester.tap(find.byTooltip('Session card'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Session details'));
+    await tester.tap(find.byTooltip('Session card'));
     await tester.pumpAndSettle();
 
-    expect(focusIsIn(const Key('session-details-card')), isTrue);
+    expect(focusIsIn(const Key('session-card-frame')), isTrue);
   });
 
   testWidgets('the popover closes when focus leaves it, as in T3 Code', (
@@ -314,11 +314,11 @@ void main() {
   ) async {
     await show(tester, size: const Size(1100, 900));
     await toggleCard(tester);
-    expect(focusIsIn(const Key('session-details-card')), isTrue);
+    expect(focusIsIn(const Key('session-card-frame')), isTrue);
 
     FocusManager.instance.primaryFocus?.unfocus();
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('session-details-card')), findsNothing);
+    expect(find.byKey(const Key('session-card-frame')), findsNothing);
   });
 
   testWidgets('an open rows menu keeps the popover when focus leaves it', (
@@ -327,14 +327,14 @@ void main() {
     await show(tester, size: const Size(1100, 900));
     await toggleCard(tester);
     await tester.tap(
-      find.byKey(const Key('session-details-card')),
+      find.byKey(const Key('session-card-frame')),
       buttons: kSecondaryButton,
     );
     await tester.pumpAndSettle();
 
     FocusManager.instance.primaryFocus?.unfocus();
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('session-details-card')), findsOneWidget);
+    expect(find.byKey(const Key('session-card-frame')), findsOneWidget);
   });
 
   testWidgets('a dialog above the popover keeps it open while it shows', (
@@ -343,13 +343,13 @@ void main() {
     await show(tester, size: const Size(1100, 900));
     await toggleCard(tester);
     showDialog<void>(
-      context: tester.element(find.byKey(const Key('session-details-card'))),
+      context: tester.element(find.byKey(const Key('session-card-frame'))),
       builder: (_) => const AlertDialog(content: Text('Covered')),
     );
     await tester.pumpAndSettle();
 
     expect(find.text('Covered'), findsOneWidget);
-    expect(find.byKey(const Key('session-details-card')), findsOneWidget);
+    expect(find.byKey(const Key('session-card-frame')), findsOneWidget);
   });
 
   testWidgets('the card scrolls within a space smaller than its content', (
@@ -357,7 +357,7 @@ void main() {
   ) async {
     await pumpCard(tester, height: 60);
     expect(
-      tester.getSize(find.byKey(const Key('session-details-card'))).height,
+      tester.getSize(find.byKey(const Key('session-card-frame'))).height,
       60,
     );
     expect(inCard(find.byType(Scrollable)), findsOneWidget);
@@ -482,7 +482,7 @@ void main() {
     (tester) async {
       await show(tester);
       await tester.tap(
-        find.byKey(const Key('session-details-card')),
+        find.byKey(const Key('session-card-frame')),
         buttons: kSecondaryButton,
       );
       await tester.pumpAndSettle();
@@ -519,7 +519,7 @@ void main() {
       await show(tester);
       Future<void> rightClick() async {
         await tester.tap(
-          find.byKey(const Key('session-details-card')),
+          find.byKey(const Key('session-card-frame')),
           buttons: kSecondaryButton,
         );
         await tester.pumpAndSettle();
@@ -683,9 +683,9 @@ void main() {
     'in a narrow window the card waits closed until the sliders button opens it',
     (tester) async {
       await show(tester, size: const Size(1100, 900));
-      expect(find.byKey(const Key('session-details-card')), findsNothing);
+      expect(find.byKey(const Key('session-card-frame')), findsNothing);
       await toggleCard(tester);
-      expect(find.byKey(const Key('session-details-card')), findsOneWidget);
+      expect(find.byKey(const Key('session-card-frame')), findsOneWidget);
     },
   );
 
@@ -694,11 +694,11 @@ void main() {
     (tester) async {
       await show(tester, size: const Size(1100, 900));
       await toggleCard(tester);
-      expect(hasFocusIn(find.byKey(const Key('session-details-card'))), isTrue);
+      expect(hasFocusIn(find.byKey(const Key('session-card-frame'))), isTrue);
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('session-details-card')), findsNothing);
-      expect(hasFocusIn(find.byKey(const Key('session-details'))), isTrue);
+      expect(find.byKey(const Key('session-card-frame')), findsNothing);
+      expect(hasFocusIn(find.byKey(const Key('session-card-toggle'))), isTrue);
     },
   );
 
@@ -709,12 +709,12 @@ void main() {
       await toggleCard(tester);
       await tester.tap(find.text('Chat'));
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('session-details-card')), findsNothing);
+      expect(find.byKey(const Key('session-card-frame')), findsNothing);
 
       await toggleCard(tester);
-      expect(find.byKey(const Key('session-details-card')), findsOneWidget);
+      expect(find.byKey(const Key('session-card-frame')), findsOneWidget);
       await toggleCard(tester);
-      expect(find.byKey(const Key('session-details-card')), findsNothing);
+      expect(find.byKey(const Key('session-card-frame')), findsNothing);
     },
   );
 
@@ -726,13 +726,13 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(1600, 900));
       await tester.pumpAndSettle();
       expect(
-        tester.getRect(find.byKey(const Key('session-details-card'))).top,
+        tester.getRect(find.byKey(const Key('session-card-frame'))).top,
         closeTo(chatColumn(tester).top + 12, 0.5),
         reason: 'the inline card keeps its own open state',
       );
       await tester.binding.setSurfaceSize(const Size(1100, 900));
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('session-details-card')), findsNothing);
+      expect(find.byKey(const Key('session-card-frame')), findsNothing);
     },
   );
 
