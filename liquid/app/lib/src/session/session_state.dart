@@ -491,41 +491,12 @@ class SessionState {
 
   /// Reads the branch's turns and what the shown ones changed between their checkpoints. A
   /// failed read is reported once, and the Diff panel says so instead of showing earlier changes.
-  Future<void> readChanges() {
-    // A read asked for meanwhile runs once after the current one instead of queueing.
-    if (_readingChanges case final reading?) {
-      _changesAgain = true;
-      return reading;
-    }
-    return _readingChanges = _readChanges();
-  }
+  Future<void> readChanges() => _changes();
+  late final _changes = _ReadLoop(_readChangesOnce);
 
-  Future<void>? _readingChanges;
-  bool _changesAgain = false;
-
-  /// Reads the statistics and the context window. A read asked for while one runs makes one
-  /// more after it, so the reads never pile up.
-  Future<void> readFigures() {
-    if (_readingFigures case final reading?) {
-      _figuresAgain = true;
-      return reading;
-    }
-    return _readingFigures = _readFigures();
-  }
-
-  Future<void>? _readingFigures;
-  bool _figuresAgain = false;
-
-  Future<void> _readFigures() async {
-    try {
-      do {
-        _figuresAgain = false;
-        await _readFiguresOnce();
-      } while (_figuresAgain);
-    } finally {
-      _readingFigures = null;
-    }
-  }
+  /// Reads the statistics and the context window, as [readChanges] reads the turns.
+  Future<void> readFigures() => _figures();
+  late final _figures = _ReadLoop(_readFiguresOnce);
 
   /// Reads the statistics, then the context window, so a window that fails keeps the statistics.
   Future<void> _readFiguresOnce() async {
@@ -552,17 +523,6 @@ class SessionState {
       if (generation != _generation) return;
       contextWindow.value = null;
       reportRead('context window', 'Could not read the context window: $error');
-    }
-  }
-
-  Future<void> _readChanges() async {
-    try {
-      do {
-        _changesAgain = false;
-        await _readChangesOnce();
-      } while (_changesAgain);
-    } finally {
-      _readingChanges = null;
     }
   }
 
@@ -1140,4 +1100,33 @@ class SessionState {
 String _firstLine(String message) {
   final line = message.trim().split('\n').first.trim();
   return String.fromCharCodes(line.runes.take(120));
+}
+
+/// Runs a read, and one more after each read asked for while one runs, so the reads of a kind
+/// never pile up. A read asked for meanwhile waits for the one in flight instead of queueing.
+class _ReadLoop {
+  _ReadLoop(this._read);
+
+  final Future<void> Function() _read;
+  Future<void>? _reading;
+  bool _again = false;
+
+  Future<void> call() {
+    if (_reading case final reading?) {
+      _again = true;
+      return reading;
+    }
+    return _reading = _loop();
+  }
+
+  Future<void> _loop() async {
+    try {
+      do {
+        _again = false;
+        await _read();
+      } while (_again);
+    } finally {
+      _reading = null;
+    }
+  }
 }
