@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/diff/diff_model.dart';
 import 'package:liquid/src/diff/diff_settings.dart';
 import 'package:liquid/src/diff/diff_view.dart';
+import 'package:liquid/src/diff/turn_header.dart';
 import 'package:liquid/src/diff/turn_scope.dart';
 import 'package:liquid/src/format.dart';
 import 'package:liquid/src/rust/api/events.dart';
@@ -13,6 +14,7 @@ import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
+import 'package:liquid/src/theme/tokens.g.dart';
 
 import 'fake_backend.dart';
 
@@ -921,6 +923,28 @@ void main() {
     expect(find.text('@@ -1,201 +1,201 @@'), findsNothing);
     await alt(LogicalKeyboardKey.arrowUp);
     expect(find.text('@@ -1,201 +1,201 @@'), findsOneWidget);
+  });
+
+  testWidgets('a wide panel keeps the switches beside the turn header', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..changed = [modified('code.ts', 2, 1)]
+      ..patches = {'code.ts': '@@ -1 +1,2 @@\n keep\n+added\n'};
+    await show(tester, backend);
+
+    final header = tester.getRect(find.byType(TurnHeader));
+    final toggle = tester.getRect(find.text('Hide whitespace'));
+    expect(
+      toggle.top,
+      lessThan(header.bottom),
+      reason: 'the switches share the header line, not a line of their own',
+    );
+    expect(
+      header.right,
+      greaterThan(toggle.left - WsMetrics.space6),
+      reason: 'the header fills the line up to the switches',
+    );
   });
 
   testWidgets('hides whitespace changes with W and from the control', (

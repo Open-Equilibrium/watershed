@@ -68,29 +68,53 @@ class PatchPane extends StatelessWidget {
     );
   }
 
-  /// The turn header with the whitespace and layout switches. In a narrow panel the switches
-  /// wrap below the header rather than cut it.
-  Widget _toolbar() => Wrap(
-    alignment: WrapAlignment.end,
-    spacing: WsMetrics.space3,
-    runSpacing: WsMetrics.space2,
-    crossAxisAlignment: WrapCrossAlignment.center,
-    children: [
-      header ?? const SizedBox.shrink(),
-      _Toggle(
-        label: 'Hide whitespace',
-        on: settings.hideWhitespace,
-        onTap: onWhitespace,
-      ),
-      Segments(
-        options: const [
-          (DiffLayout.unified, 'Unified'),
-          (DiffLayout.split, 'Split'),
+  /// The width from which the turn header and the switches fit on one line.
+  static const double _oneLineWidth = 560;
+
+  /// The turn header with the whitespace and layout switches beside it, or below it where they
+  /// do not fit.
+  Widget _toolbar() => LayoutBuilder(
+    builder: (context, constraints) {
+      final switches = [
+        _Toggle(
+          label: 'Hide whitespace',
+          on: settings.hideWhitespace,
+          onTap: onWhitespace,
+        ),
+        const SizedBox(width: WsMetrics.space3),
+        Segments(
+          options: const [
+            (DiffLayout.unified, 'Unified'),
+            (DiffLayout.split, 'Split'),
+          ],
+          selected: settings.layout,
+          onSelect: onLayout,
+        ),
+      ];
+      final top = header ?? const SizedBox.shrink();
+      if (constraints.maxWidth >= _oneLineWidth) {
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: top),
+            ...switches,
+          ],
+        );
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          top,
+          const SizedBox(height: WsMetrics.space2),
+          Wrap(
+            alignment: WrapAlignment.end,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            runSpacing: WsMetrics.space2,
+            children: switches,
+          ),
         ],
-        selected: settings.layout,
-        onSelect: onLayout,
-      ),
-    ],
+      );
+    },
   );
 
   /// The shown file's path, above its lines.
