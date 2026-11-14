@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../controls.dart';
 import '../format.dart';
 import '../session/session_statistics.dart';
 import '../session/session_state.dart';
@@ -175,7 +176,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
           ),
         ),
         const Spacer(),
-        _Segments<_View>(
+        Segments<_View>(
           options: const [
             (_View.cost, 'Cost'),
             (_View.tokens, 'Tokens'),
@@ -578,7 +579,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
         children: [
           _heading(ws, 'Breakdown'),
           const Spacer(),
-          _Segments<_Breakdown>(
+          Segments<_Breakdown>(
             options: const [
               (_Breakdown.model, 'Model'),
               (_Breakdown.tool, 'Tool'),
@@ -1011,60 +1012,4 @@ class _BreakdownRowState extends State<_BreakdownRow> {
       ),
     ),
   );
-}
-
-/// The segmented control of the header and the breakdown: the chosen option is raised.
-class _Segments<T> extends StatelessWidget {
-  const _Segments({
-    required this.options,
-    required this.selected,
-    required this.onSelect,
-  });
-
-  final List<(T, String)> options;
-  final T selected;
-  final ValueChanged<T> onSelect;
-
-  @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    return Container(
-      padding: const EdgeInsets.all(2),
-      decoration: BoxDecoration(
-        color: ws.subtle,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-        border: Border.all(color: ws.border),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (final (value, label) in options)
-            InkWell(
-              borderRadius: BorderRadius.circular(4),
-              onTap: () => onSelect(value),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 2,
-                ),
-                decoration: BoxDecoration(
-                  color: value == selected ? ws.canvas : null,
-                  borderRadius: BorderRadius.circular(4),
-                  border: value == selected
-                      ? Border.all(color: ws.borderStrong)
-                      : null,
-                ),
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: WsMetrics.fsSmall,
-                    color: value == selected ? ws.text : ws.textMuted,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
 }

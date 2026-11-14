@@ -43,7 +43,6 @@ BridgeTurnStatistics turn({
   List<BridgeModelUsage> models = const [],
   int? modelMs,
   int? toolMs,
-  int toolCalls = 0,
   int failed = 0,
 }) => BridgeTurnStatistics(
   entry: 'e-$prompt',
@@ -53,7 +52,6 @@ BridgeTurnStatistics turn({
   models: models,
   modelMs: modelMs,
   toolMs: toolMs,
-  toolCalls: toolCalls,
   failed: failed,
 );
 

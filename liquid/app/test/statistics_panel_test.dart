@@ -107,7 +107,6 @@ BridgeStatistics statistics({bool timed = true}) {
         ],
         modelMs: timed ? 125000 : null,
         toolMs: timed ? 72000 : null,
-        toolCalls: 40,
         failed: 4,
       ),
       BridgeTurnStatistics(
@@ -131,7 +130,6 @@ BridgeStatistics statistics({bool timed = true}) {
         ],
         modelMs: timed ? 463000 : null,
         toolMs: timed ? 189000 : null,
-        toolCalls: 46,
         failed: 2,
       ),
     ],
@@ -207,6 +205,35 @@ void main() {
     );
     expect(inPanel(find.text('Reading the statistics…')), findsNothing);
   });
+
+  testWidgets(
+    'the chosen view and breakdown are told, and Enter takes a focused option',
+    (tester) async {
+      await show(tester);
+      await pressMeta(tester, LogicalKeyboardKey.keyU);
+
+      expect(
+        tester.getSemantics(inPanel(find.text('Cost')).first),
+        isSemantics(isSelected: true),
+        reason: 'the chosen option is told, not only drawn',
+      );
+      expect(
+        tester.getSemantics(inPanel(find.text('Tool')).first),
+        isSemantics(isSelected: true),
+      );
+      Focus.of(tester.element(inPanel(find.text('Tokens')).first))
+          .requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+
+      expect(inPanel(find.text('Tokens per turn')), findsOneWidget);
+      expect(
+        tester.getSemantics(inPanel(find.text('Tokens')).first),
+        isSemantics(isSelected: true),
+      );
+    },
+  );
 
   testWidgets('the Cost view leads with the cost and splits it by model', (
     tester,

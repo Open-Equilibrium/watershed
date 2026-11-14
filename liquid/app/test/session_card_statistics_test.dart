@@ -81,7 +81,6 @@ BridgeStatistics sessionStatistics({
         ],
         modelMs: modelMs,
         toolMs: toolMs,
-        toolCalls: 86,
         failed: 6,
       ),
     ],
