@@ -71,17 +71,21 @@ class SessionStatistics {
     return start == null || end == null ? null : end - start;
   }
 
+  /// Each tool's calls by outcome, in the order the statistics list the tools.
+  late final List<ToolStatistics> tools = [
+    for (final tool in statistics.tools) ToolStatistics(tool, running: running),
+  ];
+
   /// Tool calls by outcome, over every tool and the whole session.
   int get toolCalls =>
       toolsSucceeded + toolsFailed + toolsCancelled + toolsRunning;
   int get toolsSucceeded => _count((tool) => tool.succeeded);
   int get toolsFailed => _count((tool) => tool.failed);
-  int get toolsCancelled =>
-      _count((tool) => tool.cancelled) + (running ? 0 : _count((t) => t.open));
-  int get toolsRunning => running ? _count((tool) => tool.open) : 0;
+  int get toolsCancelled => _count((tool) => tool.cancelled);
+  int get toolsRunning => _count((tool) => tool.running);
 
-  int _count(int Function(BridgeToolCalls tool) of) =>
-      statistics.tools.fold(0, (sum, tool) => sum + of(tool));
+  int _count(int Function(ToolStatistics tool) of) =>
+      tools.fold(0, (sum, tool) => sum + of(tool));
 
   /// The tokens an input and output of `usage` count to.
   static int tokensOf(BridgeUsage usage) => promptTokens(usage) + usage.output;
@@ -140,6 +144,25 @@ String modelName(String model) {
   if (model.isEmpty) return 'Without a model';
   final slash = model.indexOf('/');
   return slash < 0 ? model : model.substring(slash + 1);
+}
+
+/// One tool's calls by outcome. A call still open counts as running while a turn runs and as
+/// cancelled once none does, so the card and the statistics panel agree (ADR-0279).
+class ToolStatistics {
+  ToolStatistics(this.stats, {required bool running}) : _running = running;
+
+  final BridgeToolCalls stats;
+  final bool _running;
+
+  String get name => stats.name;
+  int? get durationMs => stats.durationMs;
+  int get succeeded => stats.succeeded;
+  int get failed => stats.failed;
+  int get cancelled => stats.cancelled + (_running ? 0 : stats.open);
+  int get running => _running ? stats.open : 0;
+
+  /// Every call of the tool, by any outcome.
+  int get total => succeeded + failed + cancelled + running;
 }
 
 /// One turn of the session, with its time split as the timing entries record it.

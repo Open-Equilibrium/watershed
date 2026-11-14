@@ -315,7 +315,7 @@ String _outcomes(SessionStatistics figures) {
 /// The tools with failed calls, the most failed first, as a tooltip line.
 String? _failingTools(SessionStatistics figures) {
   final failing = [
-    for (final tool in figures.statistics.tools)
+    for (final tool in figures.tools)
       if (tool.failed > 0) tool,
   ]..sort((a, b) => b.failed.compareTo(a.failed));
   if (failing.isEmpty) return null;

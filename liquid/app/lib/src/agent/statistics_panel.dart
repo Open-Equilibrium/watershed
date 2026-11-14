@@ -614,13 +614,10 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
   );
 
   Widget _toolTable(WsPalette ws, SessionStatistics figures) {
-    final tools = figures.statistics.tools;
+    final tools = figures.tools;
     final largest = tools.fold(
       1,
-      (most, tool) =>
-          tool.succeeded + tool.failed + tool.cancelled + tool.open > most
-          ? tool.succeeded + tool.failed + tool.cancelled + tool.open
-          : most,
+      (most, tool) => tool.total > most ? tool.total : most,
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -639,28 +636,16 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
                   mono: true,
                   bar: _miniBar(
                     ws,
-                    fraction:
-                        (tool.succeeded +
-                            tool.failed +
-                            tool.cancelled +
-                            tool.open) /
-                        largest,
+                    fraction: tool.total / largest,
                     segments: [
                       BarSegment(tool.succeeded, ws.textFaint),
                       BarSegment(tool.failed, ws.danger),
                       BarSegment(tool.cancelled, ws.borderStrong),
-                      BarSegment(
-                        tool.open,
-                        ws.textFaint,
-                        hatched: figures.running,
-                      ),
+                      BarSegment(tool.running, ws.textFaint, hatched: true),
                     ],
                   ),
                 ),
-                _number(
-                  ws,
-                  '${tool.succeeded + tool.failed + tool.cancelled + tool.open}',
-                ),
+                _number(ws, '${tool.total}'),
                 _number(
                   ws,
                   '${tool.failed}',

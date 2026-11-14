@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/chat_view.dart';
+import 'package:liquid/src/agent/segment_bar.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/agent/statistics_chart.dart';
@@ -439,6 +440,49 @@ void main() {
     expect(inPanel(find.text('Add a rate limit to /login')), findsOneWidget);
     expect(inPanel(find.text('Cover the limiter with tests')), findsOneWidget);
     expect(inPanel(find.text('2 failed')), findsOneWidget);
+  });
+
+  testWidgets('an open call of an ended session is drawn as cancelled', (
+    tester,
+  ) async {
+    final base = statistics();
+    await show(
+      tester,
+      stats: BridgeStatistics(
+        models: base.models,
+        tools: const [
+          BridgeToolCalls(
+            name: 'bash',
+            succeeded: 16,
+            failed: 5,
+            cancelled: 0,
+            open: 2,
+            durationMs: 233000,
+          ),
+          BridgeToolCalls(
+            name: 'edit',
+            succeeded: 63,
+            failed: 1,
+            cancelled: 1,
+            open: 0,
+          ),
+        ],
+        turns: base.turns,
+        startedMs: base.startedMs,
+        endedMs: base.endedMs,
+      ),
+    );
+    await pressMeta(tester, LogicalKeyboardKey.keyU);
+
+    final bars = tester.widgetList<SegmentBar>(
+      inPanel(find.byType(SegmentBar)),
+    );
+    final bash = bars.singleWhere((bar) => bar.segments.first.value == 16);
+    expect(
+      [for (final segment in bash.segments) segment.value],
+      [16, 5, 2, 0],
+      reason: 'succeeded, failed, cancelled, running: nothing runs, so none',
+    );
   });
 
   testWidgets('the Tool breakdown times each tool and keys its outcomes', (
