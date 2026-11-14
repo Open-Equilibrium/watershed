@@ -377,20 +377,46 @@ class _AnswerMenu extends StatelessWidget {
           _branch();
         }
       },
-      itemBuilder: (_) => const [
-        PopupMenuItem(value: 'copy', child: Text('Copy')),
-        PopupMenuItem(value: 'branch', child: Text('Branch from here')),
-      ],
+      itemBuilder: (context) {
+        final ws = context.ws;
+        final busy = _busy;
+        return [
+          const PopupMenuItem(value: 'copy', child: Text('Copy')),
+          // The reason shows under the item while the agent runs, which the item says it waits for.
+          PopupMenuItem(
+            value: 'branch',
+            enabled: !busy,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Branch from here'),
+                if (busy)
+                  Text(
+                    'Available once the agent is idle',
+                    style: TextStyle(
+                      fontSize: WsMetrics.fsSmall,
+                      color: ws.textFaint,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ];
+      },
     ),
   );
 
-  /// Branches once the agent is idle, as the branch is made from stored entries only.
-  void _branch() {
+  bool get _busy {
     final status = state.status.value;
-    if (status == RunStatus.running || status == RunStatus.waitingForYou) {
-      state.notify(BridgeLevel.info, 'Branch once the agent is idle.');
-      return;
-    }
+    return status == RunStatus.running || status == RunStatus.waitingForYou;
+  }
+
+  /// Branches from the answer once the agent is idle, as the branch is made from stored entries
+  /// only. The item is disabled while the agent runs, so this only guards a run that starts with
+  /// the menu open.
+  void _branch() {
+    if (_busy) return;
     unawaited(
       state.branch(entry).catchError((Object error) {
         state.notify(BridgeLevel.error, 'The session could not branch: $error');

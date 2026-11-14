@@ -465,21 +465,22 @@ void main() {
     },
   );
 
-  testWidgets('the Diff panel’s ✕ says what it closes and has a usable hit size', (
-    tester,
-  ) async {
-    await show(tester);
-    await press(tester, LogicalKeyboardKey.keyD);
+  testWidgets(
+    'the Diff panel’s ✕ says what it closes and has a usable hit size',
+    (tester) async {
+      await show(tester);
+      await press(tester, LogicalKeyboardKey.keyD);
 
-    final close = find.byTooltip('Close the Diff');
-    expect(close, findsOneWidget);
-    expect(
-      tester.getSize(close).width,
-      greaterThanOrEqualTo(24),
-      reason: 'a target a pointer can hit',
-    );
-    expect(tester.getSize(close).height, greaterThanOrEqualTo(24));
-  });
+      final close = find.byTooltip('Close the Diff');
+      expect(close, findsOneWidget);
+      expect(
+        tester.getSize(close).width,
+        greaterThanOrEqualTo(24),
+        reason: 'a target a pointer can hit',
+      );
+      expect(tester.getSize(close).height, greaterThanOrEqualTo(24));
+    },
+  );
 
   testWidgets('a hidden row keeps its shortcut', (tester) async {
     await show(
@@ -603,10 +604,15 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    final branch = tester.widget<PopupMenuItem<String>>(
+      find.widgetWithText(PopupMenuItem<String>, 'Branch from here'),
+    );
+    expect(branch.enabled, isFalse);
+    expect(find.text('Available once the agent is idle'), findsOneWidget);
     await tester.tap(find.text('Branch from here'));
     await tester.pumpAndSettle();
     expect(backend.calls, isNot(contains('branch a1')));
-    expect(find.text('Branch once the agent is idle.'), findsOneWidget);
+    expect(find.text('Branch once the agent is idle.'), findsNothing);
     // The status bar drops its notice after a while.
     await tester.pump(const Duration(seconds: 7));
   });
