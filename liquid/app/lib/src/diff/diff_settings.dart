@@ -25,7 +25,7 @@ class DiffSettings {
   /// Whether changes that are only whitespace are left out.
   final bool hideWhitespace;
 
-  /// The panel's width as the maintainer dragged it; null until dragged.
+  /// The panel's width as the user dragged it; null until dragged.
   final double? width;
 
   DiffSettings copyWith({
