@@ -925,7 +925,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
           ],
         ),
       );
-      return onTap == null ? content : InkWell(onTap: onTap, child: content);
+      return header ? content : _BreakdownRow(onTap: onTap, child: content);
     }
 
     return Column(
@@ -959,6 +959,38 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     ws.data2,
     ws.data3,
   ];
+}
+
+/// A breakdown row: it takes the hover colour while the pointer is over it, and runs `onTap`
+/// when it is selectable.
+class _BreakdownRow extends StatefulWidget {
+  const _BreakdownRow({required this.onTap, required this.child});
+
+  final VoidCallback? onTap;
+  final Widget child;
+
+  @override
+  State<_BreakdownRow> createState() => _BreakdownRowState();
+}
+
+class _BreakdownRowState extends State<_BreakdownRow> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: widget.onTap == null ? MouseCursor.defer : SystemMouseCursors.click,
+    onEnter: (_) => setState(() => _hovered = true),
+    onExit: (_) => setState(() => _hovered = false),
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: widget.onTap,
+      child: AnimatedContainer(
+        duration: WsMetrics.motionFast,
+        color: _hovered ? context.ws.hover : null,
+        child: widget.child,
+      ),
+    ),
+  );
 }
 
 /// The segmented control of the header and the breakdown: the chosen option is raised.

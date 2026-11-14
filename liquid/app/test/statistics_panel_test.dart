@@ -315,6 +315,46 @@ void main() {
     },
   );
 
+  testWidgets(
+    'a breakdown row takes the hover colour while the pointer is over it',
+    (tester) async {
+      await show(tester);
+      await pressMeta(tester, LogicalKeyboardKey.keyU);
+      await tester.tap(inPanel(find.widgetWithText(InkWell, 'Turn')));
+      await tester.pumpAndSettle();
+
+      final row = inPanel(find.text('Cover the limiter with tests'));
+      Color? rowColour() =>
+          (tester
+                      .widget<AnimatedContainer>(
+                        find
+                            .ancestor(
+                              of: row,
+                              matching: find.byType(AnimatedContainer),
+                            )
+                            .first,
+                      )
+                      .decoration
+                  as BoxDecoration?)
+              ?.color;
+      final hover = tester.element(row).ws.hover;
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+
+      expect(rowColour(), isNull);
+      await mouse.moveTo(tester.getCenter(row));
+      await tester.pumpAndSettle();
+      expect(rowColour(), hover);
+
+      await mouse.moveTo(
+        tester.getCenter(inPanel(find.text('Session statistics'))),
+      );
+      await tester.pumpAndSettle();
+      expect(rowColour(), isNull);
+    },
+  );
+
   testWidgets('hovering a turn column shows its figures', (tester) async {
     await show(tester);
     await pressMeta(tester, LogicalKeyboardKey.keyU);
