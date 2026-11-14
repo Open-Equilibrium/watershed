@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en"><head><title>Liquid: session statistics</title>
+<link rel="stylesheet" href="mockup.css"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+.stage{overflow-x:auto}
+.win{position:relative}
+.s1{fill:var(--ws-data-1);background:var(--ws-data-1)}
+.s2{fill:var(--ws-data-3);background:var(--ws-data-3)}
+.s3{fill:var(--ws-data-2);background:var(--ws-data-2)}
+.s0{fill:var(--ws-text-faint);background:var(--ws-text-faint)}
+.ok{background:var(--ws-text-faint)}.bad{background:var(--ws-danger)}.cx{background:var(--ws-border-strong)}
+.run{background:repeating-linear-gradient(135deg,var(--ws-text-faint) 0 2px,transparent 2px 4px)}
+.m{color:var(--ws-text-faint)}
+.fail{color:var(--ws-danger)}.fail.sm{font-size:var(--ws-fs-caption);margin-left:4px}
+.hdr{height:var(--ws-row-header);display:flex;align-items:center;gap:var(--ws-space-3);padding:0 var(--ws-space-5) 0 var(--ws-space-7);font-size:var(--ws-fs-compact)}
+.hdr .sp{flex:1}.hdr b{white-space:nowrap}
+.chip{padding:0 var(--ws-space-2);border-radius:var(--ws-radius-sm);box-shadow:inset 0 0 0 1px var(--ws-border-strong);color:var(--ws-text-muted);font-size:var(--ws-fs-small);line-height:20px;white-space:nowrap}
+.gbtn{height:26px;padding:0 10px;border-radius:var(--ws-radius-md);box-shadow:inset 0 0 0 1px var(--ws-border-strong);display:inline-flex;align-items:center;font-weight:500}
+.tbtn{width:28px;height:28px;border-radius:var(--ws-radius-md);display:inline-grid;place-items:center;color:var(--ws-text-muted)}
+.tbtn.on{background:var(--ws-hover);color:var(--ws-text)}
+.tabs{height:34px;display:flex;align-items:flex-end;gap:2px;padding:0 8px;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.tab{height:30px;display:flex;align-items:center;gap:6px;padding:0 12px;border-radius:7px 7px 0 0;font-size:var(--ws-fs-compact);color:var(--ws-text-muted)}
+.tab.on{color:var(--ws-text);box-shadow:inset 0 -2px 0 var(--ws-text)}
+.tab kbd{font-family:var(--ws-font-ui);font-size:var(--ws-fs-caption);color:var(--ws-text-faint);border:0}
+.canvas{position:relative;height:var(--h,430px);overflow:hidden}
+.chat{max-width:var(--ws-width-reading);margin:0 auto;padding:var(--ws-space-6) 0;display:flex;flex-direction:column;gap:var(--ws-space-3);font-size:var(--ws-fs-ui)}
+.chat .b{background:var(--ws-subtle);border-radius:var(--ws-radius-lg);padding:var(--ws-space-3) var(--ws-space-4);max-width:560px}
+.chat .b.u{align-self:flex-end;background:var(--ws-accent-subtle)}
+.sbar{height:28px;display:flex;align-items:center;gap:var(--ws-space-5);padding:0 var(--ws-space-5);font-size:var(--ws-fs-small);color:var(--ws-text-muted);background:var(--ws-subtle);box-shadow:inset 0 1px 0 var(--ws-border)}
+.sbar u{text-decoration-color:var(--ws-text-faint)}
+/* the details card (T3 Code's thread details card) */
+.dcard{position:absolute;right:12px;top:12px;width:276px;background:var(--ws-surface);border-radius:var(--ws-radius-xl);box-shadow:var(--ws-shadow);font-size:var(--ws-fs-small);z-index:3}
+.dcard section{padding:var(--ws-space-3)}
+.dcard section.sep{box-shadow:inset 0 1px 0 var(--ws-border);padding:var(--ws-space-1) var(--ws-space-3)}
+.ur{display:grid;grid-template-columns:84px minmax(40px,1fr) auto;align-items:center;gap:0 10px;height:24px;padding:0 8px;border-radius:var(--ws-radius-md);position:relative}
+.ur.open,.ur:hover{background:var(--ws-hover)}
+.ul{color:var(--ws-text-faint);white-space:nowrap}
+.uv{text-align:right;font-weight:500;font-variant-numeric:tabular-nums;white-space:nowrap}
+.uv.wide{grid-column:2 / 4}
+.faintv .uv{color:var(--ws-text-faint)}
+.hb{position:relative;height:3px;border-radius:2px;background:var(--ws-border-strong)}
+.hb i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:var(--ws-text-faint)}
+.hb b{position:absolute;top:-3px;width:1px;height:9px;background:var(--ws-text-muted)}
+.sb{display:flex;gap:2px;height:3px}
+.sb i{display:block;min-width:2px;border-radius:1px}
+.sb i:first-child{border-radius:2px 1px 1px 2px}.sb i:last-child{border-radius:1px 2px 2px 1px}
+.sb.big{height:8px}.sb.big i:first-child{border-radius:4px 1px 1px 4px}.sb.big i:last-child{border-radius:1px 4px 4px 1px}
+.open-row{display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border-radius:var(--ws-radius-md);font-size:var(--ws-fs-compact);font-weight:500;color:var(--ws-text-muted)}
+.open-row kbd{margin-left:auto;font-family:var(--ws-font-ui);border:0;color:var(--ws-text-faint)}
+.chev{color:var(--ws-text-faint)}
+.info{color:var(--ws-text-faint);font-weight:400}
+.livehead{display:flex;align-items:center;gap:6px;padding:10px 16px 0;color:var(--ws-accent);font-size:var(--ws-fs-small)}
+.livehead i{width:7px;height:7px;border-radius:50%;background:var(--ws-accent)}
+.rtip{position:absolute;right:calc(100% + 8px);top:118px;width:210px;background:var(--ws-text);color:var(--ws-canvas);border-radius:var(--ws-radius-md);padding:6px 10px;display:flex;flex-direction:column;gap:2px;font-size:var(--ws-fs-small)}
+.rtip .m{color:inherit;opacity:.72}
+/* the statistics panel (T3 Code's Usage, for one session) */
+.spanel{position:absolute;right:12px;top:12px;width:660px;bottom:12px;background:var(--ws-surface);border-radius:var(--ws-radius-xl);box-shadow:var(--ws-shadow);display:flex;flex-direction:column;z-index:4;overflow:hidden}
+.phead{height:44px;flex:none;display:flex;align-items:center;gap:10px;padding:0 12px 0 20px;box-shadow:inset 0 -1px 0 var(--ws-border);font-size:var(--ws-fs-ui)}
+.phead .sp{flex:1}.phead .x{color:var(--ws-text-faint);width:24px;text-align:center}
+.segm{display:inline-flex;padding:2px;border-radius:var(--ws-radius-md);background:var(--ws-subtle);box-shadow:inset 0 0 0 1px var(--ws-border);font-size:var(--ws-fs-small)}
+.segm span{padding:2px 10px;border-radius:4px;color:var(--ws-text-muted)}
+.segm span.on{background:var(--ws-canvas);color:var(--ws-text);box-shadow:0 0 0 1px var(--ws-border-strong)}
+.pbody{flex:1;overflow:hidden;padding:var(--ws-space-5) var(--ws-space-6);display:flex;flex-direction:column;gap:var(--ws-space-6)}
+.top{display:grid;grid-template-columns:200px 1fr;gap:var(--ws-space-6)}
+.lc{display:flex;flex-direction:column;gap:var(--ws-space-4)}
+.hero{display:flex;flex-direction:column;gap:2px}
+.big{font-size:32px;line-height:40px;font-weight:var(--ws-fw-semibold);font-variant-numeric:tabular-nums;white-space:nowrap}
+.hero .m{font-size:var(--ws-fs-small)}
+.who{display:flex;flex-direction:column;gap:2px}
+.wl{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:var(--ws-fs-compact)}
+.wl span{display:flex;align-items:center;gap:7px;white-space:nowrap}
+.wl b{font-weight:500;font-variant-numeric:tabular-nums;white-space:nowrap}
+.who .m{font-size:var(--ws-fs-small)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+h5{margin:0 0 var(--ws-space-3);font-size:var(--ws-fs-compact);font-weight:500}
+.plot{position:relative}
+.chart .grid{stroke:var(--ws-border);stroke-width:1}
+.chart .ax{fill:var(--ws-text-faint);font-size:11px;font-variant-numeric:tabular-nums}
+.chart .hot{fill:var(--ws-hover)}
+.tip{position:absolute;width:196px;white-space:nowrap;background:var(--ws-text);color:var(--ws-canvas);border-radius:var(--ws-radius-md);padding:6px 10px;display:flex;flex-direction:column;gap:2px;font-size:var(--ws-fs-small)}
+.tip .m{color:inherit;opacity:.72}
+.tip span{display:flex;align-items:center;gap:6px}.tip em{font-style:normal;margin-left:auto;font-variant-numeric:tabular-nums}
+.sw{width:8px;height:8px;border-radius:2px;display:inline-block;flex:none}
+.mets{display:grid;grid-template-columns:repeat(5,1fr);gap:var(--ws-space-4)}
+.mets div{display:flex;flex-direction:column;gap:2px}
+.mets span{font-size:var(--ws-fs-small);color:var(--ws-text-faint)}
+.mets b{font-size:var(--ws-fs-prose);font-weight:500;font-variant-numeric:tabular-nums}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:var(--ws-space-7)}
+.share{display:flex;flex-direction:column;gap:8px}
+.sh{display:flex;justify-content:space-between;font-size:var(--ws-fs-compact);font-weight:500}
+.leg{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:var(--ws-fs-small);color:var(--ws-text-faint)}
+.leg span{display:flex;align-items:center;gap:5px}.leg em{font-style:normal;color:var(--ws-text);font-variant-numeric:tabular-nums}
+.bh{display:flex;justify-content:space-between;align-items:center}
+.bh h5{margin:0}
+table.bt{width:100%;border-collapse:collapse;font-size:var(--ws-fs-compact);font-variant-numeric:tabular-nums;margin:6px 0 8px}
+.bt th{font-weight:400;font-size:var(--ws-fs-small);color:var(--ws-text-faint);text-align:right;padding:6px 0 6px 20px;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.bt td{text-align:right;padding:7px 0 7px 20px;color:var(--ws-text-muted);box-shadow:inset 0 -1px 0 var(--ws-border);white-space:nowrap;vertical-align:top}
+.bt th:first-child,.bt td.i{text-align:left;padding-left:6px;width:14px}
+.bt td.i{font-size:var(--ws-fs-small);color:var(--ws-text-faint)}
+.bt .w{text-align:left;width:100%}
+.bt td.w{color:var(--ws-text)}
+.bt tr.hov td{background:var(--ws-hover)}
+.nm{display:block;font-family:var(--ws-font-mono);font-size:var(--ws-fs-small)}
+.nm.p{font-family:var(--ws-font-ui);font-size:var(--ws-fs-compact)}
+.mini{display:block;margin-top:5px;max-width:220px}
+.ask{display:flex;align-items:center;gap:var(--ws-space-4);font-size:var(--ws-fs-small)}
+.btn2{height:28px;flex:none;white-space:nowrap;display:inline-flex;align-items:center;padding:0 var(--ws-space-4);border-radius:var(--ws-radius-md);box-shadow:inset 0 0 0 1px var(--ws-border-strong);color:var(--ws-text);font-size:var(--ws-fs-compact)}
+.pair{display:flex;gap:var(--ws-space-5);align-items:flex-start;flex-wrap:wrap}
+.cap{font-size:var(--ws-fs-small);color:var(--ws-text-faint);margin:0 0 6px}
+.msg3{max-width:620px;margin:var(--ws-space-5) auto;font-size:var(--ws-fs-ui);display:flex;flex-direction:column;gap:var(--ws-space-3)}
+.msg3 .b{background:var(--ws-subtle);border-radius:var(--ws-radius-lg);padding:var(--ws-space-3) var(--ws-space-4);position:relative}
+.menu{position:absolute;right:-8px;top:30px;width:230px;background:var(--ws-surface);border-radius:var(--ws-radius-lg);box-shadow:var(--ws-shadow);padding:var(--ws-space-1);font-size:var(--ws-fs-compact);z-index:2}
+.menu div{height:28px;display:flex;align-items:center;padding:0 var(--ws-space-3);border-radius:var(--ws-radius-md)}
+.menu div.on{background:var(--ws-hover)}
+.dots{position:absolute;right:8px;top:6px;color:var(--ws-text-faint)}
+ol.qs{font-size:13px;line-height:1.5;color:var(--ws-text-muted);max-width:900px;margin:0;padding-left:20px}
+ol.qs li{margin-bottom:4px}
+/* T3 Code's thread details card rows */
+.dcard{width:280px}
+.dcard section{padding:8px 8px 10px}
+.dcard section.sep{box-shadow:inset 0 1px 0 var(--ws-border);padding:8px 8px 10px}
+.crow{display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:var(--ws-radius-lg);font-size:var(--ws-fs-compact);font-weight:500;color:var(--ws-text);white-space:nowrap;overflow:hidden}
+.crow:hover{background:var(--ws-hover)}
+.crow .ic{flex:none;color:var(--ws-text-faint)}
+.crow .ic.open{color:var(--ws-success)}
+.crow .t{min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:400}
+.crow .sm,.m.sm{font-size:var(--ws-fs-small);font-weight:400}
+.crow .trail{margin-left:auto;display:inline-flex}
+.crow kbd{margin-left:auto;font-family:var(--ws-font-ui);border:0;color:var(--ws-text-faint);font-weight:400}
+.crow.sel{padding:0}
+.crow.sel .lab{flex:1;min-width:0;display:flex;align-items:center;gap:10px;height:100%;padding:0 10px;overflow:hidden}
+.crow.sel .half{width:32px;height:100%;display:grid;place-items:center;flex:none;position:relative}
+.crow.sel:hover .half::before{content:"";position:absolute;left:0;top:8px;height:16px;width:1px;background:var(--ws-border-strong)}
+.dstat{margin-left:auto;display:flex;gap:8px;font-family:var(--ws-font-mono);font-size:var(--ws-fs-small);font-weight:400;font-variant-numeric:tabular-nums}
+.add{color:var(--ws-success)}.del{color:var(--ws-danger)}
+.ur{grid-template-columns:96px minmax(40px,1fr) auto;padding:0 10px}
+.rtip{top:200px}
+.cmenu{position:absolute;right:120px;top:150px;width:220px;background:var(--ws-surface);border-radius:var(--ws-radius-lg);box-shadow:var(--ws-shadow);padding:4px;font-size:var(--ws-fs-compact);z-index:5}
+.cmenu .mi{height:28px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:var(--ws-radius-md)}
+.cmenu .mi:nth-child(4){background:var(--ws-hover)}
+.cmenu .ck{width:14px;color:var(--ws-text-muted)}
+.cmenu .msep{height:1px;background:var(--ws-border);margin:4px 0}
+/* T3 Code's right panel with the Diff */
+.canvas.split{display:flex}
+.canvas.split .left{flex:1;min-width:0;padding:0 24px}
+.rpanel{width:560px;flex:none;box-shadow:inset 1px 0 0 var(--ws-border);display:flex;flex-direction:column;font-size:var(--ws-fs-compact)}
+.rtabs{height:36px;display:flex;align-items:center;padding:0 8px;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.rtab{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 8px;border-radius:var(--ws-radius-md);background:var(--ws-hover)}
+.rtab .ic{color:var(--ws-text-faint)}.rtab .x{margin-left:6px;color:var(--ws-text-faint);font-size:11px}
+.rbar{height:36px;display:flex;align-items:center;gap:12px;padding:0 12px;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.rbar .sp{flex:1}
+.pick{display:inline-flex;align-items:center;gap:4px;font-weight:500}
+.pick .ic{color:var(--ws-text-faint)}
+.files{padding:6px;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.fr{height:28px;display:flex;align-items:center;padding:0 8px;border-radius:var(--ws-radius-md)}
+.fr.on{background:var(--ws-selected)}
+.fr .mono{font-size:var(--ws-fs-small)}
+.patch{font-size:12px;line-height:20px;padding:8px 0}
+.patch .hh{color:var(--ws-text-faint);padding:0 12px;background:var(--ws-subtle)}
+.patch .ln{padding:0 12px;white-space:pre}
+.patch .ln.add{background:var(--ws-diff-add);color:var(--ws-text)}
+.patch .ln.del{background:var(--ws-diff-del);color:var(--ws-text)}
+
+</style></head>
+<body class="theme-light chrome">
+<div class="page">
+  <div class="toolbar"><div>Theme <span class="seg" id="theme"><button data-v="light">Light</button><button data-v="dark">Dark</button><button data-v="system" class="on">System</button></span></div></div>
+  <section>
+    <h1>Liquid: session statistics</h1>
+    <p class="sub">ADR-0279: the Trajectory goes; a session's statistics show only exact figures counted from its stored entries, as T3 Code's Usage counts provider history. Nothing is estimated or judged: tokens and cost are what pi recorded per response, times come from the turns' checkpoints and the extension's timing entries, and a tool call's outcome is its stored result. Interpretations come from an agent on request. The layout follows T3 Code: its thread details card holds the Git controls and the always-visible figures, its Usage page the detail.</p>
+  </section>
+  <section>
+    <h3 class="sec">1 · The session card, top right</h3>
+    <p class="sub">T3 Code's thread details card, rebuilt for a Liquid session. The Chat keeps its tab; the branch, pull request, Git action and Changes leave the header and the Diff tab for the card, in T3 Code's rows and order: the branch with its commits ahead opens the branch menu, the pull request row shows its state and checks, the split button runs the next Git step with the other steps behind its arrow, and Changes counts the shown turn's lines and opens the Diff (section 2). Below a divider, the session's figures read label, hairline, value, as T3 Code's usage and context rows: the context bar fills toward the model's window with a tick where pi compacts, and tokens, working time and tool calls show their parts as one segmented hairline. Hovering a row explains it. The sliders button at the end of the header shows or hides the card; it sits beside the reading column when the window is wide enough, otherwise it opens as a popover (section 5).</p>
+    <div class="stage"><div class="win" style="width:1240px"><div class="hdr"><b>Login hardening</b><span class="chip">auth-service</span><span class="chip">claude-sonnet-4-5</span><span class="sp"></span><span class="tbtn on" title="Session details"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg></span></div>
+<div class="tabs"><span class="tab on">Chat <kbd>⌘1</kbd></span></div><div class="canvas" style="--h:400px"><div class="chat"><div class="b u">Add a rate limit to /login.</div><div class="b">Added a limiter of 5 attempts per minute per address, with two tests. The bash run of the full suite failed twice on an unrelated port clash before it passed.</div><div class="b u">Cover the limiter with tests.</div><div class="b">Added four cases: under the limit, at the limit, after the window, and two addresses at once.</div></div><div class="dcard" style="">
+    <section>
+  <div class="crow sel"><span class="lab"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg><span class="t">fix/login-limit</span><span class="m sm">↑2</span></span><span class="half"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
+  <div class="crow"><svg class="ic open" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" x2="6" y1="9" y2="21"/></svg><span>#412</span><span class="m t">Add a rate limit to /login</span><span class="trail"><svg class="ic open" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg></span></div>
+  <div class="crow sel"><span class="lab"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><line x1="3" x2="9" y1="12" y2="12"/><line x1="15" x2="21" y1="12" y2="12"/></svg><span>Commit</span><span class="m sm">3 files</span></span><span class="half"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
+  <div class="crow"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M9 10h6"/><path d="M12 13V7"/><path d="M9 17h6"/></svg><span>Changes</span><span class="m t">latest turn</span><span class="dstat"><span class="add">+120</span><span class="del">−30</span></span></div>
+</section>
+    <section class="sep"><div class="ur"><span class="ul">Context</span><span class="hb"><i style="width:34%"></i><b style="left:92%"></b></span><span class="uv">68.2 k / 200 k</span></div><div class="ur"><span class="ul">Tokens</span><span class="sb"><i class="s1" style="flex:212 1 0" title=""></i><i class="s2" style="flex:1580 1 0" title=""></i><i class="s0" style="flex:41 1 0" title=""></i><i class="s3" style="flex:18.3 1 0" title=""></i></span><span class="uv">1.85 M</span></div><div class="ur"><span class="ul">Cost</span><span class="uv wide">≈ $1.27</span></div><div class="ur"><span class="ul">Working time</span><span class="sb"><i class="s1" style="flex:588 1 0" title=""></i><i class="s2" style="flex:261 1 0" title=""></i><i class="s0" style="flex:23 1 0" title=""></i></span><span class="uv">14 min 32 s</span></div><div class="ur open"><span class="ul">Tool calls</span><span class="sb"><i class="ok" style="flex:79 1 0" title="79 succeeded"></i><i class="bad" style="flex:6 1 0" title="6 failed"></i><i class="cx" style="flex:1 1 0" title="1 cancelled"></i></span><span class="uv"><span class="fail">6 failed</span> · 86</span></div><div class="crow" style="margin-top:4px"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg><span>Statistics</span><kbd>⌘U</kbd></div></section>
+    <div class="rtip" style="top:262px"><b>Tool calls: 86</b><span>79 succeeded · 6 failed · 1 cancelled</span><span class="m">bash 5 failed, edit 1 failed</span></div>
+  </div></div><div class="sbar"><span>pi · claude-sonnet-4-5</span><span style="margin-left:auto"><u>212 k in · 18.3 k out</u></span><span><u>≈ $1.27</u></span></div></div></div>
+  </section>
+<section>
+    <h3 class="sec">2 · Changes opens the Diff beside the Chat</h3>
+    <p class="sub">As in T3 Code, the Diff opens in a panel at the right of the Chat, from the card's Changes row or with ⌘D (T3 Code's key), and closes with ✕ or ⌘D again. It keeps everything the Diff tab does today: the turn menu (T), unified or split (U), whitespace (W), the file list and reverting. With the panel open the Chat is narrower, so the card moves into its popover.</p>
+    <div class="stage"><div class="win" style="width:1240px"><div class="hdr"><b>Login hardening</b><span class="chip">auth-service</span><span class="chip">claude-sonnet-4-5</span><span class="sp"></span><span class="tbtn" title="Session details"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg></span></div>
+<div class="tabs"><span class="tab on">Chat <kbd>⌘1</kbd></span></div><div class="canvas split" style="--h:400px"><div class="left"><div class="chat"><div class="b u">Add a rate limit to /login.</div><div class="b">Added a limiter of 5 attempts per minute per address, with two tests. The bash run of the full suite failed twice on an unrelated port clash before it passed.</div><div class="b u">Cover the limiter with tests.</div><div class="b">Added four cases: under the limit, at the limit, after the window, and two addresses at once.</div></div></div><div class="rpanel">
+  <div class="rtabs"><span class="rtab on"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M9 10h6"/><path d="M12 13V7"/><path d="M9 17h6"/></svg>Diff<span class="x">✕</span></span></div>
+  <div class="rbar"><span class="pick">Turn 4 · Add a rate limit to /login <svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span><span class="sp"></span><span class="m sm">Unified</span><span class="m sm">Whitespace shown</span></div>
+  <div class="files">
+    <div class="fr on"><span class="mono">src/auth/limiter.ts</span><span class="dstat"><span class="add">+62</span><span class="del">−0</span></span></div>
+    <div class="fr"><span class="mono">src/auth/login.ts</span><span class="dstat"><span class="add">+18</span><span class="del">−4</span></span></div>
+    <div class="fr"><span class="mono">tests/limiter.test.ts</span><span class="dstat"><span class="add">+40</span><span class="del">−0</span></span></div>
+  </div>
+  <div class="patch mono">
+    <div class="hh">@@ -12,6 +12,10 @@ export async function login(req, res) {</div>
+    <div class="ln">   const { user, password } = req.body;</div>
+    <div class="ln del">-  const ok = await check(user, password);</div>
+    <div class="ln add">+  if (!limiter.allow(req.ip)) {</div>
+    <div class="ln add">+    return res.status(429).end();</div>
+    <div class="ln add">+  }</div>
+    <div class="ln add">+  const ok = await check(user, password);</div>
+    <div class="ln">   if (!ok) return res.status(401).end();</div>
+  </div>
+</div></div><div class="sbar"><span>pi · claude-sonnet-4-5</span><span style="margin-left:auto"><u>212 k in · 18.3 k out</u></span><span><u>≈ $1.27</u></span></div></div></div>
+  </section>
+<section>
+    <h3 class="sec">3 · Statistics, opened from the card</h3>
+    <p class="sub">The card's Statistics row (⌘U, T3 Code's Usage key) opens a panel at the same corner, laid out like T3 Code's Usage for one session: the headline figure with its parts on the left, a chart on the right, then totals, share bars and a breakdown. T3 Code charts by day; a session charts by turn, the unit the Chat and the Diff already use. Cost and Tokens split by model, as T3 Code splits by provider. The breakdown adds what T3 Code has no view for: tool calls, each with its outcomes as a segmented bar sized by its count. Hovering a column or a bar shows its exact figures; Escape closes the panel.</p>
+    <div class="stage"><div class="win" style="width:1240px"><div class="hdr"><b>Login hardening</b><span class="chip">auth-service</span><span class="chip">claude-sonnet-4-5</span><span class="sp"></span><span class="tbtn on" title="Session details"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg></span></div>
+<div class="tabs"><span class="tab on">Chat <kbd>⌘1</kbd></span></div><div class="canvas" style="--h:900px"><div class="chat"><div class="b u">Add a rate limit to /login.</div><div class="b">Added a limiter of 5 attempts per minute per address, with two tests. The bash run of the full suite failed twice on an unrelated port clash before it passed.</div><div class="b u">Cover the limiter with tests.</div><div class="b">Added four cases: under the limit, at the limit, after the window, and two addresses at once.</div></div><div class="spanel">
+    <div class="phead"><b>Session statistics</b><span class="sp"></span><span class="segm"><span class="on">Cost</span><span>Tokens</span><span class="">Time</span></span><span class="x">✕</span></div>
+    <div class="pbody">
+      <section class="top"><div class="lc"><div class="hero"><span class="big">≈ $1.27</span><span class="m">44 responses · 6 turns · as pi recorded it</span></div>
+       <div class="who"><div class="wl"><span><i class="dot s1"></i>claude-sonnet-4-5</span><b>≈ $1.21</b></div><span class="m">95% of cost · 1.79 M tokens · 41 responses</span></div>
+       <div class="who"><div class="wl"><span><i class="dot s2"></i>claude-haiku-4-5</span><b>≈ $0.06</b></div><span class="m">5% of cost · 78.9 k tokens · 3 responses</span></div></div><div class="chartblk"><h5>Cost per turn</h5><div class="plot"><svg class="chart" viewBox="0 0 390 156" width="390" height="156" role="img"><line class="grid" x1="54" x2="390" y1="134" y2="134"/><text class="ax" x="46" y="138" text-anchor="end">$0.00</text><line class="grid" x1="54" x2="390" y1="71" y2="71"/><text class="ax" x="46" y="75" text-anchor="end">$0.25</text><line class="grid" x1="54" x2="390" y1="8" y2="8"/><text class="ax" x="46" y="12" text-anchor="end">$0.50</text><path class="s1" d="M71,134 V98.72 Q71,98.72 71,98.72 H93 Q93,98.72 93,98.72 V134 Z"/><path class="s2" d="M71,96.72 V96.72 Q71,93.67999999999999 74.04,93.67999999999999 H89.96 Q93,93.67999999999999 93,96.72 V96.72 Z"/><text class="ax" x="82" y="150" text-anchor="middle">1</text><rect class="hot" x="113" y="8" width="50" height="126" rx="6"/><path class="s1" d="M127,134 V59.879999999999995 Q127,55.879999999999995 131,55.879999999999995 H145 Q149,55.879999999999995 149,59.879999999999995 V134 Z"/><text class="ax" x="138" y="150" text-anchor="middle">2</text><path class="s1" d="M183,134 V111.32 Q183,111.32 183,111.32 H205 Q205,111.32 205,111.32 V134 Z"/><path class="s2" d="M183,109.32 V105.24 Q183,101.24 187,101.24 H201 Q205,101.24 205,105.24 V109.32 Z"/><text class="ax" x="194" y="150" text-anchor="middle">3</text><path class="s1" d="M239,134 V32.16000000000001 Q239,28.16000000000001 243,28.16000000000001 H257 Q261,28.16000000000001 261,32.16000000000001 V134 Z"/><text class="ax" x="250" y="150" text-anchor="middle">4</text><path class="s1" d="M295,134 V92.64 Q295,88.64 299,88.64 H313 Q317,88.64 317,92.64 V134 Z"/><text class="ax" x="306" y="150" text-anchor="middle">5</text><path class="s1" d="M351,134 V120.36 Q351,116.36 355,116.36 H369 Q373,116.36 373,120.36 V134 Z"/><text class="ax" x="362" y="150" text-anchor="middle">6</text></svg><div class="tip" style="left:156px;top:6px"><b>Turn 2</b><span class="m">Fix it and add a regression test</span><span><i class="sw s1"></i>claude-sonnet-4-5 <em>≈ $0.31</em></span><span class="m">8 responses · 388 k tokens</span></div></div></div></section>
+      <section class="blk"><h5>Totals</h5><div class="mets">
+        <div><span>Input</span><b>212 k</b></div><div><span>Cache read</span><b>1.58 M</b></div><div><span>Cache write</span><b>41.0 k</b></div><div><span>Output</span><b>18.3 k</b></div><div><span>Read from cache</span><b>88%</b></div></div></section>
+       <section class="blk two"><div class="share"><div class="sh"><span>Tokens by type</span></div><span class="sb big"><i class="s1" style="flex:212 1 0" title="Input 212 k"></i><i class="s2" style="flex:1580 1 0" title="Cache read 1.58 M"></i><i class="s0" style="flex:41 1 0" title="Cache write 41.0 k"></i><i class="s3" style="flex:18.3 1 0" title="Output 18.3 k"></i></span><div class="leg"><span><i class="sw s1"></i>Input <em>212 k</em></span><span><i class="sw s2"></i>Cache read <em>1.58 M</em></span><span><i class="sw s0"></i>Cache write <em>41.0 k</em></span><span><i class="sw s3"></i>Output <em>18.3 k</em></span></div></div><div class="share"><div class="sh"><span>Cost by type</span></div><span class="sb big"><i class="s1" style="flex:0.52 1 0" title="Input $0.52"></i><i class="s2" style="flex:0.42 1 0" title="Cache read $0.42"></i><i class="s0" style="flex:0.12 1 0" title="Cache write $0.12"></i><i class="s3" style="flex:0.21 1 0" title="Output $0.21"></i></span><div class="leg"><span><i class="sw s1"></i>Input <em>$0.52</em></span><span><i class="sw s2"></i>Cache read <em>$0.42</em></span><span><i class="sw s0"></i>Cache write <em>$0.12</em></span><span><i class="sw s3"></i>Output <em>$0.21</em></span></div></div></section><section class="blk"><div class="bh"><h5>Breakdown</h5><span class="segm"><span>Model</span><span class="on">Tool</span><span>Turn</span></span></div>
+       <table class="bt"><tr><th>#</th><th class="w">Tool</th><th>Calls</th><th>Failed</th><th>Time</th></tr>
+       <tr><td class="i">1</td><td class="w"><span class="nm">bash</span><span class="mini" style="width:57.89473684210527%"><span class="sb"><i class="ok" style="flex:16 1 0" title=""></i><i class="bad" style="flex:5 1 0" title=""></i><i class="cx" style="flex:1 1 0" title=""></i></span></span></td><td>22</td><td><span class="fail">5</span></td><td>3 min 53 s</td></tr><tr><td class="i">2</td><td class="w"><span class="nm">read</span><span class="mini" style="width:100%"><span class="sb"><i class="ok" style="flex:38 1 0" title=""></i></span></span></td><td>38</td><td><span class="m">0</span></td><td>4.1 s</td></tr><tr><td class="i">3</td><td class="w"><span class="nm">grep</span><span class="mini" style="width:23.684210526315788%"><span class="sb"><i class="ok" style="flex:9 1 0" title=""></i></span></span></td><td>9</td><td><span class="m">0</span></td><td>21.7 s</td></tr><tr><td class="i">4</td><td class="w"><span class="nm">edit</span><span class="mini" style="width:36.84210526315789%"><span class="sb"><i class="ok" style="flex:13 1 0" title=""></i><i class="bad" style="flex:1 1 0" title=""></i></span></span></td><td>14</td><td><span class="fail">1</span></td><td>2.0 s</td></tr><tr><td class="i">5</td><td class="w"><span class="nm">write</span><span class="mini" style="width:7.894736842105263%"><span class="sb"><i class="ok" style="flex:3 1 0" title=""></i></span></span></td><td>3</td><td><span class="m">0</span></td><td>0.4 s</td></tr>
+       </table><div class="leg"><span><i class="sw ok"></i>Succeeded</span><span><i class="sw bad"></i>Failed</span><span><i class="sw cx"></i>Cancelled</span></div></section>
+      <section class="ask"><span class="btn2">Ask the agent about this session…</span><span class="m">puts a question in the input; nothing is sent until you send it</span></section>
+    </div></div></div><div class="sbar"><span>pi · claude-sonnet-4-5</span><span style="margin-left:auto"><u>212 k in · 18.3 k out</u></span><span><u>≈ $1.27</u></span></div></div></div>
+  </section>
+<section>
+    <h3 class="sec">4 · Time, and the breakdown by turn</h3>
+    <p class="sub">Time is the view T3 Code lacks. Working time adds up each turn from its start to its end checkpoint and splits into waiting for the model and running tools, as the extension's timing entries record them; what is left of the turn is Other. The turn breakdown lists every prompt with its time, tokens and cost, and its failed tool calls; selecting a row scrolls the Chat to that turn.</p>
+    <div class="stage"><div class="win" style="width:1240px"><div class="hdr"><b>Login hardening</b><span class="chip">auth-service</span><span class="chip">claude-sonnet-4-5</span><span class="sp"></span><span class="tbtn on" title="Session details"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg></span></div>
+<div class="tabs"><span class="tab on">Chat <kbd>⌘1</kbd></span></div><div class="canvas" style="--h:760px"><div class="chat"><div class="b u">Add a rate limit to /login.</div><div class="b">Added a limiter of 5 attempts per minute per address, with two tests. The bash run of the full suite failed twice on an unrelated port clash before it passed.</div><div class="b u">Cover the limiter with tests.</div><div class="b">Added four cases: under the limit, at the limit, after the window, and two addresses at once.</div></div><div class="spanel">
+    <div class="phead"><b>Session statistics</b><span class="sp"></span><span class="segm"><span class="">Cost</span><span>Tokens</span><span class="on">Time</span></span><span class="x">✕</span></div>
+    <div class="pbody">
+      <section class="top"><div class="lc"><div class="hero"><span class="big">14 min 32 s</span><span class="m">6 turns · 2 h 05 min from first to last entry</span></div>
+       <div class="who"><div class="wl"><span><i class="dot s1"></i>Waiting for the model</span><b>9 min 48 s</b></div><span class="m">67% · 44 responses · 13.4 s each on average</span></div>
+       <div class="who"><div class="wl"><span><i class="dot s2"></i>Running tools</span><b>4 min 21 s</b></div><span class="m">30% · 86 calls · bash 3 min 53 s</span></div>
+       <div class="who"><div class="wl"><span><i class="dot s0"></i>Other</span><b>23 s</b></div><span class="m">3% · in the turn, neither model nor tool</span></div></div><div class="chartblk"><h5>Time per turn</h5><div class="plot"><svg class="chart" viewBox="0 0 390 156" width="390" height="156" role="img"><line class="grid" x1="54" x2="390" y1="134" y2="134"/><text class="ax" x="46" y="138" text-anchor="end">0</text><line class="grid" x1="54" x2="390" y1="71" y2="71"/><text class="ax" x="46" y="75" text-anchor="end">2.5 min</text><line class="grid" x1="54" x2="390" y1="8" y2="8"/><text class="ax" x="46" y="12" text-anchor="end">5 min</text><path class="s1" d="M71,134 V104.6 Q71,104.6 71,104.6 H93 Q93,104.6 93,104.6 V134 Z"/><path class="s2" d="M71,102.6 V96.19999999999999 Q71,96.19999999999999 71,96.19999999999999 H93 Q93,96.19999999999999 93,96.19999999999999 V102.6 Z"/><path class="s0" d="M71,94.19999999999999 V94.19999999999999 Q71,95.35999999999999 69.84,95.35999999999999 H94.16 Q93,95.35999999999999 93,94.19999999999999 V94.19999999999999 Z"/><text class="ax" x="82" y="150" text-anchor="middle">1</text><rect class="hot" x="113" y="8" width="50" height="126" rx="6"/><path class="s1" d="M127,134 V81.5 Q127,81.5 127,81.5 H149 Q149,81.5 149,81.5 V134 Z"/><path class="s2" d="M127,79.5 V51.260000000000005 Q127,51.260000000000005 127,51.260000000000005 H149 Q149,51.260000000000005 149,51.260000000000005 V79.5 Z"/><path class="s0" d="M127,49.260000000000005 V49.260000000000005 Q127,49.580000000000005 126.68,49.580000000000005 H149.32 Q149,49.580000000000005 149,49.260000000000005 V49.260000000000005 Z"/><text class="ax" x="138" y="150" text-anchor="middle">2</text><path class="s1" d="M183,134 V113.84 Q183,113.84 183,113.84 H205 Q205,113.84 205,113.84 V134 Z"/><path class="s2" d="M183,111.84 V107.54 Q183,107.54 183,107.54 H205 Q205,107.54 205,107.54 V111.84 Z"/><path class="s0" d="M183,105.54 V105.54 Q183,107.12 181.42,107.12 H206.58 Q205,107.12 205,105.54 V105.54 Z"/><text class="ax" x="194" y="150" text-anchor="middle">3</text><path class="s1" d="M239,134 V57.56 Q239,57.56 239,57.56 H261 Q261,57.56 261,57.56 V134 Z"/><path class="s2" d="M239,55.56 V12.200000000000003 Q239,12.200000000000003 239,12.200000000000003 H261 Q261,12.200000000000003 261,12.200000000000003 V55.56 Z"/><path class="s0" d="M239,10.200000000000003 V10.200000000000003 Q239,8.420000000000003 240.78,8.420000000000003 H259.22 Q261,8.420000000000003 261,10.200000000000003 V10.200000000000003 Z"/><text class="ax" x="250" y="150" text-anchor="middle">4</text><path class="s1" d="M295,134 V92 Q295,92 295,92 H317 Q317,92 317,92 V134 Z"/><path class="s2" d="M295,90 V76.03999999999999 Q295,76.03999999999999 295,76.03999999999999 H317 Q317,76.03999999999999 317,76.03999999999999 V90 Z"/><path class="s0" d="M295,74.03999999999999 V74.03999999999999 Q295,73.94 295.1,73.94 H316.9 Q317,73.94 317,74.03999999999999 V74.03999999999999 Z"/><text class="ax" x="306" y="150" text-anchor="middle">5</text><path class="s1" d="M351,134 V107.54 Q351,107.54 351,107.54 H373 Q373,107.54 373,107.54 V134 Z"/><path class="s2" d="M351,105.54 V104.18 Q351,104.18 351,104.18 H373 Q373,104.18 373,104.18 V105.54 Z"/><path class="s0" d="M351,102.18 V102.18 Q351,103.34 349.84,103.34 H374.16 Q373,103.34 373,102.18 V102.18 Z"/><text class="ax" x="362" y="150" text-anchor="middle">6</text></svg><div class="tip" style="left:156px;top:6px"><b>Turn 2 · 3 min 21 s</b><span><i class="sw s1"></i>Model <em>2 min 05 s</em></span><span><i class="sw s2"></i>Tools <em>1 min 12 s</em></span><span><i class="sw s0"></i>Other <em>4 s</em></span></div></div></div></section>
+      <section class="blk"><div class="bh"><h5>Breakdown</h5><span class="segm"><span>Model</span><span>Tool</span><span class="on">Turn</span></span></div>
+       <table class="bt"><tr><th>#</th><th class="w">Turn</th><th>Time</th><th>Tokens</th><th>Cost</th></tr>
+       <tr><td class="i">1</td><td class="w"><span class="nm p">Find why the login test is flaky</span><span class="mini" style="width:30.76923076923077%"><span class="sb"><i class="s1" style="flex:70 1 0" title=""></i><i class="s2" style="flex:20 1 0" title=""></i><i class="s0" style="flex:2 1 0" title=""></i></span></span></td><td>1 min 32 s</td><td>212 k</td><td>≈ $0.16</td></tr><tr class="hov"><td class="i">2</td><td class="w"><span class="nm p">Fix it and add a regression test <span class="fail sm">2 failed</span></span><span class="mini" style="width:67.22408026755853%"><span class="sb"><i class="s1" style="flex:125 1 0" title=""></i><i class="s2" style="flex:72 1 0" title=""></i><i class="s0" style="flex:4 1 0" title=""></i></span></span></td><td>3 min 21 s</td><td>388 k</td><td>≈ $0.31</td></tr><tr><td class="i">3</td><td class="w"><span class="nm p">Explain the retry policy</span><span class="mini" style="width:21.40468227424749%"><span class="sb"><i class="s1" style="flex:48 1 0" title=""></i><i class="s2" style="flex:15 1 0" title=""></i><i class="s0" style="flex:1 1 0" title=""></i></span></span></td><td>1 min 04 s</td><td>141 k</td><td>≈ $0.13</td></tr><tr><td class="i">4</td><td class="w"><span class="nm p">Add a rate limit to /login <span class="fail sm">3 failed</span></span><span class="mini" style="width:100%"><span class="sb"><i class="s1" style="flex:182 1 0" title=""></i><i class="s2" style="flex:108 1 0" title=""></i><i class="s0" style="flex:9 1 0" title=""></i></span></span></td><td>4 min 59 s</td><td>602 k</td><td>≈ $0.42</td></tr><tr><td class="i">5</td><td class="w"><span class="nm p">Cover the limiter with tests <span class="fail sm">1 failed</span></span><span class="mini" style="width:47.82608695652174%"><span class="sb"><i class="s1" style="flex:100 1 0" title=""></i><i class="s2" style="flex:38 1 0" title=""></i><i class="s0" style="flex:5 1 0" title=""></i></span></span></td><td>2 min 23 s</td><td>344 k</td><td>≈ $0.18</td></tr><tr><td class="i">6</td><td class="w"><span class="nm p">Update the changelog</span><span class="mini" style="width:24.414715719063544%"><span class="sb"><i class="s1" style="flex:63 1 0" title=""></i><i class="s2" style="flex:8 1 0" title=""></i><i class="s0" style="flex:2 1 0" title=""></i></span></span></td><td>1 min 13 s</td><td>164 k</td><td>≈ $0.07</td></tr>
+       </table></section>
+      
+    </div></div></div><div class="sbar"><span>pi · claude-sonnet-4-5</span><span style="margin-left:auto"><u>212 k in · 18.3 k out</u></span><span><u>≈ $1.27</u></span></div></div></div>
+  </section>
+<section>
+    <h3 class="sec">5 · While a turn runs, older sessions, narrow windows, choosing rows</h3>
+    <p class="sub">While a turn runs, the figures grow as entries are stored; open tool calls show as running (hatched), not yet as an outcome. A response pi recorded without a cost adds tokens but no cost, and the cost row's ⓘ says how many. A session from before the timing entries shows a dash for model and tool time, never a guess. In a narrow window the sliders button opens the same card as a popover below it. Right-clicking the card chooses its rows, as in T3 Code; hidden rows keep their shortcuts.</p>
+    <div class="stage"><div class="pair">
+      <div><p class="cap">Turn running</p><div class="win" style="width:304px;height:396px"><div class="dcard" style="">
+    <section>
+  <div class="crow sel"><span class="lab"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg><span class="t">fix/login-limit</span><span class="m sm">↑2</span></span><span class="half"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
+  <div class="crow"><svg class="ic open" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" x2="6" y1="9" y2="21"/></svg><span>#412</span><span class="m t">Add a rate limit to /login</span><span class="trail"><svg class="ic open" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg></span></div>
+  <div class="crow sel"><span class="lab"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><line x1="3" x2="9" y1="12" y2="12"/><line x1="15" x2="21" y1="12" y2="12"/></svg><span>Commit</span><span class="m sm">3 files</span></span><span class="half"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
+  <div class="crow"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M9 10h6"/><path d="M12 13V7"/><path d="M9 17h6"/></svg><span>Changes</span><span class="m t">latest turn</span><span class="dstat"><span class="add">+48</span><span class="del">−6</span></span></div>
+</section>
+    <section class="sep"><div class="ur"><span class="ul">Context</span><span class="hb"><i style="width:46%"></i><b style="left:92%"></b></span><span class="uv">91.4 k / 200 k</span></div><div class="ur"><span class="ul">Tokens</span><span class="sb"><i class="s1" style="flex:212 1 0" title=""></i><i class="s2" style="flex:1580 1 0" title=""></i><i class="s0" style="flex:41 1 0" title=""></i><i class="s3" style="flex:18.3 1 0" title=""></i></span><span class="uv">402 k</span></div><div class="ur"><span class="ul">Cost</span><span class="uv wide">≈ $0.31</span></div><div class="ur"><span class="ul">Working time</span><span class="sb"><i class="s1" style="flex:180 1 0" title=""></i><i class="s2" style="flex:96 1 0" title=""></i><i class="s0" style="flex:12 1 0" title=""></i></span><span class="uv">5 min 08 s</span></div><div class="ur"><span class="ul">Tool calls</span><span class="sb"><i class="ok" style="flex:17 1 0" title="17 succeeded"></i><i class="bad" style="flex:1 1 0" title="1 failed"></i><i class="run" style="flex:1 1 0" title="1 running"></i></span><span class="uv"><span class="fail">1 failed</span> · 19</span></div><div class="crow" style="margin-top:4px"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg><span>Statistics</span><kbd>⌘U</kbd></div></section>
+    
+  </div></div></div>
+      <div><p class="cap">Older session, cost row hovered</p><div class="win" style="width:540px;height:420px"><div class="dcard" style="">
+    <section>
+  <div class="crow sel"><span class="lab"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg><span class="t">fix/login-limit</span><span class="m sm">↑2</span></span><span class="half"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
+  <div class="crow"><svg class="ic open" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" x2="6" y1="9" y2="21"/></svg><span>#412</span><span class="m t">Add a rate limit to /login</span><span class="trail"><svg class="ic open" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg></span></div>
+  <div class="crow sel"><span class="lab"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><line x1="3" x2="9" y1="12" y2="12"/><line x1="15" x2="21" y1="12" y2="12"/></svg><span>Commit</span><span class="m sm">3 files</span></span><span class="half"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
+  <div class="crow"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M9 10h6"/><path d="M12 13V7"/><path d="M9 17h6"/></svg><span>Changes</span><span class="m t">latest turn</span><span class="dstat"><span class="add">+120</span><span class="del">−30</span></span></div>
+</section>
+    <section class="sep"><div class="ur"><span class="ul">Context</span><span class="hb"><i style="width:21%"></i><b style="left:92%"></b></span><span class="uv">41.8 k / 200 k</span></div><div class="ur"><span class="ul">Tokens</span><span class="sb"><i class="s1" style="flex:212 1 0" title=""></i><i class="s2" style="flex:1580 1 0" title=""></i><i class="s0" style="flex:41 1 0" title=""></i><i class="s3" style="flex:18.3 1 0" title=""></i></span><span class="uv">402 k</span></div><div class="ur open"><span class="ul">Cost</span><span class="uv wide">≈ $0.31 <span class="info">ⓘ</span></span></div><div class="ur"><span class="ul">Working time</span><span class="uv wide">5 min 08 s</span></div><div class="ur faintv"><span class="ul">Model and tools</span><span class="uv wide">—</span></div><div class="ur"><span class="ul">Tool calls</span><span class="sb"><i class="ok" style="flex:18 1 0" title=""></i><i class="bad" style="flex:1 1 0" title=""></i></span><span class="uv"><span class="fail">1 failed</span> · 19</span></div><div class="crow" style="margin-top:4px"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg><span>Statistics</span><kbd>⌘U</kbd></div></section>
+    <div class="rtip" style="top:206px"><b>≈ $0.31 as pi recorded it</b><span class="m">2 responses without a recorded cost</span><span class="m">are counted in tokens, not in cost</span></div>
+  </div></div></div>
+      <div><p class="cap">Narrow window: popover from the header</p><div class="win" style="width:560px"><div class="hdr"><b>Login hardening</b><span class="chip">auth-service</span><span class="chip">claude-sonnet-4-5</span><span class="sp"></span><span class="tbtn on" title="Session details"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg></span></div>
+<div class="tabs"><span class="tab on">Chat <kbd>⌘1</kbd></span></div><div class="canvas" style="--h:390px"><div class="chat" style="padding:20px 24px"><div class="b u">Add a rate limit to /login.</div></div><div class="dcard" style="top:4px">
+    <section>
+  <div class="crow sel"><span class="lab"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg><span class="t">fix/login-limit</span><span class="m sm">↑2</span></span><span class="half"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
+  <div class="crow"><svg class="ic open" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" x2="6" y1="9" y2="21"/></svg><span>#412</span><span class="m t">Add a rate limit to /login</span><span class="trail"><svg class="ic open" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg></span></div>
+  <div class="crow sel"><span class="lab"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><line x1="3" x2="9" y1="12" y2="12"/><line x1="15" x2="21" y1="12" y2="12"/></svg><span>Commit</span><span class="m sm">3 files</span></span><span class="half"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
+  <div class="crow"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M9 10h6"/><path d="M12 13V7"/><path d="M9 17h6"/></svg><span>Changes</span><span class="m t">latest turn</span><span class="dstat"><span class="add">+120</span><span class="del">−30</span></span></div>
+</section>
+    <section class="sep"><div class="ur"><span class="ul">Context</span><span class="hb"><i style="width:34%"></i><b style="left:92%"></b></span><span class="uv">68.2 k / 200 k</span></div><div class="ur"><span class="ul">Tokens</span><span class="sb"><i class="s1" style="flex:212 1 0" title=""></i><i class="s2" style="flex:1580 1 0" title=""></i><i class="s0" style="flex:41 1 0" title=""></i><i class="s3" style="flex:18.3 1 0" title=""></i></span><span class="uv">1.85 M</span></div><div class="ur"><span class="ul">Cost</span><span class="uv wide">≈ $1.27</span></div><div class="ur"><span class="ul">Working time</span><span class="sb"><i class="s1" style="flex:588 1 0" title=""></i><i class="s2" style="flex:261 1 0" title=""></i><i class="s0" style="flex:23 1 0" title=""></i></span><span class="uv">14 min 32 s</span></div><div class="ur"><span class="ul">Tool calls</span><span class="sb"><i class="ok" style="flex:79 1 0" title="79 succeeded"></i><i class="bad" style="flex:6 1 0" title="6 failed"></i><i class="cx" style="flex:1 1 0" title="1 cancelled"></i></span><span class="uv"><span class="fail">6 failed</span> · 86</span></div><div class="crow" style="margin-top:4px"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg><span>Statistics</span><kbd>⌘U</kbd></div></section>
+    
+  </div></div></div></div>
+      <div><p class="cap">Right-click: choose what to show</p><div class="win" style="width:540px;height:400px"><div class="dcard" style="right:12px">
+    <section>
+  <div class="crow sel"><span class="lab"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg><span class="t">fix/login-limit</span><span class="m sm">↑2</span></span><span class="half"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
+  <div class="crow"><svg class="ic open" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" x2="6" y1="9" y2="21"/></svg><span>#412</span><span class="m t">Add a rate limit to /login</span><span class="trail"><svg class="ic open" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg></span></div>
+  <div class="crow sel"><span class="lab"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><line x1="3" x2="9" y1="12" y2="12"/><line x1="15" x2="21" y1="12" y2="12"/></svg><span>Commit</span><span class="m sm">3 files</span></span><span class="half"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
+  <div class="crow"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M9 10h6"/><path d="M12 13V7"/><path d="M9 17h6"/></svg><span>Changes</span><span class="m t">latest turn</span><span class="dstat"><span class="add">+120</span><span class="del">−30</span></span></div>
+</section>
+    <section class="sep"><div class="ur"><span class="ul">Context</span><span class="hb"><i style="width:34%"></i><b style="left:92%"></b></span><span class="uv">68.2 k / 200 k</span></div><div class="ur"><span class="ul">Tokens</span><span class="sb"><i class="s1" style="flex:212 1 0" title=""></i><i class="s2" style="flex:1580 1 0" title=""></i><i class="s0" style="flex:41 1 0" title=""></i><i class="s3" style="flex:18.3 1 0" title=""></i></span><span class="uv">1.85 M</span></div><div class="ur"><span class="ul">Cost</span><span class="uv wide">≈ $1.27</span></div><div class="ur"><span class="ul">Working time</span><span class="sb"><i class="s1" style="flex:588 1 0" title=""></i><i class="s2" style="flex:261 1 0" title=""></i><i class="s0" style="flex:23 1 0" title=""></i></span><span class="uv">14 min 32 s</span></div><div class="ur"><span class="ul">Tool calls</span><span class="sb"><i class="ok" style="flex:79 1 0" title="79 succeeded"></i><i class="bad" style="flex:6 1 0" title="6 failed"></i><i class="cx" style="flex:1 1 0" title="1 cancelled"></i></span><span class="uv"><span class="fail">6 failed</span> · 86</span></div><div class="crow" style="margin-top:4px"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg><span>Statistics</span><kbd>⌘U</kbd></div></section>
+    
+  </div><div class="cmenu">
+  <div class="mi"><span class="ck">✓</span>Branch and pull request</div>
+  <div class="mi"><span class="ck">✓</span>Git actions</div>
+  <div class="mi"><span class="ck">✓</span>Changes</div>
+  <div class="mi"><span class="ck">✓</span>Session figures</div>
+  <div class="mi"><span class="ck">✓</span>Context window</div>
+  <div class="msep"></div>
+  <div class="mi"><span class="ck"></span>Reset to default</div>
+</div></div></div>
+    </div></div>
+  </section>
+<section>
+    <h3 class="sec">6 · Branching without the Trajectory (decision)</h3>
+    <p class="sub">Today “Continue from here” exists only in the Trajectory. T3 Code forks a thread at a selected turn. Recommended: an agent answer's ··· menu in the Chat offers “Branch from here”, which continues the same session from that answer, as the Chats concept already decided (“Branching from an agent's answer makes a branch within the same Chat”). The Chat's branch mark stays as it is.</p>
+    <div class="stage"><div class="win" style="width:760px">
+      <div class="tabs"><span class="tab on">Chat <kbd>⌘1</kbd></span></div>
+      <div class="msg3" style="padding-bottom:110px">
+        <div class="b" style="align-self:flex-end;background:var(--ws-accent-subtle)">Add a rate limit to /login.</div>
+        <div class="b">Added a limiter of 5 attempts per minute and two tests.<span class="dots">···</span>
+          <div class="menu"><div>Copy</div><div class="on">Branch from here</div></div></div>
+      </div>
+    </div></div>
+  </section>
+<section>
+    <h3 class="sec">Questions</h3>
+    <ol class="qs">
+      <li>Show the context row, context used against the model's window with pi's compaction point (recommended, as T3 Code), or leave it out, since ADR-0279 names tokens, cost, time and tool calls only?</li>
+      <li>Keep the extension's timing entries for model and tool time (recommended), or drop them and show working time only?</li>
+      <li>“Branch from here” in an agent answer's menu (recommended), or drop branching with the Trajectory?</li>
+      <li>Whole session only, as the status bar counts (recommended), or a switch between this branch and all branches?</li>
+      <li>The tokens' data colors fail the colorblind check in their order (data-1 next to data-2: blue and purple merge for red-blind readers). This mockup uses the order data-1, data-3, data-2 and keeps gaps and legends. Swap data-2 and data-3 in tokens.css (recommended), or keep the order and rely on gaps and labels?</li>
+    </ol>
+  </section>
+</div>
+<script>
+let mode='system';const mq=matchMedia('(prefers-color-scheme: dark)');
+function applyTheme(){const dark=mode=='dark'||(mode=='system'&&mq.matches);document.querySelectorAll('.win,.stage').forEach(w=>{w.classList.toggle('theme-dark',dark);w.classList.toggle('theme-light',!dark)});document.body.classList.toggle('theme-dark',dark);document.body.classList.toggle('theme-light',!dark);document.querySelectorAll('#theme button').forEach(b=>b.classList.toggle('on',b.dataset.v==mode))}
+document.querySelectorAll('#theme button').forEach(b=>b.onclick=()=>{mode=b.dataset.v;applyTheme()});
+mq.addEventListener('change',applyTheme);applyTheme();
+</script>
+</body></html>
