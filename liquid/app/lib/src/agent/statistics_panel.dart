@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../format.dart';
-import '../session/session_figures.dart';
+import '../session/session_statistics.dart';
 import '../session/session_state.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
@@ -124,7 +124,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
                             padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
                             child: _body(
                               ws,
-                              SessionFigures(statistics, running: running),
+                              SessionStatistics(statistics, running: running),
                             ),
                           ),
                   ),
@@ -173,7 +173,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     ),
   );
 
-  Widget _body(WsPalette ws, SessionFigures figures) {
+  Widget _body(WsPalette ws, SessionStatistics figures) {
     final children = switch (_view) {
       _View.cost => _costView(ws, figures),
       _View.tokens => _tokensView(ws, figures),
@@ -241,7 +241,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     ],
   );
 
-  List<Widget> _costView(WsPalette ws, SessionFigures figures) {
+  List<Widget> _costView(WsPalette ws, SessionStatistics figures) {
     final models = figures.models;
     final kinds = figures.costByKind;
     return [
@@ -330,7 +330,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     ],
   );
 
-  List<Widget> _tokensView(WsPalette ws, SessionFigures figures) {
+  List<Widget> _tokensView(WsPalette ws, SessionStatistics figures) {
     final usage = figures.usage;
     return [
       _top(
@@ -392,7 +392,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     ];
   }
 
-  List<Widget> _timeView(WsPalette ws, SessionFigures figures) {
+  List<Widget> _timeView(WsPalette ws, SessionStatistics figures) {
     final working = figures.workingMs;
     final (model, tool, other) = (
       figures.modelMs,
@@ -472,14 +472,14 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     ];
   }
 
-  String _responsesAndTurns(SessionFigures figures) =>
+  String _responsesAndTurns(SessionStatistics figures) =>
       '${plural(figures.responses, 'response')} · '
       '${plural(figures.turns.length, 'turn')} · as pi recorded it';
 
   /// The chart of the turns: one column per turn, its parts stacked as `columnParts` gives them.
   TurnChart _chart(
     WsPalette ws,
-    SessionFigures figures, {
+    SessionStatistics figures, {
     required List<int> Function(TurnFigure turn) columnParts,
     required List<Color> colours,
     required String Function(int value) axis,
@@ -502,7 +502,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     ],
   );
 
-  Widget _totals(WsPalette ws, SessionFigures figures) {
+  Widget _totals(WsPalette ws, SessionStatistics figures) {
     final usage = figures.usage;
     final prompt = usage.input + usage.cacheRead;
     return Column(
@@ -550,7 +550,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     );
   }
 
-  Widget _breakdownSection(WsPalette ws, SessionFigures figures) => Column(
+  Widget _breakdownSection(WsPalette ws, SessionStatistics figures) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     spacing: 4,
     children: [
@@ -577,7 +577,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     ],
   );
 
-  Widget _modelTable(WsPalette ws, SessionFigures figures) => _table(
+  Widget _modelTable(WsPalette ws, SessionStatistics figures) => _table(
     ws,
     headers: const ['#', 'Model', 'Responses', 'Tokens', 'Cost'],
     rows: [
@@ -592,7 +592,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     ],
   );
 
-  Widget _toolTable(WsPalette ws, SessionFigures figures) {
+  Widget _toolTable(WsPalette ws, SessionStatistics figures) {
     final tools = figures.statistics.tools;
     final largest = tools.fold(
       1,
@@ -667,7 +667,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     widget.onClose();
   }
 
-  Widget _turnTable(WsPalette ws, SessionFigures figures) {
+  Widget _turnTable(WsPalette ws, SessionStatistics figures) {
     final longest = figures.turns.fold(
       1,
       (most, turn) => (turn.workingMs ?? 0) > most ? turn.workingMs! : most,

@@ -13,10 +13,7 @@ void main() {
       reason: 'a minute once seconds round to 60',
     );
     expect([formatCost(20000), formatCost(1000)], ['\$0.02', '\$0.001']);
-    expect(
-      [formatCount(6140), formatCompact(6140), formatCompact(820)],
-      ['6,140', '6.1k', '820'],
-    );
+    expect(formatCount(6140), '6,140');
   });
 
   test('formats the session figures as the card and panel show them', () {

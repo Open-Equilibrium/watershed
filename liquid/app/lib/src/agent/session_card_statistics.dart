@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../format.dart';
 import '../rust/api/history.dart';
-import '../session/session_figures.dart';
+import '../session/session_statistics.dart';
 import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
@@ -172,7 +172,10 @@ class ContextFigure extends StatelessWidget {
 
 /// The session's figures rows, in the card's order: tokens, cost, working time and tool calls.
 /// Each row says what its parts are when hovered.
-List<Widget> sessionFigureRows(BuildContext context, SessionFigures figures) {
+List<Widget> sessionStatisticsRows(
+  BuildContext context,
+  SessionStatistics figures,
+) {
   final ws = context.ws;
   final usage = figures.usage;
   final cost = formatCost(figures.cost);
@@ -253,7 +256,7 @@ List<Widget> sessionFigureRows(BuildContext context, SessionFigures figures) {
 }
 
 /// The working time row, with its model and tool parts when every turn recorded them.
-List<Widget> _timeRows(WsPalette ws, SessionFigures figures) {
+List<Widget> _timeRows(WsPalette ws, SessionStatistics figures) {
   final working = formatSpan(figures.workingMs);
   final (model, tool, other) = (
     figures.modelMs,
@@ -299,7 +302,7 @@ List<Widget> _timeRows(WsPalette ws, SessionFigures figures) {
   ];
 }
 
-String _outcomes(SessionFigures figures) {
+String _outcomes(SessionStatistics figures) {
   final running = figures.toolsRunning;
   return [
     '${figures.toolsSucceeded} succeeded',
@@ -310,7 +313,7 @@ String _outcomes(SessionFigures figures) {
 }
 
 /// The tools with failed calls, the most failed first, as a tooltip line.
-String? _failingTools(SessionFigures figures) {
+String? _failingTools(SessionStatistics figures) {
   final failing = [
     for (final tool in figures.statistics.tools)
       if (tool.failed > 0) tool,

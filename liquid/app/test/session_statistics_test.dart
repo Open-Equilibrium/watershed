@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/history.dart';
-import 'package:liquid/src/session/session_figures.dart';
+import 'package:liquid/src/session/session_statistics.dart';
 
 BridgeUsage tokens({
   int input = 0,
@@ -59,7 +59,7 @@ BridgeTurnStatistics turn({
 
 void main() {
   test('sums tokens, cost and responses over the models', () {
-    final figures = SessionFigures(
+    final figures = SessionStatistics(
       BridgeStatistics(
         models: [
           model(
@@ -98,7 +98,7 @@ void main() {
   });
 
   test('splits working time into model, tools and other, clamped at zero', () {
-    final figures = SessionFigures(
+    final figures = SessionStatistics(
       BridgeStatistics(
         models: const [],
         tools: const [],
@@ -132,7 +132,7 @@ void main() {
   });
 
   test('a turn without timing entries leaves model and tool time unknown', () {
-    final figures = SessionFigures(
+    final figures = SessionStatistics(
       BridgeStatistics(
         models: const [],
         tools: const [],
@@ -162,7 +162,7 @@ void main() {
   });
 
   test('the session span runs from its first entry to its last', () {
-    final figures = SessionFigures(
+    final figures = SessionStatistics(
       const BridgeStatistics(
         models: [],
         tools: [],
@@ -174,8 +174,9 @@ void main() {
 
     expect(figures.spanMs, 7499000);
     expect(
-      SessionFigures(const BridgeStatistics(models: [], tools: [], turns: []))
-          .spanMs,
+      SessionStatistics(
+        const BridgeStatistics(models: [], tools: [], turns: []),
+      ).spanMs,
       isNull,
     );
   });
@@ -197,7 +198,7 @@ void main() {
         turns: const [],
       );
 
-      final idle = SessionFigures(stats);
+      final idle = SessionStatistics(stats);
       expect(
         [
           idle.toolCalls,
@@ -208,7 +209,7 @@ void main() {
         ],
         [24, 16, 5, 3, 0],
       );
-      final running = SessionFigures(stats, running: true);
+      final running = SessionStatistics(stats, running: true);
       expect(
         [running.toolCalls, running.toolsCancelled, running.toolsRunning],
         [24, 1, 2],
@@ -219,7 +220,7 @@ void main() {
   test(
     'the three largest models have a series of their own, the rest share one',
     () {
-      final figures = SessionFigures(
+      final figures = SessionStatistics(
         BridgeStatistics(
           models: [
             for (final name in ['a', 'b', 'c', 'd'])

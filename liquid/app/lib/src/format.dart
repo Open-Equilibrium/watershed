@@ -23,10 +23,6 @@ String formatCount(int count) => count.toString().replaceAllMapped(
 String formatCost(int microUsd) =>
     '\$${(microUsd / 1e6).toStringAsFixed(microUsd < 10000 ? 3 : 2)}';
 
-/// A count in thousands once it reaches them, such as `6.1k`.
-String formatCompact(int count) =>
-    count >= 1000 ? '${(count / 1000).toStringAsFixed(1)}k' : '$count';
-
 /// A token count with three significant digits and a unit, such as `212 k` or `1.85 M`.
 String formatTokens(int count) {
   if (count < 1000) return '$count';

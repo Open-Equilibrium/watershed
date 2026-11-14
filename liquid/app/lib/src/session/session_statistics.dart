@@ -10,8 +10,8 @@ const otherSeries = 3;
 /// A session's statistics summed for the card and the statistics panel. Each figure adds up
 /// what the stored entries hold; a figure that needs timing a turn lacks is null, never a guess
 /// (ADR-0279).
-class SessionFigures {
-  SessionFigures(this.statistics, {this.running = false});
+class SessionStatistics {
+  SessionStatistics(this.statistics, {this.running = false});
 
   final BridgeStatistics statistics;
 
@@ -125,11 +125,11 @@ class ModelFigure {
 
   final BridgeModelUsage stats;
 
-  /// The chart series the model fills, as [SessionFigures.seriesOf] names it.
+  /// The chart series the model fills, as [SessionStatistics.seriesOf] names it.
   final int series;
 
   String get name => modelName(stats.model);
-  int get tokens => SessionFigures.tokensOf(stats.usage);
+  int get tokens => SessionStatistics.tokensOf(stats.usage);
   int get cost => stats.usage.costMicroUsd;
   int get responses => stats.responses;
 }
@@ -153,10 +153,10 @@ class TurnFigure {
 
   String get prompt => stats.prompt;
 
-  late final BridgeUsage usage = SessionFigures.sumUsage(
+  late final BridgeUsage usage = SessionStatistics.sumUsage(
     stats.models.map((model) => model.usage),
   );
-  int get tokens => SessionFigures.tokensOf(usage);
+  int get tokens => SessionStatistics.tokensOf(usage);
   int get cost => usage.costMicroUsd;
   int get responses =>
       stats.models.fold(0, (sum, model) => sum + model.responses);
@@ -180,7 +180,7 @@ class TurnFigure {
     return math.max(0, working - model - tool);
   }
 
-  /// Each series' sum of `value` over the turn's models, by [SessionFigures.seriesOf].
+  /// Each series' sum of `value` over the turn's models, by [SessionStatistics.seriesOf].
   List<int> bySeries(int Function(BridgeModelUsage model) value) {
     final sums = List.filled(otherSeries + 1, 0);
     for (final model in stats.models) {

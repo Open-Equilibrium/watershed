@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../diff/turn_scope.dart';
 import '../rust/api/history.dart';
-import '../session/session_figures.dart';
+import '../session/session_statistics.dart';
 import '../session/session_state.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
@@ -12,7 +12,7 @@ import '../theme/tokens.g.dart';
 import 'branch_menu.dart';
 import 'git_actions.dart';
 import 'pull_request_status.dart';
-import 'session_card_figures.dart';
+import 'session_card_statistics.dart';
 import 'session_card_layout.dart';
 import 'session_card_rows.dart';
 import 'session_card_settings.dart';
@@ -212,7 +212,7 @@ class _SessionCardState extends State<SessionCard> {
                 ),
                 if (window != null) _ContextWindow(window: window),
                 if (hasFigures)
-                  _SessionFigures(state: state, divided: window == null),
+                  _SessionStatistics(state: state, divided: window == null),
               ],
             ),
           ],
@@ -399,8 +399,8 @@ class _Section extends StatelessWidget {
 /// The session figures, with the Statistics row that opens the panel. The figures wait for the
 /// first read of the statistics; `divided` is false when the context window above draws the
 /// divider.
-class _SessionFigures extends StatelessWidget {
-  const _SessionFigures({required this.state, required this.divided});
+class _SessionStatistics extends StatelessWidget {
+  const _SessionStatistics({required this.state, required this.divided});
 
   final SessionState state;
   final bool divided;
@@ -415,9 +415,9 @@ class _SessionFigures extends StatelessWidget {
         divided: divided,
         rows: [
           if (statistics != null)
-            ...sessionFigureRows(
+            ...sessionStatisticsRows(
               context,
-              SessionFigures(statistics, running: running),
+              SessionStatistics(statistics, running: running),
             ),
           StatisticsRow(onTap: () => state.statisticsOpen.value = true),
         ],
