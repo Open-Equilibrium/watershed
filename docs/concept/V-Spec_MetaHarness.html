@@ -131,7 +131,7 @@ Liquid
         <li><strong>Context window:</strong> pi's own context use and the model's window (<code>get_session_stats</code>), with the point where pi compacts: the window minus <code>compaction.reserveTokens</code> from pi's settings; none when automatic compaction is off or the settings cannot be read.</li>
         <li><strong>Interpretations:</strong> “Ask the agent about this session…” puts a question into the input area and sends nothing; the agent may write its own evaluation script.</li>
       </ul>
-      <p>Where these figures come from once T3 Code runs the harnesses is part of <a href="../decisions/open-decisions.html#d-096">D-096</a>.</p>
+      <p>Where these figures come from once T3 Code runs the harnesses follows ADR-0282.</p>
     </div></section>
 
     <section id="deployment" class="section"><h2>5. Deployment modes</h2><div class="body">
@@ -315,7 +315,7 @@ liquid integration
     </div></section>
 
     <section id="open" class="section"><h2>14. Open decisions</h2><div class="body">
-      <p>See <a href="../decisions/open-decisions.html">open-decisions.html</a>: product packaging (<a href="../decisions/open-decisions.html#d-021">D-021</a>), state storage (<a href="../decisions/open-decisions.html#d-024">D-024</a>), who starts the local service (<a href="../decisions/open-decisions.html#d-074">D-074</a>), building on T3 Code (ADR-0280; <a href="../decisions/open-decisions.html#d-093">D-093</a> to <a href="../decisions/open-decisions.html#d-101">D-101</a>) and AgentPulse formulas (<a href="../decisions/open-decisions.html#d-010">D-010</a>). Host-scoped execution and multi-instance projection ownership are decided, not open.</p>
+      <p>See <a href="../decisions/open-decisions.html">open-decisions.html</a>: product packaging (<a href="../decisions/open-decisions.html#d-021">D-021</a>), state storage (<a href="../decisions/open-decisions.html#d-024">D-024</a>), who starts the local service (<a href="../decisions/open-decisions.html#d-074">D-074</a>), building on T3 Code (ADR-0280 to ADR-0283; <a href="../decisions/open-decisions.html#d-098">D-098</a>, <a href="../decisions/open-decisions.html#d-099">D-099</a>, <a href="../decisions/open-decisions.html#d-102">D-102</a>) and AgentPulse formulas (<a href="../decisions/open-decisions.html#d-010">D-010</a>). Host-scoped execution and multi-instance projection ownership are decided, not open.</p>
     </div></section>
   </main>
 </div>
