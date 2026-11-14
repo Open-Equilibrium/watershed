@@ -91,6 +91,8 @@ class _ChatViewState extends State<ChatView> {
   /// the item builds, and repeats the jump a few times if the estimate missed.
   Future<void> _scrollTo(String entry) async {
     final state = widget.state;
+    // Earlier pages of this branch cannot bring in an entry of another one.
+    if (!state.onBranch(entry)) return;
     for (
       var page = 0;
       page < _revealPages && _indexOf(entry) < 0 && state.chatMore.value;

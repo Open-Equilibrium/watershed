@@ -119,6 +119,9 @@ class ChatHistory {
   /// The branch mark until the chat shows where the branch leaves the others.
   _Mark? _pendingMark;
 
+  /// Whether `entry` is on the branch the chat shows, as the last restore read the tree.
+  bool onBranch(String entry) => _path.containsKey(entry);
+
   /// Each entry's position on the current branch, and the branch's turns, as last restored.
   Map<String, int> _path = const {};
   List<BridgeTurn> _turns = const [];

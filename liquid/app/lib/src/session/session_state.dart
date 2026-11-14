@@ -109,6 +109,9 @@ class SessionState {
   /// Whether earlier stored entries of the chat remain to be read.
   ValueNotifier<bool> get chatMore => _chat.more;
 
+  /// Whether `entry` is on the branch the chat shows; the chat cannot show another branch.
+  bool onBranch(String entry) => _chat.onBranch(entry);
+
   /// The entry the Chat scrolls to next; the Chat clears it once it has scrolled there.
   final scrollChatTo = ValueNotifier<String?>(null);
 

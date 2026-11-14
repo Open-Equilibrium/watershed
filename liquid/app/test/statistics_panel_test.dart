@@ -147,11 +147,13 @@ void main() {
     WidgetTester tester, {
     BridgeStatistics? stats,
     String? figuresError,
+    void Function(FakeBackend backend)? setup,
   }) async {
     await tester.binding.setSurfaceSize(const Size(1600, 900));
     backend = FakeBackend()
       ..stats = stats ?? statistics()
       ..figuresError = figuresError;
+    setup?.call(backend);
     state = SessionState(backend);
     await tester.pumpWidget(
       MaterialApp(
@@ -309,6 +311,59 @@ void main() {
   );
 
   testWidgets(
+    'a turn of another branch closes the panel without paging earlier history',
+    (tester) async {
+      await show(
+        tester,
+        setup: (backend) => backend
+          ..stored = historyOf(
+            tree: const [
+              BridgeTreeNode(
+                id: 'u1',
+                parent: null,
+                kind: BridgeEntryKind.user,
+              ),
+              BridgeTreeNode(
+                id: 'a1',
+                parent: 'u1',
+                kind: BridgeEntryKind.assistant,
+              ),
+            ],
+            leaf: 'a1',
+          )
+          // A chat that fills the view, so no read-ahead reads earlier pages before the tap.
+          ..transcripts[''] = BridgeTranscript(
+            items: [
+              for (var index = 0; index < 40; index++)
+                chatItem(
+                  'm$index',
+                  BridgeItemKind.assistantMessage,
+                  text: 'Message $index',
+                ),
+            ],
+            more: true,
+            start: 'm0',
+          ),
+      );
+      await pressMeta(tester, LogicalKeyboardKey.keyU);
+      await tester.tap(inPanel(find.widgetWithText(InkWell, 'Turn')));
+      await tester.pumpAndSettle();
+      backend.calls.clear();
+
+      // The second turn's entry is not on the branch the history read gives.
+      await tester.tap(inPanel(find.text('Cover the limiter with tests')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('statistics-panel')), findsNothing);
+      expect(
+        backend.calls.where((call) => call.startsWith('transcript')),
+        isEmpty,
+        reason: 'paging cannot bring in an entry of another branch',
+      );
+    },
+  );
+
+  testWidgets(
     'a turn row closes the panel and scrolls the Chat to its prompt',
     (tester) async {
       await show(tester);
@@ -340,6 +395,13 @@ void main() {
         ],
         more: false,
         start: 'e1',
+      );
+      backend.stored = historyOf(
+        tree: const [
+          BridgeTreeNode(id: 'e1', parent: null, kind: BridgeEntryKind.user),
+          BridgeTreeNode(id: 'e2', parent: 'e1', kind: BridgeEntryKind.user),
+        ],
+        leaf: 'e2',
       );
       await state.loadChat();
       await tester.pumpAndSettle();
