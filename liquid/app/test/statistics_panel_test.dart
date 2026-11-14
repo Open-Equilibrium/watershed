@@ -565,6 +565,43 @@ void main() {
     );
   });
 
+  testWidgets('an open call runs while the turn waits for the user', (
+    tester,
+  ) async {
+    final base = statistics();
+    await show(
+      tester,
+      stats: BridgeStatistics(
+        models: base.models,
+        tools: const [
+          BridgeToolCalls(
+            name: 'bash',
+            succeeded: 16,
+            failed: 5,
+            cancelled: 0,
+            open: 2,
+          ),
+        ],
+        turns: base.turns,
+        startedMs: base.startedMs,
+        endedMs: base.endedMs,
+      ),
+    );
+    await pressMeta(tester, LogicalKeyboardKey.keyU);
+    state.status.value = RunStatus.waitingForYou;
+    await tester.pumpAndSettle();
+
+    final bash = tester
+        .widgetList<SegmentBar>(inPanel(find.byType(SegmentBar)))
+        .singleWhere((bar) => bar.segments.first.value == 16);
+    expect(
+      [for (final segment in bash.segments) segment.value],
+      [16, 5, 0, 2],
+      reason:
+          'a tool waiting on the user still runs, so its call is not cancelled',
+    );
+  });
+
   testWidgets('the Tool breakdown times each tool and keys its outcomes', (
     tester,
   ) async {

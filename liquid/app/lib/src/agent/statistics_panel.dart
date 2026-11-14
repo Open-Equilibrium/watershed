@@ -106,7 +106,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
             ]),
             builder: (context, _) {
               final stored = widget.state.statistics.value;
-              final running = widget.state.status.value == RunStatus.running;
+              final running = widget.state.turnRuns;
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [

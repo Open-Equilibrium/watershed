@@ -412,7 +412,7 @@ class _StatisticsSection extends StatelessWidget {
     builder: (context, _) {
       final ws = context.ws;
       final stored = state.statistics.value;
-      final running = state.status.value == RunStatus.running;
+      final running = state.turnRuns;
       return _Section(
         divided: divided,
         rows: [

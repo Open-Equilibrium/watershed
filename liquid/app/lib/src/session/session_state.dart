@@ -780,16 +780,18 @@ class SessionState {
     }
   }
 
+  /// Whether a turn runs, including while it waits for the user.
+  bool get turnRuns => switch (status.value) {
+    RunStatus.running || RunStatus.waitingForYou => true,
+    _ => false,
+  };
+
   /// Waits, up to a few seconds, until the stopped agent no longer runs.
   Future<void> _settled() async {
-    bool busy() => switch (status.value) {
-      RunStatus.running || RunStatus.waitingForYou => true,
-      _ => false,
-    };
-    if (!busy()) return;
+    if (!turnRuns) return;
     final settled = Completer<void>();
     void check() {
-      if (!busy() && !settled.isCompleted) settled.complete();
+      if (!turnRuns && !settled.isCompleted) settled.complete();
     }
 
     status.addListener(check);
