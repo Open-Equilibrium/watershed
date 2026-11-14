@@ -1424,6 +1424,41 @@ void main() {
     },
   );
 
+  testWidgets('the header with stashed changes fits the narrowest panel', (
+    tester,
+  ) async {
+    final left = DateTime(2026, 11, 1, 10, 41).millisecondsSinceEpoch;
+    final backend = FakeBackend()
+      ..stashed = BridgeStash(
+        current: true,
+        id: 's1',
+        createdMs: left,
+        files: [
+          BridgeFileChange(
+            path: 'notes/todo.md',
+            shown: 'notes/todo.md',
+            status: BridgeChangeStatus.added,
+            added: 1,
+            removed: 0,
+          ),
+        ],
+      )
+      ..patches = {'notes/todo.md': '@@ -0,0 +1 @@\n+Ship it\n'};
+    // T3 Code's right panel minimum: every header action must lay out inside it.
+    final state = await show(tester, backend, size: const Size(360, 900));
+    await state.git.refresh();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Turn 1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Stashed changes'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Restore'), findsOneWidget);
+    expect(find.text('Discard…'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('shows the branch’s stashed changes with Restore and Discard', (
     tester,
   ) async {

@@ -68,17 +68,20 @@ class PatchPane extends StatelessWidget {
     );
   }
 
-  /// The turn header with the whitespace and layout switches.
-  Widget _toolbar() => Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
+  /// The turn header with the whitespace and layout switches. In a narrow panel the switches
+  /// wrap below the header rather than cut it.
+  Widget _toolbar() => Wrap(
+    alignment: WrapAlignment.end,
+    spacing: WsMetrics.space3,
+    runSpacing: WsMetrics.space2,
+    crossAxisAlignment: WrapCrossAlignment.center,
     children: [
-      Expanded(child: header ?? const SizedBox.shrink()),
+      header ?? const SizedBox.shrink(),
       _Toggle(
         label: 'Hide whitespace',
         on: settings.hideWhitespace,
         onTap: onWhitespace,
       ),
-      const SizedBox(width: WsMetrics.space3),
       Segments(
         options: const [
           (DiffLayout.unified, 'Unified'),

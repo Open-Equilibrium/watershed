@@ -23,12 +23,11 @@ class DiffPanel extends StatelessWidget {
     required this.onClose,
   });
 
-  /// The width before the panel is dragged.
-  static const double defaultWidth = 560;
+  /// The width before the panel is dragged, as T3 Code's right panel starts.
+  static const double defaultWidth = 540;
 
-  /// The narrowest the panel gets. T3 Code's right panel goes to 360, but the Diff header's
-  /// buttons need about 545 px, so the panel keeps Liquid's 560 until that header can shrink.
-  static const double minWidth = 560;
+  /// The narrowest the panel gets, as T3 Code's right panel goes.
+  static const double minWidth = 360;
 
   /// The room the chat keeps beside the panel, as T3 Code's chat keeps.
   static const double chatMinWidth = 360;

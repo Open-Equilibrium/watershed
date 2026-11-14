@@ -834,15 +834,15 @@ void main() {
       double width() => tester.getSize(find.byType(DiffPanel)).width;
       final window = MediaQuery.sizeOf(tester.element(find.byType(DiffPanel)))
           .width;
-      expect(width(), 560);
+      expect(width(), 540, reason: 'T3 Code’s right panel default');
 
       await tester.drag(
         find.byKey(const Key('diff-resize')),
         const Offset(-10, 0),
       );
       await tester.pumpAndSettle();
-      expect(width(), 570);
-      expect(diffSettings.value.width, 570);
+      expect(width(), 550);
+      expect(diffSettings.value.width, 550);
 
       // Widest: the window's 70 %, as T3 Code's right panel allows.
       await tester.drag(
@@ -852,13 +852,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(width(), closeTo(window * 0.7, 0.5));
 
-      // Narrowest: the Diff header's minimum, which is why it is not T3 Code's 360.
+      // Narrowest: T3 Code's right panel minimum, which the Diff header fits.
       await tester.drag(
         find.byKey(const Key('diff-resize')),
         const Offset(3000, 0),
       );
       await tester.pumpAndSettle();
-      expect(width(), 560);
+      expect(width(), 360);
     },
   );
 }
