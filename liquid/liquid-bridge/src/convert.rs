@@ -176,6 +176,7 @@ impl From<ToolCalls> for BridgeToolCalls {
             failed: int(tool.failed),
             cancelled: int(tool.cancelled),
             open: int(tool.open),
+            duration_ms: tool.duration_ms.map(int),
         }
     }
 }

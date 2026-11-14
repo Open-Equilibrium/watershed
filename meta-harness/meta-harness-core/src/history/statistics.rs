@@ -39,6 +39,9 @@ pub struct ToolCalls {
     pub cancelled: u32,
     /// Calls without a result in the session's last turn, which may still be running.
     pub open: u32,
+    /// Time its calls took, summed over the calls whose timing entries say how long; `None` when
+    /// none of them does.
+    pub duration_ms: Option<u64>,
 }
 
 /// One turn and what it counted to.
@@ -121,6 +124,8 @@ struct Invocation {
     turn: Option<usize>,
     /// Whether its result failed; `None` while it has no result.
     failed: Option<bool>,
+    /// How long its timing entry says it took.
+    duration_ms: Option<u64>,
 }
 
 /// The figures while the entries are counted.
@@ -131,6 +136,9 @@ struct Count {
     /// The calls of the latest response that have no result yet, by call id, oldest first, as
     /// indexes into `invocations`.
     waiting: HashMap<String, VecDeque<usize>>,
+    /// The calls of the latest response by call id, as indexes into `invocations`, so a timing
+    /// entry finds its call whether or not the result came first.
+    calls: HashMap<String, usize>,
     /// The turn of the latest response, when it belongs to one.
     response: Option<usize>,
     /// The longest tool timing after the latest response so far.
@@ -201,26 +209,32 @@ impl Count {
                 self.close_response();
                 self.response = current;
                 self.waiting.clear();
+                self.calls.clear();
                 for call in calls {
                     let index = self.invocations.len();
                     self.invocations.push(Invocation {
                         name: call.name.clone(),
                         turn: current,
                         failed: None,
+                        duration_ms: None,
                     });
                     self.waiting
                         .entry(call.id.clone())
                         .or_default()
                         .push_back(index);
+                    self.calls.insert(call.id.clone(), index);
                     if let Some(index) = current {
                         self.turns[index].stats.tool_calls += 1;
                     }
                 }
             }
-            Body::ToolTiming { duration_ms, .. } => {
+            Body::ToolTiming { call, duration_ms } => {
                 if let Some(index) = self.response {
                     self.turns[index].timed = true;
                     self.response_tool_ms = self.response_tool_ms.max(duration_ms.unwrap_or(0));
+                }
+                if let (Some(&index), Some(ms)) = (self.calls.get(call), duration_ms) {
+                    self.invocations[index].duration_ms = Some(*ms);
                 }
             }
             Body::RequestTiming { duration_ms } => {
@@ -263,6 +277,9 @@ impl Count {
                     name: invocation.name.clone(),
                     ..ToolCalls::default()
                 });
+            if let Some(ms) = invocation.duration_ms {
+                tool.duration_ms = Some(tool.duration_ms.unwrap_or(0).saturating_add(ms));
+            }
             match invocation.failed {
                 Some(false) => tool.succeeded += 1,
                 Some(true) => tool.failed += 1,

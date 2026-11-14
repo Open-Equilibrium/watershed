@@ -74,6 +74,7 @@ BridgeStatistics statistics({bool timed = true}) {
         failed: 5,
         cancelled: 0,
         open: 0,
+        durationMs: 233000,
       ),
       BridgeToolCalls(
         name: 'edit',
@@ -231,7 +232,7 @@ void main() {
     expect(inPanel(find.text('1.85 M')), findsWidgets);
     expect(inPanel(find.text('Tokens by type')), findsOneWidget);
 
-    await tester.tap(inPanel(find.text('Time')));
+    await tester.tap(inPanel(find.widgetWithText(InkWell, 'Time')));
     await tester.pumpAndSettle();
     expect(inPanel(find.text('17 min 53 s')), findsOneWidget);
     expect(inPanel(find.text('Waiting for the model')), findsOneWidget);
@@ -245,7 +246,7 @@ void main() {
     (tester) async {
       await show(tester, stats: statistics(timed: false));
       await pressMeta(tester, LogicalKeyboardKey.keyU);
-      await tester.tap(inPanel(find.text('Time')));
+      await tester.tap(inPanel(find.widgetWithText(InkWell, 'Time')));
       await tester.pumpAndSettle();
 
       expect(inPanel(find.text('Waiting for the model')), findsOneWidget);
@@ -289,12 +290,36 @@ void main() {
     expect(inPanel(find.text('2 failed')), findsOneWidget);
   });
 
+  testWidgets('the Tool breakdown times each tool and keys its outcomes', (
+    tester,
+  ) async {
+    await show(tester);
+    await pressMeta(tester, LogicalKeyboardKey.keyU);
+
+    expect(inPanel(find.text('3 min 53 s')), findsOneWidget, reason: 'bash');
+    expect(
+      inPanel(find.text('—')),
+      findsOneWidget,
+      reason: 'edit has no timing entry',
+    );
+    expect(inPanel(find.text('Succeeded')), findsOneWidget);
+    expect(inPanel(find.text('Cancelled')), findsOneWidget);
+    expect(
+      inPanel(find.text('Failed')),
+      findsNWidgets(2),
+      reason: 'the column header and the legend',
+    );
+  });
+
   testWidgets(
     'Ask the agent puts a question in the composer and sends nothing',
     (tester) async {
       await show(tester);
       await pressMeta(tester, LogicalKeyboardKey.keyU);
 
+      await tester.ensureVisible(
+        inPanel(find.text('Ask the agent about this session…')),
+      );
       await tester.tap(inPanel(find.text('Ask the agent about this session…')));
       await tester.pumpAndSettle();
 

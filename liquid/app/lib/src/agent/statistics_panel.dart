@@ -601,43 +601,62 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
           ? tool.succeeded + tool.failed + tool.cancelled + tool.open
           : most,
     );
-    return _table(
-      ws,
-      headers: const ['#', 'Tool', 'Calls', 'Failed'],
-      rows: [
-        for (final (index, tool) in tools.indexed)
-          [
-            _index(ws, index),
-            _name(
-              ws,
-              tool.name,
-              mono: true,
-              bar: _miniBar(
-                ws,
-                fraction:
-                    (tool.succeeded +
-                        tool.failed +
-                        tool.cancelled +
-                        tool.open) /
-                    largest,
-                segments: [
-                  BarSegment(tool.succeeded, ws.textFaint),
-                  BarSegment(tool.failed, ws.danger),
-                  BarSegment(tool.cancelled, ws.borderStrong),
-                  BarSegment(tool.open, ws.textFaint, hatched: figures.running),
-                ],
-              ),
-            ),
-            _number(
-              ws,
-              '${tool.succeeded + tool.failed + tool.cancelled + tool.open}',
-            ),
-            _number(
-              ws,
-              '${tool.failed}',
-              color: tool.failed > 0 ? ws.danger : ws.textFaint,
-            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      spacing: 8,
+      children: [
+        _table(
+          ws,
+          headers: const ['#', 'Tool', 'Calls', 'Failed', 'Time'],
+          rows: [
+            for (final (index, tool) in tools.indexed)
+              [
+                _index(ws, index),
+                _name(
+                  ws,
+                  tool.name,
+                  mono: true,
+                  bar: _miniBar(
+                    ws,
+                    fraction:
+                        (tool.succeeded +
+                            tool.failed +
+                            tool.cancelled +
+                            tool.open) /
+                        largest,
+                    segments: [
+                      BarSegment(tool.succeeded, ws.textFaint),
+                      BarSegment(tool.failed, ws.danger),
+                      BarSegment(tool.cancelled, ws.borderStrong),
+                      BarSegment(
+                        tool.open,
+                        ws.textFaint,
+                        hatched: figures.running,
+                      ),
+                    ],
+                  ),
+                ),
+                _number(
+                  ws,
+                  '${tool.succeeded + tool.failed + tool.cancelled + tool.open}',
+                ),
+                _number(
+                  ws,
+                  '${tool.failed}',
+                  color: tool.failed > 0 ? ws.danger : ws.textFaint,
+                ),
+                _number(
+                  ws,
+                  tool.durationMs == null ? '—' : formatSpan(tool.durationMs!),
+                ),
+              ],
           ],
+        ),
+        _legend(ws, [
+          ('Succeeded', ws.textFaint, ''),
+          ('Failed', ws.danger, ''),
+          ('Cancelled', ws.borderStrong, ''),
+        ]),
       ],
     );
   }
@@ -785,14 +804,15 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
                 color: ws.textFaint,
               ),
             ),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: WsMetrics.fsSmall,
-                color: ws.text,
-                fontFeatures: const [FontFeature.tabularFigures()],
+            if (value.isNotEmpty)
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: WsMetrics.fsSmall,
+                  color: ws.text,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
               ),
-            ),
           ],
         ),
     ],

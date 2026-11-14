@@ -4433,14 +4433,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeToolCalls dco_decode_bridge_tool_calls(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
     return BridgeToolCalls(
       name: dco_decode_String(arr[0]),
       succeeded: dco_decode_i_64(arr[1]),
       failed: dco_decode_i_64(arr[2]),
       cancelled: dco_decode_i_64(arr[3]),
       open: dco_decode_i_64(arr[4]),
+      durationMs: dco_decode_opt_box_autoadd_i_64(arr[5]),
     );
   }
 
@@ -6571,12 +6572,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_failed = sse_decode_i_64(deserializer);
     var var_cancelled = sse_decode_i_64(deserializer);
     var var_open = sse_decode_i_64(deserializer);
+    var var_durationMs = sse_decode_opt_box_autoadd_i_64(deserializer);
     return BridgeToolCalls(
       name: var_name,
       succeeded: var_succeeded,
       failed: var_failed,
       cancelled: var_cancelled,
       open: var_open,
+      durationMs: var_durationMs,
     );
   }
 
@@ -8907,6 +8910,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_64(self.failed, serializer);
     sse_encode_i_64(self.cancelled, serializer);
     sse_encode_i_64(self.open, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.durationMs, serializer);
   }
 
   @protected

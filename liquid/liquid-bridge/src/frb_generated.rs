@@ -5200,12 +5200,14 @@ impl SseDecode for crate::api::history::BridgeToolCalls {
         let mut var_failed = <i64>::sse_decode(deserializer);
         let mut var_cancelled = <i64>::sse_decode(deserializer);
         let mut var_open = <i64>::sse_decode(deserializer);
+        let mut var_durationMs = <Option<i64>>::sse_decode(deserializer);
         return crate::api::history::BridgeToolCalls {
             name: var_name,
             succeeded: var_succeeded,
             failed: var_failed,
             cancelled: var_cancelled,
             open: var_open,
+            duration_ms: var_durationMs,
         };
     }
 }
@@ -8526,6 +8528,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeToolCalls {
             self.failed.into_into_dart().into_dart(),
             self.cancelled.into_into_dart().into_dart(),
             self.open.into_into_dart().into_dart(),
+            self.duration_ms.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -10017,6 +10020,7 @@ impl SseEncode for crate::api::history::BridgeToolCalls {
         <i64>::sse_encode(self.failed, serializer);
         <i64>::sse_encode(self.cancelled, serializer);
         <i64>::sse_encode(self.open, serializer);
+        <Option<i64>>::sse_encode(self.duration_ms, serializer);
     }
 }
 

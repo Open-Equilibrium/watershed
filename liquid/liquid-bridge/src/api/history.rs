@@ -242,6 +242,8 @@ pub struct BridgeToolCalls {
     pub cancelled: i64,
     /// Calls without a result in the session's last turn, which may still be running.
     pub open: i64,
+    /// Time its calls took; `None` when none of its calls has a timing entry.
+    pub duration_ms: Option<i64>,
 }
 
 /// One turn and what it counted to.

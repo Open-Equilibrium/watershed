@@ -195,6 +195,7 @@ fn turns_start_at_checkpoints_and_split_figures_by_model_tool_and_time() {
                 failed: 1,
                 cancelled: 1,
                 open: 1,
+                duration_ms: Some(1_500),
             },
             ToolCalls {
                 name: "edit".to_owned(),
@@ -202,6 +203,7 @@ fn turns_start_at_checkpoints_and_split_figures_by_model_tool_and_time() {
                 failed: 0,
                 cancelled: 1,
                 open: 0,
+                duration_ms: None,
             },
             ToolCalls {
                 name: "read".to_owned(),
@@ -209,6 +211,7 @@ fn turns_start_at_checkpoints_and_split_figures_by_model_tool_and_time() {
                 failed: 0,
                 cancelled: 0,
                 open: 0,
+                duration_ms: Some(500),
             },
         ],
         "a call without a result is cancelled once its turn ended or a later turn started, and open otherwise; ties sort by name"
@@ -291,6 +294,7 @@ fn without_checkpoints_each_prompt_starts_a_turn_and_missing_timing_stays_none()
                 failed: 0,
                 cancelled: 0,
                 open: 1,
+                duration_ms: None,
             },
             ToolCalls {
                 name: "write".to_owned(),
@@ -298,6 +302,7 @@ fn without_checkpoints_each_prompt_starts_a_turn_and_missing_timing_stays_none()
                 failed: 1,
                 cancelled: 0,
                 open: 0,
+                duration_ms: None,
             },
         ]
     );

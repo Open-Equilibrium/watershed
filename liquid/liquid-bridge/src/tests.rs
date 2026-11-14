@@ -1977,6 +1977,7 @@ fn reads_statistics_and_the_context_window_for_liquid() {
                 failed: 1,
                 cancelled: 0,
                 open: 0,
+                duration_ms: Some(700),
             }],
             turns: vec![BridgeTurnStatistics {
                 entry: "u1".to_owned(),

@@ -413,12 +413,16 @@ class BridgeToolCalls {
   /// Calls without a result in the session's last turn, which may still be running.
   final PlatformInt64 open;
 
+  /// Time its calls took; `None` when none of its calls has a timing entry.
+  final PlatformInt64? durationMs;
+
   const BridgeToolCalls({
     required this.name,
     required this.succeeded,
     required this.failed,
     required this.cancelled,
     required this.open,
+    this.durationMs,
   });
 
   @override
@@ -427,7 +431,8 @@ class BridgeToolCalls {
       succeeded.hashCode ^
       failed.hashCode ^
       cancelled.hashCode ^
-      open.hashCode;
+      open.hashCode ^
+      durationMs.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -438,7 +443,8 @@ class BridgeToolCalls {
           succeeded == other.succeeded &&
           failed == other.failed &&
           cancelled == other.cancelled &&
-          open == other.open;
+          open == other.open &&
+          durationMs == other.durationMs;
 }
 
 /// A page of the chat of the session's current branch.
