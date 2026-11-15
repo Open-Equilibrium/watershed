@@ -948,6 +948,21 @@ void main() {
       expect(state.notice.value?.level, BridgeLevel.error);
     });
 
+    test(
+      'a stop whose queue cannot be taken back still aborts the run',
+      () async {
+        backend
+          ..queued = const BridgeQueue(steering: ['x'], followUp: [])
+          ..clearQueueError = 'queue locked';
+        await state.stop();
+        expect(backend.calls, ['clear queue', 'abort']);
+        expect(
+          state.notice.value?.text,
+          'Could not take the waiting messages back: queue locked',
+        );
+      },
+    );
+
     test('a stop that fails still hands the waiting messages back', () async {
       backend
         ..queued = const BridgeQueue(steering: ['x'], followUp: [])

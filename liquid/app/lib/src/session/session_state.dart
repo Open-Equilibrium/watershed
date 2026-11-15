@@ -400,14 +400,26 @@ class SessionState {
 
   Future<void> _stop() async {
     _stopping = true;
+    await _takeWaitingBack();
     try {
-      final waiting = await _backend.clearQueue();
-      final texts = [...waiting.steering, ...waiting.followUp];
-      if (texts.isNotEmpty) draft.value = texts.join('\n\n');
       await _backend.abort();
     } on Object catch (error) {
       _stopping = false;
       notify(BridgeLevel.error, 'Could not stop the agent: $error');
+    }
+  }
+
+  /// Clears the queue into the input area; a failure says so, and Stop goes on without it.
+  Future<void> _takeWaitingBack() async {
+    try {
+      final waiting = await _backend.clearQueue();
+      final texts = [...waiting.steering, ...waiting.followUp];
+      if (texts.isNotEmpty) draft.value = texts.join('\n\n');
+    } on Object catch (error) {
+      notify(
+        BridgeLevel.error,
+        'Could not take the waiting messages back: $error',
+      );
     }
   }
 

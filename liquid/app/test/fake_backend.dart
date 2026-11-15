@@ -68,14 +68,16 @@ class FakeBackend implements SessionBackend {
     if (sendError case final error?) throw error;
   }
 
-  /// What clear_queue returns; it holds until `clearQueueGate` completes.
+  /// What clear_queue returns, and what it fails with; it holds until `clearQueueGate` completes.
   BridgeQueue queued = const BridgeQueue(steering: [], followUp: []);
+  Object? clearQueueError;
   Completer<void>? clearQueueGate;
 
   @override
   Future<BridgeQueue> clearQueue() async {
     calls.add('clear queue');
     await clearQueueGate?.future;
+    if (clearQueueError case final error?) throw error;
     return queued;
   }
 
