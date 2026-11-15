@@ -26,11 +26,15 @@ class MainFlutterWindow: NSWindow {
 /// With LIQUID_KEY_LOG=1, writes the key events macOS hands the window with the Liquid key
 /// (F18), or with ⌘ or ⌃ but not ⌥, to stderr, beside Flutter's own log of them, to find why
 /// some Liquid key shortcuts do nothing (issue #63). Plain typing stays out of the log: ⌥ types
-/// characters such as @ on many layouts, and only Caps Lock of the modifier keys is logged.
+/// characters such as @ on many layouts, and only Caps Lock of the modifier keys is logged. A
+/// typed key's repeat or key-up is logged only when its key-down was, as `KeyLog` in
+/// `key_log.dart` decides; this mirrors that rule, which has no test seam here.
 private func logKeysIfAsked() {
   guard ProcessInfo.processInfo.environment["LIQUID_KEY_LOG"] == "1" else { return }
   let f18 = UInt16(kVK_F18)
   var liquidKeyDown = false
+  // The key codes whose key-down was logged and that are not released yet.
+  var loggedKeys = Set<UInt16>()
   // A Liquid key let go in another app never reaches this window.
   NotificationCenter.default.addObserver(
     forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
@@ -39,12 +43,23 @@ private func logKeysIfAsked() {
     if event.type != .flagsChanged && event.keyCode == f18 {
       liquidKeyDown = event.type == .keyDown
     }
+    let code = event.keyCode
     let chord =
       !event.modifierFlags.intersection([.command, .control]).isEmpty
       && !event.modifierFlags.contains(.option)
-    let capsLock = event.type == .flagsChanged && event.keyCode == UInt16(kVK_CapsLock)
-    guard liquidKeyDown || event.keyCode == f18 || capsLock || (chord && event.type != .flagsChanged)
-    else { return event }
+    let logged: Bool
+    switch event.type {
+    case .flagsChanged:
+      logged = liquidKeyDown || code == f18 || code == UInt16(kVK_CapsLock)
+    case .keyDown where !event.isARepeat:
+      logged = liquidKeyDown || code == f18 || chord
+      if logged { loggedKeys.insert(code) } else { loggedKeys.remove(code) }
+    case .keyDown:
+      logged = code == f18 || loggedKeys.contains(code)
+    default:
+      logged = code == f18 || loggedKeys.remove(code) != nil
+    }
+    guard logged else { return event }
     let characters = event.type == .flagsChanged ? "-" : (event.characters ?? "-")
     let plain = event.type == .flagsChanged ? "-" : (event.charactersIgnoringModifiers ?? "-")
     FileHandle.standardError.write(
