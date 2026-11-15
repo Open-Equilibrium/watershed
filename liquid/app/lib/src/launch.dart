@@ -3,10 +3,12 @@ import 'dart:io';
 
 import 'agent/sidebar.dart';
 import 'rust/api/session.dart';
+import 'rust/api/t3.dart';
 import 'rust/api/workspace.dart';
 import 'session/backend.dart';
 import 'session/branch_bases.dart';
 import 'session/session_state.dart';
+import 'session/t3_backend.dart';
 import 'workspace/workspace_state.dart';
 
 /// The session the app opens, or why it opened none.
@@ -35,6 +37,10 @@ Future<Launch> launchFromEnvironment(
   BranchBases? bases,
 }) async {
   final project = environment['LIQUID_PROJECT'];
+  // Spike: with a pinned T3 binary, the Chat runs on T3 through Meta-Harness instead of pi.
+  if (environment['LIQUID_T3_BINARY'] case final binary? when project != null) {
+    return _launchT3(environment, binary, project);
+  }
   final extension = environment['LIQUID_PI_EXTENSION'];
   // pi reads a relative extension path inside the project, which could supply its own.
   if (project == null || extension == null || !File(extension).isAbsolute) {
@@ -115,4 +121,36 @@ Future<(WorkspaceState, String?)> startWorkspace(
     return (state, 'The Workspace did not load: $error');
   }
   return (state, null);
+}
+
+/// Spike: starts the pinned T3 server for `project` and opens one Chat on it.
+Future<Launch> _launchT3(
+  Map<String, String> environment,
+  String binary,
+  String project,
+) async {
+  final instance = environment['LIQUID_T3_PROVIDER'] ?? 'claudeAgent';
+  final model = environment['LIQUID_T3_MODEL'] ?? 'claude-haiku-5-5';
+  try {
+    final chat = await T3Chat.start(
+      binary: binary,
+      home: environment['LIQUID_T3_HOME']!,
+      cwd: Directory(project).absolute.path,
+      instance: instance,
+      model: model,
+      worktreeBase: environment['LIQUID_T3_WORKTREE_BASE'],
+    );
+    final state = SessionState(T3SessionBackend(chat, '$instance/$model'));
+    return Launch.session(
+      state,
+      SessionInfo(
+        project: projectName(project),
+        harness: 'T3 Code · $instance',
+        device: Platform.localHostname,
+        path: Directory(project).absolute.path,
+      ),
+    );
+  } on Object catch (error) {
+    return Launch.problem('T3 did not start: $error');
+  }
 }

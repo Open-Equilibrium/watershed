@@ -14,6 +14,7 @@ mod pi;
 mod record;
 mod session;
 mod stored;
+pub mod t3;
 mod visible;
 
 pub use checkpoint::{

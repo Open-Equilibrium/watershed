@@ -8,6 +8,7 @@ import 'api/events.dart';
 import 'api/git.dart';
 import 'api/history.dart';
 import 'api/session.dart';
+import 'api/t3.dart';
 import 'api/workspace.dart';
 import 'api/worktrees.dart';
 
@@ -73,7 +74,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -1845105231;
+  int get rustContentHash => -680939364;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -436,6 +437,61 @@ abstract class RustLibApi extends BaseApi {
     required BridgeResource resource,
   });
 
+  Future<void> crateApiT3T3ChatAbort({required T3Chat that});
+
+  Future<BridgeContext?> crateApiT3T3ChatContext({required T3Chat that});
+
+  Stream<BridgeEvent> crateApiT3T3ChatEvents({required T3Chat that});
+
+  Future<BridgeHistory> crateApiT3T3ChatHistory({required T3Chat that});
+
+  Future<BridgeRevertPlan> crateApiT3T3ChatRevertPlan({
+    required T3Chat that,
+    required String turn,
+  });
+
+  Future<void> crateApiT3T3ChatRevertToTurn({
+    required T3Chat that,
+    required String turn,
+  });
+
+  Future<void> crateApiT3T3ChatSend({
+    required T3Chat that,
+    required String message,
+  });
+
+  Future<bool> crateApiT3T3ChatShutdown({required T3Chat that});
+
+  Future<T3Chat> crateApiT3T3ChatStart({
+    required String binary,
+    required String home,
+    required String cwd,
+    required String instance,
+    required String model,
+    String? worktreeBase,
+  });
+
+  Future<BridgeStatistics> crateApiT3T3ChatStatistics({required T3Chat that});
+
+  Future<BridgeTranscript> crateApiT3T3ChatTranscript({required T3Chat that});
+
+  Future<BridgeTurnChanges> crateApiT3T3ChatTurnChanges({
+    required T3Chat that,
+    required String from,
+    required String to,
+    required bool hideWhitespace,
+  });
+
+  Future<String> crateApiT3T3ChatTurnPatch({
+    required T3Chat that,
+    required String from,
+    required String to,
+    required String path,
+    required bool hideWhitespace,
+  });
+
+  Future<List<BridgeTurn>> crateApiT3T3ChatTurns({required T3Chat that});
+
   Future<BridgeCostByKind> crateApiHistoryBridgeCostByKindDefault();
 
   Future<BridgeQueue> crateApiEventsBridgeQueueDefault();
@@ -458,6 +514,12 @@ abstract class RustLibApi extends BaseApi {
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_LiquidWorkspacePtr;
+
+  RustArcIncrementStrongCountFnType get rust_arc_increment_strong_count_T3Chat;
+
+  RustArcDecrementStrongCountFnType get rust_arc_decrement_strong_count_T3Chat;
+
+  CrossPlatformFinalizerArg get rust_arc_decrement_strong_count_T3ChatPtr;
 }
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
@@ -3081,6 +3143,501 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateApiT3T3ChatAbort({required T3Chat that}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 69,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiT3T3ChatAbortConstMeta,
+        argValues: [that],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiT3T3ChatAbortConstMeta =>
+      const TaskConstMeta(debugName: "T3Chat_abort", argNames: ["that"]);
+
+  @override
+  Future<BridgeContext?> crateApiT3T3ChatContext({required T3Chat that}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 70,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_opt_box_autoadd_bridge_context,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiT3T3ChatContextConstMeta,
+        argValues: [that],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiT3T3ChatContextConstMeta =>
+      const TaskConstMeta(debugName: "T3Chat_context", argNames: ["that"]);
+
+  @override
+  Stream<BridgeEvent> crateApiT3T3ChatEvents({required T3Chat that}) {
+    final sink = RustStreamSink<BridgeEvent>();
+    unawaited(
+      handler.executeNormal(
+        NormalTask(
+          callFfi: (port_) {
+            final serializer = SseSerializer(generalizedFrbRustBinding);
+            sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+              that,
+              serializer,
+            );
+            sse_encode_StreamSink_bridge_event_Sse(sink, serializer);
+            pdeCallFfi(
+              generalizedFrbRustBinding,
+              serializer,
+              funcId: 71,
+              port: port_,
+            );
+          },
+          codec: SseCodec(
+            decodeSuccessData: sse_decode_unit,
+            decodeErrorData: sse_decode_String,
+          ),
+          constMeta: kCrateApiT3T3ChatEventsConstMeta,
+          argValues: [that, sink],
+          apiImpl: this,
+        ),
+      ),
+    );
+    return sink.stream;
+  }
+
+  TaskConstMeta get kCrateApiT3T3ChatEventsConstMeta => const TaskConstMeta(
+    debugName: "T3Chat_events",
+    argNames: ["that", "sink"],
+  );
+
+  @override
+  Future<BridgeHistory> crateApiT3T3ChatHistory({required T3Chat that}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 72,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bridge_history,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiT3T3ChatHistoryConstMeta,
+        argValues: [that],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiT3T3ChatHistoryConstMeta =>
+      const TaskConstMeta(debugName: "T3Chat_history", argNames: ["that"]);
+
+  @override
+  Future<BridgeRevertPlan> crateApiT3T3ChatRevertPlan({
+    required T3Chat that,
+    required String turn,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+            that,
+            serializer,
+          );
+          sse_encode_String(turn, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 73,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bridge_revert_plan,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiT3T3ChatRevertPlanConstMeta,
+        argValues: [that, turn],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiT3T3ChatRevertPlanConstMeta => const TaskConstMeta(
+    debugName: "T3Chat_revert_plan",
+    argNames: ["that", "turn"],
+  );
+
+  @override
+  Future<void> crateApiT3T3ChatRevertToTurn({
+    required T3Chat that,
+    required String turn,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+            that,
+            serializer,
+          );
+          sse_encode_String(turn, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 74,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiT3T3ChatRevertToTurnConstMeta,
+        argValues: [that, turn],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiT3T3ChatRevertToTurnConstMeta =>
+      const TaskConstMeta(
+        debugName: "T3Chat_revert_to_turn",
+        argNames: ["that", "turn"],
+      );
+
+  @override
+  Future<void> crateApiT3T3ChatSend({
+    required T3Chat that,
+    required String message,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+            that,
+            serializer,
+          );
+          sse_encode_String(message, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 75,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiT3T3ChatSendConstMeta,
+        argValues: [that, message],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiT3T3ChatSendConstMeta => const TaskConstMeta(
+    debugName: "T3Chat_send",
+    argNames: ["that", "message"],
+  );
+
+  @override
+  Future<bool> crateApiT3T3ChatShutdown({required T3Chat that}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 76,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bool,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiT3T3ChatShutdownConstMeta,
+        argValues: [that],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiT3T3ChatShutdownConstMeta =>
+      const TaskConstMeta(debugName: "T3Chat_shutdown", argNames: ["that"]);
+
+  @override
+  Future<T3Chat> crateApiT3T3ChatStart({
+    required String binary,
+    required String home,
+    required String cwd,
+    required String instance,
+    required String model,
+    String? worktreeBase,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(binary, serializer);
+          sse_encode_String(home, serializer);
+          sse_encode_String(cwd, serializer);
+          sse_encode_String(instance, serializer);
+          sse_encode_String(model, serializer);
+          sse_encode_opt_String(worktreeBase, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 77,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData:
+              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiT3T3ChatStartConstMeta,
+        argValues: [binary, home, cwd, instance, model, worktreeBase],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiT3T3ChatStartConstMeta => const TaskConstMeta(
+    debugName: "T3Chat_start",
+    argNames: ["binary", "home", "cwd", "instance", "model", "worktreeBase"],
+  );
+
+  @override
+  Future<BridgeStatistics> crateApiT3T3ChatStatistics({required T3Chat that}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 78,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bridge_statistics,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiT3T3ChatStatisticsConstMeta,
+        argValues: [that],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiT3T3ChatStatisticsConstMeta =>
+      const TaskConstMeta(debugName: "T3Chat_statistics", argNames: ["that"]);
+
+  @override
+  Future<BridgeTranscript> crateApiT3T3ChatTranscript({required T3Chat that}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 79,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bridge_transcript,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiT3T3ChatTranscriptConstMeta,
+        argValues: [that],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiT3T3ChatTranscriptConstMeta =>
+      const TaskConstMeta(debugName: "T3Chat_transcript", argNames: ["that"]);
+
+  @override
+  Future<BridgeTurnChanges> crateApiT3T3ChatTurnChanges({
+    required T3Chat that,
+    required String from,
+    required String to,
+    required bool hideWhitespace,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+            that,
+            serializer,
+          );
+          sse_encode_String(from, serializer);
+          sse_encode_String(to, serializer);
+          sse_encode_bool(hideWhitespace, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 80,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bridge_turn_changes,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiT3T3ChatTurnChangesConstMeta,
+        argValues: [that, from, to, hideWhitespace],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiT3T3ChatTurnChangesConstMeta =>
+      const TaskConstMeta(
+        debugName: "T3Chat_turn_changes",
+        argNames: ["that", "from", "to", "hideWhitespace"],
+      );
+
+  @override
+  Future<String> crateApiT3T3ChatTurnPatch({
+    required T3Chat that,
+    required String from,
+    required String to,
+    required String path,
+    required bool hideWhitespace,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+            that,
+            serializer,
+          );
+          sse_encode_String(from, serializer);
+          sse_encode_String(to, serializer);
+          sse_encode_String(path, serializer);
+          sse_encode_bool(hideWhitespace, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 81,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiT3T3ChatTurnPatchConstMeta,
+        argValues: [that, from, to, path, hideWhitespace],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiT3T3ChatTurnPatchConstMeta => const TaskConstMeta(
+    debugName: "T3Chat_turn_patch",
+    argNames: ["that", "from", "to", "path", "hideWhitespace"],
+  );
+
+  @override
+  Future<List<BridgeTurn>> crateApiT3T3ChatTurns({required T3Chat that}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 82,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_bridge_turn,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiT3T3ChatTurnsConstMeta,
+        argValues: [that],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiT3T3ChatTurnsConstMeta =>
+      const TaskConstMeta(debugName: "T3Chat_turns", argNames: ["that"]);
+
+  @override
   Future<BridgeCostByKind> crateApiHistoryBridgeCostByKindDefault() {
     return handler.executeNormal(
       NormalTask(
@@ -3089,7 +3646,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 69,
+            funcId: 83,
             port: port_,
           );
         },
@@ -3119,7 +3676,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 70,
+            funcId: 84,
             port: port_,
           );
         },
@@ -3146,7 +3703,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 71,
+            funcId: 85,
             port: port_,
           );
         },
@@ -3180,6 +3737,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   get rust_arc_decrement_strong_count_LiquidWorkspace => wire
       .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerLiquidWorkspace;
 
+  RustArcIncrementStrongCountFnType
+  get rust_arc_increment_strong_count_T3Chat => wire
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat;
+
+  RustArcDecrementStrongCountFnType
+  get rust_arc_decrement_strong_count_T3Chat => wire
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat;
+
   @protected
   AnyhowException dco_decode_AnyhowException(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -3205,6 +3770,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  T3Chat
+  dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return T3ChatImpl.frbInternalDcoDecode(raw as List<dynamic>);
+  }
+
+  @protected
   AgentSession
   dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentSession(
     dynamic raw,
@@ -3223,6 +3797,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  T3Chat
+  dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return T3ChatImpl.frbInternalDcoDecode(raw as List<dynamic>);
+  }
+
+  @protected
   AgentSession
   dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentSession(
     dynamic raw,
@@ -3238,6 +3821,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return LiquidWorkspaceImpl.frbInternalDcoDecode(raw as List<dynamic>);
+  }
+
+  @protected
+  T3Chat
+  dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return T3ChatImpl.frbInternalDcoDecode(raw as List<dynamic>);
   }
 
   @protected
@@ -5142,6 +5734,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  T3Chat
+  sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return T3ChatImpl.frbInternalSseDecode(
+      sse_decode_usize(deserializer),
+      sse_decode_i_32(deserializer),
+    );
+  }
+
+  @protected
   AgentSession
   sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentSession(
     SseDeserializer deserializer,
@@ -5166,6 +5770,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  T3Chat
+  sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return T3ChatImpl.frbInternalSseDecode(
+      sse_decode_usize(deserializer),
+      sse_decode_i_32(deserializer),
+    );
+  }
+
+  @protected
   AgentSession
   sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentSession(
     SseDeserializer deserializer,
@@ -5184,6 +5800,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return LiquidWorkspaceImpl.frbInternalSseDecode(
+      sse_decode_usize(deserializer),
+      sse_decode_i_32(deserializer),
+    );
+  }
+
+  @protected
+  T3Chat
+  sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return T3ChatImpl.frbInternalSseDecode(
       sse_decode_usize(deserializer),
       sse_decode_i_32(deserializer),
     );
@@ -7682,6 +8310,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   void
+  sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+    T3Chat self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_usize(
+      (self as T3ChatImpl).frbInternalSseEncode(move: true),
+      serializer,
+    );
+  }
+
+  @protected
+  void
   sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentSession(
     AgentSession self,
     SseSerializer serializer,
@@ -7708,6 +8349,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   void
+  sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+    T3Chat self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_usize(
+      (self as T3ChatImpl).frbInternalSseEncode(move: false),
+      serializer,
+    );
+  }
+
+  @protected
+  void
   sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentSession(
     AgentSession self,
     SseSerializer serializer,
@@ -7728,6 +8382,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_usize(
       (self as LiquidWorkspaceImpl).frbInternalSseEncode(move: null),
+      serializer,
+    );
+  }
+
+  @protected
+  void
+  sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerT3Chat(
+    T3Chat self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_usize(
+      (self as T3ChatImpl).frbInternalSseEncode(move: null),
       serializer,
     );
   }
@@ -10398,4 +11065,95 @@ class LiquidWorkspaceImpl extends RustOpaque implements LiquidWorkspace {
     subscription: subscription,
     resource: resource,
   );
+}
+
+@sealed
+class T3ChatImpl extends RustOpaque implements T3Chat {
+  // Not to be used by end users
+  T3ChatImpl.frbInternalDcoDecode(List<dynamic> wire)
+    : super.frbInternalDcoDecode(wire, _kStaticData);
+
+  // Not to be used by end users
+  T3ChatImpl.frbInternalSseDecode(BigInt ptr, int externalSizeOnNative)
+    : super.frbInternalSseDecode(ptr, externalSizeOnNative, _kStaticData);
+
+  static final _kStaticData = RustArcStaticData(
+    rustArcIncrementStrongCount:
+        RustLib.instance.api.rust_arc_increment_strong_count_T3Chat,
+    rustArcDecrementStrongCount:
+        RustLib.instance.api.rust_arc_decrement_strong_count_T3Chat,
+    rustArcDecrementStrongCountPtr:
+        RustLib.instance.api.rust_arc_decrement_strong_count_T3ChatPtr,
+  );
+
+  /// Stops the running turn.
+  Future<void> abort() =>
+      RustLib.instance.api.crateApiT3T3ChatAbort(that: this);
+
+  /// The context window of the latest provider turn.
+  Future<BridgeContext?> context() =>
+      RustLib.instance.api.crateApiT3T3ChatContext(that: this);
+
+  /// Streams the thread's events once it starts; a Chat has one subscriber.
+  Stream<BridgeEvent> events() =>
+      RustLib.instance.api.crateApiT3T3ChatEvents(that: this);
+
+  /// A thread has one branch in T3; the tree stays empty.
+  Future<BridgeHistory> history() =>
+      RustLib.instance.api.crateApiT3T3ChatHistory(that: this);
+
+  /// What reverting the files to before turn `turn` would change: everything since its start.
+  Future<BridgeRevertPlan> revertPlan({required String turn}) =>
+      RustLib.instance.api.crateApiT3T3ChatRevertPlan(that: this, turn: turn);
+
+  /// Reverts the files to before turn `turn` with T3's rollback, as T3's "edit from here".
+  Future<void> revertToTurn({required String turn}) =>
+      RustLib.instance.api.crateApiT3T3ChatRevertToTurn(that: this, turn: turn);
+
+  /// Sends a message: the first one starts the thread, later ones queue behind a running turn.
+  Future<void> send({required String message}) =>
+      RustLib.instance.api.crateApiT3T3ChatSend(that: this, message: message);
+
+  /// Stops T3.
+  Future<bool> shutdown() =>
+      RustLib.instance.api.crateApiT3T3ChatShutdown(that: this);
+
+  /// Exact statistics from T3's data: tokens per turn and model, tool calls by outcome and
+  /// time (ADR-0279). T3 reports no cost per turn, so every response counts as unpriced.
+  Future<BridgeStatistics> statistics() =>
+      RustLib.instance.api.crateApiT3T3ChatStatistics(that: this);
+
+  /// The thread's chat, rebuilt from one snapshot (ADR-0290).
+  Future<BridgeTranscript> transcript() =>
+      RustLib.instance.api.crateApiT3T3ChatTranscript(that: this);
+
+  /// The files that changed from the start of turn `from` to the end of turn `to`.
+  Future<BridgeTurnChanges> turnChanges({
+    required String from,
+    required String to,
+    required bool hideWhitespace,
+  }) => RustLib.instance.api.crateApiT3T3ChatTurnChanges(
+    that: this,
+    from: from,
+    to: to,
+    hideWhitespace: hideWhitespace,
+  );
+
+  /// One file's unified diff from the start of turn `from` to the end of turn `to`.
+  Future<String> turnPatch({
+    required String from,
+    required String to,
+    required String path,
+    required bool hideWhitespace,
+  }) => RustLib.instance.api.crateApiT3T3ChatTurnPatch(
+    that: this,
+    from: from,
+    to: to,
+    path: path,
+    hideWhitespace: hideWhitespace,
+  );
+
+  /// The thread's turns that were not reverted, oldest first, numbered as T3 numbers runs.
+  Future<List<BridgeTurn>> turns() =>
+      RustLib.instance.api.crateApiT3T3ChatTurns(that: this);
 }

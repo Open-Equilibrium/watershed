@@ -6,5 +6,6 @@ pub mod git;
 pub mod history;
 pub(crate) mod record;
 pub mod session;
+pub mod t3;
 pub mod workspace;
 pub mod worktrees;
