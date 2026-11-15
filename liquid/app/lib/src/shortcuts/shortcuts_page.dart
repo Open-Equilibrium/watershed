@@ -122,8 +122,10 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
   /// Why the keys pressed cannot be taken.
   String? _refused;
 
-  /// A change waiting until the user agrees that it replaces the kept Custom profile.
-  ({Command command, Keys keys, List<Command> clear})? _replacing;
+  /// A change waiting until the user agrees that it replaces the kept Custom profile, and the
+  /// profile it was asked under.
+  ({Command command, Keys keys, List<Command> clear, Profile profile})?
+  _replacing;
   final _keep = FocusNode(debugLabel: 'keep Custom');
   final _replace = FocusNode(debugLabel: 'replace Custom');
 
@@ -211,9 +213,15 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
   }
 
   /// A profile chosen meanwhile settles the question whether to replace Custom, and ends a
-  /// recording whose conflict names the owner under the profile before.
+  /// recording whose conflict names the owner under the profile before. Another profile than
+  /// the one asked under ends the question too, as its keys would not run there.
   void _settingsChanged() {
-    if (_replacing != null && _shortcuts.value.replaced == null) _done();
+    final replacing = _replacing;
+    if (replacing != null &&
+        (_shortcuts.value.replaced == null ||
+            _shortcuts.value.profile != replacing.profile)) {
+      _done();
+    }
     if (_conflicts.isNotEmpty) _stop();
   }
 
@@ -224,7 +232,12 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
       _pressed = keys;
       _conflicts = const [];
       _refused = null;
-      _replacing = (command: command, keys: keys, clear: clear);
+      _replacing = (
+        command: command,
+        keys: keys,
+        clear: clear,
+        profile: _shortcuts.value.profile,
+      );
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _keep.requestFocus();
@@ -817,7 +830,8 @@ class _ReplaceCustom extends StatelessWidget {
   });
 
   final ShortcutSettings settings;
-  final ({Command command, Keys keys, List<Command> clear}) change;
+  final ({Command command, Keys keys, List<Command> clear, Profile profile})
+  change;
   final FocusNode keep;
   final FocusNode replace;
   final VoidCallback onKeep;

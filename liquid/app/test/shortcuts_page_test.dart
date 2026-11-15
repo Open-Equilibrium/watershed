@@ -608,6 +608,34 @@ void main() {
       expect(shortcuts.value, kept, reason: 'the kept Custom profile is back');
     });
 
+    testWidgets(
+      'another profile than the one it asked under ends the question',
+      (tester) async {
+        // Asked under the Liquid key profile: Standard keeps the kept Custom profile, so it
+        // still "replaces" it, but ⇪E would be hidden under Standard.
+        await show(tester, kept.choose(Profile.liquidKey));
+        await openSettings(tester);
+        await tester.tap(find.text('⇪D'));
+        await tester.pumpAndSettle();
+        await press(tester, LogicalKeyboardKey.keyE, holding: liquidKey);
+        expect(find.text('Replace the Custom profile?'), findsOneWidget);
+
+        await tester.tap(find.text('Standard'));
+        await tester.pumpAndSettle();
+        expect(find.text('Replace the Custom profile?'), findsNothing);
+        expect(find.text('Replace Custom'), findsNothing);
+        expect(
+          find.text('Press keys…'),
+          findsNothing,
+          reason: 'recording ends',
+        );
+        expect(shortcuts.value.profile, Profile.standard);
+        expect(shortcuts.value.bindings(Command.diff), [
+          const Keys(LogicalKeyboardKey.keyD, meta: true),
+        ], reason: 'nothing is replaced, so no command loses its keys');
+      },
+    );
+
     testWidgets('only the question shows, not an earlier refusal', (
       tester,
     ) async {
