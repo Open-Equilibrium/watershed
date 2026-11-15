@@ -298,6 +298,8 @@ fn permissions_of(permissions: BridgePermissions) -> Permissions {
 pub struct AgentSession {
     thread: Thread,
     root: String,
+    /// The events after the latest [`AgentSession::subscribe`] snapshot, until streamed.
+    receiver: Mutex<Option<tokio::sync::mpsc::Receiver<meta_harness_core::ThreadEvent>>>,
     /// How many of the stream's events Liquid applied, which reopens the window (ADR-0272).
     credit: Arc<stream::Credit>,
 }
@@ -320,6 +322,7 @@ impl AgentSession {
         Self {
             thread,
             root,
+            receiver: Mutex::new(None),
             credit: Arc::default(),
         }
     }
@@ -341,19 +344,40 @@ impl AgentSession {
             .map(|path| path.to_string_lossy().into_owned())
     }
 
-    /// The session now and the events after it, with no gap: Liquid shows the snapshot, then
-    /// applies each event whose sequence is past it (ADR-0290).
-    pub fn events(&self, sink: StreamSink<BridgeEvent>) -> BridgeSnapshot {
-        self.forward(move |event| sink.add(event).is_ok())
+    /// The session now; [`AgentSession::events`] then streams the events after it, with no gap.
+    /// Liquid shows the snapshot and applies each event whose sequence is past it (ADR-0290).
+    pub fn subscribe(&self) -> BridgeSnapshot {
+        let (snapshot, receiver) = self.thread.subscribe();
+        *self.receiver.lock().unwrap_or_else(PoisonError::into_inner) = Some(receiver);
+        convert::snapshot(snapshot)
     }
 
-    /// As [`AgentSession::events`], to a Rust consumer.
+    /// Streams the events after the latest [`AgentSession::subscribe`].
+    pub fn events(&self, sink: StreamSink<BridgeEvent>) -> Result<(), String> {
+        self.stream(move |event| sink.add(event).is_ok())
+    }
+
+    /// Subscribes and streams to a Rust consumer; returns the snapshot.
     #[flutter_rust_bridge::frb(ignore)]
     pub fn forward(
         &self,
         deliver: impl FnMut(BridgeEvent) -> bool + Send + 'static,
     ) -> BridgeSnapshot {
-        let (snapshot, receiver) = self.thread.subscribe();
+        let snapshot = self.subscribe();
+        self.stream(deliver).expect("just subscribed");
+        snapshot
+    }
+
+    fn stream(
+        &self,
+        deliver: impl FnMut(BridgeEvent) -> bool + Send + 'static,
+    ) -> Result<(), String> {
+        let receiver = self
+            .receiver
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+            .ok_or_else(|| "Subscribe before streaming the session's events.".to_owned())?;
         let thread = self.thread.clone();
         RUNTIME.spawn(stream::forward(
             receiver,
@@ -361,7 +385,7 @@ impl AgentSession {
             self.credit.clone(),
             deliver,
         ));
-        convert::snapshot(snapshot)
+        Ok(())
     }
 
     /// Confirms that Liquid applied the stream's first `applied` events (ADR-0272).
