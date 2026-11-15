@@ -94,13 +94,20 @@ class UiScale extends StatelessWidget {
           constraints.maxWidth / scale,
           constraints.maxHeight / scale,
         );
+        final media = MediaQuery.of(context);
         return FittedBox(
           fit: BoxFit.fill,
           alignment: Alignment.topLeft,
           child: SizedBox.fromSize(
             size: size,
             child: MediaQuery(
-              data: MediaQuery.of(context).copyWith(size: size),
+              data: media.copyWith(
+                size: size,
+                padding: media.padding / scale,
+                viewPadding: media.viewPadding / scale,
+                viewInsets: media.viewInsets / scale,
+                systemGestureInsets: media.systemGestureInsets / scale,
+              ),
               child: child,
             ),
           ),

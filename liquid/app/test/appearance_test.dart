@@ -93,6 +93,32 @@ void main() {
     },
   );
 
+  testWidgets('a scaled screen keeps the keyboard inset at window size', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(800, 600));
+    final body = GlobalKey();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(viewInsets: const EdgeInsets.only(bottom: 300)),
+            child: UiScale(
+              scale: 13 / 14,
+              child: Scaffold(body: SizedBox.expand(key: body)),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(
+      tester.getRect(find.byKey(body)).bottom,
+      closeTo(600 - 300, 1),
+      reason: 'the keyboard covers 300 window pixels whatever the text size',
+    );
+  });
+
   testWidgets('two choices before the next frame both apply', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1600, 900));
     final appearance = AppearanceController();
