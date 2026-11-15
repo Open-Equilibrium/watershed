@@ -34,7 +34,7 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 - Central configuration model that resolves shared Watershed building blocks to each target's documented config surface. Flow Agent receives only its global authority and explicit Flows rather than a project-local config layer; device-local Runtime bindings remain owned by the execution host.
 - Control plane: session registry, routing, task state, attention state and agent schedule/trigger skeleton.
 - Reference scenario for schedules: a scheduled agent keeps a news feed as a database page in Liquid and changes it only with the approval its Workspace Role requires, as `disler/pi-durable-news-agent` does with its own app.
-- Host-local Meta-Harness agent executor that rejects cross-host agent-process control (on T3 Code: ADR-0280 to ADR-0290).
+- Host-local Meta-Harness agent executor that rejects cross-host agent-process control (on T3 Code: ADR-0280 to ADR-0291).
 - Adapters: Flow Agent (via its public runtime surfaces) + at least one external CLI adapter.
 - Orchestration tools for agents: T3 Code's own, across hosts through its peer links (ADR-0253, ADR-0288, [V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration)): an agent starts, messages, reads, steers and stops subagents of any harness and model, on other agent hosts too, and hosts link through the Liquid account (ADR-0285); Claude Code joins Codex as a T3 provider.
 - Event/transcript ingestion from agents; artifact/log/handoff indexing (logs, structured summaries, host-provided diffs, handoff packs, checkpoints).

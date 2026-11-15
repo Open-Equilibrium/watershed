@@ -209,12 +209,12 @@ meta metrics ...</code></pre></div>
         </div>
         <div>
           <div class="pd-cap">Start and packaging (ADR-0286)</div>
-          <div class="pd-b pd-ws">One installer: <code>meta</code> CLI and a login service<small>launchd or a systemd user unit, no administrator rights</small></div>
+          <div class="pd-b pd-ws">One installer: <code>meta</code> CLI and a login service<small>launchd, a systemd user unit or a Windows per-user autostart, no administrator rights</small></div>
           <div class="pd-a">at sign-in and after a crash</div>
           <div class="pd-b pd-ws">Meta-Harness<small>own state in SQLite with an append-only approval log</small></div>
           <div class="pd-a">starts and supervises</div>
           <div class="pd-b pd-t3">T3 Code</div>
-          <div class="pd-box"><strong>Windows 11:</strong> Liquid runs natively; whether Meta-Harness, T3 Code and the harnesses run natively or in WSL is open in <a href="../decisions/open-decisions.html#d-107">D-107</a>.</div>
+          <div class="pd-box"><strong>Windows 11:</strong> Liquid, Meta-Harness, T3 Code and the harnesses run natively, without WSL (ADR-0291).</div>
         </div>
       </div>
       <div class="flow" aria-label="Meta-Harness control-plane pipeline">
@@ -303,7 +303,7 @@ liquid integration
           <div class="pd-a">to its own T3</div>
           <div class="pd-b pd-t3">T3 on the Mac refuses read-only or ended callers and attaches the caller's mode</div>
           <div class="pd-a">through Meta-Harness's tunnel</div>
-          <div class="pd-b pd-sy">Meta-Harness Mac → direct or relay → Meta-Harness Windows (WSL)<small>forwards bytes, checks nothing</small></div>
+          <div class="pd-b pd-sy">Meta-Harness Mac → direct or relay → Meta-Harness Windows<small>forwards bytes, checks nothing</small></div>
           <div class="pd-a">loopback</div>
           <div class="pd-b pd-t3">T3 on the Windows PC grants the lower of the link's level and the caller's mode and stamps <code>linkOrigin</code></div>
           <div class="pd-a">starts</div>
@@ -403,7 +403,7 @@ liquid integration
     </div></section>
 
     <section id="open" class="section"><h2>14. Open decisions</h2><div class="body">
-      <p>See <a href="../decisions/open-decisions.html">open-decisions.html</a>: building on T3 Code (ADR-0280 to ADR-0290; Windows <a href="../decisions/open-decisions.html#d-107">D-107</a>) and AgentPulse formulas (<a href="../decisions/open-decisions.html#d-010">D-010</a>). Host-scoped execution and multi-instance projection ownership are decided, not open.</p>
+      <p>See <a href="../decisions/open-decisions.html">open-decisions.html</a>: building on T3 Code (ADR-0280 to ADR-0291) and AgentPulse formulas (<a href="../decisions/open-decisions.html#d-010">D-010</a>). Host-scoped execution and multi-instance projection ownership are decided, not open.</p>
     </div></section>
   </main>
 </div>
