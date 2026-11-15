@@ -56,6 +56,23 @@ class UnreachableProject extends FakeProject {
       Future.error('the host is down');
 }
 
+/// A session whose title read waits for `gate`, so a switch can happen while it is in flight.
+class GatedTitle extends FakeSession {
+  Completer<void>? gate;
+
+  @override
+  Future<String> title() async {
+    await gate?.future;
+    return super.title();
+  }
+}
+
+/// A session whose stream cannot be subscribed to.
+class UnsubscribableSession extends FakeSession {
+  @override
+  Future<BridgeSnapshot> subscribe() => Future.error('the stream is gone');
+}
+
 void main() {
   late FakeSession session;
   late FakeProject project;
@@ -167,6 +184,27 @@ void main() {
 
       expect(state.sessionTitle.value, 'Fix login');
       expect(state.model.value, choiceOf('claude-haiku'));
+    });
+
+    test('a switch while the title is read keeps the title and model of the session it left out', () async {
+      final gate = Completer<void>();
+      project.session = GatedTitle()
+        ..gate = gate
+        ..sessionTitle = 'Old title'
+        ..chosen = choiceOf('old-model');
+      unawaited(state.open('thread-1'));
+      await pumpEventQueue();
+
+      project.session = FakeSession(id: 'thread-2')
+        ..sessionTitle = 'New title'
+        ..chosen = choiceOf('new-model');
+      await state.open('thread-2');
+      await pumpEventQueue();
+      gate.complete();
+      await pumpEventQueue();
+
+      expect(state.sessionTitle.value, 'New title');
+      expect(state.model.value, choiceOf('new-model'));
     });
 
     test('opening restores the snapshot and skips the events it already holds (ADR-0290)', () async {
@@ -682,6 +720,18 @@ void main() {
       expect(
         state.notice.value?.text,
         'Could not open the session: the session is gone',
+      );
+    });
+
+    test('a session that cannot subscribe is a notice, not an unhandled error', () async {
+      project.session = UnsubscribableSession();
+
+      await state.open('thread-1');
+      await pumpEventQueue();
+
+      expect(
+        state.notice.value?.text,
+        'Could not open the session: the stream is gone',
       );
     });
 

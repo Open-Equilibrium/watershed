@@ -327,6 +327,29 @@ void main() {
     expect(project.calls, contains('delete thread-2 worktree=true'));
   });
 
+  testWidgets('a worktree check that fails stops the delete and says why', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      threads: [
+        threadOf('thread-2', title: 'Fix login', worktree: '/worktrees/fix'),
+      ],
+    );
+    project.onlyInWorktreeError = 'the worktree is locked';
+    await tester.tap(find.text('Fix login'), buttons: kSecondaryButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Confirm'));
+    await tester.pumpAndSettle();
+    expect(
+      state.notice.value?.text,
+      'Could not delete the session: the worktree is locked',
+    );
+    expect(project.calls.where((call) => call.startsWith('delete')), isEmpty);
+  });
+
   testWidgets(
     'a thread exports its record into Downloads and shows the folder',
     (tester) async {

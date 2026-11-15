@@ -350,6 +350,55 @@ fn requests_cross_as_approvals_or_questions_and_their_resolution_by_id() {
 }
 
 #[test]
+fn approvals_and_questions_write_out_the_hidden_characters_the_chat_shows() {
+    let request = convert::request(PendingRequest {
+        id: RequestId("r1".to_owned()),
+        turn: TurnId(2),
+        request: Request::Approval {
+            kind: "command".to_owned(),
+            prompt: "rm\u{202E}x\nls".to_owned(),
+            reason: Some("why\u{2066}".to_owned()),
+            options: vec![ApprovalOption {
+                decision: "accept".to_owned(),
+                label: "Allow\u{200B}".to_owned(),
+                warning: Some("careful\u{202E}\nnow".to_owned()),
+            }],
+        },
+    });
+    let approval = request.approval.expect("the approval");
+    assert_eq!(
+        approval.prompt, "rm<U+202E>x\nls",
+        "a prompt keeps its line breaks"
+    );
+    assert_eq!(approval.reason.as_deref(), Some("why<U+2066>"));
+    assert_eq!(approval.options[0].label, "Allow<U+200B>");
+    assert_eq!(
+        approval.options[0].warning.as_deref(),
+        Some("careful<U+202E>\nnow")
+    );
+
+    let request = convert::request(PendingRequest {
+        id: RequestId("q1".to_owned()),
+        turn: TurnId(2),
+        request: Request::Questions(vec![Question {
+            id: "which".to_owned(),
+            header: "Pick\u{200B}\nnow".to_owned(),
+            question: "Which?\u{202E}".to_owned(),
+            options: vec![("a".to_owned(), "The\u{202E} first".to_owned())],
+            multi_select: false,
+            custom: true,
+        }]),
+    });
+    let question = &request.questions[0];
+    assert_eq!(
+        question.header, "Pick<U+200B><U+000A>now",
+        "a header stays on one line"
+    );
+    assert_eq!(question.question, "Which?<U+202E>");
+    assert_eq!(question.descriptions, ["The<U+202E> first"]);
+}
+
+#[test]
 fn a_snapshot_carries_its_turns_each_with_its_status_and_its_transcript() {
     let turn = |number, status| Turn {
         number,
@@ -637,5 +686,36 @@ fn a_git_status_crosses_with_its_changes_counts_and_pull_request() {
                 base: "main".to_owned(),
             }),
         }
+    );
+}
+
+#[test]
+fn a_question_s_options_show_hidden_characters_and_answer_with_the_agent_s_labels() {
+    let questions = vec![Question {
+        id: "pick".to_owned(),
+        header: "Pick".to_owned(),
+        question: "Which?".to_owned(),
+        options: vec![
+            ("keep\u{202e}".to_owned(), String::new()),
+            ("drop".to_owned(), String::new()),
+        ],
+        multi_select: true,
+        custom: true,
+    }];
+    let shown = convert::request(PendingRequest {
+        id: RequestId("r".to_owned()),
+        turn: TurnId(1),
+        request: Request::Questions(questions.clone()),
+    });
+    assert_eq!(shown.questions[0].options, vec!["keep<U+202E>", "drop"]);
+    // The card answers with what it showed; the agent gets its own label back, and typed text
+    // stays as typed.
+    assert_eq!(
+        convert::answer_values(
+            &questions,
+            "pick",
+            vec!["keep<U+202E>".to_owned(), "typed".to_owned()]
+        ),
+        vec!["keep\u{202e}", "typed"]
     );
 }

@@ -34,7 +34,7 @@ const STREAM_WINDOW: std::time::Duration = std::time::Duration::from_millis(50);
 pub(crate) const WINDOW: usize = 256;
 
 /// Most events held back for Liquid while the window is full, counted after merging. It equals
-/// the window, so the bridge holds at most about twice the core's buffer. Past it, partial output
+/// the window, so the bridge holds at most twice the window. Past it, partial output
 /// goes and Liquid falls behind; other events are never dropped (ADR-0272).
 pub(crate) const PENDING_LIMIT: usize = 256;
 
@@ -112,7 +112,9 @@ impl Outbox {
     }
 
     /// Whether the stream takes more events from the session. It does not while what waits is
-    /// past the bound, so the core's buffer fills and pauses the agent until Liquid confirms.
+    /// past the bound: the events then queue in this subscriber's channel, and a full channel
+    /// makes the core drop the subscriber rather than pause the agent, so the stream resubscribes
+    /// behind a fell-behind event.
     pub(crate) fn open(&self) -> bool {
         self.pending.len() <= PENDING_LIMIT
     }
@@ -141,15 +143,15 @@ fn is_partial(event: &BridgeEvent) -> bool {
     event.kind == BridgeEventKind::ContentDelta
 }
 
-/// Waits until a confirmation reopens the window, which gives `None`, or the next event arrives,
-/// which gives `Some`: `Some(None)` once the session's events ended.
-async fn next_while_full(
+/// Waits until a confirmation or the session's drop wakes the forwarder, which gives `None`, or
+/// the next event arrives, which gives `Some`: `Some(None)` once the session's events ended.
+async fn next_or_wake(
     credit: &Credit,
     receiver: &mut mpsc::Receiver<ThreadEvent>,
 ) -> Option<Option<ThreadEvent>> {
-    let mut reopened = Box::pin(credit.wait());
+    let mut woken = Box::pin(credit.wait());
     std::future::poll_fn(|context| {
-        if reopened.as_mut().poll(context).is_ready() {
+        if woken.as_mut().poll(context).is_ready() {
             return std::task::Poll::Ready(None);
         }
         receiver.poll_recv(context).map(Some)
@@ -178,38 +180,34 @@ pub(crate) async fn forward(
             // Dart closed the stream.
             return;
         }
-        if outbox.pending.is_empty() {
-            // Nothing waits: take the next event with the text that streams after it.
-            match receiver.recv().await {
-                Some(event) => outbox.admit(BridgeEvent::from(event)),
-                None => {
-                    receiver = resubscribe();
-                    outbox.fell_behind();
-                    continue;
-                }
-            }
-            // Bounded by the window, so a busy agent never holds delivery back.
-            gather(
-                &mut outbox,
-                &mut receiver,
-                tokio::time::sleep(STREAM_WINDOW),
-            )
-            .await;
-        } else if !outbox.open() {
+        if !outbox.open() {
             // Nothing more is taken until Liquid confirms what waits.
             credit.wait().await;
-        } else {
-            // The window is full: events keep merging until a confirmation sends what waits.
-            match next_while_full(&credit, &mut receiver).await {
-                Some(Some(event)) => outbox.admit(BridgeEvent::from(event)),
-                Some(None) => {
-                    receiver = resubscribe();
-                    if !outbox.behind {
-                        outbox.fell_behind();
-                    }
+            continue;
+        }
+        // Events keep merging until a confirmation sends what waits; with nothing waiting, the
+        // next event starts a batch.
+        let idle = outbox.pending.is_empty();
+        match next_or_wake(&credit, &mut receiver).await {
+            Some(Some(event)) => {
+                outbox.admit(BridgeEvent::from(event));
+                if idle {
+                    // Bounded by the window, so a busy agent never holds delivery back.
+                    gather(
+                        &mut outbox,
+                        &mut receiver,
+                        tokio::time::sleep(STREAM_WINDOW),
+                    )
+                    .await;
                 }
-                None => {}
             }
+            Some(None) => {
+                receiver = resubscribe();
+                if !outbox.behind {
+                    outbox.fell_behind();
+                }
+            }
+            None => {}
         }
     }
 }

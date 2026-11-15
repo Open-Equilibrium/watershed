@@ -131,13 +131,13 @@ Execution ownership is host-local: the Meta-Harness core, embedded in Liquid (AD
 
 ## Meta-Harness agent sessions
 
-Meta-Harness starts its own T3 Code server at the pinned version (ADR-0281) on 127.0.0.1 only, with telemetry off and without the activity publishing that `t3 connect` would set up. It authenticates as T3's owner with a bearer token it issues locally for each connection and never logs. T3's data folder belongs to this Meta-Harness alone; a T3 server a dead Meta-Harness left running there is stopped before a new one starts, after checking that the recorded process still runs the pinned `t3 serve`.
+Meta-Harness starts its own T3 Code server at the pinned version (ADR-0281) on 127.0.0.1 only, with telemetry off and without the activity publishing that `t3 connect` would set up. It authenticates as T3's owner with a bearer token it issues locally for each connection and never logs. T3's data folder belongs to one Liquid. Before a new T3 server starts, the process named in the folder's `server-runtime.json` is stopped if it still runs the pinned `t3 serve`; that covers a server a dead Meta-Harness left running and a live server of a second Liquid on the same folder.
 
 Meta-Harness leaves governance to the harness (ADR-0252). What an agent may do without asking is T3's Permissions choice, Full access by default as in T3; then the agent and every tool call run with the user's operating-system permissions. The queue to Liquid is bounded by count, not bytes: at most 256 events are sent and unconfirmed and at most 256 more wait, merged; past that, waiting streaming text is dropped and Liquid reloads the Chat from a snapshot (ADR-0272, ADR-0290). A misbehaving agent that sends huge events can still exhaust Liquid's memory, an accepted risk of a trusted agent (ADR-0273).
 
-The tool names and targets the Chat shows, and the Diff panel's file names and lines, write out the characters that could hide or reorder what a call does or changed, such as `<U+202E>`.
+The tool names and targets, the approval prompts with their reasons, options and warnings, the questions with their headers, options and descriptions the Chat shows, and the Diff panel's file names and lines, write out the characters that could hide or reorder what a call does or changed, such as `<U+202E>`.
 
-“Export record” writes T3's record of the session, with its prompts and tool output, and the files each turn changed into a new folder in Downloads. The copies are plain files with the person's permissions, unencrypted, and Watershed never sends them anywhere; the record claims no completeness (ADR-0257).
+“Export record” writes T3's record of the session, with its prompts and tool output, into a new folder in Downloads, along with each turn's changed file paths and line counts; it copies no file contents. The copies are plain files with the person's permissions, unencrypted, and Watershed never sends them anywhere; the record claims no completeness (ADR-0257).
 
 The agent can change any file the user can, including settings that run commands, such as shell profiles, launch agents and Git settings. The Diff panel shows what T3's checkpoints captured and claims no completeness (ADR-0222). Hiding whitespace changes also hides changes whose whitespace alters meaning, such as Python indentation.
 

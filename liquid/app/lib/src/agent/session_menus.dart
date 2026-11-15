@@ -169,7 +169,14 @@ Future<void> confirmDeleteSession(
   if (confirmed != true || !context.mounted) return;
   final worktree = thread.worktree;
   var deleteWorktree = false;
-  if (worktree != null && await state.onlySessionInWorktree(thread.id)) {
+  var only = false;
+  try {
+    only = worktree != null && await state.onlySessionInWorktree(thread.id);
+  } on Object catch (error) {
+    state.notify(NoticeLevel.error, 'Could not delete the session: $error');
+    return;
+  }
+  if (only) {
     if (!context.mounted) return;
     deleteWorktree =
         await showDialog<bool>(

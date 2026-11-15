@@ -1,10 +1,10 @@
-//! Meta-Harness's types as the bridge hands them to Dart. Names and targets cross with hiding
-//! characters written out.
+//! Meta-Harness's types as the bridge hands them to Dart. Names, targets and the text the Chat
+//! shows cross with hiding characters written out.
 
 use meta_harness_core::{
     AgentEvent, ChatItem, Context, GitStatus, ItemDetail, ItemKind, ItemStatus, ModelChoice,
-    PendingRequest, Provider, Request, Snapshot, Statistics, ThreadEvent, ThreadSummary, Turn,
-    TurnStatus, Usage, visible_lines, visible_name,
+    PendingRequest, Provider, Question, Request, Snapshot, Statistics, ThreadEvent, ThreadSummary,
+    Turn, TurnStatus, Usage, visible, visible_lines, visible_name,
 };
 
 use crate::api::events::{
@@ -82,6 +82,24 @@ fn usage(usage: Usage) -> BridgeUsage {
     }
 }
 
+/// The answer to question `id` as the agent sent its options: each option label the card showed
+/// written out becomes the agent's label again; typed text stays as typed.
+pub(crate) fn answer_values(questions: &[Question], id: &str, values: Vec<String>) -> Vec<String> {
+    let options = questions
+        .iter()
+        .find(|q| q.id == id)
+        .map_or(&[][..], |q| &q.options[..]);
+    values
+        .into_iter()
+        .map(|value| {
+            options
+                .iter()
+                .find(|(label, _)| visible_name(label) == value)
+                .map_or(value, |(label, _)| label.clone())
+        })
+        .collect()
+}
+
 pub(crate) fn request(pending: PendingRequest) -> BridgeRequest {
     let (approval, questions) = match pending.request {
         Request::Approval {
@@ -92,14 +110,14 @@ pub(crate) fn request(pending: PendingRequest) -> BridgeRequest {
         } => (
             Some(BridgeApproval {
                 kind,
-                prompt,
-                reason,
+                prompt: visible(&prompt),
+                reason: reason.map(|reason| visible(&reason)),
                 options: options
                     .into_iter()
                     .map(|o| BridgeApprovalOption {
                         decision: o.decision,
-                        label: o.label,
-                        warning: o.warning,
+                        label: visible_name(&o.label),
+                        warning: o.warning.map(|warning| visible(&warning)),
                     })
                     .collect(),
             }),
@@ -111,10 +129,15 @@ pub(crate) fn request(pending: PendingRequest) -> BridgeRequest {
                 .into_iter()
                 .map(|q| BridgeQuestion {
                     id: q.id,
-                    header: q.header,
-                    question: q.question,
-                    descriptions: q.options.iter().map(|(_, d)| d.clone()).collect(),
-                    options: q.options.into_iter().map(|(label, _)| label).collect(),
+                    header: visible_name(&q.header),
+                    question: visible(&q.question),
+                    descriptions: q.options.iter().map(|(_, d)| visible(d)).collect(),
+                    // Written out; `answer_values` gives the agent its own labels back.
+                    options: q
+                        .options
+                        .iter()
+                        .map(|(label, _)| visible_name(label))
+                        .collect(),
                     multi_select: q.multi_select,
                     custom: q.custom,
                 })

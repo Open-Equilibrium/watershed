@@ -460,14 +460,24 @@ class SessionState {
       _detach().then((_) async {
         _session = next;
         final generation = ++_generation;
-        _setGit(next.git());
-        final snapshot = await next.subscribe();
-        if (generation != _generation) return;
-        _restore(snapshot);
-        _subscription = next.events().listen(_receive);
-        sessionTitle.value = await next.title();
-        final chosen = await next.model();
-        if (chosen != null) model.value = chosen;
+        try {
+          _setGit(next.git());
+          final snapshot = await next.subscribe();
+          if (generation != _generation) return;
+          _restore(snapshot);
+          _subscription = next.events().listen(_receive);
+          final title = await next.title();
+          if (generation != _generation) return;
+          sessionTitle.value = title;
+          final chosen = await next.model();
+          if (generation != _generation) return;
+          if (chosen != null) model.value = chosen;
+        } on Object catch (error) {
+          if (generation == _generation) {
+            notify(NoticeLevel.error, 'Could not open the session: $error');
+          }
+          return;
+        }
         unawaited(readStatistics());
         unawaited(readChanges());
       }),

@@ -26,6 +26,9 @@ class FakeProject implements ProjectBackend {
   /// What [start] and [open] fail with.
   Object? openError;
 
+  /// What [onlySessionInWorktree] fails with.
+  Object? onlyInWorktreeError;
+
   @override
   Future<List<BridgeThreadSummary>> threads() async => threadList;
 
@@ -52,7 +55,10 @@ class FakeProject implements ProjectBackend {
   }
 
   @override
-  Future<bool> onlySessionInWorktree(String id) async => onlyInWorktree;
+  Future<bool> onlySessionInWorktree(String id) async {
+    if (onlyInWorktreeError case final error?) throw error;
+    return onlyInWorktree;
+  }
 
   @override
   Future<void> delete(String id, {required bool worktree}) async =>

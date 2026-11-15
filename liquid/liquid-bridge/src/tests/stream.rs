@@ -301,6 +301,33 @@ fn closing_the_credit_releases_a_forwarder_that_waits_on_a_dropped_session() {
 }
 
 #[test]
+fn closing_the_credit_releases_a_forwarder_that_waits_for_the_next_event() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let probe = Arc::new(());
+        let held = probe.clone();
+        // The session's sender stays open, as the core keeps a dropped thread's subscriber until
+        // the thread's next event.
+        let (_events, receiver) = tokio::sync::mpsc::channel(16);
+        let forwarding = tokio::spawn(forward(receiver, never, credit.clone(), move |_event| {
+            let _held = &held;
+            true
+        }));
+        settle().await;
+        credit.close();
+        tokio::time::timeout(Duration::from_secs(1), forwarding)
+            .await
+            .expect("forward returns once the session closed, without waiting for an event")
+            .expect("forward completes");
+        assert_eq!(
+            Arc::strong_count(&probe),
+            1,
+            "the forwarder released its sink"
+        );
+    });
+}
+
+#[test]
 fn falling_behind_keeps_finished_items_and_sends_one_fell_behind_event() {
     paused_runtime().block_on(async {
         let credit = Arc::new(Credit::default());
