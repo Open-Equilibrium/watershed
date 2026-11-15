@@ -224,6 +224,28 @@ fn segmented_stream_rejects_malformed_reserved_names() {
     }
 }
 
+// Linux is the only target here whose filesystems accept arbitrary bytes in names.
+#[cfg(target_os = "linux")]
+#[test]
+fn segmented_stream_rejects_non_utf8_reserved_names() {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt as _};
+
+    let workspace = empty_workspace("segment-non-utf8-reserved-name");
+    let reservation =
+        reserve_session_log(&workspace, "segmentnonutf001").expect("session reserved");
+    let malformed = reservation
+        .session_path
+        .parent
+        .file(OsString::from_vec(b"segmentnonutf001.\xff.jsonl".to_vec()));
+    fs::write(malformed.diagnostic_path(), b"omitted\n")
+        .expect("non-UTF-8 reserved-name fixture writes");
+
+    let err = segmented_jsonl_files(&reservation.session_path, EVENT_STREAM_LIMITS)
+        .expect_err("non-UTF-8 reserved segment name is rejected");
+    assert!(err.to_string().contains("malformed"), "{err}");
+    reservation.release_lock().expect("reservation rolls back");
+}
+
 #[test]
 fn segmented_stream_rejects_case_aliased_names() {
     for base_alias in [true, false] {

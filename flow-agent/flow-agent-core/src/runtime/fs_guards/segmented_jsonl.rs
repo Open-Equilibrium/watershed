@@ -4,7 +4,7 @@ use super::{
 };
 #[cfg(test)]
 use std::cell::Cell;
-use std::ops::ControlFlow;
+use std::{ops::ControlFlow, os::unix::ffi::OsStrExt as _};
 
 const JSONL_SUFFIX: &str = ".jsonl";
 const MAX_SEGMENT_ORDINAL: u64 = 999_999;
@@ -102,6 +102,14 @@ pub fn parse_segmented_jsonl_leaf(name: &str, stem: &str) -> SegmentedJsonlLeaf 
     }
 }
 
+/// Same reserved shape as `parse_segmented_jsonl_leaf` (`<stem>.<ordinal>.jsonl`), on raw bytes.
+fn is_reserved_segment_name_bytes(name: &[u8], folded_stem: &str) -> bool {
+    name.to_ascii_lowercase()
+        .strip_prefix(folded_stem.as_bytes())
+        .and_then(|rest| rest.strip_prefix(b"."))
+        .is_some_and(|rest| rest.ends_with(JSONL_SUFFIX.as_bytes()))
+}
+
 pub fn segmented_jsonl_path(
     base: &AnchoredFile,
     ordinal: u64,
@@ -161,6 +169,14 @@ pub fn for_each_segmented_jsonl_member(
         let entry = entry.map_err(|source| path_io_error(&base.parent.path, source))?;
         let name = entry.file_name();
         let Some(name) = name.to_str() else {
+            // A non-UTF-8 name cannot be canonical, but one with the reserved shape is malformed.
+            if is_reserved_segment_name_bytes(name.as_bytes(), &folded_leaf) {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} contains malformed segmented JSONL name {}",
+                    base.parent.path.display(),
+                    name.to_string_lossy()
+                )));
+            }
             continue;
         };
         let candidate = name.to_ascii_lowercase();
