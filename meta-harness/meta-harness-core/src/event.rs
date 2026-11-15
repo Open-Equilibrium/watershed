@@ -120,6 +120,63 @@ pub struct SessionTree {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RequestId(pub String);
 
+/// A request the agent waits on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingRequest {
+    /// The request.
+    pub id: RequestId,
+    /// The turn that asks.
+    pub turn: TurnId,
+    /// What it asks.
+    pub request: Request,
+}
+
+/// What a request asks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Request {
+    /// Approve an action.
+    Approval {
+        /// T3's request kind, such as `command`, `file_change` or `file_read`.
+        kind: String,
+        /// The command, path or other detail.
+        prompt: String,
+        /// Why the agent asks, if it said.
+        reason: Option<String>,
+        /// The choices, in T3's order.
+        options: Vec<ApprovalOption>,
+    },
+    /// Answer one or more questions.
+    Questions(Vec<Question>),
+}
+
+/// One choice of an approval.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovalOption {
+    /// T3's decision: `accept`, `acceptForSession`, `acceptAlways`, `decline` or `cancel`.
+    pub decision: String,
+    /// The label.
+    pub label: String,
+    /// A warning shown with it.
+    pub warning: Option<String>,
+}
+
+/// One question the agent asks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Question {
+    /// The id its answer is sent under.
+    pub id: String,
+    /// A short header.
+    pub header: String,
+    /// The question, in Markdown.
+    pub question: String,
+    /// The options, as label and description.
+    pub options: Vec<(String, String)>,
+    /// Whether several options may be chosen.
+    pub multi_select: bool,
+    /// Whether a typed answer is allowed.
+    pub custom: bool,
+}
+
 /// A question an agent extension asks the user.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UserInput {
@@ -205,6 +262,16 @@ pub enum AgentEvent {
         turn: TurnId,
         /// The turn's checkpoint id, which names its end checkpoint; absent when it requested none.
         checkpoint: Option<String>,
+    },
+    /// The agent asks the person to approve an action or answer questions.
+    RequestOpened {
+        /// The request.
+        request: PendingRequest,
+    },
+    /// The person, or T3, resolved a request.
+    RequestResolved {
+        /// The request.
+        request: RequestId,
     },
     /// Turns were reverted and left the thread; the Chat reloads from a snapshot.
     RolledBack,

@@ -2,8 +2,9 @@
 """A deterministic ACP agent for the T3 contract tests; no model and no account.
 
 The first prompt line that is a script line decides, up to any tag T3 appends to it:
-"append <text>" appends <text> to contract.txt in the session's folder through one tool call and answers "Appended."; "wait" runs until T3 cancels
-it; anything else answers "Done."."""
+"append <text>" appends <text> to contract.txt in the session's folder through one tool call and answers "Appended."; "ask" asks permission for an
+edit and answers "Approved." or "Declined."; "wait" runs until T3 cancels it; anything else
+answers "Done."."""
 import json
 import os
 import sys
@@ -11,6 +12,7 @@ import threading
 
 sessions = {}
 cancelled = {}
+replies = {}
 
 
 def send(message):
@@ -36,6 +38,18 @@ def prompt(mid, sid, script):
         update(sid, {"sessionUpdate": "tool_call_update", "toolCallId": f"t{mid}", "status": "completed"})
         say(sid, "Appended.")
         reason = "end_turn"
+    elif script == "ask":
+        asked = threading.Event()
+        replies[f"p{mid}"] = [asked, None]
+        send({"jsonrpc": "2.0", "id": f"p{mid}", "method": "session/request_permission", "params": {
+            "sessionId": sid,
+            "toolCall": {"toolCallId": f"t{mid}", "title": "Edit contract.txt", "kind": "edit"},
+            "options": [{"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+                        {"optionId": "reject", "name": "Reject", "kind": "reject_once"}]}})
+        asked.wait()
+        outcome = replies.pop(f"p{mid}")[1].get("outcome", {})
+        say(sid, "Approved." if outcome.get("optionId") == "allow" else "Declined.")
+        reason = "end_turn"
     elif script == "wait":
         cancelled[sid].wait()
         reason = "cancelled"
@@ -50,7 +64,10 @@ for raw in sys.stdin:
         continue
     msg = json.loads(raw)
     method, mid, params = msg.get("method"), msg.get("id"), msg.get("params") or {}
-    if method == "initialize":
+    if method is None and mid in replies:
+        replies[mid][1] = msg.get("result") or {}
+        replies[mid][0].set()
+    elif method == "initialize":
         send({"jsonrpc": "2.0", "id": mid, "result": {
             "protocolVersion": 1, "agentCapabilities": {"loadSession": False}, "authMethods": [],
             "agentInfo": {"name": "scripted", "version": "0.0.1"}}})
@@ -64,7 +81,7 @@ for raw in sys.stdin:
         cancelled[sid].clear()
         text = "".join(p.get("text", "") for p in params.get("prompt", []) if p.get("type") == "text")
         lines = [line.split("<")[0].strip() for line in text.splitlines()]
-        script = next((line for line in lines if line.startswith("append ") or line == "wait"), "")
+        script = next((line for line in lines if line.startswith("append ") or line in ("ask", "wait")), "")
         threading.Thread(target=prompt, args=(mid, sid, script)).start()
     elif method == "session/cancel":
         cancelled[params["sessionId"]].set()

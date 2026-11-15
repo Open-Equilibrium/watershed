@@ -24,7 +24,8 @@ pub(crate) enum Change {
     Run(Option<Value>),
     TurnItem(Option<Value>),
     ProviderTurn,
-    RuntimeRequest,
+    /// Whether the request was pending before.
+    RuntimeRequest(bool),
     Checkpoint,
     Other,
 }
@@ -71,8 +72,8 @@ impl Projection {
                 Change::ProviderTurn
             }
             "runtime-request.updated" => {
-                upsert(&mut self.runtime_requests, payload);
-                Change::RuntimeRequest
+                let before = upsert(&mut self.runtime_requests, payload);
+                Change::RuntimeRequest(before.is_some_and(|r| r["status"] == "pending"))
             }
             "message.updated" => {
                 upsert(&mut self.messages, payload);

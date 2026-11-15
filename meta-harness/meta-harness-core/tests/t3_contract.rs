@@ -8,8 +8,8 @@ use std::process::Command;
 use std::time::Duration;
 
 use meta_harness_core::{
-    AcpAgent, AgentEvent, Host, HostConfig, Snapshot, StartThread, Thread, ThreadEvent, TurnStatus,
-    Workspace,
+    AcpAgent, AgentEvent, Host, HostConfig, Permissions, Request, Snapshot, StartThread, Thread,
+    ThreadEvent, TurnStatus, Workspace,
 };
 
 const AGENT: &str = "scripted";
@@ -109,6 +109,7 @@ async fn a_thread_runs_turns_and_reverts_files_in_its_worktree() {
             workspace: Workspace::NewWorktree {
                 base: "main".to_owned(),
             },
+            permissions: Permissions::FullAccess,
         })
         .await
         .unwrap();
@@ -156,6 +157,7 @@ async fn a_snapshot_names_the_events_it_already_contains() {
             workspace: Workspace::NewWorktree {
                 base: "main".to_owned(),
             },
+            permissions: Permissions::FullAccess,
         })
         .await
         .unwrap();
@@ -174,6 +176,42 @@ async fn a_snapshot_names_the_events_it_already_contains() {
             .iter()
             .any(|e| matches!(e.event, AgentEvent::TurnCompleted { .. }))
     );
+    host.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_supervised_thread_waits_for_the_person_to_approve() {
+    let (_dir, repo, home) = fixture();
+    let host = host(&home).await;
+    let project = host.project(&repo).await.unwrap();
+    let thread = project
+        .start(StartThread {
+            text: "ask".to_owned(),
+            instance: AGENT.to_owned(),
+            model: AGENT.to_owned(),
+            workspace: Workspace::Checkout,
+            permissions: Permissions::Supervised,
+        })
+        .await
+        .unwrap();
+    let (asked, mut events) = {
+        let snapshot = wait(&thread, |s| !s.requests.is_empty()).await;
+        (snapshot.requests[0].clone(), thread.subscribe().1)
+    };
+    let Request::Approval { options, .. } = &asked.request else {
+        panic!("an approval, not {asked:?}");
+    };
+    assert!(options.iter().any(|o| o.decision == "accept"));
+    thread.respond(&asked.id, "accept").await.unwrap();
+    let resolved = events.recv().await.unwrap();
+    let mut seen = vec![resolved.event];
+    let done = wait(&thread, completed(1)).await;
+    seen.extend(std::iter::from_fn(|| events.try_recv().ok()).map(|e| e.event));
+    assert!(seen.contains(&AgentEvent::RequestResolved {
+        request: asked.id.clone()
+    }));
+    assert!(done.requests.is_empty());
+    assert!(done.transcript.iter().any(|item| item.text == "Approved."));
     host.shutdown().await;
 }
 

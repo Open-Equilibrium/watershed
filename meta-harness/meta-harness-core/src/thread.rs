@@ -8,7 +8,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-use crate::event::{AgentEvent, ItemDetail, ItemId, ItemKind, ItemStatus, TurnId, Usage};
+use crate::event::{
+    AgentEvent, ApprovalOption, ItemDetail, ItemId, ItemKind, ItemStatus, PendingRequest, Question,
+    Request, RequestId, TurnId, Usage,
+};
 use crate::t3::{Change, Client, Projection, fresh_id, millis};
 
 /// Events a subscriber may fall behind by before it is dropped; it then restores from a new
@@ -101,6 +104,8 @@ pub struct Snapshot {
     pub turns: Vec<Turn>,
     /// The Chat's items in T3's order, without reverted ones.
     pub transcript: Vec<ChatItem>,
+    /// Requests the agent waits on, oldest first.
+    pub requests: Vec<PendingRequest>,
 }
 
 struct State {
@@ -279,6 +284,53 @@ impl Thread {
         Ok(prompt)
     }
 
+    /// Answers an approval with one of its options' decisions.
+    pub async fn respond(&self, request: &RequestId, decision: &str) -> Result<(), String> {
+        self.dispatch(json!({
+            "type": "runtime-request.respond",
+            "requestId": request.0,
+            "decision": decision,
+        }))
+        .await
+    }
+
+    /// Answers questions: each question id with its chosen labels or typed text.
+    pub async fn answer(
+        &self,
+        request: &RequestId,
+        answers: &[(String, Vec<String>)],
+    ) -> Result<(), String> {
+        let answers: serde_json::Map<String, Value> = answers
+            .iter()
+            .map(|(id, values)| {
+                let value = match values.as_slice() {
+                    [one] if !self.multi_select(request, id) => json!(one),
+                    _ => json!(values),
+                };
+                (id.clone(), value)
+            })
+            .collect();
+        self.dispatch(json!({
+            "type": "runtime-request.respond",
+            "requestId": request.0,
+            "answers": answers,
+        }))
+        .await
+    }
+
+    /// Dismisses questions without answering.
+    pub async fn dismiss(&self, request: &RequestId) -> Result<(), String> {
+        self.dispatch(json!({"type": "thread.user-input.dismiss", "requestId": request.0}))
+            .await
+    }
+
+    fn multi_select(&self, request: &RequestId, question: &str) -> bool {
+        self.snapshot().requests.iter().any(|r| {
+            r.id == *request
+                && matches!(&r.request, Request::Questions(qs) if qs.iter().any(|q| q.id == question && q.multi_select))
+        })
+    }
+
     async fn dispatch(&self, mut command: Value) -> Result<(), String> {
         command["commandId"] = json!(fresh_id("cmd"));
         command["threadId"] = json!(self.id);
@@ -346,6 +398,11 @@ fn translate(state: &mut State, change: Change, payload: &Value) -> Vec<AgentEve
             if !state.projection.visible(payload) {
                 return Vec::new();
             }
+            if let Some(request) = pending(&state.projection, payload)
+                && before.is_none()
+            {
+                return vec![AgentEvent::RequestOpened { request }];
+            }
             let Some((kind, detail)) = describe(payload) else {
                 return Vec::new();
             };
@@ -395,7 +452,16 @@ fn translate(state: &mut State, change: Change, payload: &Value) -> Vec<AgentEve
             _ => Vec::new(),
         },
         Change::Checkpoint => vec![AgentEvent::TurnsChanged],
-        Change::Thread | Change::RuntimeRequest | Change::Other => Vec::new(),
+        Change::RuntimeRequest(was_pending) => {
+            if was_pending && payload["status"] != "pending" {
+                vec![AgentEvent::RequestResolved {
+                    request: RequestId(payload["id"].as_str().unwrap_or_default().to_owned()),
+                }]
+            } else {
+                Vec::new()
+            }
+        }
+        Change::Thread | Change::Other => Vec::new(),
     }
 }
 
@@ -423,6 +489,11 @@ fn snapshot(state: &mut State) -> Snapshot {
         sequence: state.sequence,
         turns: turns(&projection),
         transcript,
+        requests: projection
+            .turn_items
+            .iter()
+            .filter_map(|item| pending(&projection, item))
+            .collect(),
     }
 }
 
@@ -472,6 +543,80 @@ fn turns(projection: &Projection) -> Vec<Turn> {
             }
         })
         .collect()
+}
+
+/// The request a turn item asks, while T3 still waits for its answer.
+fn pending(projection: &Projection, item: &Value) -> Option<PendingRequest> {
+    let id = &item["requestId"];
+    let waiting = projection
+        .runtime_requests
+        .iter()
+        .any(|r| &r["id"] == id && r["status"] == "pending");
+    if !waiting {
+        return None;
+    }
+    let text = |value: &Value| value.as_str().unwrap_or_default().to_owned();
+    let request = match item["type"].as_str()? {
+        "approval_request" => {
+            let mut options: Vec<ApprovalOption> = item["options"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|o| ApprovalOption {
+                    decision: text(&o["decision"]),
+                    label: text(&o["label"]),
+                    warning: o["warning"].as_str().map(str::to_owned),
+                })
+                .collect();
+            if options.is_empty() {
+                // T3's own default choices when the provider offers none.
+                options = [
+                    ("cancel", "Cancel"),
+                    ("decline", "Decline"),
+                    ("acceptForSession", "Always allow this session"),
+                    ("accept", "Approve"),
+                ]
+                .map(|(decision, label)| ApprovalOption {
+                    decision: decision.to_owned(),
+                    label: label.to_owned(),
+                    warning: None,
+                })
+                .to_vec();
+            }
+            Request::Approval {
+                kind: text(&item["requestKind"]),
+                prompt: text(&item["prompt"]),
+                reason: item["reason"].as_str().map(str::to_owned),
+                options,
+            }
+        }
+        "user_input_request" => Request::Questions(
+            item["questions"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|q| Question {
+                    id: text(&q["id"]),
+                    header: text(&q["header"]),
+                    question: text(&q["question"]),
+                    options: q["options"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(|o| (text(&o["label"]), text(&o["description"])))
+                        .collect(),
+                    multi_select: q["multiSelect"].as_bool().unwrap_or_default(),
+                    custom: q["allowCustomAnswer"].as_bool().unwrap_or_default(),
+                })
+                .collect(),
+        ),
+        _ => return None,
+    };
+    Some(PendingRequest {
+        id: RequestId(text(id)),
+        turn: turn_of(projection, item),
+        request,
+    })
 }
 
 fn count(value: &Value) -> u32 {

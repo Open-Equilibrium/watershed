@@ -113,6 +113,31 @@ pub enum Workspace {
     },
 }
 
+/// What an agent may do without asking, as T3's Permissions control offers it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Permissions {
+    /// Ask before commands and file changes.
+    Supervised,
+    /// Auto-approve edits, ask before other actions.
+    AutoAcceptEdits,
+    /// Supported providers approve routine actions; others still ask.
+    Auto,
+    /// Allow commands and edits without prompts.
+    FullAccess,
+}
+
+impl Permissions {
+    /// T3's runtime mode.
+    pub(crate) fn mode(self) -> &'static str {
+        match self {
+            Self::Supervised => "approval-required",
+            Self::AutoAcceptEdits => "auto-accept-edits",
+            Self::Auto => "auto",
+            Self::FullAccess => "full-access",
+        }
+    }
+}
+
 /// A new thread's first prompt, agent and checkout.
 #[derive(Debug, Clone)]
 pub struct StartThread {
@@ -124,6 +149,8 @@ pub struct StartThread {
     pub model: String,
     /// Where it works.
     pub workspace: Workspace,
+    /// What the agent may do without asking.
+    pub permissions: Permissions,
 }
 
 /// A T3 project: one folder and its threads.
@@ -152,7 +179,7 @@ impl Project {
                     "projectId": self.id,
                     "title": start.text.lines().next().unwrap_or_default(),
                     "modelSelection": {"instanceId": start.instance, "model": start.model},
-                    "runtimeMode": "full-access",
+                    "runtimeMode": start.permissions.mode(),
                     "interactionMode": "default",
                     "workspaceStrategy": strategy,
                     "initialMessage": {"text": start.text, "attachments": []},

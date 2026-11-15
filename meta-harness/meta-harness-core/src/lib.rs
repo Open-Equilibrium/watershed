@@ -31,16 +31,16 @@ pub use diff::{
     without_credentials,
 };
 pub use event::{
-    AgentEvent, Answer, ChangedLines, CostByKind, Delivery, EntryKind, ItemDetail, ItemId,
-    ItemKind, ItemStatus, NotificationLevel, Queue, RequestId, SessionTree, TreeNode, TurnId,
-    Usage, UserInput,
+    AgentEvent, Answer, ApprovalOption, ChangedLines, CostByKind, Delivery, EntryKind, ItemDetail,
+    ItemId, ItemKind, ItemStatus, NotificationLevel, PendingRequest, Question, Queue, Request,
+    RequestId, SessionTree, TreeNode, TurnId, Usage, UserInput,
 };
 pub(crate) use framing::{Frame, LineFramer};
 pub use history::{
     ChangeCount, History, ModelUsage, Statistics, ToolCalls, Transcript, TranscriptItem,
     TurnCheckpoints, TurnStatistics,
 };
-pub use host::{AcpAgent, Host, HostConfig, Project, StartThread, Workspace};
+pub use host::{AcpAgent, Host, HostConfig, Permissions, Project, StartThread, Workspace};
 pub(crate) use pi::PiAdapter;
 pub use record::session_record;
 pub use session::{
