@@ -193,7 +193,8 @@ impl WorkingTree {
     /// What Git ignores in the place of files `changes` restores, which a revert deletes or
     /// overwrites: the restored paths with something already there, and the folders holding
     /// ignored files where a file returns, ending in `/`, or files where a restored file's
-    /// folder goes.
+    /// folder goes. Links are not followed: the first part of a path that is not a folder on
+    /// disk is the one in the way, and nothing below it counts (see [`Self::repository_near`]).
     pub async fn in_the_way(
         &self,
         changes: &[FileChange],
@@ -206,6 +207,17 @@ impl WorkingTree {
             .iter()
             .filter(|change| change.status == ChangeStatus::Added)
         {
+            let blocker = change
+                .path
+                .match_indices('/')
+                .map(|(end, _)| &change.path[..end])
+                .find(|folder| matches!(is_dir(folder), Ok(false)));
+            if let Some(folder) = blocker {
+                if !listed.contains(folder) {
+                    removed.insert(folder.to_owned());
+                }
+                continue;
+            }
             match is_dir(&change.path) {
                 Ok(true) if self.ignores_below(&change.path).await? => {
                     removed.insert(format!("{}/", change.path));
@@ -215,13 +227,6 @@ impl WorkingTree {
                     replaced.insert(change.path.clone());
                 }
                 _ => {}
-            }
-            let mut folder = change.path.as_str();
-            while let Some((parent, _)) = folder.rsplit_once('/') {
-                folder = parent;
-                if matches!(is_dir(folder), Ok(false)) && !listed.contains(folder) {
-                    removed.insert(folder.to_owned());
-                }
             }
         }
         Ok((replaced, removed))

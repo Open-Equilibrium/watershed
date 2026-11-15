@@ -741,3 +741,44 @@ fn the_search_for_repositories_stops_at_its_budget_and_counts_it_as_found() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_revert_lists_an_ignored_link_standing_in_a_folder_alone() {
+    run(async {
+        let repo = Repo::new("revert-link-in-the-way");
+        let outside = Repo::new("revert-link-outside");
+        std::fs::create_dir_all(repo.path().join("d")).expect("folder");
+        repo.write("d/x", "inside\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        let tree = WorkingTree::open(repo.path())
+            .await
+            .expect("repository opens");
+        let to = tree.snapshot().await.expect("snapshot");
+
+        // An ignored link now stands where the folder was, and a recent file lies at its target.
+        std::fs::remove_dir_all(repo.path().join("d")).expect("folder removed");
+        repo.write(".git/info/exclude", "/d\n");
+        std::os::unix::fs::symlink(outside.path(), repo.path().join("d")).expect("link");
+        outside.write("x", "outside\n");
+        let from = tree.snapshot().await.expect("snapshot");
+
+        let plan = tree.revert_planned(&from, &to).await.expect("planned");
+        assert_eq!(plan.confirmation.ignored, ["d"]);
+        tree.restore(
+            &to,
+            &plan.confirmation,
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+        .await
+        .expect("restored");
+        assert_eq!(
+            std::fs::read_to_string(outside.path().join("x")).expect("outside file"),
+            "outside\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("d/x")).expect("restored file"),
+            "inside\n"
+        );
+    });
+}
