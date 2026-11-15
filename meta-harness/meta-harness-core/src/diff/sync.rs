@@ -167,20 +167,36 @@ impl WorkingTree {
         }
         // A symbolic destination updates the branch it names, so that branch is checked.
         let reference = &transfer.confirmation.reference;
-        let reference = advertised
+        let symbolic = advertised.lines().find_map(|line| {
+            line.strip_prefix("ref: ")?
+                .strip_suffix(&format!("\t{reference}"))
+        });
+        // Protocol v0 reports only HEAD's symbolic target, so a destination at HEAD's commit whose
+        // target is not reported may be the default branch under another name. Protocol v2, the
+        // default, reports every target, so the configured version decides.
+        let v0 = matches!(
+            git_config(&self.root, &["--get", "protocol.version"])
+                .await?
+                .trim(),
+            "0" | "1"
+        );
+        let head = advertised
             .lines()
-            .find_map(|line| {
-                line.strip_prefix("ref: ")?
-                    .strip_suffix(&format!("\t{reference}"))
-            })
-            .unwrap_or(reference);
+            .filter(|line| !line.starts_with("ref: "))
+            .find_map(|line| line.strip_suffix("\tHEAD"));
+        let at_head = v0
+            && symbolic.is_none()
+            && head.is_some()
+            && advertised_commit(&advertised, &transfer)? == head;
+        let reference = symbolic.unwrap_or(reference);
         let default = status
             .default_branch
             .as_ref()
             .is_some_and(|branch| reference == format!("refs/heads/{branch}"))
             || advertised
                 .lines()
-                .any(|line| line == format!("ref: {reference}\tHEAD"));
+                .any(|line| line == format!("ref: {reference}\tHEAD"))
+            || at_head;
         // A stale approval always asks again, even if the new destination is not a default.
         if (default && confirmed != Some(&transfer.confirmation))
             || confirmed.is_some_and(|confirmed| *confirmed != transfer.confirmation)

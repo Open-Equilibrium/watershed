@@ -504,6 +504,38 @@ fn push_confirms_a_destination_that_names_the_default_branch_symbolically() {
 }
 
 #[test]
+fn a_protocol_v0_destination_at_the_default_commit_asks_for_approval() {
+    run(async {
+        // Protocol v0 reports only HEAD's symbolic target, so `review` looks like a plain branch.
+        let remote = Remote::new("push-v0-alias");
+        remote
+            .bare
+            .git(&["symbolic-ref", "refs/heads/review", "refs/heads/main"]);
+        remote.repo.git(&["config", "protocol.version", "0"]);
+        remote.repo.git(&["switch", "-c", "feature"]);
+        remote
+            .repo
+            .git(&["config", "branch.feature.remote", "origin"]);
+        remote
+            .repo
+            .git(&["config", "branch.feature.merge", "refs/heads/review"]);
+        Remote::commit(&remote.repo, "local.txt");
+        let before = remote.bare.git(&["rev-parse", "main"]);
+        let tree = crate::diff::WorkingTree::open(remote.repo.path())
+            .await
+            .expect("repository");
+
+        let result = tree.prepare_push(None).await;
+
+        assert!(
+            matches!(result, Err(DiffError::PushDefault(_))),
+            "{result:?}"
+        );
+        assert_eq!(remote.bare.git(&["rev-parse", "main"]), before);
+    });
+}
+
+#[test]
 fn push_refuses_short_upstream_refs_and_confirms_the_cached_default() {
     run(async {
         for case in ["short", "cached"] {
