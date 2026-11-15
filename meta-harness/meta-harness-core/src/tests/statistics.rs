@@ -460,3 +460,56 @@ fn a_model_name_shows_hidden_characters_written_out() {
     assert_eq!(statistics.models[0].model, "fa<U+202E>ux/faux-1");
     assert_eq!(statistics.turns[0].models[0].model, "fa<U+202E>ux/faux-1");
 }
+
+/// The duration a tool's total shows, by tool name.
+fn tool_duration(statistics: &Statistics, name: &str) -> Option<u64> {
+    statistics
+        .tools
+        .iter()
+        .find(|tool| tool.name == name)
+        .and_then(|tool| tool.duration_ms)
+}
+
+#[test]
+fn repeated_call_ids_pair_each_timing_with_the_result_after_it() {
+    let statistics = counted(
+        r#"{"entries":[
+          {"type":"message","id":"u1","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z","message":{"role":"user","content":"Hi"}},
+          {"type":"message","id":"a1","parentId":"u1","timestamp":"2026-11-01T10:00:01.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[{"type":"toolCall","id":"","name":"read","arguments":{}},{"type":"toolCall","id":"","name":"bash","arguments":{}}],"usage":{"input":5,"output":1,"cost":{"total":0.001}}}},
+          {"type":"custom","id":"t1","parentId":"a1","timestamp":"2026-11-01T10:00:01.100Z","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"","durationMs":50}},
+          {"type":"message","id":"r1","parentId":"t1","timestamp":"2026-11-01T10:00:01.200Z","message":{"role":"toolResult","toolCallId":"","toolName":"read","isError":false,"content":[]}},
+          {"type":"custom","id":"t2","parentId":"r1","timestamp":"2026-11-01T10:00:01.300Z","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"","durationMs":2000}},
+          {"type":"message","id":"r2","parentId":"t2","timestamp":"2026-11-01T10:00:01.400Z","message":{"role":"toolResult","toolCallId":"","toolName":"bash","isError":false,"content":[]}}
+        ],"leafId":"r2"}"#,
+    );
+    assert_eq!(
+        (
+            tool_duration(&statistics, "read"),
+            tool_duration(&statistics, "bash"),
+        ),
+        (Some(50), Some(2000)),
+        "a result takes the earliest timing waiting for its id, as the transcript does"
+    );
+}
+
+#[test]
+fn repeated_call_ids_with_two_timings_before_their_results_get_no_duration() {
+    let statistics = counted(
+        r#"{"entries":[
+          {"type":"message","id":"u1","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z","message":{"role":"user","content":"Hi"}},
+          {"type":"message","id":"a1","parentId":"u1","timestamp":"2026-11-01T10:00:01.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[{"type":"toolCall","id":"","name":"read","arguments":{}},{"type":"toolCall","id":"","name":"bash","arguments":{}}],"usage":{"input":5,"output":1,"cost":{"total":0.001}}}},
+          {"type":"custom","id":"t1","parentId":"a1","timestamp":"2026-11-01T10:00:01.100Z","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"","durationMs":50}},
+          {"type":"custom","id":"t2","parentId":"t1","timestamp":"2026-11-01T10:00:01.200Z","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"","durationMs":2000}},
+          {"type":"message","id":"r1","parentId":"t2","timestamp":"2026-11-01T10:00:01.300Z","message":{"role":"toolResult","toolCallId":"","toolName":"read","isError":false,"content":[]}},
+          {"type":"message","id":"r2","parentId":"r1","timestamp":"2026-11-01T10:00:01.400Z","message":{"role":"toolResult","toolCallId":"","toolName":"bash","isError":false,"content":[]}}
+        ],"leafId":"r2"}"#,
+    );
+    assert_eq!(
+        (
+            tool_duration(&statistics, "read"),
+            tool_duration(&statistics, "bash"),
+        ),
+        (None, None),
+        "two timings waiting for one id cannot be told apart, so neither call gets one"
+    );
+}

@@ -3,10 +3,10 @@
 //! checkpoint, or at each prompt in a session without checkpoints, and its clock runs to its end
 //! checkpoint or the next start; entries outside every turn count only toward the session.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 use super::add;
-use super::entry::{Body, Entry};
+use super::entry::{Body, Entry, OpenCalls};
 use super::first_line;
 use super::turns::PROMPT_CHARS;
 use crate::{CostByKind, Phase, Usage};
@@ -128,15 +128,13 @@ struct Invocation {
 
 /// The figures while the entries are counted.
 #[derive(Default)]
-struct Count {
+struct Count<'a> {
     turns: Vec<Turn>,
     invocations: Vec<Invocation>,
-    /// The calls of the latest response that have no result yet, by call id, oldest first, as
-    /// indexes into `invocations`.
-    waiting: HashMap<String, VecDeque<usize>>,
-    /// The calls of the latest response by call id, as indexes into `invocations`, so a timing
-    /// entry finds its call whether or not the result came first.
-    calls: HashMap<String, usize>,
+    /// The calls of the latest response, which its results and timings pair up with by call id.
+    open: OpenCalls<'a, Option<u64>>,
+    /// The index in `invocations` of the latest response's first call; its calls follow in order.
+    first_call: usize,
     /// The turn of the latest response, when it belongs to one.
     response: Option<usize>,
     /// The longest tool timing after the latest response so far.
@@ -144,8 +142,8 @@ struct Count {
     models: HashMap<String, ModelUsage>,
 }
 
-impl Count {
-    fn entry(&mut self, entry: &Entry, checkpointed: bool) {
+impl<'a> Count<'a> {
+    fn entry(&mut self, entry: &'a Entry, checkpointed: bool) {
         let starts = match &entry.body {
             Body::Checkpoint {
                 phase: Phase::Start,
@@ -211,21 +209,15 @@ impl Count {
             Body::Assistant { calls, .. } => {
                 self.close_response();
                 self.response = current;
-                self.waiting.clear();
-                self.calls.clear();
+                self.first_call = self.invocations.len();
+                self.open.respond(calls);
                 for call in calls {
-                    let index = self.invocations.len();
                     self.invocations.push(Invocation {
                         name: call.name.clone(),
                         turn: current,
                         failed: None,
                         duration_ms: None,
                     });
-                    self.waiting
-                        .entry(call.id.clone())
-                        .or_default()
-                        .push_back(index);
-                    self.calls.insert(call.id.clone(), index);
                 }
             }
             Body::ToolTiming { call, duration_ms } => {
@@ -233,9 +225,7 @@ impl Count {
                     self.turns[index].timed = true;
                     self.response_tool_ms = self.response_tool_ms.max(duration_ms.unwrap_or(0));
                 }
-                if let (Some(&index), Some(ms)) = (self.calls.get(call), duration_ms) {
-                    self.invocations[index].duration_ms = Some(*ms);
-                }
+                self.open.ended(call, *duration_ms);
             }
             Body::RequestTiming { duration_ms } => {
                 if let Some(index) = current {
@@ -245,9 +235,11 @@ impl Count {
                 }
             }
             Body::ToolResult { call, failed, .. } => {
-                if let Some(index) = self.waiting.get_mut(call).and_then(VecDeque::pop_front) {
-                    let invocation = &mut self.invocations[index];
+                let duration_ms = self.open.timing(call).flatten();
+                if let Some((place, _)) = self.open.answer(call) {
+                    let invocation = &mut self.invocations[self.first_call + place];
                     invocation.failed = Some(*failed);
+                    invocation.duration_ms = duration_ms;
                     if let (true, Some(turn)) = (*failed, invocation.turn) {
                         self.turns[turn].stats.failed += 1;
                     }
