@@ -782,3 +782,51 @@ fn a_revert_lists_an_ignored_link_standing_in_a_folder_alone() {
         );
     });
 }
+
+#[test]
+fn hashing_a_fifo_put_in_a_files_place_fails_without_waiting_for_a_writer() {
+    use crate::diff::hash_contents;
+    let dir = std::env::temp_dir().join(format!("watershed-fifo-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("folder");
+    let fifo = dir.join("pipe");
+    assert!(
+        Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("mkfifo runs")
+            .success(),
+        "a FIFO is made"
+    );
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut digest = std::hash::DefaultHasher::new();
+        let _ = sender.send(hash_contents(&fifo, &mut digest, u64::MAX).is_err());
+    });
+    let refused = receiver
+        .recv_timeout(Duration::from_secs(10))
+        .expect("hashing a FIFO returns at once");
+    assert!(refused, "a FIFO is no file to hash");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn hashing_a_file_that_grew_past_the_budget_left_fails() {
+    use crate::diff::hash_contents;
+    let dir = std::env::temp_dir().join(format!("watershed-grown-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("folder");
+    let file = dir.join("grows");
+    std::fs::write(&file, "0123456789").expect("file");
+    let mut digest = std::hash::DefaultHasher::new();
+    // Its contents read after the stamp that counted them can exceed the budget left.
+    assert!(
+        matches!(hash_contents(&file, &mut digest, 9), Err(DiffError::Git(_))),
+        "ten bytes do not fit nine"
+    );
+    assert_eq!(
+        hash_contents(&file, &mut digest, 10).expect("ten bytes fit ten"),
+        10
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

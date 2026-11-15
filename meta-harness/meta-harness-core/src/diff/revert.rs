@@ -371,14 +371,8 @@ fn ignored_state(root: &Path, paths: &[String], read_at: i64) -> Result<String, 
         (meta.mode(), meta.ino(), meta.size(), times).hash(&mut digest);
         let racy = |stamp: i64| stamp >= read_at - RACY_SECONDS;
         if meta.is_file() && (racy(meta.mtime()) || racy(meta.ctime())) {
-            racy_bytes += meta.size();
-            if racy_bytes > MAX_RACY_BYTES {
-                return Err(DiffError::Git(
-                    "Liquid cannot confirm the ignored files written just now; plan the revert again in a moment."
-                        .to_owned(),
-                ));
-            }
-            hash_contents(&entry, &mut digest)?;
+            // Reads stop at the budget left, so a file that grew since its stamp cannot exceed it.
+            racy_bytes += hash_contents(&entry, &mut digest, MAX_RACY_BYTES - racy_bytes)?;
         }
         if !meta.is_dir() {
             continue;
@@ -400,29 +394,54 @@ fn ignored_state(root: &Path, paths: &[String], read_at: i64) -> Result<String, 
 }
 
 /// Hashes the contents of the regular file at `path` into `digest`, opened without following
-/// links. A file gone since it was listed has no contents to hash.
-fn hash_contents(path: &Path, digest: &mut std::hash::DefaultHasher) -> Result<(), DiffError> {
+/// links or waiting for a writer, as `crate::stored::open` does: a FIFO or link put in the file's
+/// place is refused at once. Reads stop after `limit` bytes, and a file with more is refused, as
+/// a file that grew after it was stamped can be. Returns the bytes read. A file gone since it was
+/// listed has no contents to hash.
+pub(crate) fn hash_contents(
+    path: &Path,
+    digest: &mut std::hash::DefaultHasher,
+    limit: u64,
+) -> Result<u64, DiffError> {
     use std::hash::Hasher;
     use std::io::Read;
     use std::os::unix::fs::OpenOptionsExt;
     let open = std::fs::OpenOptions::new()
         .read(true)
-        // The platform's no-follow flag, so a link put in place of the file is refused.
-        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
         .open(path);
-    let mut file = match open {
+    let file = match open {
         Ok(file) => file,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(0),
         Err(error) => return Err(DiffError::Io(error)),
     };
+    if !file.metadata().map_err(DiffError::Io)?.is_file() {
+        return Err(DiffError::Io(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            format!("{} is no plain file", path.display()),
+        )));
+    }
+    // One byte past the limit is the most read, which shows a file over it.
+    let mut capped = file.take(limit + 1);
     let mut chunk = [0; 8192];
+    let mut read_total = 0;
     loop {
-        match file.read(&mut chunk) {
-            Ok(0) => return Ok(()),
-            Ok(read) => digest.write(&chunk[..read]),
+        match capped.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(read) => {
+                digest.write(&chunk[..read]);
+                read_total += read as u64;
+            }
             Err(error) => return Err(DiffError::Io(error)),
         }
     }
+    if read_total > limit {
+        return Err(DiffError::Git(
+            "Liquid cannot confirm the ignored files written just now; plan the revert again in a moment."
+                .to_owned(),
+        ));
+    }
+    Ok(read_total)
 }
 
 /// The current time in Unix seconds, or zero before the epoch.

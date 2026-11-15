@@ -58,7 +58,7 @@ use process::{
     unreadable,
 };
 #[cfg(test)]
-pub(crate) use revert::holds_repository;
+pub(crate) use revert::{hash_contents, holds_repository};
 
 /// Creates the repository only for the explicit Initialize Git action.
 pub(crate) async fn initialize(dir: &Path) -> Result<(), DiffError> {
