@@ -27,14 +27,15 @@ String formatCost(int microUsd) =>
     '\$${(microUsd / 1e6).toStringAsFixed(microUsd < 10000 ? 3 : 2)}';
 
 /// A token count with three significant digits and a unit, such as `212 k` or `1.85 M`.
+/// From 999.5 M on, whole millions: three digits would need a larger unit, and
+/// `toStringAsPrecision` switches to exponent notation there.
 String formatTokens(int count) {
   if (count < 1000) return '$count';
-  if (count < 999500) {
-    final thousands = count / 1000;
-    return '${thousands < 100 ? thousands.toStringAsFixed(1) : thousands.round()} k';
-  }
+  if (count < 999500) return '${(count / 1000).toStringAsPrecision(3)} k';
   final millions = count / 1e6;
-  return '${millions < 10 ? millions.toStringAsFixed(2) : millions.toStringAsFixed(1)} M';
+  return millions < 999.5
+      ? '${millions.toStringAsPrecision(3)} M'
+      : '${millions.round()} M';
 }
 
 /// A part's share of a whole, rounded to a whole percent, such as `95%`.

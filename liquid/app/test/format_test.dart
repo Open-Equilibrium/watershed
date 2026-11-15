@@ -42,6 +42,18 @@ void main() {
     );
     expect(
       [
+        formatTokens(1850),
+        formatTokens(9999),
+        formatTokens(99950),
+        formatTokens(999500),
+        formatTokens(9999999),
+        formatTokens(999500000),
+      ],
+      ['1.85 k', '10.0 k', '100 k', '1.00 M', '10.0 M', '1000 M'],
+      reason: 'the digits follow the magnitude, never four of them',
+    );
+    expect(
+      [
         formatDuration(4100),
         formatDuration(23000),
         formatDuration(59600),
