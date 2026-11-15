@@ -92,9 +92,11 @@ const shownChars = 1000;
   return (text: text.substring(0, end), cut: true);
 }
 
-/// The shown text of the lines likely widest: the longest by a count that takes every
-/// non-ASCII character as two wide, so wide characters such as Chinese ones count as the
-/// width they take. The caller lays out only these few.
+/// The shown text of the lines likely widest, which the caller lays out: the longest by
+/// characters, which is their width when each takes one column, and the longest by a count
+/// that takes every non-ASCII character as two wide, so wide characters such as Chinese ones
+/// count as the width they take. Neither alone finds every widest line, since wide-scored
+/// lines of one script could crowd out a longer line of another.
 List<String> widestLines(List<DiffLine> lines, {int count = 8}) {
   int columns(String text) {
     var sum = 0;
@@ -104,17 +106,21 @@ List<String> widestLines(List<DiffLine> lines, {int count = 8}) {
     return sum;
   }
 
-  final widest = <({String text, int columns})>[];
-  for (final line in lines) {
-    final shown = shownText(line.text);
-    final text = shown.cut ? '${shown.text}…' : shown.text;
-    final width = columns(text);
-    if (widest.length == count && width <= widest.last.columns) continue;
-    final at = widest.indexWhere((wide) => wide.columns < width);
-    widest.insert(at < 0 ? widest.length : at, (text: text, columns: width));
-    if (widest.length > count) widest.removeLast();
+  List<String> longest(int Function(String text) measure) {
+    final widest = <({String text, int columns})>[];
+    for (final line in lines) {
+      final shown = shownText(line.text);
+      final text = shown.cut ? '${shown.text}…' : shown.text;
+      final width = measure(text);
+      if (widest.length == count && width <= widest.last.columns) continue;
+      final at = widest.indexWhere((wide) => wide.columns < width);
+      widest.insert(at < 0 ? widest.length : at, (text: text, columns: width));
+      if (widest.length > count) widest.removeLast();
+    }
+    return [for (final wide in widest) wide.text];
   }
-  return [for (final wide in widest) wide.text];
+
+  return {...longest((text) => text.length), ...longest(columns)}.toList();
 }
 
 final _hunk = RegExp(r'^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@');

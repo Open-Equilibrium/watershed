@@ -644,6 +644,48 @@ void main() {
     expect(tester.getTopLeft(line).dx, lessThan(before - 1000));
   });
 
+  testWidgets('scrolling fully right reaches the end of the longest line', (
+    tester,
+  ) async {
+    // Eight Cyrillic lines score wider per character than the 600-character line.
+    final cyrillic = List.generate(8, (_) => '+${'я' * 400}');
+    final ascii = '+${'z' * 597}END';
+    final backend = FakeBackend()
+      ..changed = [
+        BridgeFileChange(
+          path: 'wide.ts',
+          shown: 'wide.ts',
+          status: BridgeChangeStatus.modified,
+          added: 9,
+          removed: 0,
+        ),
+      ]
+      ..patches = {
+        'wide.ts': '@@ -0,0 +1,9 @@\n${[...cyrillic, ascii].join('\n')}\n',
+      };
+    await show(tester, backend, size: const Size(1200, 900));
+    final start = find.textContaining('zzz', findRichText: true);
+    await tester.dragFrom(
+      tester.getTopLeft(start) + const Offset(20, 5),
+      const Offset(-20000, 0),
+    );
+    await tester.pumpAndSettle();
+    // The text box ends with its row, so the end of the text is where its last character is.
+    final paragraph = tester.renderObject<RenderParagraph>(
+      find.textContaining('END', findRichText: true),
+    );
+    final tail = paragraph.localToGlobal(
+      paragraph.getOffsetForCaret(
+        TextPosition(offset: paragraph.text.toPlainText().length),
+        Rect.zero,
+      ),
+    );
+    expect(
+      tail.dx,
+      lessThanOrEqualTo(tester.getTopRight(find.byType(DiffView)).dx),
+    );
+  });
+
   testWidgets('keeps every arrow press while a patch loads and reads only '
       'the last', (tester) async {
     BridgeFileChange file(String path) => BridgeFileChange(
