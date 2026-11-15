@@ -100,10 +100,12 @@
             <div class="b t3">T3 host 1</div>
             <div class="a">T3's peer link, carried by Meta-Harness over the one-sign-in connection; Meta-Harness pairs the T3 servers itself</div>
             <div class="b t3">T3 host 2</div>
-            <ul><li>Pro: one set, the one T3's agents already know; T3's offline delivery and access levels; no tools to build, and it improves with T3.</li><li>Con: a beta feature; access follows T3's levels (read only, supervised, full); calls go from T3 to T3 through Meta-Harness's connection, not through Meta-Harness itself.</li></ul>
+            <ul><li>Pro: one set, the one T3's agents already know; T3's offline delivery and access levels; no tools to build, and it improves with T3.</li><li>Con: a beta feature, switched on at both ends. T3 checks each call, not Meta-Harness: the receiving side grants the lower of the link's level and the caller's mode. Below full access, linked work changes only threads it started, cannot change projects, settings or schedules, and cannot use the other host's own links, so every pair of hosts needs its own link (six for three hosts). It can still read every thread there.</li></ul>
           </div>
         </div>
-        <p><strong>Recommendation:</strong> C, with A as the fallback if the spike shows that pairing needs a person.</p>
+        <p><strong>Why C came late:</strong> T3's peer links were first checked only as a connection route (T3 Connect) and dismissed; that they also carry the agent tools was missed until the Windows example. Details: T3's <code>docs/internals/remote.md</code>.</p>
+        <p><strong>Spike:</strong> T3 never accepts a loopback address as another host's, so Meta-Harness's tunnel end needs an address T3 accepts. Also to check: whether Meta-Harness can fetch the pairing code as owner and link without a person, and whether it can turn the beta on.</p>
+        <p><strong>Recommendation:</strong> C, with A as the fallback if any spike point fails. Choose A if a Meta-Harness check on every call matters more than one tool set.</p>
         <p><strong>Acceptance criterion:</strong> a Codex thread on a Mac starts a Claude Code subagent on a Windows 11 computer through WSL after only the sign-ins, and its result reaches the Mac after the Mac was offline.</p>
       </details>
       <details id="d-102" class="decision">
@@ -113,6 +115,45 @@
         <ul><li>The person writes every commit message; nothing generates one.</li><li>Revert lists the affected files first, runs only while the project still matches that list (ADR-0256), restores only the working tree and is refused while an agent runs in the checkout.</li><li>Operating-system file locks order turns, reverts, Initialize Git, session deletion and worktree changes across Liquid windows.</li><li>No branch switch, stash, commit or pull while an agent runs in the checkout.</li><li>Switching with changes offers to leave them in the branch's one stash or bring them along.</li><li>The Chat's own model writes pull request text, so the diff reaches only that provider.</li><li>The worktree root lies outside the data folders, and removal never forces or loses work.</li><li>Deleting a session deletes its checkpoints; one action removes all of them.</li></ul>
         <p><strong>Recommendation:</strong> after the comparison, drop rules that only add convenience, and keep or propose upstream those that prevent losing work.</p>
         <p><strong>Acceptance criterion:</strong> each rule is marked keep, upstream or drop in the ADR log.</p>
+      </details>
+      <details id="d-107" class="decision wide">
+        <summary><h3>D-107 - Windows-Native Projects</h3></summary>
+        <p><strong>Status:</strong> Open (asked 2026-11-15). Under ADR-0226 everything runs in WSL, so agents work with Linux tools only. T3 Code itself also runs natively on Windows.</p>
+        <p><strong>Question:</strong> How can agents work on Windows-only projects, such as .NET with Visual Studio or PowerShell?</p>
+        <div class="dia">
+          <div class="opt rec"><h4>W1: All in WSL <span class="tag">Today</span></h4>
+            <div class="b ws">WSL: Meta-Harness, T3, agent, project in Linux</div>
+            <ul><li>Pro: fast; one platform; Linux sandboxes.</li><li>Con: no Windows tools.</li></ul>
+          </div>
+          <div class="opt"><h4>W2: WSL, project on C:</h4>
+            <div class="b ws">WSL agent works in <code>/mnt/c</code> and calls <code>dotnet.exe</code> or <code>powershell.exe</code></div>
+            <ul><li>Pro: almost nothing to build.</li><li>Con: slow file access across the VM boundary and unreliable file watchers; Windows programs run outside any sandbox with the person's full rights.</li></ul>
+          </div>
+          <div class="opt"><h4>W3: Hybrid</h4>
+            <div class="b ws">Meta-Harness in WSL</div>
+            <div class="a">starts through WSL interop</div>
+            <div class="b t3">Native T3 and agents on Windows</div>
+            <ul><li>Pro: real Windows agents and tools.</li><li>Con: Meta-Harness must handle Windows paths, processes and harness homes, which is native Windows support through the back door; agents' Windows sandboxes are weaker.</li></ul>
+          </div>
+          <div class="opt"><h4>W4: All native</h4>
+            <ul><li>Pro: cleanest on Windows.</li><li>Con: a second Meta-Harness platform; excluded by ADR-0226 until need is shown.</li></ul>
+          </div>
+        </div>
+        <p><strong>Side finding:</strong> WSL interop lets any Linux process start Windows programs by default, so an agent in W1 could leave its sandbox through <code>cmd.exe</code>. The spike checks whether agent sandboxes block it; otherwise Meta-Harness turns interop off for agents.</p>
+        <p><strong>Recommendation:</strong> W1 by default; W2 as a per-project switch that states Windows tools run unsandboxed and that a policy can disable; W3 only on shown need.</p>
+        <p><strong>Acceptance criterion:</strong> with the switch on, an agent builds a .NET project on <code>C:</code>; with it off, no agent can start a Windows program.</p>
+      </details>
+      <details id="d-108" class="decision wide">
+        <summary><h3>D-108 - A Host Move That Feels Like Compaction</h3></summary>
+        <p><strong>Status:</strong> Open. The maintainer approved that Meta-Harness builds the handoff of <a href="../adr/ADR-LOG.md">ADR-0284</a> from the full record, including goals, so that a move feels like a compaction in the same session, with minimal storage and transfer (2026-11-15).</p>
+        <p><strong>Design:</strong> only the transcript becomes a summary, with the last turns verbatim and a tool that reads the earlier session. Everything else is restored on the new host: agent configuration, goals, to-dos, session approvals as session rules, open questions, and running processes and subagents listed as interrupted. Rules, MCP servers, skills and hooks travel as the central configuration revision, and secrets as names. Permissions after the move are those before it, narrowed by the new host's policy; Liquid shows missing logins before the move.</p>
+        <p><strong>Questions:</strong></p>
+        <ul>
+          <li><strong>98.4 Who writes the summary?</strong> A (recommended): the new host opens the session file once in the background and runs the harness's own compaction, giving the same summary a compaction would; falls back to B where a harness cannot. B: a Meta-Harness prompt with the same model, which works with any harness and when switching harness. Either runs only at the move.</li>
+          <li><strong>98.5 Secrets and logins?</strong> A (recommended): central configuration names the credentials each project needs, each host resolves them from its own store, and they are entered once per host; secrets never leave a host (ADR-0224, ADR-0227). B: additionally move a secret end-to-end encrypted into the new host's store for that thread on request, which puts it on two hosts.</li>
+          <li><strong>98.6 How much transcript is synced?</strong> A (recommended): all of it, as compressed per-turn deltas deleted when the thread is archived, which keeps 98.4 A and later native continuation possible. B: trim large tool outputs to head, tail and hash, which saves storage but rules out native continuation.</li>
+        </ul>
+        <p><strong>Acceptance criterion:</strong> after a move between two signed-in hosts with the needed logins, the agent continues with the same goals, to-dos, approvals and configuration, and the person is asked for nothing.</p>
       </details>
       <details id="d-104" class="decision wide">
         <summary><h3>D-104 - Lock Folder Ownership Along The Whole Path</h3></summary>
