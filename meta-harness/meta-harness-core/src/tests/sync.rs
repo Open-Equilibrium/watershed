@@ -536,6 +536,53 @@ fn a_protocol_v0_destination_at_the_default_commit_asks_for_approval() {
 }
 
 #[test]
+fn the_protocol_git_negotiates_decides_the_default_approval_at_head() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        // A server answering protocol v0 whatever the client asks for, as a proxy may, with no
+        // protocol setting in the project.
+        for (name, v0) in [("v0", true), ("v2", false)] {
+            let remote = Remote::new(&format!("push-negotiated-{name}"));
+            // A plain branch at the default commit, which protocol v0 cannot tell from the default.
+            remote.bare.git(&["branch", "review", "main"]);
+            if v0 {
+                let script = remote.repo.path().join(".git/v0-upload-pack");
+                std::fs::write(
+                    &script,
+                    "#!/bin/sh\nunset GIT_PROTOCOL\nexec git-upload-pack \"$@\"\n",
+                )
+                .unwrap();
+                std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+                remote.repo.git(&[
+                    "config",
+                    "remote.origin.uploadpack",
+                    script.to_str().unwrap(),
+                ]);
+            }
+            remote.repo.git(&["switch", "-c", "feature"]);
+            remote
+                .repo
+                .git(&["config", "branch.feature.remote", "origin"]);
+            remote
+                .repo
+                .git(&["config", "branch.feature.merge", "refs/heads/review"]);
+            Remote::commit(&remote.repo, "local.txt");
+            let tree = crate::diff::WorkingTree::open(remote.repo.path())
+                .await
+                .expect("repository");
+
+            let result = tree.prepare_push(None).await;
+
+            assert_eq!(
+                matches!(result, Err(DiffError::PushDefault(_))),
+                v0,
+                "{name}: {result:?}"
+            );
+        }
+    });
+}
+
+#[test]
 fn push_refuses_short_upstream_refs_and_confirms_the_cached_default() {
     run(async {
         for case in ["short", "cached"] {

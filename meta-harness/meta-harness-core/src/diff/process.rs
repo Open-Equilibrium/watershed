@@ -4,7 +4,9 @@
 use super::*;
 use std::future::{Future, poll_fn};
 use std::os::fd::AsFd;
+use std::os::unix::fs::DirBuilderExt;
 use std::pin::pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The one path a `git rev-parse` query in `dir` prints. A path may hold line breaks, so only
 /// the single trailing one is taken off; splitting the output into lines could name another
@@ -47,6 +49,51 @@ pub(super) async fn git_bytes(
     args: &[&str],
 ) -> Result<Vec<u8>, DiffError> {
     output(git_command(dir, env, args), false, None).await
+}
+
+/// Runs `git` like [`git`], and also reports whether every protocol version Git negotiated while
+/// it ran was 2. Git reports the version in its trace2 events, which go to a directory only this
+/// process can use. When Git reports none, the version is not 2.
+pub(super) async fn git_negotiating(
+    dir: &Path,
+    env: &[(&str, OsString)],
+    args: &[&str],
+) -> Result<(String, bool), DiffError> {
+    static RUNS: AtomicU64 = AtomicU64::new(0);
+    let private = std::env::temp_dir().join(format!(
+        "watershed-trace-{}-{}",
+        std::process::id(),
+        RUNS.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&private)
+        .map_err(unreadable)?;
+    let events = private.join("trace2.json");
+    let mut env = env.to_vec();
+    env.push(("GIT_TRACE2_EVENT", events.as_os_str().to_owned()));
+    let output = git(dir, &env, args).await;
+    let v2 = std::fs::read_to_string(&events).is_ok_and(|events| negotiated_v2(&events));
+    let _ = std::fs::remove_dir_all(&private);
+    Ok((output?, v2))
+}
+
+/// Whether Git's trace2 `events` report a negotiated protocol version, and only version 2.
+fn negotiated_v2(events: &str) -> bool {
+    let mut reported = false;
+    for line in events.lines() {
+        let Ok(event) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if event["key"] != "negotiated-version" {
+            continue;
+        }
+        reported = true;
+        if event["value"] != "2" {
+            return false;
+        }
+    }
+    reported
 }
 
 /// At most `limit` bytes from the start of Git's output in `dir`, and whether it went on; Git

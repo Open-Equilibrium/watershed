@@ -1,7 +1,7 @@
 //! Explicit push and fast-forward pull through the host's Git and synchronous hooks.
 
 use super::branches::without_credentials;
-use super::process::{git_config, git_ref_output, no_prompts, user_git};
+use super::process::{git_config, git_negotiating, git_ref_output, no_prompts, user_git};
 use super::stash::listed_files;
 use super::*;
 
@@ -161,7 +161,7 @@ impl WorkingTree {
         }
         transfer.confirmation.repository = self.check_push_destination(&transfer).await?;
         self.fetch_transfer(&transfer).await?;
-        let advertised = self.transfer_counts(&mut transfer).await?;
+        let (advertised, v2) = self.transfer_counts(&mut transfer).await?;
         if transfer.behind > 0 {
             return Err(DiffError::Diverged(Box::new(transfer), String::new()));
         }
@@ -171,20 +171,13 @@ impl WorkingTree {
             line.strip_prefix("ref: ")?
                 .strip_suffix(&format!("\t{reference}"))
         });
-        // Protocol v0 reports only HEAD's symbolic target, so a destination at HEAD's commit whose
-        // target is not reported may be the default branch under another name. Protocol v2, the
-        // default, reports every target, so the configured version decides.
-        let v0 = matches!(
-            git_config(&self.root, &["--get", "protocol.version"])
-                .await?
-                .trim(),
-            "0" | "1"
-        );
+        // Only protocol v2 reports every symbolic target. Under an older protocol, a destination at
+        // HEAD's commit whose target is not reported may be the default branch under another name.
         let head = advertised
             .lines()
             .filter(|line| !line.starts_with("ref: "))
             .find_map(|line| line.strip_suffix("\tHEAD"));
-        let at_head = v0
+        let at_head = !v2
             && symbolic.is_none()
             && head.is_some()
             && advertised_commit(&advertised, &transfer)? == head;
@@ -336,8 +329,12 @@ impl WorkingTree {
         Ok(())
     }
 
-    async fn advertised_destination(&self, transfer: &GitTransfer) -> Result<String, DiffError> {
-        git(
+    /// The destination's listing, and whether Git negotiated protocol v2 to read it.
+    async fn advertised_destination(
+        &self,
+        transfer: &GitTransfer,
+    ) -> Result<(String, bool), DiffError> {
+        git_negotiating(
             &self.root,
             &no_prompts(),
             &[
@@ -353,12 +350,13 @@ impl WorkingTree {
         .map_err(|error| fetch_error(transfer, error))
     }
 
-    /// Counts against the advertised destination and returns its listing for default detection.
+    /// Counts against the advertised destination and returns its listing for default detection,
+    /// with whether Git negotiated protocol v2 to read it.
     pub(crate) async fn transfer_counts(
         &self,
         transfer: &mut GitTransfer,
-    ) -> Result<String, DiffError> {
-        let advertised = self.advertised_destination(transfer).await?;
+    ) -> Result<(String, bool), DiffError> {
+        let (advertised, v2) = self.advertised_destination(transfer).await?;
         let upstream = advertised_commit(&advertised, transfer)?;
         let Some(upstream) = upstream else {
             // Only a true first publication counts all history when no destination exists.
@@ -375,7 +373,7 @@ impl WorkingTree {
                 0
             };
             transfer.behind = 0;
-            return Ok(advertised);
+            return Ok((advertised, v2));
         };
         if self
             .resolve(&format!("{upstream}^{{commit}}"))
@@ -397,7 +395,7 @@ impl WorkingTree {
             |_| DiffError::Git("Git returned invalid ahead and behind counts.".to_owned());
         transfer.ahead = counts.next().unwrap_or("0").parse().map_err(invalid)?;
         transfer.behind = counts.next().unwrap_or("0").parse().map_err(invalid)?;
-        Ok(advertised)
+        Ok((advertised, v2))
     }
 
     /// Whether `git merge` may autostash on `branch`: `merge.autoStash`, or any merge options of
@@ -417,7 +415,7 @@ impl WorkingTree {
         let (transfer, status) = self.destination().await?;
         check_pull_status(&status)?;
         self.fetch_transfer(&transfer).await?;
-        let advertised = self.advertised_destination(&transfer).await?;
+        let (advertised, _) = self.advertised_destination(&transfer).await?;
         let upstream = advertised_commit(&advertised, &transfer)?;
         if upstream.is_none() || self.resolve("@{upstream}").await?.as_deref() != upstream {
             return Err(DiffError::Git(
