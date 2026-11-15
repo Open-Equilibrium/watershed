@@ -226,9 +226,18 @@ impl Checkpoints {
         };
         // Under the folder's shared lock, which a deletion holds alone until the file is gone, so
         // its look for marks sees this one or runs after the deletion.
-        let _folder = Checkout::folder(&self.dir)?.shared().await?;
-        let held = checkout.show(session).await?;
-        *self.shown.lock().expect("shown lock") = Some((session.to_owned(), held));
+        let held = self
+            .until_closed(async {
+                let _folder = Checkout::folder(&self.dir)?.shared().await?;
+                checkout.show(session).await
+            })
+            .await?;
+        let mut shown = self.shown.lock().expect("shown lock");
+        // Closing sets the flag before it clears `shown`, so a mark taken after closing drops here.
+        if *self.closed.borrow() {
+            return Err(DiffError::Closed);
+        }
+        *shown = Some((session.to_owned(), held));
         Ok(())
     }
 

@@ -749,6 +749,39 @@ fn a_session_is_not_marked_while_a_deletion_holds_the_folder() {
 }
 
 #[test]
+fn a_window_closed_while_its_mark_waits_marks_nothing() {
+    run(async {
+        let repo = Repo::new("mark-closed");
+        let window = std::sync::Arc::new(Checkpoints::new(repo.path()));
+        // Opened first, so the mark waits on the folder itself rather than on Git's start-up.
+        assert!(matches!(window.in_repository().await, Ok(true)));
+        let deletion = crate::checkout::Checkout::folder(repo.path())
+            .expect("folder")
+            .alone()
+            .await
+            .expect("deletion holds the folder");
+        let marking = {
+            let window = window.clone();
+            tokio::spawn(async move { window.show_session(Some("s1")).await })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        window.close().await;
+        drop(deletion);
+        let marked = marking.await.expect("marking ends");
+        assert!(matches!(marked, Err(DiffError::Closed)), "{marked:?}");
+        assert!(
+            crate::checkout::Checkout::new(
+                repo.path().join(".git/watershed"),
+                repo.path().join(".git/watershed"),
+            )
+            .shown()
+            .is_empty(),
+            "a closed window leaves no mark behind"
+        );
+    });
+}
+
+#[test]
 fn a_session_shown_in_another_worktree_is_not_deleted() {
     run(async {
         let repo = Repo::new("delete-shown");
