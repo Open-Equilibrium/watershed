@@ -136,6 +136,30 @@
         <p><strong>Recommendation:</strong> A, because enterprise adoption needs security that can be guaranteed.</p>
         <p><strong>Acceptance criterion:</strong> a private link that points through a non-sticky world-writable folder back into a private folder is refused.</p>
       </details>
+      <details id="d-106" class="decision wide">
+        <summary><h3>D-106 - Closing The Gap When Flow Agent Creates A Private Folder</h3></summary>
+        <p><strong>Status:</strong> Open. <code>create_private_anchored_directory</code> in <code>flow-agent/flow-agent-core/src/runtime/fs_guards.rs</code> creates the folder first and clears inherited access rights only afterwards.</p>
+        <p><strong>Problem:</strong> If a parent folder carries an inheritable right that lets another user add files, that user can drop a file, such as a config file, into Flow Agent's new private folder in the moment between creating it and clearing the rights. Only the user or an administrator can put such a right on the parent. The obvious fix, requiring the new folder to be empty after clearing, breaks a legitimate case: another thread of the same user may already write into it.</p>
+        <p><strong>Question:</strong> How should Flow Agent make sure nothing foreign got into a private folder it just created?</p>
+        <div class="dia">
+          <div class="opt"><h4>A: Check owners</h4>
+            <div class="b ws">After clearing, every entry must belong to the user</div>
+            <ul><li>Pro: small; parallel threads keep working.</li><li>Con: a foreign file moved or hard-linked in keeps the user as owner and passes.</li></ul>
+          </div>
+          <div class="opt"><h4>B: Lock while creating</h4>
+            <div class="b ws">Opening a private folder Flow Agent did not create waits on the parent's lock</div>
+            <ul><li>Pro: the folder can be required empty.</li><li>Con: a lock on every private open, which needs a deadlock review across processes.</li></ul>
+          </div>
+          <div class="opt rec"><h4>C: Prepare, then publish <span class="tag">Recommended</span></h4>
+            <div class="b ws">Create under a random name, clear the rights, require it empty</div>
+            <div class="a">rename into place, never replacing</div>
+            <div class="b ws">Private folder</div>
+            <ul><li>Pro: correct by construction, no lock on the open path.</li><li>Con: the no-replace rename differs per platform, and on macOS needs a system call outside the current library or a dependency decision; leftovers after a crash need cleanup.</li></ul>
+          </div>
+        </div>
+        <p><strong>Recommendation:</strong> C, because it closes the gap without slowing every open.</p>
+        <p><strong>Acceptance criterion:</strong> an entry planted right after the folder is created makes creation fail, and the shared-workspace concurrency test passes 50 of 50 runs on macOS.</p>
+      </details>
 
 
 
