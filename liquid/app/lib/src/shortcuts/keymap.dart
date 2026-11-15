@@ -582,12 +582,17 @@ class ShortcutSettings {
       }
     }
 
-    final rest = from.bindings(command).skip(1).where((other) => other != keys);
+    // The first key shown gives way; Liquid key combinations stay while the key is off.
+    final on = from.withLiquidKey(true);
+    final shown = from.bindings(command).firstOrNull;
+    final rest = on
+        .bindings(command)
+        .where((other) => other != shown && other != keys);
     put(command, [?keys, ...rest]);
     if (keys != null) {
       for (final owner in clear) {
         put(owner, [
-          ...from
+          ...on
               .bindings(owner)
               .where((bound) => !_runsSame(command, keys, owner, bound)),
         ]);

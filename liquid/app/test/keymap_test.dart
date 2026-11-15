@@ -7,6 +7,7 @@ void main() {
   const commandN = Keys(LogicalKeyboardKey.keyN, meta: true);
   const commandE = Keys(LogicalKeyboardKey.keyE, meta: true);
   const liquidD = Keys(LogicalKeyboardKey.keyD, liquid: true);
+  const liquidE = Keys(LogicalKeyboardKey.keyE, liquid: true);
 
   test(
     'the Liquid key profile adds ⇪ to Liquid commands and keeps their ⌘ keys',
@@ -265,6 +266,38 @@ void main() {
       expect(on.bindings(Command.diff), isNot(contains(liquidN)));
     },
   );
+
+  test('clearing a command with the Liquid key off keeps its inactive Liquid key binding', () {
+    final custom = ShortcutSettings.liquidKey()
+        .change(Command.newSession, liquidE)
+        .withLiquidKey(false);
+    expect(custom.bindings(Command.newSession), [commandN]);
+
+    final taken = custom.change(
+      Command.focusInput,
+      commandN,
+      clear: [Command.newSession],
+    );
+    final read = ShortcutSettings.fromJson(taken.toJson())!;
+
+    final on = read.withLiquidKey(true);
+    expect(on.bindings(Command.newSession), [liquidE]);
+    expect(on.bindings(Command.focusInput), contains(commandN));
+  });
+
+  test('changing a command with the Liquid key off keeps its inactive Liquid key binding', () {
+    final custom = ShortcutSettings.liquidKey()
+        .change(Command.newSession, liquidE)
+        .withLiquidKey(false);
+
+    const keyJ = Keys(LogicalKeyboardKey.keyJ, meta: true);
+    final edited = custom.change(Command.newSession, keyJ);
+    expect(edited.bindings(Command.newSession), [keyJ]);
+    expect(edited.withLiquidKey(true).bindings(Command.newSession), [
+      keyJ,
+      liquidE,
+    ]);
+  });
 
   test('the Custom switch decides whether Liquid key combinations exist', () {
     final off = ShortcutSettings.liquidKey().withLiquidKey(false);
