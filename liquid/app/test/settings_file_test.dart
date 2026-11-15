@@ -23,4 +23,24 @@ void main() {
       isEmpty,
     );
   });
+
+  test(
+    'a save that fails with any error still lets later saves write',
+    () async {
+      final written = <int>[];
+      final settings = SavedSettings<int>(0, (value) async {
+        if (value == 1) throw StateError('refused');
+        written.add(value);
+      }, 'the test settings');
+      final outcomes = <String?>[];
+      settings.saveOutcome = outcomes.add;
+
+      await settings.change(1);
+      await settings.change(2);
+
+      expect(written, [2]);
+      expect(outcomes.first, startsWith('Could not save the test settings: '));
+      expect(outcomes.last, isNull);
+    },
+  );
 }

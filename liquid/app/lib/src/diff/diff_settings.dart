@@ -17,7 +17,10 @@ class DiffSettings {
   factory DiffSettings.fromJson(Map<String, Object?> json) => DiffSettings(
     layout: DiffLayout.values.asNameMap()[json['layout']] ?? DiffLayout.unified,
     hideWhitespace: json['hideWhitespace'] == true,
-    width: json['width'] is num ? (json['width']! as num).toDouble() : null,
+    width: switch (json['width']) {
+      final num width when width.isFinite => width.toDouble(),
+      _ => null,
+    },
   );
 
   final DiffLayout layout;

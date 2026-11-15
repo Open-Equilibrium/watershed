@@ -111,8 +111,9 @@ class SavedSettings<T> extends ValueNotifier<T> {
       try {
         await write(settings);
         saveOutcome?.call(null);
-      } on FileSystemException catch (error) {
-        final failure = 'Could not save $_name: ${error.message}';
+      } on Object catch (error) {
+        final detail = error is FileSystemException ? error.message : '$error';
+        final failure = 'Could not save $_name: $detail';
         saveOutcome?.call(failure);
         problem(failure);
       }
