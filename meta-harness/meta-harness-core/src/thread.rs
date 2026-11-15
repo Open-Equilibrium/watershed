@@ -192,18 +192,24 @@ impl Thread {
         crate::Git::new(self.client.clone(), cwd, Some(self.id.clone()))
     }
 
-    /// Points the thread at `branch`, after the branch picker switched or chose a worktree.
+    /// Points the thread at `branch`, after the branch picker switched or chose a worktree. The
+    /// thread's [`Git`](crate::Git) follows at once, before T3's event arrives.
     pub async fn set_branch(
         &self,
         branch: &str,
         worktree: Option<&std::path::Path>,
     ) -> Result<(), String> {
+        let worktree = worktree.map(|p| p.to_string_lossy().into_owned());
         self.dispatch(json!({
             "type": "thread.metadata.update",
             "branch": branch,
-            "worktreePath": worktree.map(|p| p.to_string_lossy().into_owned()),
+            "worktreePath": worktree,
         }))
-        .await
+        .await?;
+        let thread = &mut self.state().projection.thread;
+        thread["branch"] = json!(branch);
+        thread["worktreePath"] = json!(worktree);
+        Ok(())
     }
 
     /// The thread's own worktree, if it has one.

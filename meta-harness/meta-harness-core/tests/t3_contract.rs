@@ -134,6 +134,10 @@ async fn a_thread_runs_turns_and_reverts_files_in_its_worktree() {
     assert_eq!(thread.revert(2, true).await.unwrap(), "append second");
     wait(&thread, |s| s.turns.len() == 1).await;
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "first\n");
+
+    // The branch picker chose the project folder's checkout; Git follows it at once.
+    thread.set_branch("main", Some(&repo)).await.unwrap();
+    assert_eq!(thread.worktree().as_deref(), Some(repo.as_path()));
     host.shutdown().await;
 }
 
