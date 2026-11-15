@@ -114,6 +114,28 @@
         <p><strong>Recommendation:</strong> after the comparison, drop rules that only add convenience, and keep or propose upstream those that prevent losing work.</p>
         <p><strong>Acceptance criterion:</strong> each rule is marked keep, upstream or drop in the ADR log.</p>
       </details>
+      <details id="d-104" class="decision wide">
+        <summary><h3>D-104 - Lock Folder Ownership Along The Whole Path</h3></summary>
+        <p><strong>Status:</strong> Open. <a href="../../SECURITY.md#mvp-vcs-boundary">SECURITY.md</a> says the lock folder refuses links and folders writable by other users, but <code>private_namespace</code> in <code>meta-harness/meta-harness-core/src/checkout.rs</code> checks only the folders above the written path and above its resolved form, not folders reached part-way through a chain of links.</p>
+        <p><strong>Problem:</strong> If a user routes their own config path through a world-writable folder without the sticky bit, another local user can swap a middle link. Two processes can then lock different files, so Initialize Git or session deletion can run beside a turn.</p>
+        <p><strong>Question:</strong> Should Watershed check every folder on the path, or should SECURITY.md say that the user owns their config path and its links?</p>
+        <div class="dia">
+          <div class="opt rec"><h4>A: Check every folder <span class="tag">Recommended</span></h4>
+            <div class="b ws">Each folder from <code>/</code>, opened without following links</div>
+            <div class="a">each link resolved under the same check, at most 40 hops</div>
+            <div class="b ws">Private lock folder</div>
+            <ul><li>Pro: keeps SECURITY.md true; locks can be created relative to the opened folder.</li><li>Con: a security-critical walk that needs tests on each supported platform.</li></ul>
+          </div>
+          <div class="opt"><h4>B: Trust the user's path</h4>
+            <div class="b">Home or XDG config path and its links, owned by the user</div>
+            <div class="a">ancestor checks removed, SECURITY.md narrowed</div>
+            <div class="b ws">Private lock folder</div>
+            <ul><li>Pro: simpler code.</li><li>Con: the guarantee shrinks to a trusted user path, which enterprise adoption cannot rely on.</li></ul>
+          </div>
+        </div>
+        <p><strong>Recommendation:</strong> A, because enterprise adoption needs security that can be guaranteed.</p>
+        <p><strong>Acceptance criterion:</strong> a private link that points through a non-sticky world-writable folder back into a private folder is refused.</p>
+      </details>
 
 
 
@@ -130,6 +152,32 @@
         <p><strong>Question:</strong> Which typed Workspace reads, changes and App actions should remain stable in the MVP?</p>
         <ul><li><strong>A:</strong> A small set of resource-specific commands and action schemas. Pro: compact for agents, easy to test and restrict. Con: new capabilities need explicit additions.</li><li><strong>B:</strong> One broad document interface. Pro: flexible. Con: harder to secure, discover efficiently and change safely.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
+      </details>
+      <details id="d-103" class="decision">
+        <summary><h3>D-103 - Restoring A Chat While Its Turn Streams</h3></summary>
+        <p><strong>Status:</strong> Open. The gap lasts until the turn ends, when the reload repairs it; ADR-0274 accepts only a turn that something outside Liquid ends.</p>
+        <p><strong>Problem:</strong> When Liquid falls behind a running turn, it re-reads the chat from the session file while the agent keeps streaming (<code>liquid/app/lib/src/session/chat_history.dart</code>, <code>session_state.dart</code>). Usage that arrives during the read can be lost, and a response stored before the read but applied live after it shows twice.</p>
+        <p><strong>Question:</strong> How can a restore stay exact while the turn streams?</p>
+        <ul>
+          <li><strong>A: Keep it and widen ADR-0274.</strong> Pro: no code change. Con: errors stay visible during long turns.</li>
+          <li><strong>B: One consistent snapshot.</strong> One Rust–Flutter bridge call returns the transcript page, usage, turns and the stream position at read time; Liquid ignores live events up to that position and keeps later ones. Pro: exactly once by construction; T3 Code uses snapshot plus sequence replay (<code>orchestration.subscribeThread</code>), where ADR-0281 is heading. Con: needs a bridge API change, and pi must store an entry before announcing it.</li>
+          <li><strong>C: No restore mid-turn.</strong> Keep applying live events and restore only at turn end. Pro: simplest. Con: text whose partial updates were dropped stays incomplete until then.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> B.</p>
+        <p><strong>Acceptance criterion:</strong> usage that arrives during a re-read counts once; a response stored before the read and also applied live shows once; a turn that ends during the read keeps its row once.</p>
+      </details>
+      <details id="d-105" class="decision">
+        <summary><h3>D-105 - Turn Numbers In The Diff And Statistics</h3></summary>
+        <p><strong>Status:</strong> Open; the Diff's numbering is pinned by <code>meta-harness/meta-harness-core/src/tests/turns.rs</code>, so changing it is a behavior change.</p>
+        <p><strong>Problem:</strong> The Diff numbers every prompt per branch, including a prompt sent while a turn is running. The statistics panel counts turns on every branch in stored order, from one start checkpoint to the next. So the same turn reads "Turn 3" in the Diff and "Turn 2" in the statistics panel.</p>
+        <p><strong>Question:</strong> Should both views number turns or prompts, and per branch?</p>
+        <ul>
+          <li><strong>A: Both count turns, per branch where a branch view applies.</strong> Pro: consistent; T3 Code numbers turns (runs), not messages. Con: changes behavior pinned in <code>turns.rs</code>.</li>
+          <li><strong>B: Both count prompts.</strong> Pro: matches today's Diff. Con: a turn with a prompt sent during it gets two numbers in the statistics panel.</li>
+          <li><strong>C: The statistics panel shows the prompt text and time instead of a number.</strong> Pro: no shared numbering needed. Con: a Diff number can no longer be matched to a statistics row.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> A.</p>
+        <p><strong>Acceptance criterion:</strong> the same turn shows the same number in the Diff and the statistics panel.</p>
       </details>
     </div>
   </section>
