@@ -153,7 +153,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Session card** — The card at the top right of the Chat that holds a session's Git controls and statistics, as T3 Code's thread details card; it sits beside the Chat or opens as a popover.
 - **Context window** — The tokens a model takes in one request; the session card shows how much of it the session uses and where pi compacts the session.
 - **Session statistics** — What a session's stored entries count to, as tokens, cost, working time and tool calls by outcome, never estimated (ADR-0279). The session card shows them as rows with the context window; the statistics panel, opened with ⌘U from the card's Statistics row, shows them per turn.
-- **Turn** — What an agent does for a prompt, from one start checkpoint to the next; without checkpoints, from one prompt to the next. How the Diff and the statistics number turns is open in [D-105](docs/decisions/open-decisions.html#d-105).
+- **Turn** — What an agent does for a prompt, from one start checkpoint to the next; without checkpoints, from one prompt to the next. The Diff and the statistics panel both number turns (ADR-0279).
 - **Diff panel** — The Diff of the Chat's turns, shown as a panel beside the Chat (⌘D).
 - **Start page** — What the agent surface shows before a session's first message: the project's recent sessions to continue and chips to set the new one up.
 - **Input area** — The fixed-height area at the bottom of the agent surface: the composer, or in its place an agent question.

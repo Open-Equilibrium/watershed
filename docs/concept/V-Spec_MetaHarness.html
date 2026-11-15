@@ -112,7 +112,7 @@ Liquid
       <p><strong>Liquid is a standalone local-first workspace product, not merely Meta-Harness's UI.</strong> Workspace sync is independent from this live control plane. When an owning Meta-Harness is unreachable, Liquid may render cached state only as offline/stale and must not queue commands as if success were guaranteed. Meta-Harness and its agents access Liquid only through the workspace CLI/API/mutation pipeline, never Liquid storage internals.</p>
       <p>A provisioned local Meta-Harness may start a same-host Flow Agent backed by a local model endpoint without Internet access. This does not let a remote client control an unreachable host. Cross-device Portable continuation uses Flow Agent's future public export/import surface and creates a child Run at the destination; Meta-Harness never copies Flow Agent's private store or transfers a live process claim. Exact archive/ownership behavior remains <a href="../decisions/open-decisions.html#d-058">D-058</a>, archive authenticity remains <a href="../decisions/open-decisions.html#d-062">D-062</a>, and local inference process trust remains <a href="../decisions/open-decisions.html#d-061">D-061</a>.</p>
       <h3 id="git-integration">Git integration</h3>
-      <p>Accepted (ADR-0011, ADR-0190, ADR-0191, ADR-0220, ADR-0234); shipped except creating worktrees, which waits for Chats. Meta-Harness runs the host's <code>git</code> and <code>gh</code> on agent projects and Liquid presents it; it is no VCS. Its security boundary and exact mechanics are canonical in <a href="../../SECURITY.md#mvp-vcs-boundary">SECURITY.md</a>; the worktree UI still to build is in the <a href="../design/mockups/liquid-git-prs-worktrees.html">pull request and worktree mockups</a>.</p>
+      <p>Accepted (ADR-0011, ADR-0190, ADR-0191, ADR-0220, ADR-0234); shipped except creating worktrees, which waits for Chats. Meta-Harness runs the host's <code>git</code> and <code>gh</code> on agent projects and Liquid presents it; it is no VCS. Its security boundary and exact mechanics are canonical in <a href="../../SECURITY.md#mvp-vcs-boundary">SECURITY.md</a>. Target (ADR-0282): T3 Code's Git behavior as shipped replaces every rule below, and this code is deleted; the worktree UI still to build is in the <a href="../design/mockups/liquid-git-prs-worktrees.html">pull request and worktree mockups</a>.</p>
       <ul>
         <li><strong>Checkpoints:</strong> as in T3 Code, each turn gets one at its start and one at its end, stored without asking as commits under Watershed's own <a href="../../GLOSSARY.md#liquid-primitives">checkpoint refs</a>, with tracked and new files but none Git ignores; the Diff panel reads them. A folder without Git gets none and says so; deleting a session deletes its checkpoints, and one action removes all of them.</li>
         <li><strong>Revert:</strong> like T3 Code's “Edit from here”, reverting to a turn first lists the affected files, runs only while the project still matches that confirmed list (ADR-0256), restores only the working tree, never the index or the branch, leaves repositories inside the project alone, continues the session on a new pi branch with the turn's prompt back in the input area, so the undone turns stay in the session tree, and is refused while an agent runs in the same checkout.</li>
@@ -214,7 +214,7 @@ meta metrics ...</code></pre></div>
           <div class="pd-b pd-ws">Meta-Harness<small>own state in SQLite with an append-only approval log</small></div>
           <div class="pd-a">starts and supervises</div>
           <div class="pd-b pd-t3">T3 Code</div>
-          <div class="pd-box"><strong>Windows 11:</strong> Liquid runs natively; Meta-Harness, T3 Code and the harnesses run in WSL (ADR-0226), with projects in the Linux file system. Projects on <code>C:</code>: <a href="../decisions/open-decisions.html#d-107">D-107</a>.</div>
+          <div class="pd-box"><strong>Windows 11:</strong> Liquid runs natively; whether Meta-Harness, T3 Code and the harnesses run natively or in WSL is open in <a href="../decisions/open-decisions.html#d-107">D-107</a>.</div>
         </div>
       </div>
       <div class="flow" aria-label="Meta-Harness control-plane pipeline">
@@ -321,7 +321,7 @@ liquid integration
     </div></section>
 
     <section id="durability" class="section"><h2>11. Durability</h2><div class="body">
-      <p class="muted">Today's limit (ADR-0274): Liquid restores a Chat with separate reads of its transcript, usage and turns, so a turn that something outside Liquid, such as a pi extension, ends during a restore may be missing until the next restore.</p>
+      <p class="muted">Today's limit (ADR-0274): Liquid restores a Chat with separate reads of its transcript, usage and turns, so a turn that something outside Liquid, such as a pi extension, ends during a restore may be missing until the next restore. Target (ADR-0290): one snapshot returns all three with the stream position at read time; Liquid ignores live events up to that position, as T3 Code's <code>subscribeThread</code> does.</p>
       <p>Accepted target (ADR-0229). Durable work has four levels, and Meta-Harness with T3 Code on every host covers all four: agents depend on the files, tools and credentials of a machine, so every host needs its own supervisor, and Liquid sync plus Git checkpoints give the hosts a shared state.</p>
       <p><span class="pd-key pd-ws">Watershed</span><span class="pd-key pd-t3">T3 Code, unchanged</span><span class="pd-key pd-h">Harness or outside agent</span><span class="pd-key pd-sy">Host connection</span></p>
       <div style="overflow-x:auto">
@@ -403,7 +403,7 @@ liquid integration
     </div></section>
 
     <section id="open" class="section"><h2>14. Open decisions</h2><div class="body">
-      <p>See <a href="../decisions/open-decisions.html">open-decisions.html</a>: building on T3 Code (ADR-0280 to ADR-0289; Git rules <a href="../decisions/open-decisions.html#d-102">D-102</a>) and AgentPulse formulas (<a href="../decisions/open-decisions.html#d-010">D-010</a>). Host-scoped execution and multi-instance projection ownership are decided, not open.</p>
+      <p>See <a href="../decisions/open-decisions.html">open-decisions.html</a>: building on T3 Code (ADR-0280 to ADR-0290; Windows <a href="../decisions/open-decisions.html#d-107">D-107</a>) and AgentPulse formulas (<a href="../decisions/open-decisions.html#d-010">D-010</a>). Host-scoped execution and multi-instance projection ownership are decided, not open.</p>
     </div></section>
   </main>
 </div>

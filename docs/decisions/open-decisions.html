@@ -72,75 +72,26 @@
   <section id="m2">
     <h2>M2 - Meta-Harness</h2>
     <div class="grid">
-
-
-
-
-
-
-
-
-
-      <details id="d-102" class="decision">
-        <summary><h3>D-102 - Watershed Git Rules T3 Code Does Not Ship</h3></summary>
-        <p><strong>Status:</strong> Open; blocks deleting the Git code under ADR-0282. The maintainer wants to discuss each rule separately, and may drop some (2026-11-14). Compared with T3 Code at a03d9bce: T3 matches none of the rules; it is weaker on 1, 2, 4, 5, 7 and 8 and differs on 3 and 6. Its revert runs <code>git clean -fd</code> and is blocked only in the client; its worktree cleanup deletes ignored files such as <code>.env</code>; its checkpoints outlive deleted threads.</p>
-        <p><strong>Question:</strong> For each rule in the <a href="../concept/V-Spec_MetaHarness.html#git-integration">V-Spec</a> that T3 lacks, keep it in Meta-Harness, propose it to T3, or drop it?</p>
-        <ul><li>The person writes every commit message; nothing generates one.</li><li>Revert lists the affected files first, runs only while the project still matches that list (ADR-0256), restores only the working tree and is refused while an agent runs in the checkout.</li><li>Operating-system file locks order turns, reverts, Initialize Git, session deletion and worktree changes across Liquid windows.</li><li>No branch switch, stash, commit or pull while an agent runs in the checkout.</li><li>Switching with changes offers to leave them in the branch's one stash or bring them along.</li><li>The Chat's own model writes pull request text, so the diff reaches only that provider.</li><li>The worktree root lies outside the data folders, and removal never forces or loses work.</li><li>Deleting a session deletes its checkpoints; one action removes all of them.</li></ul>
-        <p><strong>Recommendation:</strong> drop 1, 3 and 5, which are convenience or covered by one T3 server per host; set T3's text-generation model through central configuration for 6; propose 2, 4, 7 and 8 to T3 as one "never lose work" change, with small Meta-Harness checks for 2 and 4 on Liquid's actions and a checkpoint cleanup for 8 until T3 ships it.</p>
-        <p><strong>Acceptance criterion:</strong> each rule is marked keep, upstream or drop in the ADR log.</p>
-      </details>
       <details id="d-107" class="decision wide">
-        <summary><h3>D-107 - Windows-Native Projects</h3></summary>
-        <p><strong>Status:</strong> Open (asked 2026-11-15). Under ADR-0226 everything runs in WSL, so agents work with Linux tools only. T3 Code itself also runs natively on Windows.</p>
-        <p><strong>Question:</strong> How can agents work on Windows-only projects, such as .NET with Visual Studio or PowerShell?</p>
+        <summary><h3>D-107 - Meta-Harness Natively On Windows 11</h3></summary>
+        <p><strong>Status:</strong> Open (asked 2026-11-15). The old rule that Meta-Harness reaches Windows only through WSL rested on Windows not being a runtime for agents. Since ADR-0280, T3 Code runs the harnesses, and T3 runs natively on Windows. Most of Meta-Harness's Unix-specific code, the locks and Git code in <code>checkout.rs</code> and <code>diff/</code>, is deleted under ADR-0282. Flow Agent stays without native Windows support (<a href="../../PLATFORMS.md">PLATFORMS.md</a>).</p>
+        <p><strong>Question:</strong> Does Meta-Harness ship a native build for Windows 11 x86_64?</p>
         <div class="dia">
-          <div class="opt rec"><h4>W1: All in WSL <span class="tag">Today</span></h4>
-            <div class="b ws">WSL: Meta-Harness, T3, agent, project in Linux</div>
-            <ul><li>Pro: fast; one platform; Linux sandboxes.</li><li>Con: no Windows tools.</li></ul>
+          <div class="opt rec"><h4>A: Native <span class="tag">Recommended</span></h4>
+            <div class="b ws">Liquid, Meta-Harness, T3 Code and the agents run natively on Windows</div>
+            <ul><li>Pro: agents use Windows tools such as .NET, PowerShell and Visual Studio on fast NTFS; no WSL, administrator rights or VM memory; the same layout as on macOS and Linux.</li><li>Con: a third native platform with its own CI runner and tests; Windows versions of the login service, the secret store and private folders, where inherited access rights raise the question of <a href="#d-106">D-106</a>.</li></ul>
           </div>
-          <div class="opt"><h4>W2: WSL, project on C:</h4>
-            <div class="b ws">WSL agent works in <code>/mnt/c</code> and calls <code>dotnet.exe</code> or <code>powershell.exe</code></div>
-            <ul><li>Pro: almost nothing to build.</li><li>Con: slow file access across the VM boundary and unreliable file watchers.</li></ul>
-          </div>
-          <div class="opt"><h4>W3: Hybrid</h4>
-            <div class="b ws">Meta-Harness in WSL</div>
-            <div class="a">starts through WSL interop</div>
-            <div class="b t3">Native T3 and agents on Windows</div>
-            <ul><li>Pro: real Windows agents and tools.</li><li>Con: Meta-Harness must handle Windows paths, processes and harness homes, which is native Windows support through the back door.</li></ul>
-          </div>
-          <div class="opt"><h4>W4: All native</h4>
-            <ul><li>Pro: cleanest on Windows.</li><li>Con: a second Meta-Harness platform; excluded by ADR-0226 until need is shown.</li></ul>
+          <div class="opt"><h4>B: WSL, as before</h4>
+            <div class="b ws">Liquid on Windows starts Meta-Harness, T3 Code and the agents in WSL</div>
+            <ul><li>Pro: the Linux build serves; no Windows code.</li><li>Con: agents have Linux tools only; projects on <code>C:</code> are slow; WSL needs administrator rights and reserves memory.</li></ul>
           </div>
         </div>
-        <p><strong>Not a criterion:</strong> sandboxes, also for Windows programs started from WSL, are the harness's (ADR-0252).</p>
-        <p><strong>Recommendation:</strong> W2: projects on <code>C:</code> work as they are, with the slower file access documented; W3 only on shown need.</p>
-        <p><strong>Acceptance criterion:</strong> an agent in WSL builds a .NET project on <code>C:</code> with <code>dotnet.exe</code>.</p>
-      </details>
-      <details id="d-104" class="decision wide">
-        <summary><h3>D-104 - Lock Folder Ownership Along The Whole Path</h3></summary>
-        <p><strong>Status:</strong> Open; moot if <a href="#d-102">D-102</a> drops the file-lock rules, because ADR-0282 then deletes this code. <a href="../../SECURITY.md#mvp-vcs-boundary">SECURITY.md</a> says the lock folder refuses links and folders writable by other users, but <code>private_namespace</code> in <code>meta-harness/meta-harness-core/src/checkout.rs</code> checks only the folders above the written path and above its resolved form, not folders reached part-way through a chain of links.</p>
-        <p><strong>Problem:</strong> If a user routes their own config path through a world-writable folder without the sticky bit, another local user can swap a middle link. Two processes can then lock different files, so Initialize Git or session deletion can run beside a turn.</p>
-        <p><strong>Question:</strong> Should Watershed check every folder on the path, or should SECURITY.md say that the user owns their config path and its links?</p>
-        <div class="dia">
-          <div class="opt rec"><h4>A: Check every folder <span class="tag">Recommended</span></h4>
-            <div class="b ws">Each folder from <code>/</code>, opened without following links</div>
-            <div class="a">each link resolved under the same check, at most 40 hops</div>
-            <div class="b ws">Private lock folder</div>
-            <ul><li>Pro: keeps SECURITY.md true; locks can be created relative to the opened folder.</li><li>Con: a security-critical walk that needs tests on each supported platform.</li></ul>
-          </div>
-          <div class="opt"><h4>B: Trust the user's path</h4>
-            <div class="b">Home or XDG config path and its links, owned by the user</div>
-            <div class="a">ancestor checks removed, SECURITY.md narrowed</div>
-            <div class="b ws">Private lock folder</div>
-            <ul><li>Pro: simpler code.</li><li>Con: the guarantee shrinks to a trusted user path, which enterprise adoption cannot rely on.</li></ul>
-          </div>
-        </div>
-        <p><strong>Recommendation:</strong> A, because enterprise adoption needs security that can be guaranteed.</p>
-        <p><strong>Acceptance criterion:</strong> a private link that points through a non-sticky world-writable folder back into a private folder is refused.</p>
+        <p><strong>Recommendation:</strong> A, x86_64 first; ARM64 after Release 1.</p>
+        <p><strong>Acceptance criterion:</strong> on Windows 11 x86_64 without WSL, an agent started from Liquid builds a .NET project with <code>dotnet</code>.</p>
       </details>
       <details id="d-106" class="decision wide">
         <summary><h3>D-106 - Closing The Gap When Flow Agent Creates A Private Folder</h3></summary>
-        <p><strong>Status:</strong> Open. <code>create_private_anchored_directory</code> in <code>flow-agent/flow-agent-core/src/runtime/fs_guards.rs</code> creates the folder first and clears inherited access rights only afterwards.</p>
+        <p><strong>Status:</strong> Open; part of the <a href="../../SECURITY.md#flow-owned-write-protection-and-its-limits">Flow-owned write protection</a>. <code>create_private_anchored_directory</code> in <code>flow-agent/flow-agent-core/src/runtime/fs_guards.rs</code> creates the folder first and clears inherited access rights only afterwards.</p>
         <p><strong>Problem:</strong> If a parent folder carries an inheritable right that lets another user add files, that user can drop a file, such as a config file, into Flow Agent's new private folder in the moment between creating it and clearing the rights. Only the user or an administrator can put such a right on the parent. The obvious fix, requiring the new folder to be empty after clearing, breaks a legitimate case: another thread of the same user may already write into it.</p>
         <p><strong>Question:</strong> How should Flow Agent make sure nothing foreign got into a private folder it just created?</p>
         <div class="dia">
@@ -162,10 +113,6 @@
         <p><strong>Recommendation:</strong> C, because it closes the gap without slowing every open.</p>
         <p><strong>Acceptance criterion:</strong> an entry planted right after the folder is created makes creation fail, and the shared-workspace concurrency test passes 50 of 50 runs on macOS.</p>
       </details>
-
-
-
-
     </div>
   </section>
 
@@ -178,32 +125,6 @@
         <p><strong>Question:</strong> Which typed Workspace reads, changes and App actions should remain stable in the MVP?</p>
         <ul><li><strong>A:</strong> A small set of resource-specific commands and action schemas. Pro: compact for agents, easy to test and restrict. Con: new capabilities need explicit additions.</li><li><strong>B:</strong> One broad document interface. Pro: flexible. Con: harder to secure, discover efficiently and change safely.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
-      </details>
-      <details id="d-103" class="decision">
-        <summary><h3>D-103 - Restoring A Chat While Its Turn Streams</h3></summary>
-        <p><strong>Status:</strong> Open. The gap lasts until the turn ends, when the reload repairs it; ADR-0274 accepts only a turn that something outside Liquid ends.</p>
-        <p><strong>Problem:</strong> When Liquid falls behind a running turn, it re-reads the chat from the session file while the agent keeps streaming (<code>liquid/app/lib/src/session/chat_history.dart</code>, <code>session_state.dart</code>). Usage that arrives during the read can be lost, and a response stored before the read but applied live after it shows twice.</p>
-        <p><strong>Question:</strong> How can a restore stay exact while the turn streams?</p>
-        <ul>
-          <li><strong>A: Keep it and widen ADR-0274.</strong> Pro: no code change. Con: errors stay visible during long turns.</li>
-          <li><strong>B: One consistent snapshot.</strong> One Rust–Flutter bridge call returns the transcript page, usage, turns and the stream position at read time; Liquid ignores live events up to that position and keeps later ones. Pro: exactly once by construction; T3 Code uses snapshot plus sequence replay (<code>orchestration.subscribeThread</code>), where ADR-0281 is heading. Con: needs a bridge API change, and pi must store an entry before announcing it.</li>
-          <li><strong>C: No restore mid-turn.</strong> Keep applying live events and restore only at turn end. Pro: simplest. Con: text whose partial updates were dropped stays incomplete until then.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> B.</p>
-        <p><strong>Acceptance criterion:</strong> usage that arrives during a re-read counts once; a response stored before the read and also applied live shows once; a turn that ends during the read keeps its row once.</p>
-      </details>
-      <details id="d-105" class="decision">
-        <summary><h3>D-105 - Turn Numbers In The Diff And Statistics</h3></summary>
-        <p><strong>Status:</strong> Open; the Diff's numbering is pinned by <code>meta-harness/meta-harness-core/src/tests/turns.rs</code>, so changing it is a behavior change.</p>
-        <p><strong>Problem:</strong> The Diff numbers every prompt per branch, including a prompt sent while a turn is running. The statistics panel counts turns on every branch in stored order, from one start checkpoint to the next. So the same turn reads "Turn 3" in the Diff and "Turn 2" in the statistics panel.</p>
-        <p><strong>Question:</strong> Should both views number turns or prompts, and per branch?</p>
-        <ul>
-          <li><strong>A: Both count turns, per branch where a branch view applies.</strong> Pro: consistent; T3 Code numbers turns (runs), not messages. Con: changes behavior pinned in <code>turns.rs</code>.</li>
-          <li><strong>B: Both count prompts.</strong> Pro: matches today's Diff. Con: a turn with a prompt sent during it gets two numbers in the statistics panel.</li>
-          <li><strong>C: The statistics panel shows the prompt text and time instead of a number.</strong> Pro: no shared numbering needed. Con: a Diff number can no longer be matched to a statistics row.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> A.</p>
-        <p><strong>Acceptance criterion:</strong> the same turn shows the same number in the Diff and the statistics panel.</p>
       </details>
     </div>
   </section>
