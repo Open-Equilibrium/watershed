@@ -160,6 +160,8 @@ class _AgentShellState extends State<AgentShell> {
   }
 
   Future<void> _askProfile() async {
+    // A question open now goes first; `_questionChanged` asks once it is answered.
+    if (widget.state?.asking ?? false) return;
     final profile = await askProfile(context);
     // A question closed it before a choice; it asks again once it is answered.
     if (profile == null) return;

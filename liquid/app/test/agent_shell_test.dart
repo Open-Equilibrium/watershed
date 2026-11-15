@@ -18,12 +18,15 @@ import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/rust/api/worktrees.dart';
 import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/session/session_state.dart';
+import 'package:liquid/src/shortcuts/keymap.dart';
+import 'package:liquid/src/shortcuts/shortcut_store.dart';
 import 'package:liquid/src/theme/icons.dart';
 import 'package:liquid/src/theme/logo.dart';
 import 'package:liquid/src/theme/theme.dart';
 import 'package:liquid/src/theme/tokens.g.dart';
 
 import 'fake_backend.dart';
+import 'fake_host.dart';
 import 'focus_kit.dart';
 
 const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
@@ -1329,6 +1332,48 @@ void main() {
     await tester.tap(find.text('Fixed'));
     await tester.pump();
     expect(backend.calls.last, 'answer q1 Fixed');
+  });
+
+  testWidgets('a question open at the first frame comes before the profile', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    backend = FakeBackend();
+    state = SessionState(backend);
+    backend.controller.add(confirm('q1'));
+    await tester.pump();
+    expect(
+      state.asking,
+      isTrue,
+      reason: 'the question is open before the shell',
+    );
+
+    final store = MemoryStore();
+    final shortcuts = await ShortcutController.load(store, FakeHost());
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: AgentShell(state: state, info: info, shortcuts: shortcuts),
+      ),
+    );
+    await tester.pumpAndSettle();
+    const asks = 'How do you want to use the keyboard?';
+    expect(find.text(asks), findsNothing, reason: 'the question goes first');
+    expect(store.saved, isNull, reason: 'nobody chose a profile');
+
+    backend.controller.add(
+      event(
+        BridgeEventKind.userInputResolved,
+        request: BridgeRequest(id: 'q1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text(asks), findsOneWidget);
+
+    await tester.tap(find.text('Use Liquid key'));
+    await tester.pumpAndSettle();
+    expect(find.text(asks), findsNothing, reason: 'asked once');
+    expect(store.saved, ShortcutSettings.liquidKey());
   });
 
   testWidgets('keeps a long question and its answers in the input area', (
