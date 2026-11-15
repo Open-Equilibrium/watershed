@@ -18,13 +18,14 @@ use rustix::{
     fd::OwnedFd,
     fs::inotify::{self, CreateFlags, ReadFlags, WatchFlags},
 };
-#[cfg(test)]
-use std::{collections::BTreeMap, path::PathBuf, sync::Mutex};
 use std::{
+    cell::Cell,
     fs,
     io::{self, Read, Seek, SeekFrom},
     path::Path,
 };
+#[cfg(test)]
+use std::{collections::BTreeMap, path::PathBuf, sync::Mutex};
 #[cfg(target_os = "linux")]
 use std::{mem::MaybeUninit, os::fd::AsRawFd as _};
 
@@ -373,6 +374,8 @@ pub struct SessionLogAppender {
     pub(crate) current_ordinal: u64,
     pub(crate) file: fs::File,
     inventory_watch: SegmentInventoryWatch,
+    // Set by any watch change or failed drain, and cleared only by a successful inventory scan.
+    inventory_dirty: Cell<bool>,
     pub(crate) limits: SessionStreamLimits,
     sealed_segments: Vec<SealedSessionStreamSegment>,
     pub(crate) total_bytes: u64,
@@ -411,6 +414,7 @@ impl SessionLogAppender {
             current_ordinal: inventory.current_ordinal,
             file,
             inventory_watch: inventory.inventory_watch,
+            inventory_dirty: Cell::new(false),
             limits,
             sealed_segments: inventory.sealed_segments,
             total_bytes: inventory.total_bytes,
@@ -466,7 +470,11 @@ impl SessionLogAppender {
     fn verify_current_segment(&self) -> Result<AnchoredFile, RuntimeError> {
         let expected_segment_count = usize::try_from(self.current_ordinal).unwrap_or(usize::MAX);
         let watch_active = self.inventory_watch.is_active();
-        let mut scan_inventory = !watch_active || self.inventory_watch.changed(&self.base_path)?;
+        // `changed` drains the watch, so its result is recorded before any scan can fail.
+        if !watch_active || self.inventory_watch.changed(&self.base_path)? {
+            self.inventory_dirty.set(true);
+        }
+        let mut scan_inventory = self.inventory_dirty.get();
         loop {
             if scan_inventory {
                 verify_segmented_jsonl_inventory(
@@ -474,6 +482,7 @@ impl SessionLogAppender {
                     self.limits,
                     expected_segment_count,
                 )?;
+                self.inventory_dirty.set(false);
             }
             for segment in &self.sealed_segments {
                 verify_owned_anchored_file(&segment.path, &segment.file, "session log segment")?;
@@ -509,6 +518,7 @@ impl SessionLogAppender {
             if !watch_active || !self.inventory_watch.changed(&self.base_path)? {
                 return Ok(current);
             }
+            self.inventory_dirty.set(true);
             if !scan_inventory {
                 scan_inventory = true;
                 continue;

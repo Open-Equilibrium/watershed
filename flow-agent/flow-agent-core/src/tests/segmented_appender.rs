@@ -218,6 +218,30 @@ fn event_appender_rejects_a_same_length_replacement_during_rotation() {
     reservation.simulate_abrupt_termination();
 }
 
+// The inotify watch that makes a clean inventory cheap is Linux-only.
+#[cfg(target_os = "linux")]
+#[test]
+fn event_appender_keeps_rejecting_an_unexpected_sibling_after_a_failed_scan() {
+    let workspace = empty_workspace("event-writer-sticky-inventory");
+    let reservation =
+        reserve_session_log(&workspace, "stickyinventory001").expect("session reserved");
+    let appender = SessionLogAppender::open(&reservation.session_path).expect("appender opens");
+    let sibling = segmented_jsonl_path(&reservation.session_path, 2).expect("sibling path");
+    fs::write(sibling.diagnostic_path(), b"\n").expect("unexpected sibling writes");
+
+    for check in 1..=2 {
+        let error = appender
+            .len(reservation.session_path.diagnostic_path())
+            .expect_err("an unexpected sibling must fail every length check");
+        assert!(
+            error.to_string().contains("segment inventory changed"),
+            "check {check}: {error}"
+        );
+    }
+    drop(appender);
+    reservation.release_lock().expect("reservation rolls back");
+}
+
 #[test]
 fn event_appender_rejects_unterminated_segment_boundaries() {
     for non_final in [false, true] {
