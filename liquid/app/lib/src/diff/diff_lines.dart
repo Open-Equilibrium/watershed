@@ -53,16 +53,17 @@ import 'diff_model.dart';
 /// a long line is cut; a hunk header in the faint small style.
 Widget _code(BuildContext context, DiffLine line) {
   final faint = context.ws.textFaint;
-  final (:text, :cut) = shownText(line.text);
+  // Git caps a hunk header's function name at 80 bytes, so a hunk header is never cut.
   if (line.kind == DiffKind.hunk) {
     return Text(
-      cut ? '$text…' : text,
+      line.text,
       style: monoStyle(
         context,
         color: faint,
       ).copyWith(fontSize: WsMetrics.fsSmall),
     );
   }
+  final (:text, :cut) = shownText(line.text);
   final crlf = !cut && text.endsWith('\r');
   final end = cut
       ? '…'

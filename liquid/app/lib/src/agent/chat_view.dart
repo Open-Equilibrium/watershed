@@ -60,17 +60,6 @@ class _ChatViewState extends State<ChatView> {
   }
 
   @override
-  void didUpdateWidget(ChatView old) {
-    super.didUpdateWidget(old);
-    if (old.state != widget.state) {
-      old.state.scrollChatTo.removeListener(_scrollRequested);
-      old.state.items.removeListener(_pruneItemKeys);
-      widget.state.scrollChatTo.addListener(_scrollRequested);
-      widget.state.items.addListener(_pruneItemKeys);
-    }
-  }
-
-  @override
   void dispose() {
     widget.state.scrollChatTo.removeListener(_scrollRequested);
     widget.state.items.removeListener(_pruneItemKeys);

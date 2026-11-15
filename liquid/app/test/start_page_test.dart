@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/session_menus.dart';
 import 'package:liquid/src/agent/shell.dart';
@@ -14,14 +15,13 @@ import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
 
-const info = SessionInfo(project: 'acme-api', path: '/work/acme-api');
+final info = SessionInfo(project: 'acme-api', path: '/work/acme-api');
 
 void main() {
   late FakeProject project;
   late SessionState state;
   // What the system's opener was asked to show, instead of starting Finder.
   final opened = <String>[];
-
   setUp(() {
     opened.clear();
     runOpener = (program, arguments) async {
@@ -358,5 +358,98 @@ void main() {
     await tester.pumpAndSettle();
     expect(project.calls, contains('writer claude-sonnet-5-5'));
     expect(find.text('Claude Sonnet 5.5'), findsOneWidget);
+  });
+
+  testWidgets('the project menu copies the folder path', (tester) async {
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map)['text'] as String?;
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    await show(tester);
+    await tester.tap(find.text('acme-api').first, buttons: kSecondaryButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Copy path'));
+    await tester.pumpAndSettle();
+    expect(copied, '/work/acme-api');
+  });
+
+  testWidgets(
+    'a thread shows its branch and when it changed; its menu shows on hover',
+    (tester) async {
+      await show(
+        tester,
+        threads: [
+          BridgeThreadSummary(
+            id: 'thread-2',
+            title: 'Fix login',
+            branch: 'fix/login',
+            updatedMs: DateTime.now()
+                .subtract(const Duration(hours: 5))
+                .millisecondsSinceEpoch,
+            running: false,
+            archived: false,
+          ),
+        ],
+      );
+      expect(find.text('fix/login'), findsOneWidget);
+      expect(find.text('5 h ago'), findsOneWidget);
+
+      final menu = find.descendant(
+        of: find.ancestor(
+          of: find.text('Fix login'),
+          matching: find.byType(RowMenu),
+        ),
+        matching: find.byTooltip('More actions'),
+      );
+      double menuOpacity() => tester
+          .widget<Opacity>(
+            find.ancestor(of: menu, matching: find.byType(Opacity)).first,
+          )
+          .opacity;
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(mouse.removePointer);
+      await mouse.addPointer(
+        location: tester.getCenter(find.text('Fix login')),
+      );
+      await tester.pumpAndSettle();
+      expect(menuOpacity(), 1);
+      await mouse.moveTo(Offset.zero);
+      await tester.pumpAndSettle();
+      expect(menuOpacity(), 0, reason: 'the pointer left the row');
+    },
+  );
+
+  testWidgets('a folder the system cannot open is reported', (tester) async {
+    await show(tester, threads: [threadOf('thread-1', title: 'Fix login')]);
+    await state.open('thread-1');
+    await tester.pumpAndSettle();
+    Future<void> exportRecord() async {
+      await tester.tap(find.text('Fix login'), buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Export record'));
+      await tester.pumpAndSettle();
+    }
+
+    runOpener = (program, arguments) async =>
+        ProcessResult(0, 1, '', 'no handler');
+    await exportRecord();
+    expect(find.textContaining('no handler'), findsOneWidget);
+
+    runOpener = (program, arguments) async =>
+        throw ProcessException(program, arguments, 'missing');
+    await exportRecord();
+    expect(find.textContaining('missing'), findsOneWidget);
   });
 }

@@ -51,10 +51,11 @@ class DiffPanel extends StatelessWidget {
     settings.value = settings.value.copyWith(width: box.size.width - dx);
   }
 
-  /// Saves the width the panel was laid out at, once the drag's last layout has run.
+  /// Saves the width the panel was laid out at, once the drag's last layout has run; a press
+  /// that drags nothing saves nothing.
   void _dragEnded(BuildContext context) =>
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!context.mounted) return;
+        if (!context.mounted || settings.value.width == null) return;
         final box = context.findRenderObject()! as RenderBox;
         unawaited(
           settings.change(settings.value.copyWith(width: box.size.width)),
@@ -147,7 +148,6 @@ class DiffPanel extends StatelessWidget {
               onHorizontalDragUpdate: (details) =>
                   _dragBy(context, details.delta.dx),
               onHorizontalDragEnd: (_) => _dragEnded(context),
-              onHorizontalDragCancel: () => _dragEnded(context),
             ),
           ),
         ),
