@@ -687,6 +687,12 @@ void main() {
         ),
         findsOneWidget,
       );
+      // Leaving the detached checkout outside Liquid is reported.
+      expect(
+        state.notices.value.first.text,
+        'The checkout switched to main outside Liquid.',
+      );
+      await tester.pump(const Duration(seconds: 7));
     },
   );
 

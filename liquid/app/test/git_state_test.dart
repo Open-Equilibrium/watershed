@@ -788,6 +788,26 @@ void main() {
     ]);
   });
 
+  test('leaving detached HEAD for a branch with a stash says so', () async {
+    // A loaded detached status has no branch name, but it is still the checkout to compare with.
+    backend.git = gitStatusOf(branch: null);
+    await git.refresh();
+    backend.git = gitStatusOf();
+    backend.stashed = BridgeStash(
+      current: true,
+      id: 's1',
+      createdMs: DateTime(2026, 11, 1, 10, 41).millisecondsSinceEpoch,
+      files: [change('a.txt')],
+    );
+
+    await git.refresh();
+
+    expect(notices.map((notice) => notice.$2), [
+      'The checkout switched to main outside Liquid.',
+      'main has stashed changes from 10:41; the Diff panel shows them.',
+    ]);
+  });
+
   test('switching tells where the changes went', () async {
     backend.git = gitStatusOf(changed: 4);
     await git.refresh();

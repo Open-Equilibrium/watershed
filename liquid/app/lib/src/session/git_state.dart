@@ -208,6 +208,9 @@ class GitState {
   Future<void> refresh() => _latestRefresh = _refresh(++_reads);
 
   Future<void> _refresh(int read) async {
+    // The first read and a read outside Git have no status to compare with; a loaded detached
+    // status has none for its branch, but it is still the checkout to compare with.
+    final compared = status.value != null;
     final before = status.value?.branch;
     try {
       final now = await _backend.gitStatus();
@@ -224,7 +227,7 @@ class GitState {
       }
       refreshed.value++;
       final after = now?.branch;
-      if (before == null || after == null || after == before) return;
+      if (!compared || after == null || after == before) return;
       if (!_writing) {
         notify(
           BridgeLevel.info,
