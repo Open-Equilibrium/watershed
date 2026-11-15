@@ -41,6 +41,10 @@ pub struct Fake {
     /// `http://127.0.0.1:<port>`, as T3's origin is.
     pub origin: String,
     requests: Arc<Mutex<Vec<(String, Value)>>>,
+    /// The latest request id per tag, which pushed chunks answer.
+    latest: Arc<Mutex<HashMap<String, String>>>,
+    /// The request ids the client interrupted; T3 pushes nothing more to them.
+    interrupts: Arc<Mutex<Vec<String>>>,
     out: mpsc::UnboundedSender<Out>,
 }
 
@@ -53,8 +57,10 @@ impl Fake {
         let origin = format!("http://{}", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(Vec::new()));
         let log = requests.clone();
-        // The latest request id per tag, which pushed chunks answer.
         let latest: Arc<Mutex<HashMap<String, String>>> = Arc::default();
+        let interrupts: Arc<Mutex<Vec<String>>> = Arc::default();
+        // The task owns the originals; the handle keeps the shared state for the test.
+        let (latest_handle, interrupts_handle) = (latest.clone(), interrupts.clone());
         let (out, mut outgoing) = mpsc::unbounded_channel();
         tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
@@ -79,11 +85,18 @@ impl Fake {
                                 socket.send(reply).await.unwrap();
                             }
                         }
+                        for interrupt in frames.iter().filter(|f| f["_tag"] == "Interrupt") {
+                            let id = interrupt["requestId"].as_str().unwrap().to_owned();
+                            interrupts.lock().unwrap().push(id);
+                        }
                     }
                     next = outgoing.recv(), if handle_open => match next {
                         Some(Out::Chunk(tag, values)) => {
                             let id = latest.lock().unwrap()[&tag].clone();
-                            socket.send(chunk(&id, values)).await.unwrap();
+                            // T3 stops a request's stream once the client interrupts it.
+                            if !interrupts.lock().unwrap().contains(&id) {
+                                socket.send(chunk(&id, values)).await.unwrap();
+                            }
                         }
                         Some(Out::Close) => {
                             let _ = socket.close(None).await;
@@ -97,6 +110,8 @@ impl Fake {
         Self {
             origin,
             requests,
+            latest: latest_handle,
+            interrupts: interrupts_handle,
             out,
         }
     }
@@ -104,6 +119,18 @@ impl Fake {
     /// Sends `values` on the latest stream of `tag`, as T3 sends each change.
     pub fn push(&self, tag: &str, values: Vec<Value>) {
         let _ = self.out.send(Out::Chunk(tag.to_owned(), values));
+    }
+
+    /// The id of the latest request for `tag`.
+    pub fn request_id(&self, tag: &str) -> String {
+        self.latest.lock().unwrap()[tag].clone()
+    }
+
+    /// Waits until the client interrupted request `id`.
+    pub async fn interrupted(&self, id: &str) {
+        while !self.interrupts.lock().unwrap().iter().any(|i| i == id) {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
     }
 
     /// Closes the connection, as T3 does when it stops.

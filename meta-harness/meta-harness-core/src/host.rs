@@ -453,17 +453,28 @@ fn text(value: &Value) -> String {
     value.as_str().unwrap_or_default().to_owned()
 }
 
-/// Merges the ACP agents into `home`'s `settings.json`, keeping every other setting.
-fn write_settings(home: &Path, agents: &[AcpAgent]) -> Result<(), String> {
+/// Merges the ACP agents into `home`'s `settings.json`, keeping every other setting. A file that
+/// is not a JSON object is an error and stays as it is; the new file replaces the old by rename,
+/// so a failed write keeps the old one.
+pub(crate) fn write_settings(home: &Path, agents: &[AcpAgent]) -> Result<(), String> {
     if agents.is_empty() {
         return Ok(());
     }
     let dir = home.join("userdata");
     let file = dir.join("settings.json");
-    let mut settings: Value = std::fs::read_to_string(&file)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_else(|| json!({}));
+    let mut settings: Value = match std::fs::read_to_string(&file) {
+        Ok(text) => serde_json::from_str(&text)
+            .ok()
+            .filter(Value::is_object)
+            .ok_or_else(|| {
+                format!(
+                    "T3's settings file {} does not hold a JSON object; it was left unchanged.",
+                    file.display()
+                )
+            })?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => json!({}),
+        Err(error) => return Err(format!("Could not read T3's settings: {error}")),
+    };
     for agent in agents {
         settings["providerInstances"][&agent.id] = json!({
             "driver": "acpRegistry",
@@ -476,6 +487,8 @@ fn write_settings(home: &Path, agents: &[AcpAgent]) -> Result<(), String> {
         });
     }
     std::fs::create_dir_all(&dir).map_err(|e| format!("Could not create T3's data folder: {e}"))?;
-    std::fs::write(&file, settings.to_string())
-        .map_err(|e| format!("Could not write T3's settings: {e}"))
+    let temporary = dir.join("settings.json.tmp");
+    std::fs::write(&temporary, settings.to_string())
+        .map_err(|e| format!("Could not write T3's settings: {e}"))?;
+    std::fs::rename(&temporary, &file).map_err(|e| format!("Could not write T3's settings: {e}"))
 }

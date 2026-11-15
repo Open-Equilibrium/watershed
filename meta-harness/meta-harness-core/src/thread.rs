@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 use crate::event::{
     AgentEvent, ApprovalOption, ItemDetail, ItemId, ItemKind, ItemStatus, PendingRequest, Question,
@@ -126,6 +127,16 @@ impl State {
     }
 }
 
+/// The task that applies T3's stream to a thread. The last clone of the thread ends it, which
+/// drops the stream and so tells T3 to stop sending.
+struct Follower(JoinHandle<()>);
+
+impl Drop for Follower {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// A followed T3 thread.
 #[derive(Clone)]
 pub struct Thread {
@@ -133,6 +144,8 @@ pub struct Thread {
     id: String,
     root: String,
     state: Arc<Mutex<State>>,
+    // Held only for its drop, which ends the follow task.
+    _follower: Arc<Follower>,
 }
 
 impl Thread {
@@ -156,21 +169,25 @@ impl Thread {
             items: HashMap::new(),
             subscribers: Vec::new(),
         }));
-        let follower = Arc::downgrade(&state);
-        tokio::spawn(async move {
+        let applied = state.clone();
+        let follower = tokio::spawn(async move {
             while let Some(message) = stream.recv().await {
-                let Some(state) = follower.upgrade() else {
-                    return;
-                };
-                let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
+                let mut state = applied.lock().unwrap_or_else(PoisonError::into_inner);
                 apply(&mut state, &message);
             }
+            // T3 ended the stream, so the subscribers end with it.
+            applied
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .subscribers
+                .clear();
         });
         Ok(Self {
             client,
             id,
             root,
             state,
+            _follower: Arc::new(Follower(follower)),
         })
     }
 
@@ -271,14 +288,15 @@ impl Thread {
         self.dispatch(json!({"type": "thread.stop"})).await
     }
 
-    /// The unified diff from the end of turn `from` to the end of turn `to`; turn 0 is the
-    /// thread's start.
+    /// The unified diff from the start of turn `from` to the end of turn `to`; `from` starts
+    /// after its predecessor (see `predecessor`).
     pub async fn diff(
         &self,
         from: u64,
         to: u64,
         ignore_whitespace: bool,
     ) -> Result<String, String> {
+        let from = predecessor(&self.state().projection, from);
         let result = self
             .client
             .call(
@@ -300,17 +318,7 @@ impl Thread {
         let (checkpoint, prompt) = {
             let state = self.state();
             let projection = &state.projection;
-            let checkpoint = projection
-                .checkpoints
-                .iter()
-                .find(|c| {
-                    c["status"] == "ready"
-                        && if turn == 1 {
-                            c["ordinalWithinScope"] == 0 && c["appRunOrdinal"].is_null()
-                        } else {
-                            c["appRunOrdinal"].as_u64() == Some(turn - 1)
-                        }
-                })
+            let checkpoint = ready_checkpoint(projection, predecessor(projection, turn))
                 .cloned()
                 .ok_or(format!("Turn {turn} has no checkpoint to revert to."))?;
             let prompt = turns(projection)
@@ -526,6 +534,32 @@ fn run_id(runs: &[Value], matches: impl Fn(&Value) -> bool) -> Option<Value> {
     runs.iter().find(|r| matches(r)).map(|r| r["id"].clone())
 }
 
+/// The ready checkpoint at the end of turn `number`; turn 0 is the thread's start.
+fn ready_checkpoint(projection: &Projection, number: u64) -> Option<&Value> {
+    projection.checkpoints.iter().find(|c| {
+        c["status"] == "ready"
+            && if number == 0 {
+                c["ordinalWithinScope"] == 0 && c["appRunOrdinal"].is_null()
+            } else {
+                c["appRunOrdinal"].as_u64() == Some(number)
+            }
+    })
+}
+
+/// The turn count turn `turn` starts after: the latest earlier run that is not rolled back and
+/// has a ready checkpoint, or 0 for the thread's start. T3 keeps the numbers of the runs a
+/// rewind rolled back, so the next run's predecessor is the visible one, as in T3's web app.
+fn predecessor(projection: &Projection, turn: u64) -> u64 {
+    projection
+        .runs
+        .iter()
+        .filter(|run| run["status"] != "rolled_back")
+        .filter_map(|run| run["ordinal"].as_u64())
+        .filter(|&ordinal| ordinal < turn && ready_checkpoint(projection, ordinal).is_some())
+        .max()
+        .unwrap_or(0)
+}
+
 /// Applies one message of T3's thread stream and hands its agent events to the subscribers.
 fn apply(state: &mut State, message: &Value) {
     if message["kind"] != "event" {
@@ -643,7 +677,9 @@ fn translate(state: &mut State, change: Change, payload: &Value) -> Vec<AgentEve
                 Vec::new()
             }
         }
-        Change::Thread | Change::Other => Vec::new(),
+        // An edited queued prompt changes a turn's prompt.
+        Change::Message(true) => vec![AgentEvent::TurnsChanged],
+        Change::Thread | Change::Message(false) | Change::Other => Vec::new(),
     }
 }
 
@@ -691,10 +727,7 @@ fn turns(projection: &Projection) -> Vec<Turn> {
         .filter(|run| run["status"] != "rolled_back")
         .map(|run| {
             let number = run["ordinal"].as_u64().unwrap_or_default();
-            let checkpoint = projection
-                .checkpoints
-                .iter()
-                .find(|c| c["appRunOrdinal"].as_u64() == Some(number) && c["status"] == "ready");
+            let checkpoint = ready_checkpoint(projection, number);
             let files: Vec<TurnFile> = checkpoint
                 .and_then(|c| c["files"].as_array())
                 .into_iter()

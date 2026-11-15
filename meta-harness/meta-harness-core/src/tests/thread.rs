@@ -712,3 +712,66 @@ async fn settings_branch_and_context_reach_t3_and_show_in_the_thread() {
         Some(&json!({"cwd": "/repo/wt"}))
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_turn_after_a_rewind_reverts_and_diffs_from_its_visible_predecessor() {
+    let (fake, thread) = follow(
+        projection(json!({
+            "runs": [
+                run("r1", 1, "completed", "m1"),
+                run("r2", 2, "rolled_back", "m2"),
+                run("r3", 3, "rolled_back", "m3"),
+                run("r4", 4, "completed", "m4"),
+            ],
+            "messages": [
+                {"id": "m1", "text": "first"}, {"id": "m2", "text": "second"},
+                {"id": "m3", "text": "third"}, {"id": "m4", "text": "fourth"},
+            ],
+            // T3 marks the checkpoints a rewind passed as stale.
+            "checkpoints": [
+                {"id": "base", "scopeId": "s", "status": "ready", "ordinalWithinScope": 0, "appRunOrdinal": null},
+                {"id": "cp1", "scopeId": "s", "status": "ready", "ordinalWithinScope": 1, "appRunOrdinal": 1},
+                {"id": "cp2", "scopeId": "s", "status": "stale", "ordinalWithinScope": 2, "appRunOrdinal": 2},
+                {"id": "cp3", "scopeId": "s", "status": "stale", "ordinalWithinScope": 3, "appRunOrdinal": 3},
+                {"id": "cp4", "scopeId": "s", "status": "ready", "ordinalWithinScope": 2, "appRunOrdinal": 4},
+            ],
+        })),
+        1,
+    )
+    .await;
+    assert_eq!(thread.revert(4, true).await.unwrap(), "fourth");
+    assert_eq!(
+        command(&fake),
+        json!({"type": "checkpoint.rollback", "scopeId": "s", "checkpointId": "cp1",
+            "restoreFiles": true, "threadId": "thread-1"})
+    );
+    thread.diff(4, 4, false).await.unwrap();
+    assert_eq!(
+        fake.payloads("orchestration.getTurnDiff"),
+        vec![
+            json!({"threadId": "thread-1", "fromTurnCount": 1, "toTurnCount": 4,
+            "ignoreWhitespace": false})
+        ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dropping_a_followed_thread_interrupts_its_stream_on_t3() {
+    let (fake, thread) = follow(projection(json!({})), 1).await;
+    let id = fake.request_id(SUBSCRIBE);
+    drop(thread);
+    tokio::time::timeout(WAIT, fake.interrupted(&id))
+        .await
+        .expect("T3 receives the interrupt");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn subscribers_end_when_t3_ends_the_thread_stream() {
+    let (fake, thread) = follow(projection(json!({})), 1).await;
+    let (_, mut events) = thread.subscribe();
+    fake.close();
+    let ended = tokio::time::timeout(WAIT, events.recv())
+        .await
+        .expect("the subscription ends");
+    assert!(ended.is_none());
+}

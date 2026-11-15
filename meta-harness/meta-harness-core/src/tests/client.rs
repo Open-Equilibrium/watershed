@@ -90,3 +90,18 @@ async fn a_stream_opened_after_the_connection_closed_fails_instead_of_waiting() 
     let opened = tokio::time::timeout(WAIT, client.stream("subscribe", json!({}))).await;
     assert!(opened.expect("the stream opens or fails").is_err());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dropped_stream_interrupts_its_request_on_t3_and_is_forgotten() {
+    let fake = Fake::start(|_, _, _| Vec::new()).await;
+    let client = connect(&fake).await;
+    let items = client.stream("subscribe", json!({})).await.unwrap();
+    fake.received("subscribe", 1).await;
+    let id = fake.request_id("subscribe");
+    assert_eq!(client.waiting(), 1);
+    drop(items);
+    tokio::time::timeout(WAIT, fake.interrupted(&id))
+        .await
+        .expect("T3 receives the interrupt");
+    assert_eq!(client.waiting(), 0);
+}

@@ -399,3 +399,16 @@ async fn publishing_names_the_provider_repository_and_visibility() {
         ]
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dropping_the_status_receiver_interrupts_the_watch_on_t3() {
+    let (fake, git) = checkout(|_, _, _| Vec::new()).await;
+    let statuses = git.watch().await.unwrap();
+    fake.received("subscribeVcsStatus", 1).await;
+    let id = fake.request_id("subscribeVcsStatus");
+    // T3 pushes nothing, so the watch must notice the missing listener by itself.
+    drop(statuses);
+    tokio::time::timeout(std::time::Duration::from_secs(10), fake.interrupted(&id))
+        .await
+        .expect("T3 receives the interrupt");
+}

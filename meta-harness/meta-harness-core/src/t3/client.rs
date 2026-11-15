@@ -1,12 +1,12 @@
 //! T3 Code's client protocol, Effect RPC JSON frames over one WebSocket on `/ws`.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
@@ -27,6 +27,38 @@ pub(crate) struct Client {
     out: mpsc::UnboundedSender<Message>,
     waiters: Waiters,
     next: Arc<AtomicU64>,
+}
+
+/// An open stream request and its items, as T3 sends them. Dropped, it tells T3 to stop the
+/// request (Effect RPC's `Interrupt`) and forgets it.
+pub(crate) struct Subscription {
+    items: mpsc::UnboundedReceiver<Value>,
+    id: String,
+    out: mpsc::UnboundedSender<Message>,
+    waiters: Waiters,
+}
+
+impl Subscription {
+    /// The next item T3 sent; `None` once the request ended.
+    pub async fn recv(&mut self) -> Option<Value> {
+        self.items.recv().await
+    }
+}
+
+impl Drop for Subscription {
+    fn drop(&mut self) {
+        let open = self
+            .waiters
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_mut()
+            .and_then(|open| open.remove(&self.id));
+        // A request that already ended, or a closed connection, has nothing left to stop.
+        if open.is_some() {
+            let frame = json!({"_tag": "Interrupt", "requestId": self.id});
+            let _ = self.out.send(Message::Text(frame.to_string().into()));
+        }
+    }
 }
 
 impl Client {
@@ -56,7 +88,7 @@ impl Client {
                     break;
                 }
             }
-            close(&writer_waiters).await;
+            close(&writer_waiters);
         });
         let reader_waiters = waiters.clone();
         let ack = out.clone();
@@ -73,10 +105,10 @@ impl Client {
                     frame => vec![frame],
                 };
                 for frame in frames {
-                    dispatch(&reader_waiters, &ack, frame).await;
+                    dispatch(&reader_waiters, &ack, frame);
                 }
             }
-            close(&reader_waiters).await;
+            close(&reader_waiters);
         });
         Ok(Self {
             out,
@@ -86,8 +118,13 @@ impl Client {
     }
 
     /// Registers a request's waiter; once the connection closed, no request may wait.
-    async fn register(&self, id: &str, waiter: Waiter) -> Result<(), String> {
-        match self.waiters.lock().await.as_mut() {
+    fn register(&self, id: &str, waiter: Waiter) -> Result<(), String> {
+        match self
+            .waiters
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_mut()
+        {
             Some(open) => {
                 open.insert(id.to_owned(), waiter);
                 Ok(())
@@ -108,7 +145,7 @@ impl Client {
     pub async fn call(&self, tag: &str, payload: Value) -> Result<Value, String> {
         let id = self.next.fetch_add(1, Ordering::Relaxed).to_string();
         let (reply, answer) = oneshot::channel();
-        self.register(&id, Waiter::Call(reply)).await?;
+        self.register(&id, Waiter::Call(reply))?;
         self.send_request(&id, tag, payload)?;
         answer
             .await
@@ -116,23 +153,28 @@ impl Client {
     }
 
     /// Opens the stream `tag`; each received item arrives in order, already acknowledged.
-    pub async fn stream(
-        &self,
-        tag: &str,
-        payload: Value,
-    ) -> Result<mpsc::UnboundedReceiver<Value>, String> {
+    pub async fn stream(&self, tag: &str, payload: Value) -> Result<Subscription, String> {
         let id = self.next.fetch_add(1, Ordering::Relaxed).to_string();
         let (items, receiver) = mpsc::unbounded_channel();
-        self.register(&id, Waiter::Stream(items)).await?;
+        self.register(&id, Waiter::Stream(items))?;
         self.send_request(&id, tag, payload)?;
-        Ok(receiver)
+        Ok(Subscription {
+            items: receiver,
+            id,
+            out: self.out.clone(),
+            waiters: self.waiters.clone(),
+        })
     }
 }
 
 /// Ends every open request with the connection: each call fails, each stream ends. Later
 /// requests fail at once (see [`Client::register`]).
-async fn close(waiters: &Waiters) {
-    let open = waiters.lock().await.take().unwrap_or_default();
+fn close(waiters: &Waiters) {
+    let open = waiters
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take()
+        .unwrap_or_default();
     for (_, waiter) in open {
         if let Waiter::Call(reply) = waiter {
             let _ = reply.send(Err("T3 closed the connection".to_owned()));
@@ -140,7 +182,7 @@ async fn close(waiters: &Waiters) {
     }
 }
 
-async fn dispatch(waiters: &Waiters, ack: &mpsc::UnboundedSender<Message>, frame: Value) {
+fn dispatch(waiters: &Waiters, ack: &mpsc::UnboundedSender<Message>, frame: Value) {
     // Frames without a request, such as Pong, concern the connection only.
     let Some(request_id) = frame["requestId"].as_str() else {
         return;
@@ -153,7 +195,7 @@ async fn dispatch(waiters: &Waiters, ack: &mpsc::UnboundedSender<Message>, frame
                     .to_string()
                     .into(),
             ));
-            let open = waiters.lock().await;
+            let open = waiters.lock().unwrap_or_else(PoisonError::into_inner);
             if let Some(Waiter::Stream(items)) = open.as_ref().and_then(|o| o.get(request_id))
                 && let Some(values) = frame["values"].as_array()
             {
@@ -170,7 +212,7 @@ async fn dispatch(waiters: &Waiters, ack: &mpsc::UnboundedSender<Message>, frame
             };
             let waiter = waiters
                 .lock()
-                .await
+                .unwrap_or_else(PoisonError::into_inner)
                 .as_mut()
                 .and_then(|open| open.remove(request_id));
             if let Some(Waiter::Call(reply)) = waiter {
@@ -178,5 +220,17 @@ async fn dispatch(waiters: &Waiters, ack: &mpsc::UnboundedSender<Message>, frame
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+impl Client {
+    /// How many requests still await T3's replies.
+    pub(crate) fn waiting(&self) -> usize {
+        self.waiters
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map_or(0, HashMap::len)
     }
 }

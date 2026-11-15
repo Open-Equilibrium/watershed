@@ -85,9 +85,22 @@ impl Server {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
     }
 
-    /// Stops the server and waits for it to exit.
+    /// Stops the server as `stop_left_behind` does: TERM, then KILL if it has not exited after
+    /// five seconds. T3 stops its runs and their provider processes on TERM.
     pub async fn stop(mut self) {
-        let _ = self.child.kill().await;
+        if let Some(pid) = self
+            .child
+            .id()
+            .and_then(|pid| rustix::process::Pid::from_raw(i32::try_from(pid).ok()?))
+        {
+            let _ = rustix::process::kill_process(pid, rustix::process::Signal::TERM);
+        }
+        if tokio::time::timeout(Duration::from_secs(5), self.child.wait())
+            .await
+            .is_err()
+        {
+            let _ = self.child.kill().await;
+        }
     }
 }
 

@@ -445,7 +445,10 @@ impl AgentSession {
     }
 
     fn range_diff(&self, from: i64, to: i64, hide_whitespace: bool) -> Result<String, String> {
-        let from = u64::try_from(from - 1).map_err(|_| "Turns start at 1.".to_owned())?;
+        let from = u64::try_from(from)
+            .ok()
+            .filter(|turn| *turn > 0)
+            .ok_or_else(|| "Turns start at 1.".to_owned())?;
         let to = u64::try_from(to).map_err(|_| "Turns start at 1.".to_owned())?;
         run(self.thread.diff(from, to, hide_whitespace))
     }
@@ -476,9 +479,24 @@ impl AgentSession {
         request: String,
         answers: Vec<BridgeQuestionAnswer>,
     ) -> Result<(), String> {
+        let asked = self
+            .thread
+            .snapshot()
+            .requests
+            .into_iter()
+            .find_map(|pending| match pending.request {
+                meta_harness_core::Request::Questions(questions) if pending.id.0 == request => {
+                    Some(questions)
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
         let answers: Vec<(String, Vec<String>)> = answers
             .into_iter()
-            .map(|a| (a.question, a.values))
+            .map(|a| {
+                let values = convert::answer_values(&asked, &a.question, a.values);
+                (a.question, values)
+            })
             .collect();
         run(self
             .thread

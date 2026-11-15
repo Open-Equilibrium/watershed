@@ -206,7 +206,16 @@ impl Git {
         let (sender, receiver) = mpsc::channel(16);
         tokio::spawn(async move {
             let (mut local, mut remote) = (Value::Null, Value::Null);
-            while let Some(event) = stream.recv().await {
+            loop {
+                let event = tokio::select! {
+                    event = stream.recv() => event,
+                    // Nobody reads the statuses any more: stop following T3 now, not at its next
+                    // change.
+                    () = sender.closed() => return,
+                };
+                let Some(event) = event else {
+                    return;
+                };
                 match event["_tag"].as_str() {
                     Some("snapshot") => {
                         local = event["local"].clone();

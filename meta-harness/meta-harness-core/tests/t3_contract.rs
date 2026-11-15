@@ -54,7 +54,12 @@ async fn host(home: &Path) -> Host {
         acp_agents: vec![AcpAgent {
             id: AGENT.to_owned(),
             command: PathBuf::from("/usr/bin/python3"),
-            args: vec![script.to_string_lossy().into_owned()],
+            // The script ignores its arguments; the home folder names this test's agents in the
+            // process list.
+            args: vec![
+                script.to_string_lossy().into_owned(),
+                home.to_string_lossy().into_owned(),
+            ],
             models: vec![AGENT.to_owned()],
         }],
     })
@@ -129,7 +134,7 @@ async fn a_thread_runs_turns_and_reverts_files_in_its_worktree() {
         (turns[1].number, turns[1].added, turns[1].removed),
         (2, 1, 0)
     );
-    assert!(thread.diff(1, 2, false).await.unwrap().contains("+second"));
+    assert!(thread.diff(2, 2, false).await.unwrap().contains("+second"));
     // The thread's Git reads its own worktree, where the append is still uncommitted.
     let changed = thread.git().status().await.unwrap().changes;
     assert_eq!(
@@ -149,6 +154,100 @@ async fn a_thread_runs_turns_and_reverts_files_in_its_worktree() {
     thread.set_branch("main", Some(&repo)).await.unwrap();
     assert_eq!(thread.worktree().as_deref(), Some(repo.as_path()));
     host.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_turn_after_a_rewind_reverts_and_diffs_from_its_visible_predecessor() {
+    let (_dir, repo, home) = fixture();
+    let host = host(&home).await;
+    let project = host.project(&repo).await.unwrap();
+    let thread = project
+        .start(start("append first", worktree(), Permissions::FullAccess))
+        .await
+        .unwrap();
+    wait(&thread, completed(1)).await;
+    thread.send("append second", false).await.unwrap();
+    wait(&thread, completed(2)).await;
+    assert_eq!(thread.revert(2, true).await.unwrap(), "append second");
+    wait(&thread, |s| s.turns.len() == 1).await;
+
+    // T3 numbers the next run after the rolled back one, so the new turn is number 3.
+    thread.send("append third", false).await.unwrap();
+    wait(&thread, completed(2)).await;
+    let numbers: Vec<u64> = thread.turns().iter().map(|t| t.number).collect();
+    assert_eq!(numbers, [1, 3]);
+    let file = thread.worktree().unwrap().join("contract.txt");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "first\nthird\n");
+    assert!(thread.diff(3, 3, false).await.unwrap().contains("+third"));
+    assert_eq!(thread.revert(3, true).await.unwrap(), "append third");
+    wait(&thread, |s| s.turns.len() == 1).await;
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "first\n");
+    host.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn shutdown_stops_t3_and_the_agent_processes_it_started() {
+    let (_dir, repo, home) = fixture();
+    let host = host(&home).await;
+    let project = host.project(&repo).await.unwrap();
+    let thread = project
+        .start(start("wait", Workspace::Checkout, Permissions::FullAccess))
+        .await
+        .unwrap();
+    wait(&thread, |s| {
+        s.turns.iter().any(|t| t.status == TurnStatus::Running)
+    })
+    .await;
+    let mut agents = Vec::new();
+    for _ in 0..100 {
+        agents = processes_naming(&home);
+        if !agents.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(!agents.is_empty(), "T3 started its agent");
+    host.shutdown().await;
+    // T3 stops its provider processes as it stops; an agent left running would wait forever.
+    for _ in 0..50 {
+        agents.retain(|pid| running(*pid));
+        if agents.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    for pid in &agents {
+        kill(*pid);
+    }
+    assert!(
+        agents.is_empty(),
+        "agent processes still run after shutdown"
+    );
+}
+
+/// The processes whose command line names `home`, such as the agents T3 started in it.
+fn processes_naming(home: &Path) -> Vec<u32> {
+    let listing = Command::new("ps")
+        .args(["-axww", "-o", "pid=,command="])
+        .output()
+        .unwrap();
+    let marker = home.to_string_lossy();
+    String::from_utf8_lossy(&listing.stdout)
+        .lines()
+        .filter(|line| line.contains(&*marker))
+        .filter_map(|line| line.split_whitespace().next()?.parse().ok())
+        .collect()
+}
+
+fn running(pid: u32) -> bool {
+    rustix::process::Pid::from_raw(pid as i32)
+        .is_some_and(|pid| rustix::process::test_kill_process(pid).is_ok())
+}
+
+fn kill(pid: u32) {
+    if let Some(pid) = rustix::process::Pid::from_raw(pid as i32) {
+        let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -289,28 +388,39 @@ async fn a_prompt_sent_while_a_turn_runs_queues_and_can_be_removed() {
     })
     .await;
     thread.send("append later", false).await.unwrap();
+    thread.send("append more", false).await.unwrap();
     let queued = wait(&thread, |s| {
         s.turns
             .iter()
-            .any(|t| t.status == TurnStatus::Queued && !t.prompt.is_empty())
+            .filter(|t| t.status == TurnStatus::Queued && !t.prompt.is_empty())
+            .count()
+            == 2
     })
     .await;
-    let turn = queued
-        .turns
-        .iter()
-        .find(|t| t.status == TurnStatus::Queued)
-        .unwrap();
-    assert_eq!(turn.prompt, "append later");
+    let [later, more] = [0, 1].map(|i| {
+        queued
+            .turns
+            .iter()
+            .filter(|t| t.status == TurnStatus::Queued)
+            .nth(i)
+            .unwrap()
+            .clone()
+    });
+    assert_eq!(
+        (later.prompt.as_str(), more.prompt.as_str()),
+        ("append later", "append more")
+    );
+    // Subscribers learn of an edit, so Liquid's queue shows the new text.
     thread
-        .edit_queued(turn.number, "append edited")
+        .edit_queued(more.number, "append edited")
         .await
         .unwrap();
-    // Subscribers learn of the edit, so Liquid's queue shows the new text.
     wait(&thread, |s| {
         s.turns.iter().any(|t| t.prompt == "append edited")
     })
     .await;
-    thread.cancel_queued(turn.number).await.unwrap();
+    thread.cancel_queued(more.number).await.unwrap();
+    thread.cancel_queued(later.number).await.unwrap();
     wait(&thread, |s| {
         s.turns.iter().all(|t| t.status != TurnStatus::Queued)
     })
