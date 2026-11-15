@@ -34,9 +34,9 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 - Central configuration model that resolves shared Watershed building blocks to each target's documented config surface. Flow Agent receives only its global authority and explicit Flows rather than a project-local config layer; device-local Runtime bindings remain owned by the execution host.
 - Control plane: session registry, routing, task state, attention state and agent schedule/trigger skeleton.
 - Reference scenario for schedules: a scheduled agent keeps a news feed as a database page in Liquid and changes it only with the approval its Workspace Role requires, as `disler/pi-durable-news-agent` does with its own app.
-- Host-local Meta-Harness agent executor that rejects cross-host agent-process control (on T3 Code: ADR-0280 to ADR-0286, [D-099](docs/decisions/open-decisions.html#d-099), D-102).
+- Host-local Meta-Harness agent executor that rejects cross-host agent-process control (on T3 Code: ADR-0280 to ADR-0289, D-102).
 - Adapters: Flow Agent (via its public runtime surfaces) + at least one external CLI adapter.
-- Orchestration tools for agents as MCP tools (ADR-0253, [V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration)): an agent starts, messages, reads, steers and stops subagents of any harness and model, on other agent hosts too, and hosts link through the Liquid account (ADR-0285); Claude Code joins pi and Codex as an adapter.
+- Orchestration tools for agents: T3 Code's own, across hosts through its peer links (ADR-0253, ADR-0288, [V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration)): an agent starts, messages, reads, steers and stops subagents of any harness and model, on other agent hosts too, and hosts link through the Liquid account (ADR-0285); Claude Code joins Codex as a T3 provider.
 - Event/transcript ingestion from agents; artifact/log/handoff indexing (logs, structured summaries, host-provided diffs, handoff packs, checkpoints).
 - Policy-gated configuration writes with audit trail and review flow.
 - **No rich standalone GUI**; Meta-Harness ships as CLI plus login service (ADR-0286).

@@ -18,7 +18,7 @@ export async function assertDecisionPage(page) {
   for (const [id, heading] of [
     ["d-066", "Flow Agent - First Release"],
     ["d-065", "Watershed - Shared Release Safeguards"],
-    ["d-099", "M2 - Meta-Harness"],
+    ["d-104", "M2 - Meta-Harness"],
     ["d-020", "Flow Agent - Permissions, Integrations And Offline Use"],
     ["d-059", "Flow Agent - Permissions, Integrations And Offline Use"],
   ]) {
@@ -39,8 +39,8 @@ export async function assertDecisionPage(page) {
   assert.equal(await page.locator("#d-063").count(), 0, "the decided protection scope leaves the live index");
 
   const url = page.url().split("#")[0];
-  await page.goto(`${url}#d-099`, { waitUntil: "load" });
-  const serviceStart = page.locator("#d-099");
+  await page.goto(`${url}#d-104`, { waitUntil: "load" });
+  const serviceStart = page.locator("#d-104");
   assert.equal(await serviceStart.locator("p").first().isVisible(), true, "direct links reveal their question");
   assert.equal(await page.locator("#d-065 p").first().isVisible(), false, "questions stay independent");
   const packagingLink = serviceStart.getByRole("link", { name: "D-102", exact: true });
@@ -55,7 +55,7 @@ export async function assertDecisionPage(page) {
   await serviceStart.locator("summary").press("Enter");
   assert.equal(await serviceStart.locator("p").first().isVisible(), false);
   await page.goBack();
-  assert.equal(new URL(page.url()).hash, "#d-099", "reopening the same question adds no history entry");
+  assert.equal(new URL(page.url()).hash, "#d-104", "reopening the same question adds no history entry");
   await serviceStart.locator("p").first().waitFor({ state: "visible" });
   await packaging.locator("summary").press("Enter");
   assert.equal(await packaging.locator("p").first().isVisible(), false);

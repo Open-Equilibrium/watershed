@@ -81,33 +81,6 @@
 
 
 
-      <details id="d-099" class="decision wide">
-        <summary><h3>D-099 - Which Tools Start Agents On Another Host</h3></summary>
-        <p class="legend"><span class="key ws">Watershed</span><span class="key t3">T3 Code, unchanged</span><span class="key h">Harness</span><span class="key gone">Switched off</span></p>
-        <p><strong>Status:</strong> Open; the rest of durability level D is decided (ADR-0285). T3 Code gives every agent it starts its own MCP tools: orchestration tools such as <code>delegate_task</code>, <code>t3_thread_launch</code>, <code>t3_thread_send</code> and <code>t3_thread_read</code>, and tools that stay in every option, such as questions, secrets and <code>html_render</code>. With T3's linked environments (beta) the same tools act on another host by its environment id; T3 makes the pairing code itself when it holds a managing session on that host, and a result reaches an offline parent once it is back. T3 has no setting that switches its orchestration tools off.</p>
-        <p><strong>Question:</strong> Which tools does an agent use to start and steer threads on another host?</p>
-        <div class="dia">
-          <div class="opt"><h4>A: Two sets</h4>
-            <div class="row"><div class="b t3">T3 tools: this host</div><div class="b ws">Meta-Harness tools: other hosts</div></div>
-            <ul><li>Pro: no T3 change.</li><li>Con: two similar sets confuse the model; Meta-Harness builds the tools, forwarding and offline delivery T3 already has.</li></ul>
-          </div>
-          <div class="opt"><h4>B: One Meta-Harness set</h4>
-            <div class="b ws">Meta-Harness tools: any host, including this one</div>
-            <div class="b gone">T3's orchestration tools</div>
-            <ul><li>Pro: one set; every call passes Meta-Harness.</li><li>Con: T3 must first accept a switch for its tools, an upstream proposal like those in <a href="#d-102">D-102</a>; Meta-Harness rebuilds what T3 has.</li></ul>
-          </div>
-          <div class="opt rec"><h4>C: T3's set across hosts <span class="tag">Recommended</span></h4>
-            <div class="b t3">T3 host 1</div>
-            <div class="a">T3's peer link, carried by Meta-Harness over the one-sign-in connection; Meta-Harness pairs the T3 servers itself</div>
-            <div class="b t3">T3 host 2</div>
-            <ul><li>Pro: one set, the one T3's agents already know; T3's offline delivery and access levels; no tools to build, and it improves with T3.</li><li>Con: a beta feature, switched on at both ends. T3 checks each call, not Meta-Harness: the receiving side grants the lower of the link's level and the caller's mode. Below full access, linked work changes only threads it started, cannot change projects, settings or schedules, and cannot use the other host's own links, so every pair of hosts needs its own link (six for three hosts). It can still read every thread there.</li></ul>
-          </div>
-        </div>
-        <p><strong>Why C came late:</strong> T3's peer links were first checked only as a connection route (T3 Connect) and dismissed; that they also carry the agent tools was missed until the Windows example. Details: T3's <code>docs/internals/remote.md</code>.</p>
-        <p><strong>Spike:</strong> T3 never accepts a loopback address as another host's, so Meta-Harness's tunnel end needs an address T3 accepts. Also to check: whether Meta-Harness can fetch the pairing code as owner and link without a person, and whether it can turn the beta on.</p>
-        <p><strong>Recommendation:</strong> C, with A as the fallback if any spike point fails. Choose A if a Meta-Harness check on every call matters more than one tool set.</p>
-        <p><strong>Acceptance criterion:</strong> a Codex thread on a Mac starts a Claude Code subagent on a Windows 11 computer through WSL after only the sign-ins, and its result reaches the Mac after the Mac was offline.</p>
-      </details>
       <details id="d-102" class="decision">
         <summary><h3>D-102 - Watershed Git Rules T3 Code Does Not Ship</h3></summary>
         <p><strong>Status:</strong> Open; blocks deleting the Git code under ADR-0282. The maintainer wants to discuss each rule separately, and may drop some (2026-11-14). The comparison with T3 Code is still to do.</p>
@@ -127,37 +100,25 @@
           </div>
           <div class="opt"><h4>W2: WSL, project on C:</h4>
             <div class="b ws">WSL agent works in <code>/mnt/c</code> and calls <code>dotnet.exe</code> or <code>powershell.exe</code></div>
-            <ul><li>Pro: almost nothing to build.</li><li>Con: slow file access across the VM boundary and unreliable file watchers; Windows programs run outside any sandbox with the person's full rights.</li></ul>
+            <ul><li>Pro: almost nothing to build.</li><li>Con: slow file access across the VM boundary and unreliable file watchers.</li></ul>
           </div>
           <div class="opt"><h4>W3: Hybrid</h4>
             <div class="b ws">Meta-Harness in WSL</div>
             <div class="a">starts through WSL interop</div>
             <div class="b t3">Native T3 and agents on Windows</div>
-            <ul><li>Pro: real Windows agents and tools.</li><li>Con: Meta-Harness must handle Windows paths, processes and harness homes, which is native Windows support through the back door; agents' Windows sandboxes are weaker.</li></ul>
+            <ul><li>Pro: real Windows agents and tools.</li><li>Con: Meta-Harness must handle Windows paths, processes and harness homes, which is native Windows support through the back door.</li></ul>
           </div>
           <div class="opt"><h4>W4: All native</h4>
             <ul><li>Pro: cleanest on Windows.</li><li>Con: a second Meta-Harness platform; excluded by ADR-0226 until need is shown.</li></ul>
           </div>
         </div>
-        <p><strong>Side finding:</strong> WSL interop lets any Linux process start Windows programs by default, so an agent in W1 could leave its sandbox through <code>cmd.exe</code>. The spike checks whether agent sandboxes block it; otherwise Meta-Harness turns interop off for agents.</p>
-        <p><strong>Recommendation:</strong> W1 by default; W2 as a per-project switch that states Windows tools run unsandboxed and that a policy can disable; W3 only on shown need.</p>
-        <p><strong>Acceptance criterion:</strong> with the switch on, an agent builds a .NET project on <code>C:</code>; with it off, no agent can start a Windows program.</p>
-      </details>
-      <details id="d-108" class="decision wide">
-        <summary><h3>D-108 - A Host Move That Feels Like Compaction</h3></summary>
-        <p><strong>Status:</strong> Open. The maintainer approved that Meta-Harness builds the handoff of <a href="../adr/ADR-LOG.md">ADR-0284</a> from the full record, including goals, so that a move feels like a compaction in the same session, with minimal storage and transfer (2026-11-15).</p>
-        <p><strong>Design:</strong> only the transcript becomes a summary, with the last turns verbatim and a tool that reads the earlier session. Everything else is restored on the new host: agent configuration, goals, to-dos, session approvals as session rules, open questions, and running processes and subagents listed as interrupted. Rules, MCP servers, skills and hooks travel as the central configuration revision, and secrets as names. Permissions after the move are those before it, narrowed by the new host's policy; Liquid shows missing logins before the move.</p>
-        <p><strong>Questions:</strong></p>
-        <ul>
-          <li><strong>98.4 Who writes the summary?</strong> A (recommended): the new host opens the session file once in the background and runs the harness's own compaction, giving the same summary a compaction would; falls back to B where a harness cannot. B: a Meta-Harness prompt with the same model, which works with any harness and when switching harness. Either runs only at the move.</li>
-          <li><strong>98.5 Secrets and logins?</strong> A (recommended): central configuration names the credentials each project needs, each host resolves them from its own store, and they are entered once per host; secrets never leave a host (ADR-0224, ADR-0227). B: additionally move a secret end-to-end encrypted into the new host's store for that thread on request, which puts it on two hosts.</li>
-          <li><strong>98.6 How much transcript is synced?</strong> A (recommended): all of it, as compressed per-turn deltas deleted when the thread is archived, which keeps 98.4 A and later native continuation possible. B: trim large tool outputs to head, tail and hash, which saves storage but rules out native continuation.</li>
-        </ul>
-        <p><strong>Acceptance criterion:</strong> after a move between two signed-in hosts with the needed logins, the agent continues with the same goals, to-dos, approvals and configuration, and the person is asked for nothing.</p>
+        <p><strong>Not a criterion:</strong> sandboxes, also for Windows programs started from WSL, are the harness's (ADR-0252).</p>
+        <p><strong>Recommendation:</strong> W2: projects on <code>C:</code> work as they are, with the slower file access documented; W3 only on shown need.</p>
+        <p><strong>Acceptance criterion:</strong> an agent in WSL builds a .NET project on <code>C:</code> with <code>dotnet.exe</code>.</p>
       </details>
       <details id="d-104" class="decision wide">
         <summary><h3>D-104 - Lock Folder Ownership Along The Whole Path</h3></summary>
-        <p><strong>Status:</strong> Open. <a href="../../SECURITY.md#mvp-vcs-boundary">SECURITY.md</a> says the lock folder refuses links and folders writable by other users, but <code>private_namespace</code> in <code>meta-harness/meta-harness-core/src/checkout.rs</code> checks only the folders above the written path and above its resolved form, not folders reached part-way through a chain of links.</p>
+        <p><strong>Status:</strong> Open; moot if <a href="#d-102">D-102</a> drops the file-lock rules, because ADR-0282 then deletes this code. <a href="../../SECURITY.md#mvp-vcs-boundary">SECURITY.md</a> says the lock folder refuses links and folders writable by other users, but <code>private_namespace</code> in <code>meta-harness/meta-harness-core/src/checkout.rs</code> checks only the folders above the written path and above its resolved form, not folders reached part-way through a chain of links.</p>
         <p><strong>Problem:</strong> If a user routes their own config path through a world-writable folder without the sticky bit, another local user can swap a middle link. Two processes can then lock different files, so Initialize Git or session deletion can run beside a turn.</p>
         <p><strong>Question:</strong> Should Watershed check every folder on the path, or should SECURITY.md say that the user owns their config path and its links?</p>
         <div class="dia">

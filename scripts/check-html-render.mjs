@@ -223,8 +223,8 @@ async function checkDocument(browser, doc, viewport) {
 
     if (doc.relativePath === "docs/decisions/open-decisions.html") {
       await assertDecisionPage(page);
-      await page.goto(`${pathToFileURL(doc.absolutePath).href}#d-099`, { waitUntil: "load" });
-      await page.locator("#d-099").getByRole("link", { name: "D-102", exact: true }).press("Enter");
+      await page.goto(`${pathToFileURL(doc.absolutePath).href}#d-104`, { waitUntil: "load" });
+      await page.locator("#d-104").getByRole("link", { name: "D-102", exact: true }).press("Enter");
       await page.keyboard.press("Tab");
       if (await page.locator("#d-102 a:focus").count() !== 1) {
         throw new Error(`${label}: Tab after a decision link must continue inside its destination`);

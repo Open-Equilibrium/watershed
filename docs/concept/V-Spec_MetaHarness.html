@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>V-Spec — Meta-Harness</title>
 <style>
-:root{--bg:#0f1115;--panel:#171a21;--panel2:#1e222b;--text:#e6e8ee;--muted:#9aa3b2;--line:#2a2f3a;--accent:#4ea1ff;--good:#7ee0a8;--warn:#ffcf6b;--bad:#ff9b9b;--r:12px;--font:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#0f1115,#11141a 40rem,#0f1115);color:var(--text);font:16px/1.58 var(--font)}a{color:var(--accent)}code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.layout{display:grid;grid-template-columns:250px minmax(0,1fr);gap:24px;max-width:1320px;margin:0 auto;padding:24px}.toc{position:sticky;top:16px;align-self:start;background:rgba(23,26,33,.9);border:1px solid var(--line);border-radius:var(--r);padding:16px}.toc h2{font-size:13px;text-transform:uppercase;color:var(--muted);letter-spacing:.12em}.toc a{display:block;color:var(--muted);text-decoration:none;padding:7px 8px;border-radius:8px}.toc a:hover{background:var(--panel2);color:var(--text)}.hero,.section{border:1px solid var(--line);border-radius:var(--r);background:rgba(23,26,33,.92);margin-bottom:14px}.hero{padding:28px}.hero h1{font-size:clamp(32px,5vw,52px);line-height:1.02;margin:8px 0}.eyebrow{color:var(--good);font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.muted{color:var(--muted)}.section h2{margin:0;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--panel2);font-size:20px}.body{padding:18px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.card{background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:14px}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:3px 8px;margin:2px;color:var(--muted);font-size:12px}.good{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}pre{overflow:auto;background:#0b0d12;border:1px solid var(--line);border-radius:var(--r);padding:14px}.flow{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;align-items:stretch}.node{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center}.arrow{color:var(--muted);display:flex;align-items:center;justify-content:center}@media(max-width:900px){.layout{display:block}.toc{position:relative;margin-bottom:16px}.grid,.flow{grid-template-columns:1fr}}
+:root{--bg:#0f1115;--panel:#171a21;--panel2:#1e222b;--text:#e6e8ee;--muted:#9aa3b2;--line:#2a2f3a;--accent:#4ea1ff;--good:#7ee0a8;--warn:#ffcf6b;--bad:#ff9b9b;--r:12px;--font:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#0f1115,#11141a 40rem,#0f1115);color:var(--text);font:16px/1.58 var(--font)}a{color:var(--accent)}code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.layout{display:grid;grid-template-columns:250px minmax(0,1fr);gap:24px;max-width:1320px;margin:0 auto;padding:24px}.toc{position:sticky;top:16px;align-self:start;background:rgba(23,26,33,.9);border:1px solid var(--line);border-radius:var(--r);padding:16px}.toc h2{font-size:13px;text-transform:uppercase;color:var(--muted);letter-spacing:.12em}.toc a{display:block;color:var(--muted);text-decoration:none;padding:7px 8px;border-radius:8px}.toc a:hover{background:var(--panel2);color:var(--text)}.hero,.section{border:1px solid var(--line);border-radius:var(--r);background:rgba(23,26,33,.92);margin-bottom:14px}.hero{padding:28px}.hero h1{font-size:clamp(32px,5vw,52px);line-height:1.02;margin:8px 0}.eyebrow{color:var(--good);font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.muted{color:var(--muted)}.section h2{margin:0;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--panel2);font-size:20px}.body{padding:18px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.card{background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:14px}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:3px 8px;margin:2px;color:var(--muted);font-size:12px}.good{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}pre{overflow:auto;background:#0b0d12;border:1px solid var(--line);border-radius:var(--r);padding:14px}.flow{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;align-items:stretch}.node{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center}.arrow{color:var(--muted);display:flex;align-items:center;justify-content:center}@media(max-width:900px){.layout{display:block}.toc{position:relative;margin-bottom:16px}.grid,.flow{grid-template-columns:1fr}}.pd-b{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--panel2);text-align:center;font-size:14px;line-height:1.4;margin:4px 0}.pd-b small{display:block;color:var(--muted);font-size:12px}.pd-ws{border-color:var(--accent)}.pd-t3{border-color:var(--warn)}.pd-h{border-style:dashed;border-color:var(--muted)}.pd-sy{border-color:var(--good)}.pd-a{text-align:center;color:var(--muted);font-size:12px;line-height:1.3}.pd-a::before{content:"\2193  ";color:var(--text)}.pd-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin:10px 0}.pd-box{border:1px dashed var(--line);border-radius:var(--r);padding:10px 12px;margin:6px 0}.pd-cap{font-size:12px;color:var(--muted);margin-bottom:4px}.pd-key{display:inline-block;border:1px solid;border-radius:6px;padding:0 8px;font-size:12px;margin:0 6px 6px 0}.pd-steps{margin:8px 0;padding-left:22px}.pd-steps li{margin:0 0 6px}
 </style>
 </head>
 <body>
@@ -194,6 +194,29 @@ meta metrics ...</code></pre></div>
     </div></section>
 
     <section id="architecture" class="section"><h2>7. Architecture</h2><div class="body">
+      <h3 id="t3-stack">Agent host on T3 Code</h3>
+      <p>Accepted target (ADR-0280 to ADR-0282, ADR-0286). The pipeline and crates further down predate building on T3 Code and follow it once reworked.</p>
+      <p><span class="pd-key pd-ws">Watershed</span><span class="pd-key pd-t3">T3 Code, unchanged</span><span class="pd-key pd-h">Harness or outside agent</span><span class="pd-key pd-sy">Host connection</span></p>
+      <div class="pd-row">
+        <div>
+          <div class="pd-b pd-ws">Liquid on any device</div>
+          <div class="pd-a">Meta-Harness's client protocol, Liquid's only way in (ADR-0281)</div>
+          <div class="pd-b pd-ws">Meta-Harness (Rust)<small>central configuration with approval and audit, host links, host moves, agent profiles</small></div>
+          <div class="pd-a">starts a pinned T3 Code on loopback, telemetry and activity publishing off; client protocol and MCP, contract-tested</div>
+          <div class="pd-b pd-t3">T3 Code server<small>harness runs, checkpoints, diff, revert, Git, pull requests, worktrees, crash resume, schedules, agent tools (ADR-0282)</small></div>
+          <div class="pd-a">ACP or a native adapter</div>
+          <div class="pd-b pd-h">Harnesses<small>Codex, Claude Code, Flow Agent through ACP, …</small></div>
+        </div>
+        <div>
+          <div class="pd-cap">Start and packaging (ADR-0286)</div>
+          <div class="pd-b pd-ws">One installer: <code>meta</code> CLI and a login service<small>launchd or a systemd user unit, no administrator rights</small></div>
+          <div class="pd-a">at sign-in and after a crash</div>
+          <div class="pd-b pd-ws">Meta-Harness<small>own state in SQLite with an append-only approval log</small></div>
+          <div class="pd-a">starts and supervises</div>
+          <div class="pd-b pd-t3">T3 Code</div>
+          <div class="pd-box"><strong>Windows 11:</strong> Liquid runs natively; Meta-Harness, T3 Code and the harnesses run in WSL (ADR-0226), with projects in the Linux file system. Projects on <code>C:</code>: <a href="../decisions/open-decisions.html#d-107">D-107</a>.</div>
+        </div>
+      </div>
       <div class="flow" aria-label="Meta-Harness control-plane pipeline">
         <div class="node">CLI / API / BYOA / Liquid command</div><div class="arrow">→</div><div class="node">Control plane + policy gate</div><div class="arrow">→</div><div class="node">Config resolver</div>
         <div class="node">Meta-Harness agent executor</div><div class="arrow">→</div><div class="node">Agent adapter</div><div class="arrow">→</div><div class="node">Artifact index</div>
@@ -260,47 +283,106 @@ liquid integration
         <li>policy-gated config-improvement proposals.</li>
       </ul>
       <h3 id="orchestration">Agents orchestrating agents</h3>
-      <p>Accepted target (ADR-0253), with T3 Code as the model: an agent starts, messages, reads, steers and stops other threads across harnesses, model providers and agent hosts. A Codex thread on a Mac can start a Claude Code subagent on a Windows 11 computer linked as an agent host, whose Meta-Harness runs in WSL, talk with it and steer it.</p>
+      <p>Accepted target (ADR-0288): agents use T3 Code's own orchestration tools, and a tool that takes an <code>environmentId</code> acts on another host through T3's peer links. Meta-Harness builds no tools of its own for this.</p>
+      <p><span class="pd-key pd-ws">Watershed</span><span class="pd-key pd-t3">T3 Code, unchanged</span><span class="pd-key pd-h">Harness or outside agent</span><span class="pd-key pd-sy">Host connection</span></p>
+      <div class="pd-row">
+        <div>
+          <div class="pd-cap">Linking two hosts: once per direction, without a person</div>
+          <ol class="pd-steps">
+            <li>Both hosts are signed in to the Liquid account (ADR-0285); the receiving host's switch accepts agents from other hosts.</li>
+            <li>Meta-Harness on the receiving host has its T3 issue a pairing code, as that T3's owner.</li>
+            <li>The code travels end-to-end encrypted to Meta-Harness on the linking host.</li>
+            <li>That Meta-Harness runs <code>t3 environment link</code> with the code, its tunnel's address and the access level its policy sets.</li>
+            <li>The linking T3 signs in to the other T3's <code>/mcp</code> as an OAuth client and keeps the token in its secret store; the receiving T3 lists it under Sharing &amp; access, where it can be revoked.</li>
+          </ol>
+          <p class="muted">Linked work cannot use the receiving host's own links, so every pair of hosts gets its own link, six for three hosts; Meta-Harness adds and removes them.</p>
+        </div>
+        <div>
+          <div class="pd-cap">One call: Codex on a Mac has Claude Code on a Windows PC review</div>
+          <div class="pd-b pd-h"><code>delegate_task(environmentId: "Windows PC", …)</code><small>the tool it also uses on its own host</small></div>
+          <div class="pd-a">to its own T3</div>
+          <div class="pd-b pd-t3">T3 on the Mac refuses read-only or ended callers and attaches the caller's mode</div>
+          <div class="pd-a">through Meta-Harness's tunnel</div>
+          <div class="pd-b pd-sy">Meta-Harness Mac → direct or relay → Meta-Harness Windows (WSL)<small>forwards bytes, checks nothing</small></div>
+          <div class="pd-a">loopback</div>
+          <div class="pd-b pd-t3">T3 on the Windows PC grants the lower of the link's level and the caller's mode and stamps <code>linkOrigin</code></div>
+          <div class="pd-a">starts</div>
+          <div class="pd-b pd-h">Claude Code thread<small>configured by Meta-Harness there, like every local thread</small></div>
+          <div class="pd-a">T3 on the Mac waits in calls of at most 50 s</div>
+          <div class="pd-b pd-t3">The result completes the parent's task; a Mac that was offline picks open remote tasks up again at start</div>
+        </div>
+      </div>
       <ul>
-        <li><strong>Tools:</strong> Meta-Harness offers every session it starts its orchestration as MCP tools, as T3 Code offers its agents: list the agent hosts and the harnesses and models each offers; start a thread with a harness, model, host and first message as the caller's subagent; send it a message, also while it runs; read its messages and state; wait for its result; stop it; ask to link another agent host.</li>
-        <li><strong>Execution:</strong> a call goes to the caller's own Meta-Harness, which forwards it to the other agent host; that host starts and supervises the harness itself, so execution stays host-local and a process another host claims is refused.</li>
-        <li><strong>Subagents and messages:</strong> a subagent is a thread with its parent; each message is attributed to the thread that sent it, and the subagent's results reach the parent as messages, as T3 Code delivers a delegated task's result.</li>
-        <li><strong>Authority:</strong> a subagent's grant comes from its parent's grant and is never larger (ADR-0223); the person sees and stops every thread in Liquid.</li>
-        <li><strong>Linking agent hosts:</strong> they pair over the authenticated remote connection (ADR-0185), as T3 Code links environments: an agent may only ask to link an agent host, and the person completes the pairing on that host; each host keeps its own credentials.</li>
+        <li><strong>Authority:</strong> the caller's mode limits the remote work, so a subagent never exceeds its parent (ADR-0223); a plan-mode agent cannot start full-access work.</li>
+        <li><strong>Below full access</strong> linked work changes only threads of its own origin and no projects, settings or schedules, and setup scripts are skipped; it can still read every thread on that host. At full access it runs as the receiving host's user, unfenced, still stamped with its origin.</li>
+        <li><strong>The person</strong> sees each child under its parent in Liquid and can stop it.</li>
+        <li><strong>Spike:</strong> T3 never takes a loopback address as another host's, so the tunnel's end needs an address T3 accepts; pairing without a person and switching the beta on are checked too. If one fails, Meta-Harness offers its own tools for other hosts.</li>
       </ul>
     </div></section>
 
     <section id="durability" class="section"><h2>11. Durability</h2><div class="body">
       <p class="muted">Today's limit (ADR-0274): Liquid restores a Chat with separate reads of its transcript, usage and turns, so a turn that something outside Liquid, such as a pi extension, ends during a restore may be missing until the next restore.</p>
-      <p>Accepted target (ADR-0229). Durable work has four levels, and Meta-Harness on every host covers all four: agents depend on the files, tools and credentials of a machine, so every host needs its own supervisor, and Liquid sync plus Git checkpoints give the hosts a shared state.</p>
-      <svg viewBox="0 0 640 330" role="img" aria-label="Durability across four levels" style="width:100%;max-width:760px;height:auto;display:block">
-        <g font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="11" fill="#e6e8ee">
-        <rect x="230" y="8" width="180" height="56" rx="10" fill="none" stroke="#4ea1ff"/><text x="320" y="28" text-anchor="middle" font-weight="600">Liquid on every device</text><text x="320" y="44" text-anchor="middle" font-size="10" fill="#9aa3b2">laptop · phone · another computer</text><text x="320" y="57" text-anchor="middle" font-size="10" fill="#4ea1ff">A: attaches to the host</text>
-        <rect x="10" y="110" width="250" height="150" rx="10" fill="#c9a0ff" fill-opacity=".06" stroke="#c9a0ff"/><text x="135" y="130" text-anchor="middle" font-weight="600">Host 1 · Meta-Harness service</text>
-        <text x="24" y="152" font-size="10">• journal before display and effect</text><text x="24" y="168" font-size="10">• supervises pi, Flow Agent, …</text><text x="24" y="184" font-size="10" fill="#c9a0ff">B: resumes after a crash</text><text x="24" y="206" font-size="10">• the harness's session file</text><text x="24" y="222" font-size="10">• project + checkpoint refs (Git)</text><text x="24" y="244" font-size="10">• its own credentials</text>
-        <rect x="380" y="110" width="250" height="150" rx="10" fill="#c9a0ff" fill-opacity=".06" stroke="#c9a0ff"/><text x="505" y="130" text-anchor="middle" font-weight="600">Host 2 · Meta-Harness service</text>
-        <text x="394" y="152" font-size="10">• the same as host 1</text><text x="394" y="174" font-size="10" fill="#c9a0ff">C: continues a session at a</text><text x="394" y="188" font-size="10" fill="#c9a0ff">turn boundary: record + checkpoint</text><text x="394" y="210" font-size="10" fill="#c9a0ff">D: runs tasks from host 1,</text><text x="394" y="224" font-size="10" fill="#c9a0ff">later single tools</text><text x="394" y="246" font-size="10">• its own credentials</text>
-        <rect x="200" y="282" width="240" height="40" rx="10" fill="#7ee0a8" fill-opacity=".07" stroke="#7ee0a8"/><text x="320" y="300" text-anchor="middle" font-weight="600">Liquid sync: agent-sessions area</text><text x="320" y="315" text-anchor="middle" font-size="10" fill="#9aa3b2">session records for the person's hosts and devices</text>
-        <rect x="240" y="170" width="160" height="40" rx="8" fill="none" stroke="#9aa3b2" stroke-dasharray="4 3"/><text x="320" y="187" text-anchor="middle" font-size="10.5">Git remote</text><text x="320" y="201" text-anchor="middle" font-size="10" fill="#9aa3b2">branch + checkpoint refs</text>
-        <g stroke-width="1.6" fill="none"><line x1="290" y1="64" x2="200" y2="110" stroke="#4ea1ff"/><line x1="350" y1="64" x2="440" y2="110" stroke="#4ea1ff"/><line x1="260" y1="150" x2="380" y2="150" stroke="#c9a0ff" stroke-dasharray="5 4"/><line x1="260" y1="190" x2="240" y2="190" stroke="#9aa3b2"/><line x1="400" y1="190" x2="380" y2="190" stroke="#9aa3b2"/><line x1="135" y1="260" x2="230" y2="282" stroke="#7ee0a8"/><line x1="505" y1="260" x2="410" y2="282" stroke="#7ee0a8"/></g>
-        <text x="320" y="144" text-anchor="middle" font-size="10" fill="#c9a0ff">host link (D)</text>
-        </g>
-      </svg>
-      <ul>
-        <li><strong>A · Switch the client:</strong> Meta-Harness runs as a service; Liquid on any device attaches over the authenticated remote connection (ADR-0185) and sees the same live session. The Workspace copy of the session record lets every device show its history without a connection.</li>
-        <li><strong>B · Survive a crash:</strong> as T3 Code does (ADR-0278). Every harness event is journaled before Liquid shows it, in short group commits rather than once per token. After a crash, restart or update, Meta-Harness resumes the harness's own session; unless the harness continues the cut turn itself, it sends: <em>"Continue where you left off. Your last turn was cut short, so a command or other action it started may have finished or may still be running. Before you repeat one that changes state, confirm it did not take effect and is not still running; if you cannot tell, say so instead of repeating it."</em> It does this at most three times in a row, and never while the session waits for the person, after a stop or once the person has written. A session stopped by a provider's usage limit continues when the limit resets.</li>
-        <li><strong>C · Move an agent:</strong> at a turn boundary another of the person's hosts takes the session over: the record from Liquid, the files from the Git checkpoint ref (ADR-0220), its own credentials and the person's grant (ADR-0223). At each turn end Meta-Harness mirrors the session record into the agent-sessions area, its content as blobs with only metadata in the CRDT. The Sync Server gives the session to one host; two hosts continuing offline create two branches.</li>
-        <li><strong>D · Several hosts:</strong> agent hosts hand each other tasks and messages and return results, as T3 Code's linked environments do; a harness's own approvals stay with the host that runs the work. Running single tools on another host follows later.</li>
-      </ul>
+      <p>Accepted target (ADR-0229). Durable work has four levels, and Meta-Harness with T3 Code on every host covers all four: agents depend on the files, tools and credentials of a machine, so every host needs its own supervisor, and Liquid sync plus Git checkpoints give the hosts a shared state.</p>
+      <p><span class="pd-key pd-ws">Watershed</span><span class="pd-key pd-t3">T3 Code, unchanged</span><span class="pd-key pd-h">Harness or outside agent</span><span class="pd-key pd-sy">Host connection</span></p>
       <div style="overflow-x:auto">
       <table>
-        <tr><th>Harness</th><th>Journal before display</th><th>Resume</th></tr>
-        <tr><td>pi</td><td>Meta-Harness journals each RPC event first</td><td>restart with <code>--session</code>, then the continue message</td></tr>
-        <tr><td>Flow Agent</td><td>its own journal</td><td>Meta-Harness calls <code>flow resume</code>; Flow Agent never repeats an uncertain attempt itself</td></tr>
-        <tr><td>Later adapters</td><td>Meta-Harness's journal</td><td>their own session resume, then the continue message</td></tr>
+        <tr><th>Level</th><th>Who</th><th>How</th></tr>
+        <tr><td>A · Switch the client</td><td>Meta-Harness</td><td>Liquid on any device attaches to Meta-Harness on the host, through the host connection when remote (ADR-0285).</td></tr>
+        <tr><td>B · Survive a crash</td><td>T3 Code</td><td>T3 resumes the harness session and sends a continue prompt; the login service restarts Meta-Harness, which restarts T3 (ADR-0278, ADR-0286).</td></tr>
+        <tr><td>C · Move a session</td><td>Meta-Harness</td><td>Another host continues at a turn boundary by a handoff that feels like a compaction (ADR-0284, ADR-0289).</td></tr>
+        <tr><td>D · Several hosts</td><td>T3 Code over Meta-Harness's connection</td><td>Agents start and steer threads on other hosts with T3's tools (ADR-0288, <a href="#orchestration">orchestration</a>).</td></tr>
       </table>
       </div>
-      <p class="muted">Each adapter reports which levels it reaches. The harness's own session file stays authoritative on its host, and pi keeps Liquid's records as custom entries in it; the Workspace record is the portable copy (ADR-0189). Without a Git project only the conversation moves.</p>
+      <h3 id="host-links">Linking hosts</h3>
+      <p>Accepted target (ADR-0285): one sign-in per host, nothing else to set up.</p>
+      <div class="pd-row">
+        <div>
+          <div class="pd-b pd-ws">Sign in to the Liquid account on each host (ADR-0224)</div>
+          <div class="pd-a">the sync server hands out each host's id and keys</div>
+          <div class="pd-b pd-sy">Direct connection where hole punching works, else an end-to-end encrypted relay such as iroh<small>the relay sees who sends how much, never content; Tailscale until it exists</small></div>
+          <div class="pd-a">trust within the account, each host with a switch to refuse agents from other hosts</div>
+          <div class="pd-b pd-ws">Every host appears in Liquid on every device</div>
+        </div>
+        <div>
+          <div class="pd-b pd-h">Outside agents: Grok Bot, Claude Duet, OpenAI Dots</div>
+          <div class="pd-a">one public HTTPS MCP address on the relay, OAuth with a chosen level</div>
+          <div class="pd-b pd-ws">An always-on host's Meta-Harness</div>
+          <div class="pd-a">T3's tools across hosts (ADR-0288)</div>
+          <div class="pd-b pd-t3">Threads on every host</div>
+          <p class="muted">The tasks' content reaches the bot's provider.</p>
+        </div>
+      </div>
+      <h3 id="host-move">Moving a session to another host</h3>
+      <p>Accepted target (ADR-0284, ADR-0289). Usually the old host is gone, for example crashed, so the move asks the person for as little as possible and feels like a compaction: only the transcript becomes a summary, and every other part of the session is restored.</p>
+      <div class="pd-row">
+        <div>
+          <div class="pd-cap">At every turn's end, on the owning host</div>
+          <div class="pd-b pd-ws">Meta-Harness puts into Liquid's encrypted sync: the T3 thread record, the agent configuration used, the harness's session file as a compressed delta, the checkpoint as an incremental Git bundle, the owning host and the session state below</div>
+          <div class="pd-a">the owner is offline and the person writes</div>
+          <div class="pd-b pd-ws">Liquid offers the move; a host that continues concurrently forks the thread</div>
+          <div class="pd-a">on the new host</div>
+          <div class="pd-b pd-h">The harness's own compaction summarizes the session file; a harness without one gets a Meta-Harness prompt with the same model</div>
+          <div class="pd-a">T3 starts the thread with the summary, the last turns verbatim and the restored state</div>
+          <div class="pd-b pd-t3">The agent continues; Liquid marks the thread "continued on" the new host, like a compaction marker</div>
+        </div>
+        <div>
+          <div style="overflow-x:auto">
+          <table>
+            <tr><th>Part of the session</th><th>On the new host</th></tr>
+            <tr><td>Transcript</td><td>summary, last turns verbatim, a tool that reads the earlier session</td></tr>
+            <tr><td>Agent configuration</td><td>same harness, model, effort and mode; rules, MCP servers, skills and hooks from the same central configuration revision</td></tr>
+            <tr><td>Goals, to-dos, open questions</td><td>restored, natively where the harness supports it</td></tr>
+            <tr><td>Session approvals</td><td>set again as session rules</td></tr>
+            <tr><td>Permissions</td><td>those from before, narrowed only by the new host's policy; Liquid shows what is missing before the move</td></tr>
+            <tr><td>Secrets the person entered</td><td>from the end-to-end encrypted sync, so nothing is asked again; a policy can switch this off</td></tr>
+            <tr><td>Running processes and subagents</td><td>listed as interrupted for the agent to restart</td></tr>
+            <tr><td>Hidden reasoning, read-file markers, prompt cache</td><td>lost, as in a compaction; the agent reads files again</td></tr>
+          </table>
+          </div>
+        </div>
+      </div>
+      <h3 id="persistent-agents">Persistent agents</h3>
+      <p>Accepted target (ADR-0283), once host moves and host links work: an agent profile has a name, a memory folder, its central configuration and its own T3 routines and webhooks. Each wake-up is a turn in the profile's thread; a full context hands off to a new thread, as Grok Bot keeps the bot, not a thread, as its lasting unit.</p>
       <p><strong>Another harness</strong> (ADR-0231): a session moves to another harness, such as from pi to Codex, only as a handoff, as in T3 Code. The target starts a new session that receives the conversation so far as text, at most 16,000 tokens by default, marked as context, not a new request; attachments and the provider's tool and reasoning state do not move. A target that already saw part of the conversation receives only what followed; the files come from the Git checkpoint ref. Within pi, switching model or provider stays pi's own switch inside the session.</p>
     </div></section>
 
@@ -321,7 +403,7 @@ liquid integration
     </div></section>
 
     <section id="open" class="section"><h2>14. Open decisions</h2><div class="body">
-      <p>See <a href="../decisions/open-decisions.html">open-decisions.html</a>: building on T3 Code (ADR-0280 to ADR-0286; tools for other hosts <a href="../decisions/open-decisions.html#d-099">D-099</a>, Git rules <a href="../decisions/open-decisions.html#d-102">D-102</a>) and AgentPulse formulas (<a href="../decisions/open-decisions.html#d-010">D-010</a>). Host-scoped execution and multi-instance projection ownership are decided, not open.</p>
+      <p>See <a href="../decisions/open-decisions.html">open-decisions.html</a>: building on T3 Code (ADR-0280 to ADR-0289; Git rules <a href="../decisions/open-decisions.html#d-102">D-102</a>) and AgentPulse formulas (<a href="../decisions/open-decisions.html#d-010">D-010</a>). Host-scoped execution and multi-instance projection ownership are decided, not open.</p>
     </div></section>
   </main>
 </div>
