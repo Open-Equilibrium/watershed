@@ -124,7 +124,7 @@ Each topic's canonical home; other files link there.
 | Durability | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#durability) |
 | Session record export | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#boundary) |
 | MVP VCS boundary, Git integration and checkpoints | [SECURITY.md](SECURITY.md#mvp-vcs-boundary); target: [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#git-integration) |
-| Adapter requirements for another agent harness | [meta-harness/README.md](meta-harness/README.md#adapter-requirements) |
+| Another agent harness, as a T3 Code provider | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#t3-stack) |
 | Liquid sync, replicas and areas | [Liquid V-Spec](docs/concept/V-Spec_Liquid.html#sync) |
 | Roles and grants | [SECURITY.md](SECURITY.md#liquid-workspace-access--external-agent-edits); target: [Liquid V-Spec](docs/concept/V-Spec_Liquid.html#agent-grants) |
 | Liquid Pages, Blocks and Tables | [Liquid V-Spec](docs/concept/V-Spec_Liquid.html#model) |
