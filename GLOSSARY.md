@@ -37,8 +37,8 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Meta-Agent** — The agent that _operates_ the Meta-Harness; either Liquid-native or BYOA. May propose configuration changes for underlying agents, which take effect only once approved (ADR-0227, planned).
 - **BYOA** — "Bring Your Own Agent"; plugging an external agent in as the Meta-Agent.
 - **AgentPulse** — Meta-Harness subsystem measuring rework ratio, first-attempt success rate, and cost-per-productive-outcome. Meta-Harness computes/stores the metrics; Liquid only renders them.
-- **Adapter** — A Meta-Harness subsystem that translates an external agent's harness (today only pi) into normalized protocol events/commands. Native agent shapes do not leak past the adapter.
-- **Agent event** — One event of the in-process session model the embedded Meta-Harness core gives Liquid's agent surface until its service mode (ADR-0195): turns, items, content deltas, requests and usage. Not a Flow Agent runtime event.
+- **Adapter** — The part of an agent host that translates an external agent's harness into normalized events and commands; on T3 Code, its providers and local ACP commands (ADR-0282). Native agent shapes do not leak past it.
+- **Agent event** — One event of the session model the embedded Meta-Harness core gives Liquid's agent surface, translated from T3 Code's thread events: turns, items, content deltas, requests and usage, each with T3's sequence number (ADR-0290). Not a Flow Agent runtime event.
 - **Partial output** — What a running tool call has written so far, reported as its whole output while it runs; each report replaces the one before it, unlike a content delta, which appends text.
 
 ## Flow Agent primitives
@@ -100,8 +100,6 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Run bundle** — One Run's event/context/recovery segments, Run Log including its definition metadata, and immutable objects.
 - **Conversation bundle** — One conversation history plus all owned Run bundles.
 - **Host-local session ownership leases** — Exclusive operating-system file leases in the private user-global Workspace store. `PROTOCOL.md` defines their ownership and acquisition contract. Process exit releases leases; none is durable or transferable across hosts.
-- **Stash operation token** — The unique suffix in the message of a stash Liquid saves, such as `Liquid: changes left on main · 7f3a9c0123456789`, which identifies that save independently of the stash list's order.
-- **Session branch** — One path through a pi session's tree of entries, which a revert or Branch from here starts; not a Git branch, which keeps the name "branch" in Liquid.
 - **Session marker** — The persistent `session.lock` observability leaf inside a run directory. It is not ownership authority and cannot grant or revoke the lease.
 - **Reservation orphan** — An empty run artifact retained and inventoried when rollback cannot prove identity-bound deletion. Its cleanup failure remains visible, and compare-then-unlink never removes it.
 - **Event segment** — One append-only canonical JSONL file within a run bundle; rotation bounds individual I/O without starting a new run or resetting sequence/budgets.
@@ -151,13 +149,13 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **History** — Liquid's attributed and reversible record of Workspace Actions; also called **workspace action history / workspace VCS** when distinguishing it from project-code VCS. A revert records a new reversing Action; Restore version returns a Page to an earlier save point (ADR-0235).
 - **Agent surface** — Liquid's view of one agent session: the sidebar, the Chat with its session card, the Diff panel beside it when open, the widget strip, the input area and the status bar; ADR-0239 plans to fold it into Chats.
 - **Session card** — The card at the top right of the Chat that holds a session's Git controls and statistics, as T3 Code's thread details card; it sits beside the Chat or opens as a popover.
-- **Context window** — The tokens a model takes in one request; the session card shows how much of it the session uses and where pi compacts the session.
+- **Context window** — The tokens a model takes in one request; the session card shows how much of it the session uses and where the agent compacts it, as the provider reports.
 - **Session statistics** — What a session's stored entries count to, as tokens, cost, working time and tool calls by outcome, never estimated (ADR-0279). The session card shows them as rows with the context window; the statistics panel, opened with ⌘U from the card's Statistics row, shows them per turn.
-- **Turn** — What an agent does for a prompt, from one start checkpoint to the next; without checkpoints, from one prompt to the next. The Diff and the statistics panel both number turns (ADR-0279).
+- **Turn** — What an agent does for a prompt: one T3 Code run, numbered by its ordinal, which also numbers its checkpoint and diff. The Diff and the statistics panel both number turns (ADR-0279).
 - **Diff panel** — The Diff of the Chat's turns, shown as a panel beside the Chat (⌘D).
 - **Start page** — What the agent surface shows before a session's first message: the project's recent sessions to continue and chips to set the new one up.
 - **Input area** — The fixed-height area at the bottom of the agent surface: the composer, or in its place an agent question.
-- **Git integration** — Git operations on the projects agents work in — diffs, branches, commits, push, pull requests and worktrees — run by Meta-Harness on its host and presented in Liquid (ADR-0190). It operates the project's own Git repository and is not a Watershed VCS; Liquid's own VCS is History.
+- **Git integration** — Git operations on the projects agents work in — diffs, branches, commits, push, pull requests and worktrees — run by T3 Code on Meta-Harness's host with its behavior as shipped and presented in Liquid (ADR-0282). It operates the project's own Git repository and is not a Watershed VCS; Liquid's own VCS is History.
 - **CRDT** — Conflict-free replicated data type: a data structure whose independently edited copies merge deterministically to the same state. Liquid sync uses an established CRDT library (ADR-0182): Automerge 3 (ADR-0238).
 - **Rust–Flutter bridge** — The asynchronous call and stream boundary between Liquid's Flutter UI and its Rust core. It carries bounded deltas, never whole Pages or Databases (ADR-0182); it uses flutter_rust_bridge v2 (ADR-0186).
 - **Liquid replica** — A complete local working copy of an authorized Workspace. Interactive reads and writes never require a remote round trip.
@@ -169,9 +167,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Subagent** — A thread an agent starts through T3 Code's orchestration tools (ADR-0288), in any harness, with any model and on any agent host, which reports back to it as messages; its authority never exceeds its parent's grant (ADR-0253).
 - **Grant** — What a person signs to let an agent act for them in a Workspace: an area, actions and an expiry, never more than that person may do; revoking it makes the Sync Server refuse the agent's changes (ADR-0223).
 - **Agent-sessions area** — The area where Meta-Harness mirrors agent session records at turn boundaries, so another of the person's agent hosts can continue a session (ADR-0229).
-- **Shown session** — The stored session a Liquid window displays. It holds a shared lock, so deleting that session is refused while any window of the project shows it (ADR-0271). Unlike a running agent, it does not block reverts or commits.
-- **Session record** — The folder “Export record” writes into Downloads for one stored session: pi's session file unchanged, `record.json` with its turns, and a `README.txt` of what it leaves out (ADR-0257).
-- **Checkpoint ref** — A Git ref under Meta-Harness's own namespace, `refs/watershed/checkpoints/<session>/<turn>/<start|end>`, that points at a commit of the agent project's files at a turn's start or end, to show the turn's changes and to revert the files to it (ADR-0220, ADR-0234).
+- **Session record** — The folder “Export record” writes into Downloads for one session: T3 Code's record of the thread, `record.json` with its turns, and a `README.txt` of what it leaves out (ADR-0257).
 - **Compliance replica** — A replica a company runs with its own key for search, legal hold and data-loss checks (ADR-0228).
 - **Recovery key** — The second way to regain a Workspace's keys when no signed-in device can approve a new one. Area keys are also wrapped for it, and the person or their company holds it (ADR-0228).
 - **Headless replica** — A Liquid replica without UI, on a server for Automations and schedules or on a separate agent host. It holds only the Workspaces enabled for it and, once selective replication follows the complete M3 replicas, only the areas its Roles allow (ADR-0255).

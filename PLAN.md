@@ -4,7 +4,7 @@ Open implementation work per milestone, with deliverables and a Definition of Do
 
 ## MVP boundary
 
-The first MVP is **Flow Agent as a CLI-only harness**. It runs inside normal Git projects but does not own project history, auto-commit, branch management or any Watershed-specific **project-code** VCS engine. This is distinct from Liquid's internal **workspace** action history/VCS (over Liquid's own workspace data), which is in scope for the Liquid MVP (M3), and from the Git integration for agent projects, which Meta-Harness runs and Liquid presents (ADR-0190), including its per-turn checkpoints (ADR-0220).
+The first MVP is **Flow Agent as a CLI-only harness**. It runs inside normal Git projects but does not own project history, auto-commit, branch management or any Watershed-specific **project-code** VCS engine. This is distinct from Liquid's internal **workspace** action history/VCS (over Liquid's own workspace data), which is in scope for the Liquid MVP (M3), and from the Git integration for agent projects, which T3 Code runs on Meta-Harness's host and Liquid presents, including its per-turn checkpoints (ADR-0282).
 
 ## Sequencing and adoption
 
@@ -51,14 +51,10 @@ The target product is canonical in [`docs/concept/V-Spec_Liquid.html`](docs/conc
 
 #### Liquid agent surface — early slice
 
-The macOS Liquid app controls pi through an embedded Meta-Harness core (ADR-0184). Open:
+The macOS Liquid app runs its agent sessions on a pinned T3 Code server through an embedded Meta-Harness core (ADR-0184, ADR-0280). Open:
 
-- Close the cheap record gaps (ADR-0222): show the nested tool calls pi records, and say in the Diff panel exactly what it covers, after an approved mockup.
-- Service mode, remote access and Android follow with multi-device (ADR-0195).
-
-#### Liquid Git integration — next slice
-
-Completes the Git integration for the agent's Git project (ADR-0190, ADR-0191, ADR-0220, ADR-0234); Meta-Harness runs the host's `git` and `gh`, Liquid provides the UI. Remaining: worktrees with Chats (ADR-0239), which they need — creating one from a new Chat's composer, its location and the last-Chat choice, the folder chip and moving an idle Chat ([mockups](docs/design/mockups/liquid-git-prs-worktrees.html)).
+- Say in the Diff panel exactly what it covers (ADR-0222), copying T3 Code's wording where it has one.
+- Service mode, remote access and Android follow with the installer and service (ADR-0286) and multi-device.
 
 #### M3a — Local Workspace foundation
 

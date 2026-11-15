@@ -448,7 +448,7 @@ Canonical byte limits count only the serialized JSON value, excluding record fra
 
 - **Versioned.** Each parser accepts only its declared current schema.
 - **No isolation fields.** Flow definitions, authoring flags, compiled policy and Executor requests reject filesystem, network, runtime-profile and process-capacity fields as unknown, with no compatibility interpretation; `tool.started` payloads carry none.
-- **Normalized events.** Adapters must map native agent events into the families above; do not leak native shapes. Exception: the embedded Meta-Harness core of the Liquid agent-surface slice uses its own in-process model, built on T3 Code's runtime event vocabulary, until its service mode (ADR-0195).
+- **Normalized events.** Adapters must map native agent events into the families above; do not leak native shapes. Exception: the embedded Meta-Harness core of the Liquid agent-surface slice uses its own in-process model, translated from T3 Code's thread events, until its service mode (ADR-0281).
 - **Artifact contract over runtime parity.** Agents differ in runtime semantics; they must agree only on this message contract.
 - **Deterministic ordering within a session.** A participant must follow the event envelope's `sequence` rule per session.
 - **No exfiltration via protocol.** Events and future commands carrying writes are subject to the security policy in `SECURITY.md`.
