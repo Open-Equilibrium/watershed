@@ -404,6 +404,18 @@ fn system_dns_capacity_is_shared_and_reclaimed_only_after_lookup_completion() {
             ..lookup_deadlines()
         },
     );
+    // Uncancelled, the request waits for a lookup slot that the held lookups keep.
+    assert!(
+        matches!(
+            waiting.recv_timeout(Duration::from_millis(250)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ),
+        "the request returned before it was cancelled"
+    );
+    assert!(matches!(
+        held.started.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
     cancelled.store(true, Ordering::Release);
     assert_lookup_command_error(waiting, false, true);
     assert!(matches!(
