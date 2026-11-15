@@ -77,6 +77,15 @@ fn credential_record_debug_never_prints_tokens_or_account() {
 }
 
 #[test]
+fn account_routing_debug_never_prints_the_account() {
+    let routing = account_routing_from_id_token(&jwt_with_account("account-secret-fixture"))
+        .expect("account routing parses");
+    let debug = format!("{routing:?}");
+    assert!(!debug.contains("account-secret-fixture"), "{debug}");
+    assert!(debug.contains("<redacted>"), "{debug}");
+}
+
+#[test]
 fn account_routing_defaults_to_standard_and_preserves_fedramp() {
     for (claim, expected) in [(None, false), (Some(false), false), (Some(true), true)] {
         let routing = account_routing_from_id_token(&jwt_with_account_routing("account", claim))

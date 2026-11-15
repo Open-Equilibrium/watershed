@@ -51,10 +51,20 @@ struct JwtAuthClaim {
     chatgpt_account_is_fedramp: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(crate) struct AccountRouting {
     pub(crate) account_id: String,
     pub(crate) is_fedramp: bool,
+}
+
+impl fmt::Debug for AccountRouting {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AccountRouting")
+            .field("account_id", &"<redacted>")
+            .field("is_fedramp", &self.is_fedramp)
+            .finish()
+    }
 }
 
 pub(crate) fn validate_credential_record(
