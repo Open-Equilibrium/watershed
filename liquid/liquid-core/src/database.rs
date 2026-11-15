@@ -177,16 +177,7 @@ impl Index {
 
     /// The sort key for a row placed at `place`.
     fn key_at(&self, place: Place<&RowId>) -> Result<String, Error> {
-        let index = match place {
-            Place::First => 0,
-            Place::After(after) => self.position(after).ok_or(Error::NotFound)? + 1,
-            Place::Last => self.rows.len(),
-        };
-        let key = |i: usize| self.rows.get(i).map(|row| row.sort.as_str());
-        Ok(crate::sort_key::between(
-            index.checked_sub(1).and_then(key),
-            key(index),
-        ))
+        crate::sort_key::at(&self.rows, place, |row| &row.id, |row| Some(&row.sort))
     }
 
     fn insert(&mut self, sort: String, id: RowId) {
