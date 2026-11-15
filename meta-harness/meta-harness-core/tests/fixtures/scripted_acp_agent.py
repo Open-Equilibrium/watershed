@@ -3,8 +3,8 @@
 
 The first prompt line that is a script line decides, up to any tag T3 appends to it:
 "append <text>" appends <text> to contract.txt in the session's folder through one tool call and answers "Appended."; "ask" asks permission for an
-edit and answers "Approved." or "Declined."; "wait" runs until T3 cancels it; anything else
-answers "Done."."""
+edit and answers "Approved." or "Declined."; "stream <n>" answers in <n> chunks of 16 bytes;
+"wait" runs until T3 cancels it; anything else answers "Done."."""
 import json
 import os
 import sys
@@ -50,6 +50,10 @@ def prompt(mid, sid, script):
         outcome = replies.pop(f"p{mid}")[1].get("outcome", {})
         say(sid, "Approved." if outcome.get("optionId") == "allow" else "Declined.")
         reason = "end_turn"
+    elif script.startswith("stream "):
+        for _ in range(int(script[len("stream "):])):
+            say(sid, "sixteen bytes ok")
+        reason = "end_turn"
     elif script == "wait":
         cancelled[sid].wait()
         reason = "cancelled"
@@ -81,7 +85,7 @@ for raw in sys.stdin:
         cancelled[sid].clear()
         text = "".join(p.get("text", "") for p in params.get("prompt", []) if p.get("type") == "text")
         lines = [line.split("<")[0].strip() for line in text.splitlines()]
-        script = next((line for line in lines if line.startswith("append ") or line in ("ask", "wait")), "")
+        script = next((line for line in lines if line.startswith(("append ", "stream ")) or line in ("ask", "wait")), "")
         threading.Thread(target=prompt, args=(mid, sid, script)).start()
     elif method == "session/cancel":
         cancelled[params["sessionId"]].set()

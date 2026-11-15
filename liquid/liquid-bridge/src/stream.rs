@@ -4,33 +4,24 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use meta_harness_core::SessionEvent;
+use meta_harness_core::ThreadEvent;
 use tokio::sync::{Notify, mpsc};
 
 use crate::api::events::{BridgeEvent, BridgeEventKind};
 
 /// Adds `event` to `batch`. A content delta joins the one before it when both belong to the same
-/// item, and a partial output replaces the one before it for the same item, since each carries
-/// the item's whole output so far; a batch holds one event per run of text however fast it
+/// item, taking its sequence, so a batch holds one event per run of text however fast it
 /// streams.
 pub(crate) fn push(batch: &mut Vec<BridgeEvent>, event: BridgeEvent) {
     if let Some(last) = batch.last_mut()
         && last.kind == event.kind
+        && event.kind == BridgeEventKind::ContentDelta
         && last.item.as_ref().map(|item| item.id) == event.item.as_ref().map(|item| item.id)
+        && let (Some(text), Some(more)) = (last.text.as_mut(), event.text.as_deref())
     {
-        match event.kind {
-            BridgeEventKind::ItemUpdated => {
-                *last = event;
-                return;
-            }
-            BridgeEventKind::ContentDelta => {
-                if let (Some(text), Some(more)) = (last.text.as_mut(), event.text.as_deref()) {
-                    text.push_str(more);
-                    return;
-                }
-            }
-            _ => {}
-        }
+        text.push_str(more);
+        last.sequence = event.sequence;
+        return;
     }
     batch.push(event);
 }
@@ -39,8 +30,7 @@ pub(crate) fn push(batch: &mut Vec<BridgeEvent>, event: BridgeEvent) {
 /// its stream.
 const STREAM_WINDOW: std::time::Duration = std::time::Duration::from_millis(50);
 
-/// Most events sent to Dart and not yet applied by Liquid. It equals the core's event buffer
-/// (`EVENT_BUFFER`), the largest queue the core already keeps for agent events.
+/// Most events sent to Dart and not yet applied by Liquid.
 pub(crate) const WINDOW: usize = 256;
 
 /// Most events held back for Liquid while the window is full, counted after merging. It equals
@@ -108,17 +98,17 @@ impl Outbox {
             let waiting = self.pending.len();
             self.pending.retain(|event| !is_partial(event));
             if self.pending.len() < waiting && !self.behind {
-                // The exit stays last, as the event contract requires.
-                let exited = self
-                    .pending
-                    .last()
-                    .is_some_and(|event| event.kind == BridgeEventKind::Exited);
-                let at = self.pending.len() - usize::from(exited);
-                self.pending
-                    .insert(at, crate::convert::event(BridgeEventKind::FellBehind));
-                self.behind = true;
+                self.fell_behind();
             }
         }
+    }
+
+    /// Queues one fell-behind event: Liquid reloads from a snapshot (ADR-0290).
+    pub(crate) fn fell_behind(&mut self) {
+        let sequence = self.pending.last().map_or(0, |event| event.sequence);
+        self.pending
+            .push(crate::convert::event(BridgeEventKind::FellBehind, sequence));
+        self.behind = true;
     }
 
     /// Whether the stream takes more events from the session. It does not while what waits is
@@ -146,20 +136,17 @@ impl Outbox {
     }
 }
 
-/// Whether `event` is partial output, which a later event of the same item replaces or extends.
+/// Whether `event` is streaming text, which a later event of the same item extends.
 fn is_partial(event: &BridgeEvent) -> bool {
-    matches!(
-        event.kind,
-        BridgeEventKind::ContentDelta | BridgeEventKind::ItemUpdated
-    )
+    event.kind == BridgeEventKind::ContentDelta
 }
 
 /// Waits until a confirmation reopens the window, which gives `None`, or the next event arrives,
 /// which gives `Some`: `Some(None)` once the session's events ended.
 async fn next_while_full(
     credit: &Credit,
-    receiver: &mut mpsc::Receiver<SessionEvent>,
-) -> Option<Option<SessionEvent>> {
+    receiver: &mut mpsc::Receiver<ThreadEvent>,
+) -> Option<Option<ThreadEvent>> {
     let mut reopened = Box::pin(credit.wait());
     std::future::poll_fn(|context| {
         if reopened.as_mut().poll(context).is_ready() {
@@ -170,36 +157,37 @@ async fn next_while_full(
     .await
 }
 
-/// Hands the session's events to `deliver` until it returns `false` or the session is dropped,
-/// those from before the start first. It sends at most `WINDOW` events that `credit` has not
-/// confirmed; what waits meanwhile merges, and an overflow ends in one fell-behind event
-/// (ADR-0272).
+/// Hands the thread's events to `deliver` until it returns `false` or the session is dropped.
+/// It sends at most `WINDOW` events that `credit` has not confirmed; what waits meanwhile
+/// merges, and an overflow ends in one fell-behind event (ADR-0272). When the core drops this
+/// subscriber, which fell too far behind, the stream takes `resubscribe`'s events after a
+/// fell-behind event.
 pub(crate) async fn forward(
-    early: Vec<SessionEvent>,
-    mut receiver: mpsc::Receiver<SessionEvent>,
+    mut receiver: mpsc::Receiver<ThreadEvent>,
+    mut resubscribe: impl FnMut() -> mpsc::Receiver<ThreadEvent>,
     credit: Arc<Credit>,
     mut deliver: impl FnMut(BridgeEvent) -> bool,
 ) {
     let mut outbox = Outbox::default();
-    for event in early {
-        outbox.admit(BridgeEvent::from(event));
-    }
-    let mut closed = false;
     loop {
         if credit.is_closed() {
             // The session was dropped, so no confirmation comes; what waits is released with it.
             return;
         }
         if !outbox.send(credit.applied(), &mut deliver) {
-            // Dart closed the stream: stop; dropping the session ends the agent.
+            // Dart closed the stream.
             return;
         }
         if outbox.pending.is_empty() {
             // Nothing waits: take the next event with the text that streams after it.
-            let Some(event) = receiver.recv().await else {
-                return;
-            };
-            outbox.admit(BridgeEvent::from(event));
+            match receiver.recv().await {
+                Some(event) => outbox.admit(BridgeEvent::from(event)),
+                None => {
+                    receiver = resubscribe();
+                    outbox.fell_behind();
+                    continue;
+                }
+            }
             // Bounded by the window, so a busy agent never holds delivery back.
             gather(
                 &mut outbox,
@@ -207,15 +195,19 @@ pub(crate) async fn forward(
                 tokio::time::sleep(STREAM_WINDOW),
             )
             .await;
-        } else if closed || !outbox.open() {
-            // Nothing more is taken until Liquid confirms what waits; the agent ends with its
-            // events, so its exit goes out after them.
+        } else if !outbox.open() {
+            // Nothing more is taken until Liquid confirms what waits.
             credit.wait().await;
         } else {
             // The window is full: events keep merging until a confirmation sends what waits.
             match next_while_full(&credit, &mut receiver).await {
                 Some(Some(event)) => outbox.admit(BridgeEvent::from(event)),
-                Some(None) => closed = true,
+                Some(None) => {
+                    receiver = resubscribe();
+                    if !outbox.behind {
+                        outbox.fell_behind();
+                    }
+                }
                 None => {}
             }
         }
@@ -227,7 +219,7 @@ pub(crate) async fn forward(
 /// anything else ends the gathering at once.
 pub(crate) async fn gather(
     outbox: &mut Outbox,
-    receiver: &mut mpsc::Receiver<SessionEvent>,
+    receiver: &mut mpsc::Receiver<ThreadEvent>,
     window: impl Future<Output = ()>,
 ) {
     // Boxed, as `pin!` expands to `super let`, which flutter_rust_bridge's parser rejects.

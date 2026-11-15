@@ -1534,6 +1534,7 @@ dependencies = [
  "liquid-storage",
  "meta-harness-core",
  "rustix",
+ "serde_json",
  "tokio",
 ]
 

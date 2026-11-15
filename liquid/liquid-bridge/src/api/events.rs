@@ -66,6 +66,8 @@ pub enum BridgeItemKind {
     FileChange,
     /// Another tool call.
     DynamicToolCall,
+    /// An error T3 or the provider reported.
+    Error,
 }
 
 /// One Chat item.

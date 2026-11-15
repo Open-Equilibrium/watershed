@@ -1,27 +1,22 @@
-//! Agent sessions for the Liquid app. Calls run on flutter_rust_bridge's worker threads, never on
+//! Agent sessions for the Liquid app: Meta-Harness's T3 Code server, a project's threads and
+//! one followed thread (ADR-0280). Calls run on flutter_rust_bridge's worker threads, never on
 //! the Dart main isolate, and events stream to Dart as they arrive (ADR-0182).
 
-use std::sync::{Arc, LazyLock, PoisonError};
-
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use meta_harness_core::{
-    AgentCommand, Answer, Checkpoint, Checkpoints, CommandError, Delivery, DiffError, Phase,
-    RequestId, Session, SessionEvent, TurnCheckpoints, Whitespace, recent_sessions, session_id,
-    session_record, session_title, session_title_of, session_titles, visible_lines, visible_name,
+    Host, HostConfig, Permissions, Project, StartThread, Thread, ThreadSummary, TurnStatus,
+    Workspace,
 };
 use tokio::runtime::Runtime;
-use tokio::sync::{Mutex, mpsc};
 
-use crate::api::events::{BridgeEvent, BridgeQueue};
-use crate::api::history::{
-    BridgeChangesState, BridgeContext, BridgeHistory, BridgeRevertConfirmation, BridgeRevertPlan,
-    BridgeRunningAgent, BridgeStatistics, BridgeTranscript, BridgeTurn, BridgeTurnChanges,
-};
-use crate::api::record::{README, SESSION_FILE, download_dir, record_name, write_folder};
-use crate::convert::describe;
+use crate::api::events::{BridgeEvent, BridgeFileChange};
+use crate::api::git::GitCheckout;
+use crate::api::record::{README, THREAD_FILE, download_dir, record_name, write_folder};
+use crate::api::thread::{BridgeContext, BridgeSnapshot, BridgeStatistics, BridgeTurn};
+use crate::convert;
 use crate::frb_generated::StreamSink;
-use crate::ready::{SHUTDOWN_GRACE, error_output, ready};
 use crate::stream;
 
 pub(crate) static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
@@ -32,77 +27,279 @@ pub(crate) static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
         .expect("the bridge runtime starts")
 });
 
-/// How to start pi; the core adds its arguments.
-pub struct SessionConfig {
-    /// The executable.
-    pub program: String,
-    /// Watershed's pi extension, by absolute path.
-    pub extension_path: String,
-    /// A stored session file to reopen, by absolute path.
-    pub session: Option<String>,
-    /// Its working directory.
-    pub cwd: String,
-}
-
-/// A session pi stored, as the start page lists it.
+/// A provider and its models, as the model picker lists them.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BridgeStoredSession {
-    /// The session file.
-    pub path: String,
-    /// Its name, or else the first line of its first prompt, or else "Untitled session".
-    pub title: String,
-    /// When pi last wrote it, in Unix milliseconds.
-    pub modified_ms: i64,
+pub struct BridgeProvider {
+    /// The instance id sessions choose it by.
+    pub instance: String,
+    /// Its display name.
+    pub name: String,
+    /// Whether it can run now.
+    pub available: bool,
+    /// Its models.
+    pub models: Vec<BridgeModel>,
 }
 
-/// A session with checkpoints in the project's repository.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BridgeCheckpointSession {
-    /// Its title, as the start page names stored sessions; "Unknown session" when no session
-    /// of this project is stored with its id.
-    pub title: String,
-    /// Its turns with checkpoints.
-    pub turns: i64,
-}
-
-/// A model the agent can use.
+/// A model and its choices.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeModel {
-    /// The provider, such as `anthropic`.
-    pub provider: String,
-    /// The provider's model id.
+    /// The id.
     pub id: String,
-    /// The name to show.
+    /// The display name.
     pub name: String,
-    /// Tokens the model can take in one request, when the agent knows them.
-    pub context_window: Option<i64>,
+    /// Its select options, such as reasoning effort.
+    pub options: Vec<BridgeModelOption>,
 }
 
-/// A running agent session; dropping it kills the agent.
+/// One select option of a model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeModelOption {
+    /// The id.
+    pub id: String,
+    /// The label.
+    pub label: String,
+    /// The choices' ids.
+    pub choices: Vec<String>,
+    /// The choices' labels, matching `choices`.
+    pub labels: Vec<String>,
+    /// The default choice.
+    pub default: Option<String>,
+}
+
+/// A chosen provider, model and option values.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeModelChoice {
+    /// The provider instance.
+    pub instance: String,
+    /// The model.
+    pub model: String,
+    /// Option ids, matching `values`.
+    pub option_ids: Vec<String>,
+    /// Chosen values.
+    pub values: Vec<String>,
+}
+
+/// What an agent may do without asking (T3's Permissions).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgePermissions {
+    /// Ask before commands and file changes.
+    Supervised,
+    /// Auto-approve edits, ask before other actions.
+    AutoAcceptEdits,
+    /// Supported providers approve routine actions; others still ask.
+    Auto,
+    /// Allow commands and edits without prompts.
+    FullAccess,
+}
+
+/// A session as the sidebar lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeThreadSummary {
+    /// The session's id.
+    pub id: String,
+    /// Its title.
+    pub title: String,
+    /// When it last changed, in Unix milliseconds.
+    pub updated_ms: Option<i64>,
+    /// Its branch.
+    pub branch: Option<String>,
+    /// Its worktree.
+    pub worktree: Option<String>,
+    /// Whether a turn runs.
+    pub running: bool,
+    /// Whether it is archived.
+    pub archived: bool,
+}
+
+/// One answer to one question.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeQuestionAnswer {
+    /// The question's id.
+    pub question: String,
+    /// The chosen labels, or the typed text.
+    pub values: Vec<String>,
+}
+
+fn run<T>(future: impl Future<Output = T>) -> T {
+    RUNTIME.block_on(future)
+}
+
+/// Meta-Harness's T3 Code server on this host.
+#[flutter_rust_bridge::frb(opaque)]
+pub struct AgentHost {
+    host: Mutex<Option<Arc<Host>>>,
+}
+
+impl AgentHost {
+    /// Starts the pinned `t3` at `binary` with its data in `home`.
+    pub fn start(binary: String, home: String) -> Result<Self, String> {
+        let host = run(Host::start(HostConfig {
+            binary: binary.into(),
+            home: home.into(),
+            acp_agents: Vec::new(),
+        }))?;
+        Ok(Self {
+            host: Mutex::new(Some(Arc::new(host))),
+        })
+    }
+
+    /// Wraps a started host, for Rust consumers such as tests.
+    #[flutter_rust_bridge::frb(ignore)]
+    pub fn from_host(host: Host) -> Self {
+        Self {
+            host: Mutex::new(Some(Arc::new(host))),
+        }
+    }
+
+    fn host(&self) -> Result<Arc<Host>, String> {
+        self.host
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .ok_or_else(|| "T3 has stopped.".to_owned())
+    }
+
+    /// The providers T3 offers, with their models.
+    pub fn providers(&self) -> Result<Vec<BridgeProvider>, String> {
+        let host = self.host()?;
+        Ok(run(host.providers())?
+            .into_iter()
+            .map(convert::provider)
+            .collect())
+    }
+
+    /// The writer model (ADR-0294), if one is set.
+    pub fn writer_model(&self) -> Result<Option<BridgeModelChoice>, String> {
+        let host = self.host()?;
+        Ok(run(host.writer_model())?.map(|m| convert::model_choice(&m)))
+    }
+
+    /// Sets the one model that writes commit messages, pull request text and session titles.
+    pub fn set_writer_model(&self, choice: BridgeModelChoice) -> Result<(), String> {
+        let host = self.host()?;
+        run(host.set_writer_model(&convert::to_model_choice(choice)))
+    }
+
+    /// The project for the folder `root`.
+    pub fn project(&self, root: String) -> Result<AgentProject, String> {
+        let host = self.host()?;
+        let project = run(host.project(Path::new(&root)))?;
+        Ok(AgentProject {
+            project: Arc::new(project),
+            root,
+        })
+    }
+
+    /// Stops T3; later calls fail.
+    pub fn shutdown(&self) {
+        let host = self
+            .host
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(host) = host.and_then(Arc::into_inner) {
+            run(host.shutdown());
+        }
+    }
+}
+
+/// A project: a folder and its sessions.
+#[flutter_rust_bridge::frb(opaque)]
+pub struct AgentProject {
+    project: Arc<Project>,
+    root: String,
+}
+
+impl AgentProject {
+    /// The project's sessions, newest first.
+    pub fn threads(&self) -> Result<Vec<BridgeThreadSummary>, String> {
+        Ok(run(self.project.threads())?
+            .into_iter()
+            .map(convert::thread_summary)
+            .collect())
+    }
+
+    /// Starts a session with its first prompt, as T3's workspace selector chose: in a new
+    /// worktree from `base`, in the existing `worktree`, or else in the project folder.
+    pub fn start(
+        &self,
+        text: String,
+        model: BridgeModelChoice,
+        base: Option<String>,
+        worktree: Option<String>,
+        permissions: BridgePermissions,
+    ) -> Result<AgentSession, String> {
+        let thread = run(self.project.start(StartThread {
+            text,
+            model: convert::to_model_choice(model),
+            workspace: match (base, worktree) {
+                (Some(base), _) => Workspace::NewWorktree { base },
+                (None, Some(path)) => Workspace::Worktree { path: path.into() },
+                (None, None) => Workspace::Checkout,
+            },
+            permissions: permissions_of(permissions),
+        }))?;
+        Ok(AgentSession::new(thread, self.root.clone()))
+    }
+
+    /// Follows the existing session `id`.
+    pub fn open(&self, id: String) -> Result<AgentSession, String> {
+        let thread = run(self.project.open(&id))?;
+        Ok(AgentSession::new(thread, self.root.clone()))
+    }
+
+    async fn summary(&self, id: &str) -> Result<ThreadSummary, String> {
+        self.project
+            .threads()
+            .await?
+            .into_iter()
+            .find(|t| t.id == id)
+            .ok_or_else(|| "This session no longer exists.".to_owned())
+    }
+
+    /// Whether `id` is the only session in its worktree, so deleting it may delete that too.
+    pub fn only_session_in_worktree(&self, id: String) -> Result<bool, String> {
+        run(async {
+            let summary = self.summary(&id).await?;
+            self.project.only_thread_in_worktree(&summary).await
+        })
+    }
+
+    /// Deletes the session `id`, and with `worktree` its worktree, keeping the branch.
+    pub fn delete(&self, id: String, worktree: bool) -> Result<(), String> {
+        run(async {
+            let summary = self.summary(&id).await?;
+            self.project.delete(&summary, worktree).await
+        })
+    }
+
+    /// Archives or restores the session `id`.
+    pub fn archive(&self, id: String, archived: bool) -> Result<(), String> {
+        run(self.project.archive(&id, archived))
+    }
+
+    /// Git for the project folder.
+    pub fn git(&self) -> GitCheckout {
+        GitCheckout::new(self.project.git())
+    }
+}
+
+fn permissions_of(permissions: BridgePermissions) -> Permissions {
+    match permissions {
+        BridgePermissions::Supervised => Permissions::Supervised,
+        BridgePermissions::AutoAcceptEdits => Permissions::AutoAcceptEdits,
+        BridgePermissions::Auto => Permissions::Auto,
+        BridgePermissions::FullAccess => Permissions::FullAccess,
+    }
+}
+
+/// One followed session.
 #[flutter_rust_bridge::frb(opaque)]
 pub struct AgentSession {
-    pub(crate) session: Mutex<Option<Session>>,
-    /// The session's events until Dart subscribes; the core buffers a bounded number and then
-    /// pauses the agent.
-    receiver: std::sync::Mutex<Option<mpsc::Receiver<SessionEvent>>>,
-    /// Events that arrived while the agent started.
-    early: std::sync::Mutex<Vec<SessionEvent>>,
-    /// The project's checkpoints at each turn's start and end.
-    pub(crate) checkpoints: Arc<Checkpoints>,
-    /// The directory the agent works in.
-    pub(crate) cwd: PathBuf,
-    /// Stops the agent even while a request holds the session.
-    stopper: std::sync::Mutex<Option<meta_harness_core::Stopper>>,
-    /// Answers questions and aborts the turn even while a request holds the session.
-    responder: meta_harness_core::Responder,
-    /// The program and arguments pi started with, which write a pull request's text the same
-    /// way.
-    pub(crate) pi_program: PathBuf,
-    pub(crate) pi_args: Vec<std::ffi::OsString>,
-    /// Stops waiting for the latest pull request text; left in place once that text arrived.
-    pub(crate) writing: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    thread: Thread,
+    root: String,
     /// How many of the stream's events Liquid applied, which reopens the window (ADR-0272).
-    credit: std::sync::Arc<stream::Credit>,
+    credit: Arc<stream::Credit>,
 }
 
 impl Drop for AgentSession {
@@ -113,813 +310,262 @@ impl Drop for AgentSession {
 }
 
 impl AgentSession {
-    /// Starts pi; subscribe with [`AgentSession::events`].
-    pub fn start(config: SessionConfig) -> Result<Self, String> {
-        Self::launch(AgentCommand {
-            program: config.program.into(),
-            args: Vec::new(),
-            extension: config.extension_path.into(),
-            session: config.session.map(Into::into),
-            cwd: config.cwd.into(),
-        })
-    }
-
-    /// Starts an agent as `command` says.
+    /// Follows `thread`, for Rust consumers such as observation workloads.
     #[flutter_rust_bridge::frb(ignore)]
-    pub fn launch(command: AgentCommand) -> Result<Self, String> {
-        let _runtime = RUNTIME.enter();
-        let (mut session, mut receiver) = Session::start(&command)
-            .map_err(|error| format!("could not run {}: {error}", command.program.display()))?;
-        // Without the extension a turn runs without its checkpoints, so the agent must confirm
-        // it within a time limit; dropping the session ends the agent.
-        let (gate, mut early) = RUNTIME.block_on(ready(&mut session, &mut receiver));
-        match gate {
-            Ok(Ok(())) => {}
-            // An agent that ended at once says why on its error output.
-            Ok(Err(CommandError::Closed)) => {
-                let output = early
-                    .iter()
-                    .find_map(|event| match event {
-                        SessionEvent::Exited { error_output, .. } => Some(error_output.clone()),
-                        _ => None,
-                    })
-                    .or_else(|| RUNTIME.block_on(error_output(&mut receiver)));
-                return Err(output
-                    .filter(|output| !output.is_empty())
-                    .unwrap_or_else(|| describe(CommandError::Closed)));
-            }
-            Ok(Err(error)) => return Err(describe(error)),
-            Err(not_ready) => return Err(not_ready),
-        }
-        early.shrink_to_fit();
-        let stopper = session.stopper();
-        let checkpoints = session.checkpoints();
-        // The session pi resumes is the one this window shows (ADR-0271).
-        let resumed = command
-            .session
-            .as_deref()
-            .and_then(|file| session_id(file, &command.cwd));
-        let window = Self {
-            stopper: std::sync::Mutex::new(stopper),
-            responder: session.responder(),
-            session: Mutex::new(Some(session)),
-            receiver: std::sync::Mutex::new(Some(receiver)),
-            early: std::sync::Mutex::new(early),
-            checkpoints,
-            cwd: command.cwd,
-            pi_program: command.program,
-            pi_args: command.args,
-            writing: std::sync::Mutex::new(None),
-            credit: std::sync::Arc::default(),
-        };
-        RUNTIME
-            .block_on(window.checkpoints.show_session(resumed.as_deref()))
-            .map_err(shown)?;
-        Ok(window)
+    pub fn follow(thread: Thread, root: String) -> Self {
+        Self::new(thread, root)
     }
 
-    /// Streams the session's events; a session has one subscriber.
-    pub fn events(&self, sink: StreamSink<BridgeEvent>) -> Result<(), String> {
+    fn new(thread: Thread, root: String) -> Self {
+        Self {
+            thread,
+            root,
+            credit: Arc::default(),
+        }
+    }
+
+    /// The session's id.
+    pub fn id(&self) -> String {
+        self.thread.id().to_owned()
+    }
+
+    /// Its title.
+    pub fn title(&self) -> String {
+        self.thread.title()
+    }
+
+    /// Its own worktree, if it has one.
+    pub fn worktree(&self) -> Option<String> {
+        self.thread
+            .worktree()
+            .map(|path| path.to_string_lossy().into_owned())
+    }
+
+    /// The session now and the events after it, with no gap: Liquid shows the snapshot, then
+    /// applies each event whose sequence is past it (ADR-0290).
+    pub fn events(&self, sink: StreamSink<BridgeEvent>) -> BridgeSnapshot {
         self.forward(move |event| sink.add(event).is_ok())
     }
 
-    /// Hands each batch of events to `deliver` until it returns `false`; Rust-side consumers
-    /// such as tests and observation workloads use it instead of a Dart stream.
+    /// As [`AgentSession::events`], to a Rust consumer.
     #[flutter_rust_bridge::frb(ignore)]
     pub fn forward(
         &self,
         deliver: impl FnMut(BridgeEvent) -> bool + Send + 'static,
-    ) -> Result<(), String> {
-        let receiver = self
-            .receiver
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-            .ok_or_else(|| "the session's events already have a subscriber".to_owned())?;
-        let early = std::mem::take(&mut *self.early.lock().unwrap_or_else(PoisonError::into_inner));
+    ) -> BridgeSnapshot {
+        let (snapshot, receiver) = self.thread.subscribe();
+        let thread = self.thread.clone();
         RUNTIME.spawn(stream::forward(
-            early,
             receiver,
+            move || thread.subscribe().1,
             self.credit.clone(),
             deliver,
         ));
-        Ok(())
+        convert::snapshot(snapshot)
     }
 
-    /// Confirms that Liquid applied the stream's first `applied` events, which lets the stream
-    /// send that many more. Liquid calls it after applying each batch it received (ADR-0272).
+    /// Confirms that Liquid applied the stream's first `applied` events (ADR-0272).
     pub fn confirm_applied(&self, applied: i64) {
         self.credit.confirm(u64::try_from(applied).unwrap_or(0));
     }
 
-    /// Sends a message: an idle agent starts a run with it, a running one takes it before its
-    /// next model request or, with `follow_up`, once it is done. Each run's start and end are
-    /// checkpointed, so the Diff panel shows what it changed.
-    pub fn send(&self, message: String, follow_up: bool) -> Result<(), String> {
-        RUNTIME.block_on(async {
-            let pending = {
-                let mut session = self.session.lock().await;
-                let delivery = if follow_up {
-                    Delivery::FollowUp
-                } else {
-                    Delivery::Steer
-                };
-                open(&mut session)?
-                    .send(&message, delivery)
-                    .await
-                    .map_err(describe)?
-            };
-            // The session stays free meanwhile, so questions asked before acceptance can be
-            // answered.
-            pending.started().await.map_err(describe).map(drop)
-        })
+    /// The session now, to restore the Chat after falling behind (ADR-0290).
+    pub fn snapshot(&self) -> BridgeSnapshot {
+        convert::snapshot(self.thread.snapshot())
     }
 
-    /// Whether the project is in a Git repository, so its turns can have checkpoints.
-    pub fn in_repository(&self) -> Result<bool, String> {
-        RUNTIME
-            .block_on(self.checkpoints.in_repository())
-            .map_err(shown)
+    /// Sends `text`: an idle session starts a turn; a running one takes it as a steer with
+    /// `steer`, else queues it.
+    pub fn send(&self, text: String, steer: bool) -> Result<(), String> {
+        run(self.thread.send(&text, steer))
     }
 
-    /// The turns of the current branch, oldest first, with what each changed.
-    pub fn turns(&self) -> Result<Vec<BridgeTurn>, String> {
-        RUNTIME.block_on(async {
-            let turns = branch_turns(&mut *self.session.lock().await).await?;
-            Ok(turns.into_iter().map(Into::into).collect())
-        })
+    /// Stops the running turn.
+    pub fn stop(&self) -> Result<(), String> {
+        run(self.thread.stop())
     }
 
-    /// The files that changed from the start of turn `from` to the end of turn `to`, both on
-    /// the current branch; with `hide_whitespace`, changes that are only whitespace are left
-    /// out.
+    /// The turns, oldest first.
+    pub fn turns(&self) -> Vec<BridgeTurn> {
+        self.thread.turns().into_iter().map(convert::turn).collect()
+    }
+
+    /// The files that changed from the start of turn `from` to the end of turn `to`.
     pub fn turn_changes(
         &self,
-        from: String,
-        to: String,
+        from: i64,
+        to: i64,
         hide_whitespace: bool,
-    ) -> Result<BridgeTurnChanges, String> {
-        RUNTIME.block_on(async {
-            let (from, to) = self.checkpoints_of(&from, &to).await?;
-            let read = self
-                .checkpoints
-                .changes(&from, &to, whitespace(hide_whitespace))
-                .await;
-            let (state, files) = match read {
-                Ok(changes) => (
-                    BridgeChangesState::Shown,
-                    changes.into_iter().map(Into::into).collect(),
-                ),
-                Err(error) => (unread(error)?, Vec::new()),
-            };
-            Ok(BridgeTurnChanges { state, files })
-        })
-    }
-
-    /// The unified diff of one file from the start of turn `from` to the end of turn `to`;
-    /// characters that could hide or reorder its lines are written out, as in the file's shown
-    /// name, but for the carriage returns of Windows line ends, which the Diff panel marks.
-    pub fn turn_patch(
-        &self,
-        from: String,
-        to: String,
-        path: String,
-        hide_whitespace: bool,
-    ) -> Result<String, String> {
-        RUNTIME.block_on(async {
-            let (from, to) = self.checkpoints_of(&from, &to).await?;
-            self.checkpoints
-                .patch(&from, &to, &path, whitespace(hide_whitespace))
-                .await
-                .map(|patch| visible_lines(&patch))
-                .map_err(shown)
-        })
-    }
-
-    /// The start checkpoint of turn `from` and the end checkpoint of turn `to`, which must be
-    /// turns of the current branch, so Dart never names a checkpoint itself.
-    async fn checkpoints_of(
-        &self,
-        from: &str,
-        to: &str,
-    ) -> Result<(Checkpoint, Checkpoint), String> {
-        let turns = branch_turns(&mut *self.session.lock().await).await?;
-        Ok((
-            checkpoint(turn_of(&turns, from)?, Phase::Start),
-            checkpoint(turn_of(&turns, to)?, Phase::End),
-        ))
-    }
-
-    /// What reverting the files to before turn `turn` of the current branch would change;
-    /// files changed after the branch's last turn ended are marked.
-    pub fn revert_plan(&self, turn: String) -> Result<BridgeRevertPlan, String> {
-        RUNTIME.block_on(async {
-            let (to, since, dir) = {
-                let mut session = self.session.lock().await;
-                let turns = branch_turns(&mut session).await?;
-                let to = checkpoint(turn_of(&turns, &turn)?, Phase::Start);
-                let since = turns
-                    .iter()
-                    .rev()
-                    .find(|turn| turn.ended)
-                    .map(|turn| checkpoint(turn, Phase::End));
-                (to, since, session_dir(&mut session).await)
-            };
-            let plan = match self.checkpoints.revert_plan(&to, since.as_ref()).await {
-                Ok(plan) => plan,
-                Err(error) => {
-                    return Ok(BridgeRevertPlan {
-                        state: unread(error)?,
-                        files: Vec::new(),
-                        running: Vec::new(),
-                        branch: None,
-                        // Nothing to confirm, as no revert is offered.
-                        confirmation: meta_harness_core::RevertConfirmation::default().into(),
-                    });
-                }
-            };
-            let running = plan
-                .running
-                .iter()
-                .map(|session| BridgeRunningAgent {
-                    own: *session == to.session,
-                    title: dir
-                        .as_deref()
-                        .and_then(|dir| session_title_of(dir, &self.cwd, session)),
-                })
-                .collect();
-            Ok(BridgeRevertPlan {
-                state: BridgeChangesState::Shown,
-                files: plan.files.into_iter().map(Into::into).collect(),
-                running,
-                branch: plan.branch.as_deref().map(visible_name),
-                confirmation: plan.confirmation.into(),
-            })
-        })
-    }
-
-    /// Reverts the files to before turn `turn` of the current branch and continues the session
-    /// from before its prompt, which returns to the input area; the undone turns keep their
-    /// branch. Refused while an agent runs in the checkout, and once the files no longer match
-    /// the plan `confirmation` came with (ADR-0256). Each error says whether the files changed.
-    pub fn revert_to_turn(
-        &self,
-        turn: String,
-        confirmation: BridgeRevertConfirmation,
-    ) -> Result<(), String> {
-        RUNTIME.block_on(async {
-            let not_reverted = |error: String| format!("the files were not reverted: {error}");
-            // Held until the session moved, so a prompt or move sent meanwhile starts after it;
-            // questions are answered and the agent stopped without it.
-            let mut session = self.session.lock().await;
-            let turns = branch_turns(&mut session).await.map_err(not_reverted)?;
-            let found = turn_of(&turns, &turn).map_err(not_reverted)?;
-            let prompt = found.prompt_entry.clone().ok_or_else(|| {
-                not_reverted(format!("turn {turn} has no prompt to continue before"))
-            })?;
-            self.checkpoints
-                .revert(&checkpoint(found, Phase::Start), &confirmation.into())
-                .await
-                .map_err(|error| match error {
-                    DiffError::PlanChanged => "nothing was reverted: files changed since you \
-                                               confirmed. Open Revert again to see the current \
-                                               list."
-                        .to_owned(),
-                    DiffError::NotReverted(paths) => left_unreverted(&paths),
-                    DiffError::PartlyReverted(error) => format!(
-                        "the files may be partly reverted ({}); reverting again finishes it",
-                        shown(*error)
-                    ),
-                    error => not_reverted(shown(error)),
-                })?;
-            let continued = async move {
-                let pending = open(&mut session)?
-                    .branch(&prompt, None)
-                    .await
-                    .map_err(describe)?;
-                pending.accepted().await.map_err(describe)?;
-                // pi reports the command handled even when an extension cancelled the move, so
-                // the branch is read back: the turn's prompt must be off it.
-                let turns = branch_turns(&mut session).await?;
-                if turns
-                    .iter()
-                    .any(|turn| turn.prompt_entry.as_deref() == Some(prompt.as_str()))
-                {
-                    return Err("pi stayed on the turn's branch".to_owned());
-                }
-                Ok(())
-            };
-            continued.await.map_err(|error| {
-                format!(
-                    "the files were reverted, but the session could not continue from before \
-                     the turn: {error}"
-                )
-            })
-        })
-    }
-
-    /// The sessions with checkpoints in the project's repository, sorted by their ids.
-    pub fn checkpoint_sessions(&self) -> Result<Vec<BridgeCheckpointSession>, String> {
-        RUNTIME.block_on(async {
-            let sessions = self.checkpoint_ids().await?;
-            if sessions.is_empty() {
-                return Ok(Vec::new());
-            }
-            let titles = session_dir(&mut *self.session.lock().await)
-                .await
-                .map(|dir| session_titles(&dir, &self.cwd))
-                .unwrap_or_default();
-            Ok(sessions
-                .into_iter()
-                .map(|(id, turns)| BridgeCheckpointSession {
-                    title: titles
-                        .get(&id)
-                        .cloned()
-                        .unwrap_or_else(|| "Unknown session".to_owned()),
-                    turns: i64::try_from(turns).unwrap_or(i64::MAX),
-                })
-                .collect())
-        })
-    }
-
-    /// Removes every checkpoint in the project's repository; refused while an agent runs in any
-    /// of its worktrees. Outside Git there is nothing to remove.
-    pub fn remove_all_checkpoints(&self) -> Result<(), String> {
-        match RUNTIME.block_on(self.checkpoints.remove_all()) {
-            Ok(()) | Err(DiffError::NotARepository) => Ok(()),
-            Err(error) => Err(shown(error)),
-        }
-    }
-
-    /// The file pi stores the open session in, unless it keeps the session in memory.
-    pub fn session_file(&self) -> Result<Option<String>, String> {
-        RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            let state = open(&mut session)?.state().await.map_err(describe)?;
-            Ok(state.session_file.map(|file| file.display().to_string()))
-        })
-    }
-
-    /// The turns with checkpoints of the session stored in `path`, the open one too; none
-    /// outside Git or before pi stored the session.
-    pub fn stored_turns(&self, path: String) -> Result<i64, String> {
-        RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            let Some(id) = self
-                .stored_session(&mut session, &path, Open::Counts)
-                .await?
-            else {
-                return Ok(0);
-            };
-            let turns = self
-                .checkpoint_ids()
-                .await?
-                .into_iter()
-                .find(|(session, _)| *session == id)
-                .map_or(0, |(_, turns)| turns);
-            Ok(i64::try_from(turns).unwrap_or(i64::MAX))
-        })
-    }
-
-    /// Deletes the session stored in `path`, a session of this project in pi's session
-    /// directory other than the open one, with its checkpoints first; refused while an agent
-    /// runs in any worktree of the repository. Neither comes back. A session pi never stored
-    /// leaves nothing to delete.
-    pub fn delete_session(&self, path: String) -> Result<(), String> {
-        RUNTIME.block_on(async {
-            // Held until the session is gone, so switching to it waits.
-            let mut session = self.session.lock().await;
-            let Some(id) = self
-                .stored_session(&mut session, &path, Open::Refused)
-                .await?
-            else {
-                return Ok(());
-            };
-            self.checkpoints
-                .delete_session(&id, Path::new(&path))
-                .await
-                .map_err(shown)
-        })
-    }
-
-    /// Writes the record of the session stored in `path` as a new folder in Downloads and returns
-    /// its path. `title` is the name Liquid shows, `host` the machine's name and `day` the local
-    /// date as `YYYY-MM-DD`. A failure writes nothing and says why.
-    pub fn export_record(
-        &self,
-        path: String,
-        title: String,
-        host: String,
-        day: String,
-    ) -> Result<String, String> {
-        let downloads = download_dir().ok_or("no home folder, so no Downloads folder")?;
-        self.export_into(&downloads, &path, &title, &host, &day)
-            .map(|folder| folder.display().to_string())
-    }
-
-    /// [`AgentSession::export_record`] into `downloads`.
-    pub(crate) fn export_into(
-        &self,
-        downloads: &Path,
-        path: &str,
-        title: &str,
-        host: &str,
-        day: &str,
-    ) -> Result<PathBuf, String> {
-        let id = RUNTIME
-            .block_on(async {
-                let mut session = self.session.lock().await;
-                self.stored_session(&mut session, path, Open::Counts).await
-            })?
-            .ok_or_else(|| "pi has not stored this session yet, so it has no record".to_owned())?;
-        write_folder(downloads, &record_name(title, day), |folder| {
-            let copy = folder.join(SESSION_FILE);
-            std::fs::copy(path, &copy)
-                .map_err(|error| format!("could not copy pi's session file: {error}"))?;
-            let record = RUNTIME
-                .block_on(session_record(
-                    &self.checkpoints,
-                    &copy,
-                    &self.cwd,
-                    host,
-                    &id,
-                    title,
-                ))
-                .map_err(shown)?;
-            std::fs::write(folder.join("record.json"), record)
-                .map_err(|error| format!("could not write record.json: {error}"))?;
-            std::fs::write(folder.join("README.txt"), README)
-                .map_err(|error| format!("could not write README.txt: {error}"))
-        })
-    }
-
-    /// The sessions with checkpoints, by id with their turns; none outside Git.
-    async fn checkpoint_ids(&self) -> Result<Vec<(String, usize)>, String> {
-        match self.checkpoints.sessions().await {
-            Ok(sessions) => Ok(sessions),
-            Err(DiffError::NotARepository) => Ok(Vec::new()),
-            Err(error) => Err(shown(error)),
-        }
-    }
-
-    /// The id of the session stored in `path`, which must be a session file of this project in
-    /// pi's session directory, and with [`Open::Refused`] not the open session, whatever its
-    /// name; none when pi has not stored it yet. So Dart never names another file.
-    async fn stored_session(
-        &self,
-        session: &mut Option<Session>,
-        path: &str,
-        the_open: Open,
-    ) -> Result<Option<String>, String> {
-        let path = Path::new(path);
-        let current = open(session)?.state().await.map_err(describe)?.session_file;
-        let Some(current) = current else {
-            return Err("pi keeps this session in memory and stores no others".to_owned());
-        };
-        let not_open = || "the open session cannot be deleted from inside it".to_owned();
-        if path == current && the_open == Open::Refused {
-            return Err(not_open());
-        }
-        let refused = || "not a session file in pi's session directory".to_owned();
-        if path.parent() != current.parent() {
-            return Err(refused());
-        }
-        // A pipe or device would block the read; pi writes plain `.jsonl` files.
-        let meta = match std::fs::symlink_metadata(path) {
-            Ok(meta) => meta,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error.to_string()),
-        };
-        if !meta.is_file()
-            || path
-                .extension()
-                .is_none_or(|extension| extension != "jsonl")
-        {
-            return Err(refused());
-        }
-        let id =
-            session_id(path, &self.cwd).ok_or_else(|| "no session of this project".to_owned())?;
-        if the_open == Open::Refused
-            && session_id(&current, &self.cwd).as_deref() == Some(id.as_str())
-        {
-            return Err(not_open());
-        }
-        Ok(Some(id))
-    }
-
-    /// Reads the session's branch tree and what its stored responses used.
-    pub fn history(&self) -> Result<BridgeHistory, String> {
-        RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            let history = open(&mut session)?.history().await.map_err(describe)?;
-            let tree = history.tree();
-            Ok(BridgeHistory {
-                tree: tree.nodes.into_iter().map(Into::into).collect(),
-                leaf: tree.leaf,
-                usage: history.usage().into(),
-            })
-        })
-    }
-
-    /// What the session's stored entries count to, on every branch (ADR-0279).
-    pub fn statistics(&self) -> Result<BridgeStatistics, String> {
-        RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            let history = open(&mut session)?.history().await.map_err(describe)?;
-            Ok(history.statistics().into())
-        })
-    }
-
-    /// The context window the next request fills and when pi compacts it; `None` when the agent
-    /// reports no window.
-    pub fn context(&self) -> Result<Option<BridgeContext>, String> {
-        RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            Ok(open(&mut session)?
-                .context()
-                .await
-                .map_err(describe)?
-                .map(Into::into))
-        })
-    }
-
-    /// The chat of the current branch: the items of up to `limit` stored entries before
-    /// `before`, or of the newest ones.
-    pub fn transcript(
-        &self,
-        before: Option<String>,
-        limit: u32,
-    ) -> Result<BridgeTranscript, String> {
-        RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            let history = open(&mut session)?.history().await.map_err(describe)?;
-            let limit = usize::try_from(limit).unwrap_or(usize::MAX);
-            Ok(history.transcript(before.as_deref(), limit).into())
-        })
-    }
-
-    /// Continues the session from `entry`; the next prompt starts a new branch there.
-    pub fn branch(&self, entry: String) -> Result<(), String> {
-        RUNTIME.block_on(async {
-            let pending = open(&mut *self.session.lock().await)?
-                .branch(&entry, None)
-                .await
-                .map_err(describe)?;
-            pending.accepted().await.map_err(describe)
-        })
-    }
-
-    /// Up to `limit` stored sessions of this project, newest first, without the current one.
-    pub fn recent_sessions(&self, limit: u32) -> Result<Vec<BridgeStoredSession>, String> {
-        let current = RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            open(&mut session)?.state().await.map_err(describe)
-        })?;
-        // A session pi keeps in memory has no directory to list.
-        let Some(file) = current.session_file else {
-            return Ok(Vec::new());
-        };
-        let dir = file.parent().unwrap_or(Path::new("."));
-        let limit = usize::try_from(limit).unwrap_or(usize::MAX);
-        let stored = recent_sessions(dir, &self.cwd, Some(&file), limit)
-            .map_err(|error| error.to_string())?;
-        // A session whose path is not UTF-8 has no name to reopen it by, so it is not listed.
-        Ok(stored
+    ) -> Result<Vec<BridgeFileChange>, String> {
+        let diff = self.range_diff(from, to, hide_whitespace)?;
+        Ok(convert::diff_files(&diff)
             .into_iter()
-            .filter_map(|session| BridgeStoredSession::try_from(session).ok())
+            .map(|(file, _)| file)
             .collect())
     }
 
-    /// The open session's title, as the start page names stored sessions; none before pi
-    /// stored a name or a prompt.
-    pub fn title(&self) -> Result<Option<String>, String> {
-        let current = RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            open(&mut session)?.state().await.map_err(describe)
-        })?;
-        Ok(current
-            .session_file
-            .and_then(|file| session_title(&file, &self.cwd)))
+    /// One file's unified diff from the start of turn `from` to the end of turn `to`.
+    pub fn turn_patch(
+        &self,
+        from: i64,
+        to: i64,
+        path: String,
+        hide_whitespace: bool,
+    ) -> Result<String, String> {
+        let diff = self.range_diff(from, to, hide_whitespace)?;
+        Ok(convert::diff_files(&diff)
+            .into_iter()
+            .find(|(file, _)| file.path == path)
+            .map(|(_, patch)| patch)
+            .unwrap_or_default())
     }
 
-    /// Starts a new session in the same agent; `false` when an extension cancelled it.
-    pub fn new_session(&self) -> Result<bool, String> {
-        RUNTIME.block_on(async {
-            let pending = open(&mut *self.session.lock().await)?
-                .new_session()
-                .await
-                .map_err(describe)?;
-            // Waits without holding the session.
-            let switched = pending.switched().await.map_err(describe)?;
-            // A new session is shown once its first turn starts.
-            if switched {
-                self.checkpoints.show_session(None).await.map_err(shown)?;
-            }
-            Ok(switched)
+    fn range_diff(&self, from: i64, to: i64, hide_whitespace: bool) -> Result<String, String> {
+        let from = u64::try_from(from - 1).map_err(|_| "Turns start at 1.".to_owned())?;
+        let to = u64::try_from(to).map_err(|_| "Turns start at 1.".to_owned())?;
+        run(self.thread.diff(from, to, hide_whitespace))
+    }
+
+    /// T3's "Edit from here": rewinds to before turn `turn`, with `restore_files` its files
+    /// too. Returns the turn's prompt for the input area.
+    pub fn revert(&self, turn: i64, restore_files: bool) -> Result<String, String> {
+        let turn = u64::try_from(turn).map_err(|_| "Turns start at 1.".to_owned())?;
+        run(self.thread.revert(turn, restore_files))
+    }
+
+    /// T3's "Fork from this response": a new session from the end of turn `turn`; its id.
+    pub fn fork(&self, turn: i64) -> Result<String, String> {
+        let turn = u64::try_from(turn).map_err(|_| "Turns start at 1.".to_owned())?;
+        run(self.thread.fork(turn))
+    }
+
+    /// Answers an approval with one of its decisions.
+    pub fn respond(&self, request: String, decision: String) -> Result<(), String> {
+        run(self
+            .thread
+            .respond(&meta_harness_core::RequestId(request), &decision))
+    }
+
+    /// Answers questions.
+    pub fn answer(
+        &self,
+        request: String,
+        answers: Vec<BridgeQuestionAnswer>,
+    ) -> Result<(), String> {
+        let answers: Vec<(String, Vec<String>)> = answers
+            .into_iter()
+            .map(|a| (a.question, a.values))
+            .collect();
+        run(self
+            .thread
+            .answer(&meta_harness_core::RequestId(request), &answers))
+    }
+
+    /// Dismisses questions without answering.
+    pub fn dismiss(&self, request: String) -> Result<(), String> {
+        run(self.thread.dismiss(&meta_harness_core::RequestId(request)))
+    }
+
+    /// The session's exact statistics (ADR-0279).
+    pub fn statistics(&self) -> BridgeStatistics {
+        convert::statistics(self.thread.statistics())
+    }
+
+    /// The context window the latest request filled.
+    pub fn context(&self) -> Option<BridgeContext> {
+        self.thread.context().map(convert::context)
+    }
+
+    /// The session's model.
+    pub fn model(&self) -> Option<BridgeModelChoice> {
+        self.thread.model().map(|m| convert::model_choice(&m))
+    }
+
+    /// Changes the model for the next turn.
+    pub fn set_model(&self, model: BridgeModelChoice) -> Result<(), String> {
+        run(self.thread.set_model(&convert::to_model_choice(model)))
+    }
+
+    /// Changes what the agent may do without asking.
+    pub fn set_permissions(&self, permissions: BridgePermissions) -> Result<(), String> {
+        run(self.thread.set_permissions(permissions_of(permissions)))
+    }
+
+    /// "Send now" on a queued turn.
+    pub fn send_queued_now(&self, turn: i64) -> Result<(), String> {
+        run(self
+            .thread
+            .send_queued_now(u64::try_from(turn).unwrap_or(0)))
+    }
+
+    /// Replaces a queued turn's prompt.
+    pub fn edit_queued(&self, turn: i64, text: String) -> Result<(), String> {
+        run(self
+            .thread
+            .edit_queued(u64::try_from(turn).unwrap_or(0), &text))
+    }
+
+    /// Removes a queued turn.
+    pub fn cancel_queued(&self, turn: i64) -> Result<(), String> {
+        run(self.thread.cancel_queued(u64::try_from(turn).unwrap_or(0)))
+    }
+
+    /// Git for the session's checkout.
+    pub fn git(&self) -> GitCheckout {
+        GitCheckout::new(self.thread.git())
+    }
+
+    /// Points the session at `branch`, in `worktree` when the branch picker chose one.
+    pub fn set_branch(&self, branch: String, worktree: Option<String>) -> Result<(), String> {
+        run(self
+            .thread
+            .set_branch(&branch, worktree.as_deref().map(Path::new)))
+    }
+
+    /// Writes the session's record into a new folder in Downloads (ADR-0257); returns it.
+    pub fn export_record(&self, host: String, day: String) -> Result<String, String> {
+        let downloads = download_dir().ok_or("No Downloads folder was found.")?;
+        self.export_record_to(&downloads, &host, &day)
+            .map(|folder| folder.to_string_lossy().into_owned())
+    }
+
+    #[flutter_rust_bridge::frb(ignore)]
+    pub(crate) fn export_record_to(
+        &self,
+        downloads: &Path,
+        host: &str,
+        day: &str,
+    ) -> Result<PathBuf, String> {
+        let thread = self.thread.record();
+        let record = serde_json::json!({
+            "schema": "watershed-session-record-v2",
+            "host": host,
+            "harness": self.model().map(|m| m.instance),
+            "project": self.root,
+            "branch": thread["thread"]["branch"],
+            "turns": self.thread.turns().iter().map(|t| serde_json::json!({
+                "number": t.number,
+                "status": match t.status {
+                    TurnStatus::Queued => "queued",
+                    TurnStatus::Running => "running",
+                    TurnStatus::Completed => "completed",
+                    TurnStatus::Aborted => "aborted",
+                },
+                "startedMs": t.started_ms,
+                "endedMs": t.ended_ms,
+                "files": t.files.iter().map(|f| serde_json::json!({
+                    "path": f.path, "kind": f.kind, "added": f.added, "removed": f.removed,
+                })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+        });
+        write_folder(downloads, &record_name(&self.title(), day), |folder| {
+            let write = |name: &str, text: String| {
+                std::fs::write(folder.join(name), text)
+                    .map_err(|error| format!("could not write {name}: {error}"))
+            };
+            write(THREAD_FILE, thread.to_string())?;
+            write("record.json", format!("{record:#}"))?;
+            write("README.txt", README.to_owned())
         })
-    }
-
-    /// Continues the session stored in `path`; `false` when an extension cancelled it.
-    pub fn switch_session(&self, path: String) -> Result<bool, String> {
-        RUNTIME.block_on(async {
-            let pending = open(&mut *self.session.lock().await)?
-                .switch_session(Path::new(&path))
-                .await
-                .map_err(describe)?;
-            let switched = pending.switched().await.map_err(describe)?;
-            if switched {
-                let id = session_id(Path::new(&path), &self.cwd);
-                self.checkpoints
-                    .show_session(id.as_deref())
-                    .await
-                    .map_err(shown)?;
-            }
-            Ok(switched)
-        })
-    }
-
-    /// The models the agent can use.
-    pub fn models(&self) -> Result<Vec<BridgeModel>, String> {
-        RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            Ok(open(&mut session)?
-                .models()
-                .await
-                .map_err(describe)?
-                .into_iter()
-                .map(Into::into)
-                .collect())
-        })
-    }
-
-    /// The selected model as `provider/id`.
-    pub fn current_model(&self) -> Result<Option<String>, String> {
-        RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            Ok(open(&mut session)?.state().await.map_err(describe)?.model)
-        })
-    }
-
-    /// Selects the model the next requests use.
-    pub fn set_model(&self, provider: String, id: String) -> Result<(), String> {
-        RUNTIME.block_on(async {
-            let pending = open(&mut *self.session.lock().await)?
-                .set_model(&provider, &id)
-                .await
-                .map_err(describe)?;
-            // pi runs extensions' handlers first; the session stays free for their questions.
-            pending.accepted().await.map_err(describe)
-        })
-    }
-
-    // The calls below wait for nothing but pi and run on flutter_rust_bridge's async runtime,
-    // so calls waiting on a slow project or a hung agent in its thread pool never hold up an
-    // answer, Stop or quitting.
-
-    /// Aborts the running turn; open questions are dismissed, so the agent can stop.
-    pub async fn abort(&self) -> Result<(), String> {
-        let pending = self.responder.abort().await.map_err(describe)?;
-        // pi answers once the agent is idle; the session stays free meanwhile.
-        pending.accepted().await.map_err(describe)
-    }
-
-    /// Removes the messages waiting for the running agent and returns them.
-    pub async fn clear_queue(&self) -> Result<BridgeQueue, String> {
-        Ok(open(&mut *self.session.lock().await)?
-            .clear_queue()
-            .await
-            .map_err(describe)?
-            .into())
-    }
-
-    /// Answers a selection, input or editor question with text.
-    pub async fn answer_text(&self, request: String, text: String) -> Result<(), String> {
-        self.answer(request, Answer::Value(text)).await
-    }
-
-    /// Answers a confirmation question.
-    pub async fn answer_confirm(&self, request: String, confirmed: bool) -> Result<(), String> {
-        self.answer(request, Answer::Confirmed(confirmed)).await
-    }
-
-    /// Dismisses a question.
-    pub async fn dismiss(&self, request: String) -> Result<(), String> {
-        self.answer(request, Answer::Cancelled).await
-    }
-
-    /// Asks the agent to exit and kills it after a grace period; returns whether it exited
-    /// successfully.
-    pub async fn shutdown(&self) -> bool {
-        let stopper = self
-            .stopper
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
-        let stopped = match stopper {
-            Some(stopper) => stopper.stop(SHUTDOWN_GRACE).await,
-            None => false,
-        };
-        // Requests still waiting end with the agent, so the session is free to drop.
-        self.session.lock().await.take();
-        self.checkpoints.close().await;
-        stopped
-    }
-
-    async fn answer(&self, request: String, answer: Answer) -> Result<(), String> {
-        self.responder
-            .answer(&RequestId(request), answer)
-            .await
-            .map_err(describe)
-    }
-}
-
-pub(crate) fn open(session: &mut Option<Session>) -> Result<&mut Session, String> {
-    session
-        .as_mut()
-        .ok_or_else(|| "the session was shut down".to_owned())
-}
-
-/// Whether a diff hides changes that are only whitespace.
-pub(crate) fn whitespace(hide: bool) -> Whitespace {
-    if hide {
-        Whitespace::Hidden
-    } else {
-        Whitespace::Shown
-    }
-}
-
-/// Whether a stored session may be the open one.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Open {
-    /// It may, as when counting its turns.
-    Counts,
-    /// It may not, as when deleting it.
-    Refused,
-}
-
-/// The turns of the current branch.
-pub(crate) async fn branch_turns(
-    session: &mut Option<Session>,
-) -> Result<Vec<TurnCheckpoints>, String> {
-    Ok(open(session)?
-        .history()
-        .await
-        .map_err(describe)?
-        .turns(None))
-}
-
-/// pi's session directory, unless pi keeps the session in memory.
-async fn session_dir(session: &mut Option<Session>) -> Option<PathBuf> {
-    let file = open(session).ok()?.state().await.ok()?.session_file?;
-    file.parent().map(Path::to_owned)
-}
-
-/// Turn `id` among `turns`.
-fn turn_of<'a>(turns: &'a [TurnCheckpoints], id: &str) -> Result<&'a TurnCheckpoints, String> {
-    turns
-        .iter()
-        .find(|turn| turn.turn == id)
-        .ok_or_else(|| format!("no turn {id} on the current branch"))
-}
-
-/// `turn`'s checkpoint at `phase`.
-fn checkpoint(turn: &TurnCheckpoints, phase: Phase) -> Checkpoint {
-    Checkpoint {
-        session: turn.session.clone(),
-        turn: turn.turn.clone(),
-        phase,
-    }
-}
-
-/// Says which files Git left unreverted, at most a few of them, as Liquid shows file names.
-pub(crate) fn left_unreverted(paths: &[String]) -> String {
-    const NAMED: usize = 3;
-    let mut named: Vec<String> = paths
-        .iter()
-        .take(NAMED)
-        .map(|path| visible_name(path))
-        .collect();
-    if paths.len() > NAMED {
-        named.push(format!("{} more", paths.len() - NAMED));
-    }
-    format!(
-        "the other files were reverted and the session stays on its branch; Git could not \
-         revert {}",
-        named.join(", ")
-    )
-}
-
-/// A checkpoint error as Liquid shows it: Git's messages name files, so what could hide or
-/// reorder them is written out, as in file names.
-pub(crate) fn shown(error: DiffError) -> String {
-    visible_name(&error.to_string())
-}
-
-/// Why checkpoints could not be read, when they cannot exist here or were removed.
-pub(crate) fn unread(error: DiffError) -> Result<BridgeChangesState, String> {
-    match error {
-        DiffError::NotARepository => Ok(BridgeChangesState::OutsideGit),
-        DiffError::NoCheckpoint => Ok(BridgeChangesState::Removed),
-        error => Err(shown(error)),
     }
 }
