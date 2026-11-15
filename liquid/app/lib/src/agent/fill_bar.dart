@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// The context bar: the share of the window in use, with a tick at `tick` where pi compacts.
+/// The context bar: the share of the window in use, with a tick at `tick` where the agent compacts.
 class FillBar extends StatelessWidget {
   const FillBar({
     super.key,

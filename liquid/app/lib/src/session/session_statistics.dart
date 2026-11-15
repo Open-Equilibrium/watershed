@@ -2,14 +2,14 @@ import 'dart:math' as math;
 
 import '../format.dart';
 import '../rust/api/events.dart';
-import '../rust/api/history.dart';
+import '../rust/api/thread.dart';
 
 /// The chart series of the three largest models; the models after them share the last one.
 const otherSeries = 3;
 
 /// A session's statistics summed for the card and the statistics panel. Each value adds up
-/// what the stored entries hold; a value that needs timing a turn lacks is null, never a guess
-/// (ADR-0279).
+/// what T3 reports; T3 reports no cost and no model time, so those stay unknown, never a guess
+/// (ADR-0279, ADR-0293).
 class SessionStatistics {
   SessionStatistics(this.statistics, {this.running = false});
 
@@ -24,22 +24,8 @@ class SessionStatistics {
 
   /// Input, cache reads and writes, and output, as the Tokens row counts them.
   int get tokens => tokensOf(usage);
-  int get cost => usage.costMicroUsd;
-
-  /// What each kind of the session's tokens cost, summed over the models.
-  late final BridgeCostByKind costByKind = BridgeCostByKind(
-    input: _costOf((kind) => kind.input),
-    output: _costOf((kind) => kind.output),
-    cacheRead: _costOf((kind) => kind.cacheRead),
-    cacheWrite: _costOf((kind) => kind.cacheWrite),
-  );
   int get responses =>
       statistics.models.fold(0, (sum, model) => sum + model.responses);
-  int get unpriced =>
-      statistics.models.fold(0, (sum, model) => sum + model.unpriced);
-
-  int _costOf(int Function(BridgeCostByKind kind) of) =>
-      statistics.models.fold(0, (sum, model) => sum + of(model.costByKind));
 
   late final List<ModelStatistics> models = [
     for (final stats in statistics.models)
@@ -48,7 +34,7 @@ class SessionStatistics {
 
   late final List<TurnStatistics> turns = [
     for (final (index, stats) in statistics.turns.indexed)
-      TurnStatistics(index + 1, stats, seriesOf),
+      TurnStatistics(index + 1, stats),
   ];
 
   /// The chart series of a model: its place among the largest models, or the shared one.
@@ -58,12 +44,11 @@ class SessionStatistics {
   }
 
   /// Working time of every turn whose clock is known, from its first entry to its last.
-  int get workingMs => _sum([for (final turn in turns) turn.workingMs]) ?? 0;
+  int get workingMs =>
+      turns.fold(0, (sum, turn) => sum + (turn.workingMs ?? 0));
 
-  /// The model and tool time, and the rest of the turns' time; null while a turn lacks timing.
-  int? get modelMs => _sum([for (final turn in turns) turn.modelMs]);
+  /// The tool time; null while a turn lacks it.
   int? get toolMs => _sum([for (final turn in turns) turn.toolMs]);
-  int? get otherMs => _sum([for (final turn in turns) turn.otherMs]);
 
   /// From the session's first entry to its last.
   int? get spanMs {
@@ -93,7 +78,7 @@ class SessionStatistics {
 
   /// The sum of `usages`, field by field.
   static BridgeUsage sumUsage(Iterable<BridgeUsage> usages) {
-    var input = 0, output = 0, cacheRead = 0, cacheWrite = 0, cost = 0;
+    var input = 0, output = 0, cacheRead = 0, cacheWrite = 0;
     var reasoning = 0;
     for (final usage in usages) {
       input += usage.input;
@@ -101,7 +86,6 @@ class SessionStatistics {
       cacheRead += usage.cacheRead;
       cacheWrite += usage.cacheWrite;
       reasoning += usage.reasoning;
-      cost += usage.costMicroUsd;
     }
     return BridgeUsage(
       input: input,
@@ -109,7 +93,6 @@ class SessionStatistics {
       cacheRead: cacheRead,
       cacheWrite: cacheWrite,
       reasoning: reasoning,
-      costMicroUsd: cost,
     );
   }
 
@@ -135,7 +118,6 @@ class ModelStatistics {
 
   String get name => modelName(stats.model);
   int get tokens => SessionStatistics.tokensOf(stats.usage);
-  int get cost => stats.usage.costMicroUsd;
   int get responses => stats.responses;
 }
 
@@ -168,14 +150,13 @@ class ToolStatistics {
   int get total => succeeded + failed + cancelled + running;
 }
 
-/// One turn of the session, with its time split as the timing entries record it.
+/// One turn of the session.
 class TurnStatistics {
-  TurnStatistics(this.index, this.stats, this._seriesOf);
+  TurnStatistics(this.index, this.stats);
 
-  /// The turn's number, from 1.
+  /// The turn's position, from 1.
   final int index;
   final BridgeTurnStatistics stats;
-  final int Function(String model) _seriesOf;
 
   String get prompt => stats.prompt;
 
@@ -183,34 +164,15 @@ class TurnStatistics {
     stats.models.map((model) => model.usage),
   );
   int get tokens => SessionStatistics.tokensOf(usage);
-  int get cost => usage.costMicroUsd;
   int get responses =>
       stats.models.fold(0, (sum, model) => sum + model.responses);
   int get failed => stats.failed;
 
-  /// From the turn's first entry to its last; null when either is unknown.
+  /// From the turn's start to its end; null when either is unknown.
   int? get workingMs {
     final (start, end) = (stats.startedMs, stats.endedMs);
     if (start == null || end == null) return null;
     return math.max(0, end - start);
   }
-
-  int? get modelMs => stats.modelMs;
   int? get toolMs => stats.toolMs;
-
-  /// What is left of the working time once the model and the tools took theirs.
-  int? get otherMs {
-    final (working, model, tool) = (workingMs, modelMs, toolMs);
-    if (working == null || model == null || tool == null) return null;
-    return math.max(0, working - model - tool);
-  }
-
-  /// Each series' sum of `value` over the turn's models, by [SessionStatistics.seriesOf].
-  List<int> bySeries(int Function(BridgeModelUsage model) value) {
-    final sums = List.filled(otherSeries + 1, 0);
-    for (final model in stats.models) {
-      sums[_seriesOf(model.model)] += value(model);
-    }
-    return sums;
-  }
 }

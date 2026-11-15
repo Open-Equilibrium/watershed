@@ -1,1042 +1,546 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/git.dart';
-import 'package:liquid/src/rust/api/history.dart';
-import 'package:liquid/src/session/branch_bases.dart';
+import 'package:liquid/src/session/backend.dart';
 import 'package:liquid/src/session/git_state.dart';
 
 import 'fake_backend.dart';
 
-void main() {
-  late FakeBackend backend;
-  late GitState git;
-  late List<(BridgeLevel, String)> notices;
-
-  setUp(() {
-    backend = FakeBackend();
-    notices = [];
-    git = GitState(
-      backend,
-      notify: (level, text) => notices.add((level, text)),
-    );
-  });
-
-  test('a completed commit reports failed inspection as a warning', () async {
-    backend.outcome = const BridgeGitOutcome(
-      kind: BridgeGitOutcomeKind.done,
-      files: [],
-      running: [],
-      detail: 'Could not inspect the completed commit: unreadable index',
-      commit: BridgeCommit(branch: 'main', subject: null, count: 1),
-    );
-    final result = await git.commit(['a.txt'], 'Subject', snapshot: 'snapshot');
-    expect(result!.kind, BridgeGitOutcomeKind.done);
-    expect(notices.single, (
-      BridgeLevel.warning,
-      'Committed 1 file on main. Could not inspect the completed commit: unreadable index',
-    ));
-  });
-
-  test('hook changes report only files left uncommitted', () async {
-    backend.outcome = BridgeGitOutcome(
-      kind: BridgeGitOutcomeKind.hookChanged,
-      files: const ['a.txt'],
-      running: const [],
-      detail: '',
-      commit: const BridgeCommit(branch: 'main', subject: 'Subject', count: 1),
-    );
-    await git.commit(['a.txt'], 'Subject', snapshot: 'snapshot');
-    expect(notices.single, (
-      BridgeLevel.warning,
-      'Committed 1 file on main: “Subject” A hook also changed a.txt, which stays uncommitted.',
-    ));
-  });
-
-  test(
-    'equal fresh status objects do not notify but real changes do',
-    () async {
-      var changes = 0;
-      git.status.addListener(() => changes++);
-      await git.refresh();
-      await git.refresh();
-      expect(changes, 1);
-      backend.git = gitStatusOf(changed: 2);
-      await git.refresh();
-      expect(changes, 2);
-    },
-  );
-
-  test('new branch failure says nothing was committed and names the created branch', () async {
-    backend.outcome = const BridgeGitOutcome(
-      kind: BridgeGitOutcomeKind.commitBranchFailed,
-      files: [],
-      running: [],
-      detail: 'hook refused',
-      commit: BridgeCommit(branch: 'feat', subject: null, count: 0),
-    );
-    await git.commit(
-      ['a.txt'],
-      'Subject',
-      snapshot: 'snapshot',
-      branch: 'feat',
-    );
-    expect(
-      notices.single.$2,
-      'Created and switched to feat; nothing was committed. hook refused',
-    );
-    expect(notices.single.$2, isNot(contains('null')));
-  });
-
-  test(
-    'a refused new branch names the files and says nothing was created',
-    () async {
-      backend.outcome = outcomeOf(
-        BridgeGitOutcomeKind.wouldOverwrite,
-        files: const ['private.txt'],
-      );
-      await git.create('feature');
-      expect(notices.single.$2, contains('private.txt'));
-      expect(notices.single.$2, contains('Nothing was created.'));
-    },
-  );
-
-  test('a commit onto a refused new branch names the files and says nothing was created', () async {
-    backend.outcome = outcomeOf(
-      BridgeGitOutcomeKind.wouldOverwrite,
-      files: const ['private.txt'],
-    );
-    await git.commit(
-      ['a.txt'],
-      'Subject',
-      snapshot: 'snapshot',
-      branch: 'feature',
-    );
-    expect(notices.single.$2, contains('private.txt'));
-    expect(
-      notices.single.$2,
-      contains('No branch was created and nothing was committed.'),
-    );
-  });
-
-  test(
-    'several hook-changed files stay uncommitted after the success notice',
-    () async {
-      backend.outcome = const BridgeGitOutcome(
-        kind: BridgeGitOutcomeKind.hookChanged,
-        files: ['a.txt', 'b.txt'],
-        running: [],
-        detail: '',
-        commit: BridgeCommit(branch: 'main', subject: 'Subject', count: 2),
-      );
-      await git.commit(['a.txt', 'b.txt'], 'Subject', snapshot: 'snapshot');
-      expect(
-        notices.single.$2,
-        'Committed 2 files on main: “Subject” A hook also changed a.txt, b.txt, which stay uncommitted.',
-      );
-    },
-  );
-
-  test('fetch freshness belongs to the remote git fetched', () async {
-    // The checkout names origin, but the fetch reached backup.
-    backend.fetchedRemote = 'backup';
-    await git.refresh();
-    await git.fetchNow();
-    expect(
-      git.fetched,
-      isNull,
-      reason: 'origin was not fetched, so it is not fresh',
-    );
-
-    backend.git = gitStatusOf(remote: 'backup', upstream: 'backup/main');
-    await git.refresh();
-    expect(git.fetched, isNotNull, reason: 'backup was fetched');
-  });
-
-  test('a failed fetch names no remote the failure cannot attribute', () async {
-    // The cached status names origin, but Git's upstream has moved to backup since.
-    await git.refresh();
-    backend.git = gitStatusOf(remote: 'backup', upstream: 'backup/main');
-    backend.fetchError = 'offline';
-    await git.fetchNow();
-    expect(notices.single.$2, contains('Could not fetch: “offline”'));
-    expect(notices.single.$2, isNot(contains('origin')));
-  });
-
-  test('a created branch records the branch Git created it from', () async {
-    // The cached status says main, but the checkout moved to other before the branch was created.
-    final bases = BranchBases();
-    final state = GitState(
-      backend,
-      notify: (level, text) => notices.add((level, text)),
-      bases: bases,
-    );
-    await state.refresh();
-    backend.createdFrom = 'other';
-    await state.create('feature');
-    expect(await bases.baseOf('/work/api/.git', 'feature'), 'other');
-  });
-
-  test(
-    'a commit onto a new branch records the branch Git created it from',
-    () async {
-      // The cached status says main, but Git created the branch from other.
-      for (final kind in [
-        BridgeGitOutcomeKind.done,
-        BridgeGitOutcomeKind.commitBranchFailed,
-      ]) {
-        final bases = BranchBases();
-        final state = GitState(
-          backend,
-          notify: (level, text) => notices.add((level, text)),
-          bases: bases,
-        );
-        await state.refresh();
-        backend.outcome = BridgeGitOutcome(
-          kind: kind,
-          files: const [],
-          running: const [],
-          detail: '',
-          commit: const BridgeCommit(
-            branch: 'feature',
-            subject: null,
-            count: 1,
-          ),
-          createdFrom: 'other',
-        );
-        await state.commit(
-          ['a.txt'],
-          'Subject',
-          snapshot: 'snapshot',
-          branch: 'feature',
-        );
-        expect(
-          await bases.baseOf('/work/api/.git', 'feature'),
-          'other',
-          reason: '$kind',
-        );
-      }
-    },
-  );
-
-  int fetches() => backend.calls.where((call) => call == 'fetch').length;
-
-  test(
-    'push and pull notices report the actual destination and captured counts',
-    () async {
-      await git.refresh();
-      backend.transferOutcome = BridgeGitOutcome(
-        kind: BridgeGitOutcomeKind.done,
-        files: const [],
-        running: const [],
-        detail: '',
-        transfer: transferOf(ahead: 1),
-      );
-      await git.push(device: 'MacBook');
-      expect(git.fetched, isNotNull);
-      backend.transferOutcome = BridgeGitOutcome(
-        kind: BridgeGitOutcomeKind.done,
-        files: const [],
-        running: const [],
-        detail: '',
-        transfer: transferOf(
-          branch: 'feature/retry-after',
-          upstream: 'origin/feature/retry-after',
-          firstPush: true,
-        ),
-      );
-      await git.push(device: 'MacBook');
-      backend.transferOutcome = BridgeGitOutcome(
-        kind: BridgeGitOutcomeKind.done,
-        files: const [],
-        running: const [],
-        detail: '',
-        transfer: transferOf(behind: 3),
-      );
-      await git.pull(device: 'MacBook');
-      expect(notices.map((notice) => notice.$2), [
-        'Pushed 1 commit to origin/main',
-        'Pushed feature/retry-after to origin; it now tracks origin/feature/retry-after',
-        'Pulled 3 commits from origin/main',
-      ]);
-    },
-  );
-
-  test('push rejection, sign-in and pull refusals use the approved recovery wording', () async {
-    await git.refresh();
-    for (final ahead in [0, 1]) {
-      backend.transferOutcome = BridgeGitOutcome(
-        kind: BridgeGitOutcomeKind.diverged,
-        files: const [],
-        running: const [],
-        detail: '',
-        transfer: transferOf(ahead: ahead, behind: 3),
-      );
-      await git.push(device: 'MacBook');
-    }
-    backend.transferOutcome = BridgeGitOutcome(
-      kind: BridgeGitOutcomeKind.signInFailed,
-      files: const [],
-      running: const [],
-      detail: 'Authentication failed',
-      transfer: transferOf(),
-    );
-    await git.push(device: 'MacBook');
-    backend.transferOutcome = outcomeOf(
-      BridgeGitOutcomeKind.wouldOverwrite,
-      files: ['src/routes/login.ts'],
-    );
-    await git.pull(device: 'MacBook');
-    backend.transferOutcome = outcomeOf(
-      BridgeGitOutcomeKind.agentRunning,
-      running: [
-        const BridgeRunningAgent(own: false, title: 'Fix flaky sync test'),
-      ],
-    );
-    await git.pull(device: 'MacBook');
-    expect(
-      notices[0].$2,
-      startsWith(
-        'Could not push: origin/main has 3 commits that main lacks. Pull them, then push.',
-      ),
-    );
-    expect(
-      notices[1].$2,
-      startsWith(
-        'Could not push: main and origin/main have diverged, 1 commit here and 3 there. Merge or rebase in a terminal, then push.',
-      ),
-    );
-    expect(
-      notices[2].$2,
-      startsWith(
-        'Could not push: Git could not sign in to origin. Liquid uses the Git login of MacBook; sign in there with git or gh, then push again.',
-      ),
-    );
-    expect(notices[2].$2, contains('Nothing was pushed.'));
-    expect(notices[2].$2, contains('“Authentication failed”'));
-    expect(
-      notices[3].$2,
-      startsWith(
-        'Could not pull: Git would overwrite your uncommitted changes in src/routes/login.ts. Commit them first.',
-      ),
-    );
-    expect(
-      notices[4].$2,
-      'Could not pull: “Fix flaky sync test” is running in this checkout. Stop it or wait until it finishes. Nothing was pulled.',
-    );
-    expect(notices.map((notice) => notice.$1), everyElement(BridgeLevel.error));
-  });
-
-  test(
-    'unsupported push destinations use the preflight error notice',
-    () async {
-      backend.transferOutcome = outcomeOf(
-        BridgeGitOutcomeKind.preflightFailed,
-        detail: 'This remote pushes to other or several repositories. Push it with Git.',
-      );
-      await git.push(device: 'MacBook');
-      expect(notices.single, (
-        BridgeLevel.error,
-        'Could not push: This remote pushes to other or several repositories. Push it with Git. Nothing was pushed.',
-      ));
-    },
-  );
-
-  test('a transfer failure shows Git output and states that its effects are uncertain', () async {
-    backend.transferOutcome = outcomeOf(
-      BridgeGitOutcomeKind.transferFailed,
-      detail: 'Could not resolve host: github.com',
-    );
-    await git.push(device: 'MacBook');
-    expect(notices.single.$2, startsWith('Could not push: Git failed.'));
-    expect(notices.single.$2, contains('“Could not resolve host: github.com”'));
-    expect(
-      notices.single.$2,
-      contains('Git or its hooks may have made changes.'),
-    );
-  });
-
-  testWidgets(
-    'a requested Fetch shares a pending background fetch and reports its failure',
-    (tester) async {
-      final pending = _PendingFetchBackend();
-      final state = GitState(
-        pending,
-        notify: (level, text) => notices.add((level, text)),
-      );
-      state.watch();
-      await tester.pump();
-      await tester.pump(fetchEvery);
-      var finished = false;
-      final requested = state.fetchNow().then((_) => finished = true);
-      await tester.pump();
-      expect(finished, isFalse);
-      pending.fetched.completeError('offline');
-      await tester.pump();
-      await requested;
-      expect(pending.calls.where((call) => call == 'fetch'), hasLength(1));
-      expect(notices.single.$1, BridgeLevel.error);
-      expect(notices.single.$2, contains('Could not fetch: “offline”'));
-      state.stop();
-    },
-  );
-
-  testWidgets('a requested Fetch queues behind a fetch for another remote', (
-    tester,
-  ) async {
-    for (final stopped in [false, true]) {
-      final pending = _QueuedFetchBackend();
-      final state = GitState(
-        pending,
-        notify: (level, text) => notices.add((level, text)),
-      );
-      addTearDown(state.stop);
-      state.watch();
-      await tester.pump();
-      await tester.pump(fetchEvery);
-      expect(pending.remotes, ['origin']);
-      pending.git = gitStatusOf(remote: 'other', upstream: 'other/main');
-      await state.refresh();
-      var finished = false;
-      final requested = state.fetchNow().then((_) => finished = true);
-      final shared = state.fetchNow();
-      await tester.pump();
-      expect(finished, isFalse);
-      expect(pending.remotes, ['origin']);
-      if (stopped) state.stop();
-      pending.fetches.first.complete('origin');
-      await tester.pump();
-      if (!stopped) {
-        expect(pending.remotes, ['origin', 'other']);
-        expect(finished, isFalse);
-        expect(state.fetched, isNull);
-        pending.fetches.last.completeError('offline');
-        await tester.pump();
-        expect(notices.single.$1, BridgeLevel.error);
-        expect(notices.single.$2, contains('Could not fetch: “offline”'));
-      } else {
-        expect(pending.remotes, ['origin']);
-      }
-      await requested;
-      await shared;
-      state.stop();
-      notices.clear();
-    }
-  });
-
-  testWidgets('background fetch waits while a push or pull runs', (
-    tester,
-  ) async {
-    for (final push in [true, false]) {
-      final state = GitState(
-        backend,
-        notify: (level, text) => notices.add((level, text)),
-      );
-      await state.refresh();
-      backend.transferGate = Completer<BridgeGitOutcome>();
-      state.watch();
-      final writing = push
-          ? state.push(device: 'MacBook')
-          : state.pull(device: 'MacBook');
-      await tester.pump();
-      expect(
-        state.progress.value,
-        isNotNull,
-        reason: 'transfer starts before the fetch tick',
-      );
-      await tester.pump(fetchEvery);
-      expect(fetches(), 0, reason: push ? 'push' : 'pull');
-      backend.transferGate!.complete(
-        BridgeGitOutcome(
-          kind: BridgeGitOutcomeKind.done,
-          files: const [],
-          running: const [],
-          detail: '',
-          transfer: transferOf(),
-        ),
-      );
-      await tester.pump();
-      await writing;
-      state.stop();
-    }
-  });
-
-  test(
-    'preflight and fetch failures guarantee that nothing was transferred',
-    () async {
-      for (final push in [true, false]) {
-        final action = push ? 'push' : 'pull';
-        final past = push ? 'pushed' : 'pulled';
-        for (final kind in [
-          BridgeGitOutcomeKind.preflightFailed,
-          BridgeGitOutcomeKind.fetchFailed,
-        ]) {
-          backend.transferOutcome = BridgeGitOutcome(
-            kind: kind,
-            files: const [],
-            running: const [],
-            detail: 'offline',
-            transfer: transferOf(),
-          );
-          await (push
-              ? git.push(device: 'MacBook')
-              : git.pull(device: 'MacBook'));
-          expect(
-            git.fetched,
-            isNull,
-            reason: 'failed fetches do not refresh the fetched time',
-          );
-          expect(notices.last.$1, BridgeLevel.error);
-          expect(notices.last.$2, startsWith('Could not $action:'));
-          expect(notices.last.$2, contains('Nothing was $past.'));
-          expect(notices.last.$2, isNot(contains('may have made changes')));
-          if (kind == BridgeGitOutcomeKind.fetchFailed) {
-            expect(
-              notices.last.$2,
-              contains('Could not fetch from origin: “offline”'),
-            );
-          }
-        }
-      }
-    },
-  );
-
-  testWidgets('a pending fetch leaves checkout polling active', (tester) async {
-    final pending = _PendingFetchBackend();
-    final state = GitState(
-      pending,
-      notify: (level, text) => notices.add((level, text)),
-    );
-    addTearDown(state.stop);
-    state.watch();
-    await tester.pump();
-    await tester.pump(fetchEvery);
-    expect(pending.calls.where((call) => call == 'fetch'), hasLength(1));
-    pending.git = gitStatusOf(branch: 'other', changed: 2);
-    pending.stashed = stashOf();
-    for (var tick = 0; tick < 3; tick++) {
-      await tester.pump(fetchEvery);
-      expect(state.status.value?.branch, 'other');
-      expect(state.status.value?.changed, 2);
-      expect(state.stash.value?.id, 's1');
-    }
-    expect(pending.calls.where((call) => call == 'fetch'), hasLength(1));
-    state.stop();
-    pending.fetched.completeError('fetch ended after stop');
-    await tester.pump();
-    expect(
-      notices.where((notice) => notice.$2.contains('Could not fetch')),
-      isEmpty,
-    );
-  });
-
-  testWidgets('overlapping writes each publish their switch and arrival', (
-    tester,
-  ) async {
-    final pending = _PendingWritesBackend();
-    final state = GitState(
-      pending,
-      notify: (level, text) => notices.add((level, text)),
-    );
-    await state.refresh();
-    Future<BridgeGitOutcome?> switchTo(String name) => state.switchTo(
-      branchOf(name),
-      leaveChanges: false,
-      fromBranch: null,
-      replacingStash: null,
-    );
-    final first = switchTo('one');
-    final second = switchTo('two');
-    await tester.pump();
-    pending.writes['one']!.complete();
-    await tester.pump();
-    await first;
-    pending.writes['two']!.complete();
-    await tester.pump();
-    await second;
-    expect(notices.map((notice) => notice.$2), [
-      'Switched to one.',
-      'one has stashed changes from 10:41; the Diff panel shows them.',
-      'Switched to two.',
-      'two has stashed changes from 10:41; the Diff panel shows them.',
-    ]);
-  });
-
-  for (final kind in [
-    BridgeGitOutcomeKind.done,
-    BridgeGitOutcomeKind.hookFailed,
-  ]) {
-    test(
-      'a $kind switch with a failed refresh names the destination',
-      () async {
-        await git.refresh();
-        backend.git = gitStatusOf(branch: 'feature');
-        backend.gitError = 'status read failed';
-        backend.outcome = BridgeGitOutcome(
-          kind: kind,
-          files: const [],
-          running: const [],
-          detail: kind == BridgeGitOutcomeKind.hookFailed ? 'hook refused' : '',
-        );
-
-        await git.switchTo(
-          branchOf('feature'),
-          leaveChanges: false,
-          fromBranch: null,
-          replacingStash: null,
-        );
-
-        expect(git.problem.value, 'status read failed');
-        expect(notices.single, (
-          kind == BridgeGitOutcomeKind.done
-              ? BridgeLevel.info
-              : BridgeLevel.warning,
-          kind == BridgeGitOutcomeKind.done
-              ? 'Switched to feature.'
-              : 'Switched to feature. A hook failed after: hook refused',
-        ));
-      },
-    );
-  }
-
-  testWidgets('a write waits for the latest read to publish its own switch', (
-    tester,
-  ) async {
-    final pending = _PendingStatusBackend();
-    final state = GitState(
-      pending,
-      notify: (level, text) => notices.add((level, text)),
-    );
-    await state.refresh();
-    pending.hold = true;
-    var completed = false;
-    final write = state.switchTo(
-      branchOf('feature'),
-      leaveChanges: false,
-      fromBranch: null,
-      replacingStash: null,
-    )..then((_) => completed = true);
-    await tester.pump();
-    expect(pending.reads, hasLength(1));
-    final later = state.refresh();
-    expect(pending.reads, hasLength(2));
-    pending.reads[0].complete(gitStatusOf(branch: 'feature'));
-    await tester.pump();
-    expect(
-      completed,
-      isFalse,
-      reason: 'the superseding read has not published',
-    );
-    expect(notices, isEmpty);
-    pending.reads[1].complete(gitStatusOf(branch: 'feature'));
-    await tester.pump();
-    await write;
-    await later;
-    expect(state.status.value?.branch, 'feature');
-    expect(notices, [(BridgeLevel.info, 'Switched to feature.')]);
-  });
-
-  test(
-    'an external switch cannot pair another branch stash with the status',
-    () async {
-      final switching = _SwitchingBackend();
-      final state = GitState(switching, notify: (_, _) {});
-
-      await state.refresh();
-
-      expect(state.status.value?.branch, 'main');
-      expect(state.stash.value?.id, 'main-stash');
-    },
-  );
-
-  testWidgets('fetches every 15 seconds and waits longer after failures', (
-    tester,
-  ) async {
-    git.watch();
-    await tester.pump();
-    expect(git.status.value?.branch, 'main');
-    await tester.pump(const Duration(seconds: 15));
-    expect(fetches(), 1);
-
-    backend.fetchError = 'Could not resolve host: github.com';
-    await tester.pump(const Duration(seconds: 15));
-    expect(fetches(), 2);
-    expect(notices.single.$1, BridgeLevel.warning);
-    expect(
-      notices.single.$2,
-      contains('Could not fetch: “Could not resolve host: github.com”'),
-    );
-    // The wait after a failure doubles from 30 seconds; a streak tells once.
-    await tester.pump(const Duration(seconds: 29));
-    expect(fetches(), 2);
-    await tester.pump(const Duration(seconds: 1));
-    expect(fetches(), 3);
-    final reads = backend.statusReads;
-    await tester.pump(const Duration(seconds: 60));
-    expect(fetches(), 4);
-    expect(notices, hasLength(1));
-    expect(
-      backend.statusReads - reads,
-      4,
-      reason: 'the state is read every 15 seconds while fetching waits',
-    );
-
-    backend.fetchError = null;
-    await tester.pump(const Duration(seconds: 120));
-    expect(fetches(), 5);
-    await tester.pump(const Duration(seconds: 15));
-    expect(fetches(), 6, reason: 'a fetch that works again resets the wait');
-
-    git.stop();
-  });
-
-  testWidgets('a branch without upstream fetches nothing but stays current', (
-    tester,
-  ) async {
-    backend.git = gitStatusOf(upstream: null);
-    git.watch();
-    await tester.pump(const Duration(seconds: 15));
-    expect(fetches(), 0);
-    backend.git = gitStatusOf(upstream: null, changed: 2);
-    await tester.pump(const Duration(seconds: 15));
-    expect(git.status.value?.changed, 2);
-    git.stop();
-  });
-
-  test('a branch that only looks like the shown one is a new status', () async {
-    backend.git = gitStatusOf(
-      branch: 'fix/<U+202E>',
-      rawBranch: 'fix/<U+202E>',
-    );
-    await git.refresh();
-    backend.git = gitStatusOf(branch: 'fix/<U+202E>', rawBranch: 'fix/\u202e');
-    await git.refresh();
-    expect(git.status.value?.rawBranch, 'fix/\u202e');
-  });
-
-  test('the same stash keeps its value across reads', () async {
-    backend.stashed = BridgeStash(
-      current: true,
-      id: 's1',
-      createdMs: 0,
-      files: [change('a.txt')],
-    );
-    await git.refresh();
-    final first = git.stash.value;
-    backend.stashed = BridgeStash(
-      current: true,
-      id: 's1',
-      createdMs: 0,
-      files: [change('a.txt')],
-    );
-    await git.refresh();
-    expect(identical(git.stash.value, first), isTrue);
-  });
-
-  test('a hook failing after the switch is a warning, not a failure', () async {
-    await git.refresh();
-    backend.git = gitStatusOf(branch: 'other');
-    backend.outcome = outcomeOf(
-      BridgeGitOutcomeKind.hookFailed,
-      detail: 'git-lfs was not found on your path',
-    );
-    await git.switchTo(
-      branchOf('other'),
-      leaveChanges: false,
-      fromBranch: null,
-      replacingStash: null,
-    );
-    expect(notices.single, (
-      BridgeLevel.warning,
-      'Switched to other. A hook failed after: git-lfs was not found on your path',
-    ));
-    expect(git.status.value?.branch, 'other');
-  });
-
-  test('says when the checkout switched outside Liquid', () async {
-    await git.refresh();
-    backend.git = gitStatusOf(branch: 'feature');
-    await git.refresh();
-    expect(
-      notices.single.$2,
-      'The checkout switched to feature outside Liquid.',
-    );
-  });
-
-  test('back on a branch with stashed changes says so', () async {
-    backend.git = gitStatusOf(branch: 'feature');
-    await git.refresh();
-    backend.git = gitStatusOf();
-    backend.stashed = BridgeStash(
-      current: true,
-      id: 's1',
-      createdMs: DateTime(2026, 11, 1, 10, 41).millisecondsSinceEpoch,
-      files: [change('a.txt')],
-    );
-
-    await git.switchTo(
-      branchOf('main'),
-      leaveChanges: false,
-      fromBranch: null,
-      replacingStash: null,
-    );
-
-    expect(notices.map((notice) => notice.$2), [
-      'Switched to main.',
-      'main has stashed changes from 10:41; the Diff panel shows them.',
-    ]);
-  });
-
-  test('leaving detached HEAD for a branch with a stash says so', () async {
-    // A loaded detached status has no branch name, but it is still the checkout to compare with.
-    backend.git = gitStatusOf(branch: null);
-    await git.refresh();
-    backend.git = gitStatusOf();
-    backend.stashed = BridgeStash(
-      current: true,
-      id: 's1',
-      createdMs: DateTime(2026, 11, 1, 10, 41).millisecondsSinceEpoch,
-      files: [change('a.txt')],
-    );
-
-    await git.refresh();
-
-    expect(notices.map((notice) => notice.$2), [
-      'The checkout switched to main outside Liquid.',
-      'main has stashed changes from 10:41; the Diff panel shows them.',
-    ]);
-  });
-
-  test('switching tells where the changes went', () async {
-    backend.git = gitStatusOf(changed: 4);
-    await git.refresh();
-    backend.git = gitStatusOf(branch: 'feature/token-bucket');
-
-    await git.switchTo(
-      branchOf('feature/token-bucket'),
-      leaveChanges: true,
-      fromBranch: 'main',
-      replacingStash: null,
-    );
-
-    expect(backend.calls.last, 'switch feature/token-bucket leaving changes');
-    expect(
-      notices.single.$2,
-      'Switched to feature/token-bucket. Your 4 changes are stashed on main.',
-    );
-    expect(git.status.value?.branch, 'feature/token-bucket');
-  });
-
-  test(
-    'an agent running in the checkout is named and nothing changes',
-    () async {
-      await git.refresh();
-      backend.outcome = outcomeOf(
-        BridgeGitOutcomeKind.agentRunning,
-        running: [
-          const BridgeRunningAgent(own: false, title: 'Fix flaky sync test'),
-        ],
-      );
-
-      await git.restoreStash(stashOf());
-
-      expect(notices.single, (
-        BridgeLevel.warning,
-        'Could not restore: “Fix flaky sync test” is running in this checkout. '
-            'Stop it or wait until it finishes.',
-      ));
-    },
-  );
-
-  test(
-    'a restore that conflicts or that Git refuses keeps the stash',
-    () async {
-      backend.stashed = BridgeStash(
-        current: true,
-        id: 's1',
-        createdMs: 0,
-        files: [change('a.txt')],
-      );
-      await git.refresh();
-      backend.outcome = outcomeOf(
-        BridgeGitOutcomeKind.conflicts,
-        files: ['src/routes/login.ts'],
-      );
-      await git.restoreStash(stashOf());
-      backend.outcome = outcomeOf(
-        BridgeGitOutcomeKind.wouldOverwrite,
-        files: ['src/routes/login.ts'],
-      );
-      await git.restoreStash(stashOf());
-
-      expect(notices.map((notice) => notice.$2), [
-        'Restored with conflicts in src/routes/login.ts; Git kept the stash. Resolve them in '
-            'an editor, then discard the stash.',
-        'Could not restore: Git would overwrite your uncommitted changes in '
-            'src/routes/login.ts. The stash stays; commit or discard those changes, then '
-            'restore.',
-      ]);
-      expect(git.stash.value, isNotNull);
-    },
-  );
-
-  test('a restore into a checkout with changes says what to do', () async {
-    backend.git = gitStatusOf(changed: 2);
-    await git.refresh();
-    backend.outcome = outcomeOf(BridgeGitOutcomeKind.uncommitted);
-
-    await git.restoreStash(stashOf());
-
-    expect(notices.single, (
-      BridgeLevel.warning,
-      'Could not restore: the checkout has 2 uncommitted changes. Commit or discard them, '
-          'then restore; the stash stays.',
-    ));
-  });
-
-  test('restoring reports its files and reads the stash again', () async {
-    backend.stashed = BridgeStash(
-      current: true,
-      id: 's1',
-      createdMs: 0,
-      files: [change('a.txt'), change('b.txt')],
-    );
-    await git.refresh();
-    final stashed = git.stash.value!;
-    backend.stashed = null;
-
-    await git.restoreStash(stashed);
-
-    expect(notices.single, (
-      BridgeLevel.info,
-      'Restored 2 stashed files on main',
-    ));
-    expect(git.stash.value, isNull);
-  });
-
-  test('Git that cannot be read is a problem, outside Git none', () async {
-    backend.gitError = 'git could not start: No such file or directory';
-    await git.refresh();
-    expect(git.problem.value, contains('git could not start'));
-
-    backend.gitError = null;
-    backend.git = null;
-    await git.refresh();
-    expect(git.problem.value, isNull);
-    expect(git.status.value, isNull);
-  });
-
-  test('describes branch names Git does not allow', () {
-    expect(branchNameProblem('feature/retry-after'), isNull);
-    expect(
-      branchNameProblem('fix..login'),
-      'Git does not allow “..” in a branch name.',
-    );
-    expect(
-      branchNameProblem('a b'),
-      'Git does not allow spaces in a branch name.',
-    );
-    expect(
-      branchNameProblem('-x'),
-      'Git does not allow a branch name to start with “-”.',
-    );
-    expect(
-      branchNameProblem('x.lock'),
-      'Git does not allow a branch name to end with “.lock”.',
-    );
-  });
-}
-
-class _SwitchingBackend extends FakeBackend {
-  _SwitchingBackend() {
-    stashed = const BridgeStash(
-      current: true,
-      id: 'main-stash',
-      createdMs: 0,
-      files: [],
-    );
-  }
-
-  @override
-  Future<BridgeGitStatus?> gitStatus() async {
-    final before = await super.gitStatus();
-    git = gitStatusOf(branch: 'other');
-    stashed = const BridgeStash(
-      current: true,
-      id: 'other-stash',
-      createdMs: 0,
-      files: [],
-    );
-    return before;
-  }
-}
-
-class _PendingStatusBackend extends FakeBackend {
-  bool hold = false;
-  final reads = <Completer<BridgeGitStatus?>>[];
-
-  @override
-  Future<BridgeGitStatus?> gitStatus() {
-    if (!hold) return super.gitStatus();
-    final read = Completer<BridgeGitStatus?>();
-    reads.add(read);
-    return read.future;
-  }
-}
-
-BridgeStash stashOf() =>
-    const BridgeStash(current: true, id: 's1', createdMs: 0, files: []);
-
-BridgeFileChange change(String path) => BridgeFileChange(
-  path: path,
-  shown: path,
-  status: BridgeChangeStatus.modified,
-  added: 1,
-  removed: 0,
+/// A checkout on a feature branch with a remote and an upstream, unless a case changes that.
+BridgeGitStatus checkout({
+  String? branch = 'feature/x',
+  bool defaultBranch = false,
+  String? provider = 'github',
+  bool remote = true,
+  bool upstream = true,
+  bool changed = false,
+  int ahead = 0,
+  int behind = 0,
+  int? aheadOfDefault,
+  BridgeBranchPullRequest? pullRequest,
+}) => gitStatusOf(
+  branch: branch,
+  defaultBranch: defaultBranch,
+  provider: provider,
+  remote: remote,
+  upstream: upstream,
+  changes: changed ? [fileOf('a.dart')] : const [],
+  ahead: ahead,
+  behind: behind,
+  aheadOfDefault: aheadOfDefault,
+  pullRequest: pullRequest,
 );
 
-class _PendingFetchBackend extends FakeBackend {
-  final fetched = Completer<String?>();
+/// Git whose [run] streams the progress a test adds to [progress].
+class SteppedGit extends FakeGit {
+  final progress = StreamController<BridgeGitProgress>();
 
   @override
-  Future<String?> fetch() {
-    calls.add('fetch');
-    return fetched.future;
+  Stream<BridgeGitProgress> run(
+    BridgeGitAction action, {
+    String? message,
+    List<String>? files,
+    bool featureBranch = false,
+  }) {
+    calls.add('run ${action.name} message=$message');
+    return progress.stream;
   }
 }
 
-class _QueuedFetchBackend extends FakeBackend {
-  final remotes = <String?>[];
-  final fetches = <Completer<String?>>[];
-
+class PullFailingGit extends FakeGit {
   @override
-  Future<String?> fetch() {
-    remotes.add(git?.remote);
-    final fetched = Completer<String?>();
-    fetches.add(fetched);
-    return fetched.future;
-  }
+  Future<(String, String)> pull() => Future.error('offline');
 }
 
-class _PendingWritesBackend extends FakeBackend {
-  final writes = {'one': Completer<void>(), 'two': Completer<void>()};
-
+class InitFailingGit extends FakeGit {
   @override
-  Future<BridgeGitOutcome> switchBranch(
-    BridgeBranch branch, {
-    required bool leaveChanges,
-    required String? fromBranch,
-    required String? replacingStash,
-  }) async {
-    await writes[branch.name]!.future;
-    git = gitStatusOf(branch: branch.name);
-    stashed = BridgeStash(
-      current: true,
-      id: branch.name,
-      createdMs: DateTime(2026, 11, 1, 10, 41).millisecondsSinceEpoch,
-      files: const [],
+  Future<void> init() => Future.error('no permission');
+}
+
+class WatchFailingGit extends FakeGit {
+  @override
+  Stream<BridgeGitStatus> watch() => Stream.error('gone');
+}
+
+void main() {
+  late List<String> errors;
+
+  setUp(() => errors = []);
+
+  GitState gitState(GitBackend git) => GitState(
+    git,
+    onError: (title, message) => errors.add('$title: $message'),
+  );
+
+  test('the split button does what T3 does in each state of the checkout', () {
+    void expectQuick(
+      BridgeGitStatus? status,
+      String label,
+      QuickKind kind, {
+      BridgeGitAction? action,
+      String? hint,
+      bool busy = false,
+    }) {
+      final quick = resolveQuickAction(status, busy: busy);
+      expect(
+        (quick.label, quick.kind, quick.action, quick.hint),
+        (label, kind, action, hint),
+        reason: label,
+      );
+    }
+
+    const upToDate = 'Branch is up to date. No action needed.';
+    expectQuick(
+      checkout(changed: true),
+      'Commit, push & PR',
+      QuickKind.runAction,
+      action: BridgeGitAction.commitPushPullRequest,
     );
-    return outcome;
-  }
+    expectQuick(
+      null,
+      'Commit',
+      QuickKind.showHint,
+      hint: 'Git status is unavailable.',
+    );
+    expectQuick(
+      checkout(changed: true),
+      'Commit',
+      QuickKind.showHint,
+      hint: 'Git action in progress.',
+      busy: true,
+    );
+    expectQuick(
+      checkout(branch: null),
+      'Commit',
+      QuickKind.showHint,
+      hint:
+          'Create and checkout a ref before pushing or opening a pull request.',
+    );
+    expectQuick(
+      checkout(changed: true, behind: 2),
+      'Commit',
+      QuickKind.runAction,
+      action: BridgeGitAction.commit,
+    );
+    expectQuick(
+      checkout(changed: true, remote: false, upstream: false),
+      'Commit',
+      QuickKind.runAction,
+      action: BridgeGitAction.commit,
+    );
+    expectQuick(
+      checkout(changed: true, defaultBranch: true),
+      'Commit & push',
+      QuickKind.runAction,
+      action: BridgeGitAction.commitPush,
+    );
+    expectQuick(
+      checkout(changed: true, pullRequest: pullRequestOf()),
+      'Commit & push',
+      QuickKind.runAction,
+      action: BridgeGitAction.commitPush,
+    );
+    expectQuick(
+      checkout(remote: false, upstream: false),
+      'Publish repository',
+      QuickKind.openPublish,
+    );
+    expectQuick(
+      checkout(upstream: false, ahead: 2),
+      'Push & create PR',
+      QuickKind.runAction,
+      action: BridgeGitAction.createPullRequest,
+    );
+    expectQuick(
+      checkout(upstream: false),
+      'Push',
+      QuickKind.showHint,
+      hint: 'No local commits to push.',
+    );
+    expectQuick(
+      checkout(ahead: 1, pullRequest: pullRequestOf()),
+      'Push',
+      QuickKind.runAction,
+      action: BridgeGitAction.push,
+    );
+    expectQuick(
+      checkout(ahead: 1, defaultBranch: true),
+      'Push',
+      QuickKind.runAction,
+      action: BridgeGitAction.commitPush,
+    );
+    expectQuick(
+      checkout(ahead: 1),
+      'Push & create PR',
+      QuickKind.runAction,
+      action: BridgeGitAction.createPullRequest,
+    );
+    expectQuick(
+      checkout(ahead: 1, behind: 1),
+      'Sync ref',
+      QuickKind.showHint,
+      hint: 'Branch has diverged from upstream. Rebase/merge first.',
+    );
+    expectQuick(checkout(behind: 3), 'Pull', QuickKind.runPull);
+    expectQuick(
+      checkout(pullRequest: pullRequestOf()),
+      'Commit',
+      QuickKind.showHint,
+      hint: upToDate,
+    );
+    expectQuick(
+      checkout(aheadOfDefault: 2),
+      'Create PR',
+      QuickKind.runAction,
+      action: BridgeGitAction.createPullRequest,
+    );
+    expectQuick(checkout(), 'Commit', QuickKind.showHint, hint: upToDate);
+    expectQuick(
+      checkout(provider: 'gitlab', upstream: false, ahead: 2),
+      'Push & create MR',
+      QuickKind.runAction,
+      action: BridgeGitAction.createPullRequest,
+    );
+    expectQuick(
+      checkout(provider: 'gitlab', changed: true),
+      'Commit, push & MR',
+      QuickKind.runAction,
+      action: BridgeGitAction.commitPushPullRequest,
+    );
+  });
+
+  test('the menu lists each item with why it is disabled', () {
+    const clean = 'Worktree is clean. Make changes before committing.';
+    const busy = 'Git action in progress.';
+    expect(buildMenuItems(null, busy: false), isEmpty);
+    expect(
+      buildMenuItems(checkout(remote: false, upstream: false), busy: false),
+      [(MenuItem.commit, clean)],
+    );
+    expect(buildMenuItems(checkout(changed: true, ahead: 1), busy: false), [
+      (MenuItem.commit, null),
+      (MenuItem.push, null),
+      (MenuItem.createPullRequest, null),
+    ]);
+    expect(
+      buildMenuItems(
+        checkout(branch: null, changed: true, ahead: 1),
+        busy: false,
+      ),
+      [
+        (MenuItem.commit, null),
+        (MenuItem.push, 'Detached HEAD: check out a branch before pushing.'),
+        (
+          MenuItem.createPullRequest,
+          'Detached HEAD: check out a branch before creating a pull request.',
+        ),
+      ],
+    );
+    expect(
+      buildMenuItems(checkout(changed: true, behind: 1, ahead: 1), busy: false),
+      [
+        (MenuItem.commit, null),
+        (
+          MenuItem.push,
+          'Branch is behind upstream. Pull/rebase before pushing.',
+        ),
+        (
+          MenuItem.createPullRequest,
+          'Branch is behind upstream. Pull/rebase before creating a pull request.',
+        ),
+      ],
+    );
+    expect(
+      buildMenuItems(
+        checkout(changed: true, pullRequest: pullRequestOf()),
+        busy: false,
+      ),
+      [(MenuItem.commit, null), (MenuItem.push, 'No local commits to push.')],
+      reason: 'an open pull request leaves out the create item',
+    );
+    expect(
+      buildMenuItems(checkout(provider: 'gitlab', changed: true), busy: false),
+      [
+        (MenuItem.commit, null),
+        (MenuItem.push, 'No local commits to push.'),
+        (
+          MenuItem.createPullRequest,
+          'No local commits to include in a merge request.',
+        ),
+      ],
+    );
+    expect(buildMenuItems(checkout(changed: true, ahead: 1), busy: true), [
+      (MenuItem.commit, busy),
+      (MenuItem.push, busy),
+      (MenuItem.createPullRequest, busy),
+    ]);
+  });
+
+  test('the default-branch confirmation words the action as T3 does', () {
+    const github = (singular: 'pull request', short: 'PR');
+    const gitlab = (singular: 'merge request', short: 'MR');
+    final cases = [
+      (
+        BridgeGitAction.push,
+        false,
+        github,
+        'Push to default ref?',
+        'Push to main',
+      ),
+      (
+        BridgeGitAction.commitPush,
+        true,
+        github,
+        'Commit & push to default ref?',
+        'Commit & push to main',
+      ),
+      (
+        BridgeGitAction.createPullRequest,
+        false,
+        github,
+        'Push & create PR from default ref?',
+        'Push & create PR',
+      ),
+      (
+        BridgeGitAction.commitPushPullRequest,
+        true,
+        github,
+        'Commit, push & create PR from default ref?',
+        'Commit, push & create PR',
+      ),
+      (
+        BridgeGitAction.createPullRequest,
+        false,
+        gitlab,
+        'Push & create MR from default ref?',
+        'Push & create MR',
+      ),
+    ];
+    for (final (action, includesCommit, terms, title, label) in cases) {
+      final copy = defaultBranchCopy(
+        action,
+        'main',
+        includesCommit: includesCommit,
+        terms: terms,
+      );
+      expect(
+        (copy.title, copy.continueLabel),
+        (title, label),
+        reason: '$action',
+      );
+    }
+    expect(
+      defaultBranchCopy(
+        BridgeGitAction.push,
+        'main',
+        includesCommit: false,
+        terms: github,
+      ).description,
+      'This action will push local commits on "main". You can continue on this ref '
+      'or create a feature ref and run the same action there.',
+    );
+  });
+
+  test('a feature branch is offered only to actions that commit changes', () {
+    expect(
+      featureBranchUnavailable(BridgeGitAction.commit, 'main', changes: false),
+      isNotNull,
+      reason: 'there are no changes to name it after',
+    );
+    expect(
+      featureBranchUnavailable(BridgeGitAction.push, 'main', changes: true),
+      isNotNull,
+    );
+    expect(
+      featureBranchUnavailable(
+        BridgeGitAction.createPullRequest,
+        'main',
+        changes: true,
+      ),
+      isNotNull,
+    );
+    expect(
+      featureBranchUnavailable(
+        BridgeGitAction.commitPush,
+        'main',
+        changes: true,
+      ),
+      isNull,
+    );
+    expect(
+      featureBranchUnavailable(
+        BridgeGitAction.commitPushPullRequest,
+        'main',
+        changes: true,
+      ),
+      isNull,
+    );
+  });
+
+  test('elapsed time reads as seconds, then minutes and seconds', () {
+    expect(
+      [
+        for (final seconds in [0, 12, 65]) elapsed(Duration(seconds: seconds)),
+      ],
+      ['0s', '12s', '1m 5s'],
+    );
+  });
+
+  test('the state follows the checkout status as it changes', () async {
+    final git = FakeGit(status: checkout());
+    final state = gitState(git);
+    addTearDown(state.dispose);
+    await pumpEventQueue();
+    expect(state.quickAction().label, 'Commit');
+
+    git.change(checkout(behind: 2));
+    await pumpEventQueue();
+
+    expect(state.quickAction().kind, QuickKind.runPull);
+  });
+
+  test(
+    'a run shows its phase, hook and output as they come, then its result',
+    () async {
+      final git = SteppedGit();
+      addTearDown(git.progress.close);
+      final state = gitState(git);
+      addTearDown(state.dispose);
+
+      final run = state.run(BridgeGitAction.commitPush, message: 'Fix');
+      expect(state.running.value?.label, 'Starting source control action...');
+
+      git.progress.add(progressOf(BridgeGitProgressKind.phase, 'Committing'));
+      await pumpEventQueue();
+      expect(state.running.value?.label, 'Committing');
+      git.progress.add(progressOf(BridgeGitProgressKind.hook, 'lint'));
+      await pumpEventQueue();
+      expect(state.running.value?.label, 'Running lint...');
+      git.progress.add(
+        progressOf(BridgeGitProgressKind.output, '1 file changed'),
+      );
+      await pumpEventQueue();
+      expect(state.running.value?.output, '1 file changed');
+
+      git.progress.add(
+        progressOf(
+          BridgeGitProgressKind.finished,
+          'Committed',
+          description: '1 file',
+          pullRequest: 'https://example.com/pr/1',
+        ),
+      );
+      await pumpEventQueue();
+      expect(state.result.value, (
+        title: 'Committed',
+        description: '1 file',
+        url: 'https://example.com/pr/1',
+      ));
+
+      await git.progress.close();
+      await run;
+      expect(state.running.value, isNull);
+      expect(git.calls, ['run commitPush message=Fix']);
+    },
+  );
+
+  test(
+    'a failed step and a broken stream are action failures, with no result',
+    () async {
+      final git = SteppedGit();
+      addTearDown(git.progress.close);
+      final state = gitState(git);
+      addTearDown(state.dispose);
+
+      final run = state.run(BridgeGitAction.push);
+      git.progress.add(
+        progressOf(BridgeGitProgressKind.failed, 'rejected: non-fast-forward'),
+      );
+      git.progress.addError('ssh: connection lost');
+      await run;
+
+      expect(errors, [
+        'Action failed: rejected: non-fast-forward',
+        'Action failed: ssh: connection lost',
+      ]);
+      expect(state.result.value, isNull);
+      expect(state.running.value, isNull);
+    },
+  );
+
+  test(
+    'only one action runs at a time: a second action or a pull is ignored',
+    () async {
+      final git = SteppedGit();
+      addTearDown(git.progress.close);
+      final state = gitState(git);
+      addTearDown(state.dispose);
+
+      final first = state.run(BridgeGitAction.commit);
+      await state.run(BridgeGitAction.push);
+      await state.pull();
+      await git.progress.close();
+      await first;
+
+      expect(git.calls, ['run commit message=null']);
+    },
+  );
+
+  test('pull shows its result, and a failure is a pull error', () async {
+    final git = FakeGit();
+    final state = gitState(git);
+    addTearDown(state.dispose);
+    await state.pull();
+    expect(git.calls, ['pull']);
+    expect(state.result.value, (
+      title: 'Pulled',
+      description: 'Up to date',
+      url: null,
+    ));
+    expect(state.running.value, isNull);
+
+    final offline = gitState(PullFailingGit());
+    addTearDown(offline.dispose);
+    await offline.pull();
+    expect(errors, ['Pull failed: offline']);
+  });
+
+  test(
+    'initialize runs git init, and a failure is an initialization error',
+    () async {
+      final git = FakeGit();
+      final state = gitState(git);
+      addTearDown(state.dispose);
+      await state.initialize();
+      expect(git.calls, ['init']);
+      expect(state.running.value, isNull);
+
+      final denied = gitState(InitFailingGit());
+      addTearDown(denied.dispose);
+      await denied.initialize();
+      expect(errors, ['Git initialization failed: no permission']);
+    },
+  );
+
+  testWidgets('a result shows for ten seconds, then clears', (tester) async {
+    final state = gitState(FakeGit());
+    addTearDown(state.dispose);
+    await state.pull();
+
+    expect(state.result.value, isNotNull);
+    await tester.pump(const Duration(seconds: 9));
+    expect(state.result.value, isNotNull);
+    await tester.pump(const Duration(seconds: 1));
+    expect(state.result.value, isNull);
+  });
+
+  test('a checkout whose status cannot be watched reports that Git status is unavailable', () async {
+    final state = gitState(WatchFailingGit());
+    addTearDown(state.dispose);
+    await pumpEventQueue();
+
+    expect(state.problem.value, 'Git status is unavailable.');
+    expect(state.status.value, isNull);
+  });
 }

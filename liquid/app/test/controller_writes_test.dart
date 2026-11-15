@@ -78,16 +78,6 @@ void main() {
         'The first line once its Text Block takes over; the line is no longer built, so ⌘Z cannot reach it.',
       ),
       (
-        'lib/src/agent/pull_request_writing.dart',
-        '_titleField.text = _filledTitle = title;',
-        'The first fill from the commit, before the form is built.',
-      ),
-      (
-        'lib/src/agent/pull_request_writing.dart',
-        '_bodyField.text = _filledBody = body;',
-        'The first fill from the commit, before the form is built.',
-      ),
-      (
         'lib/src/controls.dart',
         'controller.value = value;',
         'writeText itself: the one place Liquid writes text into a field.',

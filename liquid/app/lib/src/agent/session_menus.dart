@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../controls.dart';
-import '../rust/api/events.dart';
 import '../rust/api/session.dart';
 import '../session/session_state.dart';
 import '../theme/icons.dart';
@@ -16,12 +15,16 @@ class RowAction {
     this.label,
     this.onSelected, {
     this.danger = false,
+    this.enabled = true,
     this.shortcut,
   });
 
   final String label;
   final VoidCallback onSelected;
   final bool danger;
+
+  /// Whether the item can be chosen; a disabled item stays listed.
+  final bool enabled;
   final String? shortcut;
 }
 
@@ -63,6 +66,7 @@ class _RowMenuState extends State<RowMenu> {
           else
             PopupMenuItem(
               value: action,
+              enabled: action.enabled,
               height: 32,
               child: Row(
                 children: [
@@ -141,138 +145,55 @@ class _RowMenuState extends State<RowMenu> {
   );
 }
 
-/// Asks before deleting the session stored at `path`, named `title`, with its checkpoints,
-/// then deletes it.
+/// Asks before deleting `thread`, as T3 Code's delete does. When it is the only thread in its
+/// worktree, T3 then asks whether the worktree goes too; Cancel keeps the worktree and still
+/// deletes the thread.
 Future<void> confirmDeleteSession(
   BuildContext context,
-  SessionState state, {
-  required String path,
-  required String title,
-}) async {
-  final int turns;
-  try {
-    turns = await state.storedTurns(path);
-  } on Object catch (error) {
-    state.notify(BridgeLevel.error, 'Could not read the session: $error');
-    return;
-  }
-  // A question that arrived meanwhile takes the keys, so no dialog opens over it.
-  if (!context.mounted || state.asking) return;
-  final checkpoints = switch (turns) {
-    0 => 'Its pi session file is deleted',
-    1 => 'Its pi session file and its turn’s checkpoints are deleted',
-    final count =>
-      'Its pi session file and its $count turns’ checkpoints are deleted',
-  };
+  SessionState state,
+  BridgeThreadSummary thread,
+) async {
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (context) => DangerDialog(
-      title: 'Delete “$title”?',
-      action: 'Delete session',
+      title: 'Delete thread "${thread.title}"?',
+      action: 'Confirm',
       children: [
         Text(
-          '$checkpoints and cannot be restored. Project files, commits and branches stay.',
+          'This permanently clears conversation history for this thread.',
           style: DangerDialog.text(context),
         ),
       ],
     ),
   );
-  if (confirmed == true) await state.deleteSession(path);
-}
-
-/// Asks before removing every checkpoint of `project`, listing the sessions that lose them,
-/// then removes them.
-Future<void> confirmRemoveCheckpoints(
-  BuildContext context,
-  SessionState state,
-  String project,
-) async {
-  final List<BridgeCheckpointSession> sessions;
-  try {
-    sessions = await state.checkpointSessions();
-  } on Object catch (error) {
-    state.notify(BridgeLevel.error, 'Could not read the checkpoints: $error');
-    return;
+  if (confirmed != true || !context.mounted) return;
+  final worktree = thread.worktree;
+  var deleteWorktree = false;
+  if (worktree != null && await state.onlySessionInWorktree(thread.id)) {
+    if (!context.mounted) return;
+    deleteWorktree =
+        await showDialog<bool>(
+          context: context,
+          builder: (context) => DangerDialog(
+            title: 'Delete the worktree too?',
+            action: 'Confirm',
+            children: [
+              Text(
+                'This thread is the only one linked to this worktree:\n$worktree',
+                style: DangerDialog.text(context),
+              ),
+            ],
+          ),
+        ) ??
+        false;
   }
-  // A question that arrived meanwhile takes the keys, so no dialog opens over it.
-  if (!context.mounted || state.asking) return;
-  final confirmed = await showDialog<bool>(
-    context: context,
-    builder: (context) {
-      final ws = context.ws;
-      final faint = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
-      return DangerDialog(
-        title: 'Remove all checkpoints of $project?',
-        action: sessions.isEmpty ? null : 'Remove checkpoints',
-        children: [
-          Text(switch (sessions.length) {
-            0 => 'No session has checkpoints in this project.',
-            1 =>
-              '1 session keeps its chat, but no longer shows turn changes '
-                  'or reverts files. Project files, commits and branches stay. Git frees the '
-                  'space at its next cleanup.',
-            final count =>
-              '$count sessions keep their chats, but no longer show turn '
-                  'changes or revert files. Project files, commits and branches stay. Git '
-                  'frees the space at its next cleanup.',
-          }, style: DangerDialog.text(context)),
-          if (sessions.isNotEmpty)
-            Container(
-              constraints: const BoxConstraints(maxHeight: 240),
-              padding: const EdgeInsets.all(WsMetrics.space2),
-              decoration: BoxDecoration(
-                color: ws.subtle,
-                borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-              ),
-              child: ListView(
-                shrinkWrap: true,
-                children: [
-                  for (final session in sessions)
-                    SizedBox(
-                      height: 26,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: WsMetrics.space2,
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                session.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            Text(
-                              session.turns == 1
-                                  ? '1 turn'
-                                  : '${session.turns} turns',
-                              style: faint,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-        ],
-      );
-    },
-  );
-  if (confirmed == true) await state.removeAllCheckpoints();
+  await state.delete(thread.id, worktree: deleteWorktree);
 }
 
-/// Writes the record of the session stored at `path`, named `title`, into Downloads and shows the
-/// new folder in the system's file manager; when nothing was written, nothing is shown.
-Future<void> exportSessionRecord(
-  SessionState state, {
-  required String path,
-  required String title,
-}) async {
+/// Writes the open session's record into Downloads and shows the new folder in the system's file
+/// manager; when nothing was written, nothing is shown.
+Future<void> exportSessionRecord(SessionState state) async {
   final folder = await state.exportRecord(
-    path: path,
-    title: title,
     host: Platform.localHostname,
     day: _localDay(DateTime.now()),
   );
@@ -297,7 +218,7 @@ Future<void> openInFileManager(SessionState state, String path) =>
 /// Opens a GitHub page in the system's browser; only HTTPS pages, and a failure is reported.
 Future<void> openInBrowser(SessionState state, String url) async {
   if (!url.startsWith('https://')) {
-    state.notify(BridgeLevel.error, 'Could not open $url: not an HTTPS page.');
+    state.notify(NoticeLevel.error, 'Could not open $url: not an HTTPS page.');
     return;
   }
   await _openWithSystem(state, url);
@@ -311,11 +232,11 @@ Future<void> _openWithSystem(SessionState state, String target) async {
     ]);
     if (result.exitCode != 0) {
       state.notify(
-        BridgeLevel.error,
+        NoticeLevel.error,
         'Could not open $target: ${result.stderr}',
       );
     }
   } on ProcessException catch (error) {
-    state.notify(BridgeLevel.error, 'Could not open $target: ${error.message}');
+    state.notify(NoticeLevel.error, 'Could not open $target: ${error.message}');
   }
 }

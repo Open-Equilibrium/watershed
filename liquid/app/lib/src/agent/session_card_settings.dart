@@ -5,6 +5,7 @@ import '../settings_file.dart';
 /// The rows of the session card that can be hidden, in the card's order. Ids are stored, so
 /// never rename one.
 enum CardItem {
+  workspace('workspace', 'Environment and worktree'),
   branch('branch', 'Branch and pull request'),
   gitActions('gitActions', 'Git actions'),
   changes('changes', 'Changes'),

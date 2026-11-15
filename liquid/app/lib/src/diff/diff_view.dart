@@ -2,16 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../controls.dart';
-import '../format.dart';
 import '../rust/api/events.dart';
-import '../rust/api/git.dart';
 import '../session/session_state.dart';
 import '../shortcuts/keymap.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
-import 'diff_model.dart';
 import 'diff_lines.dart';
+import 'diff_model.dart';
 import 'diff_settings.dart';
 import 'file_tile.dart';
 import 'patch_pane.dart';
@@ -25,10 +22,10 @@ String diffKeys() =>
     '${Fixed.foldFolder.display} folder · ${Fixed.previousOrNextHunk.display} hunk · '
     '${Fixed.unifiedOrSplit.display} unified/split · ${Fixed.hideWhitespace.display} whitespace';
 
-/// What a turn changed between its checkpoints, or all turns of the branch: a folder tree of
-/// changed files and the selected file's diff, unified or split. Up and Down select files, Left and
-/// Right fold and unfold the selected file's folders, ⌥Up and ⌥Down move between the file's
-/// changes, T chooses the turn.
+/// What a turn changed between its checkpoints, or all turns, or the uncommitted changes: a
+/// folder tree of changed files and the selected file's diff, unified or split. Up and Down
+/// select files, Left and Right fold and unfold the selected file's folders, ⌥Up and ⌥Down move
+/// between the file's changes, T chooses the turn.
 class DiffView extends StatefulWidget {
   const DiffView({
     super.key,
@@ -76,7 +73,7 @@ class _DiffViewState extends State<DiffView> {
   /// Scrolls the selected file's lines.
   final _scroll = ScrollController();
 
-  /// Opens the turn menu from the keyboard.
+  /// Opens the scope menu from the keyboard.
   final _turnMenu = GlobalKey<PopupMenuButtonState<DiffScope>>();
 
   @override
@@ -85,10 +82,6 @@ class _DiffViewState extends State<DiffView> {
     widget.state.changed.addListener(_show);
     widget.state.shown.addListener(_rebuild);
     widget.state.shownScope.addListener(_rebuild);
-    widget.state.git.status.addListener(_rebuild);
-    unawaited(widget.state.git.refresh());
-    widget.state.shownStash.addListener(_show);
-    widget.state.git.stash.addListener(_rebuild);
     // Opening the panel reads the turns again, so it shows the latest one.
     unawaited(widget.state.readChanges());
     // It also shows the last list at once and moves the keyboard to it.
@@ -104,9 +97,6 @@ class _DiffViewState extends State<DiffView> {
     widget.state.changed.removeListener(_show);
     widget.state.shown.removeListener(_rebuild);
     widget.state.shownScope.removeListener(_rebuild);
-    widget.state.git.status.removeListener(_rebuild);
-    widget.state.shownStash.removeListener(_show);
-    widget.state.git.stash.removeListener(_rebuild);
     _focus.dispose();
     _scroll.dispose();
     super.dispose();
@@ -147,30 +137,19 @@ class _DiffViewState extends State<DiffView> {
       while (mounted) {
         final wanted = _selected;
         final comparison = _comparison;
-        final revision = _revision;
         if (wanted == null) return;
         // Why the file shows no lines: a diff that could not be read, such as one over Git's
         // output limit, or a change without text.
         String? note;
         var lines = const <DiffLine>[];
-        final what = 'the changes of ${wanted.path}';
         try {
           lines = await widget.parse(await widget.state.patch(wanted.path));
-          widget.state.reportRead(what, null);
           if (lines.isEmpty) note = _textless;
         } on Object catch (error) {
-          // The pane names the file above it; the notification names it itself.
           note = 'Could not show the changes: $error';
-          widget.state.reportRead(
-            what,
-            'Could not show the changes of ${wanted.shown}: $error',
-          );
         }
-        // A newer selection, comparison or uncommitted revision reads again.
-        if (!mounted ||
-            _selected != wanted ||
-            _comparison != comparison ||
-            _revision != revision) {
+        // A newer selection or comparison reads again.
+        if (!mounted || _selected != wanted || _comparison != comparison) {
           continue;
         }
         final keepPosition =
@@ -191,19 +170,12 @@ class _DiffViewState extends State<DiffView> {
     }
   }
 
-  String? get _revision => widget.state.shownScope.value is UncommittedChanges
-      ? widget.state.uncommittedRevision
-      : null;
-
-  /// What the shown patch compares: the turns or stash and whether whitespace is hidden.
+  /// What the shown patch compares: the turns or the uncommitted changes, and whether whitespace
+  /// is hidden.
   String get _comparison {
     final shown = widget.state.shown.value;
-    final scope = widget.state.shownScope.value;
-    final stash = scope is StashedChanges
-        ? widget.state.shownStash.value?.stash.id
-        : null;
-    return '${scope.runtimeType} ${shown?.from.id}..${shown?.to.id} '
-        '$stash ${widget.state.hideWhitespace.value}';
+    return '${widget.state.shownScope.value.runtimeType} ${shown?.from.number}..'
+        '${shown?.to.number} ${widget.state.hideWhitespace.value}';
   }
 
   /// Whether a folded folder hides `row`.
@@ -322,31 +294,29 @@ class _DiffViewState extends State<DiffView> {
     child: Focus(
       focusNode: _focus,
       child: ValueListenableBuilder(
-        valueListenable: widget.state.changesProblem,
-        builder: (context, problem, _) => problem == null
-            ? _content(context)
-            : _empty(context, problem.title, problem.text),
+        valueListenable: widget.state.git,
+        builder: (context, git, _) => ListenableBuilder(
+          listenable: Listenable.merge([
+            git.status,
+            widget.state.changesProblem,
+          ]),
+          builder: (context, _) {
+            final repository = git.status.value?.repository ?? false;
+            final problem = widget.state.changesProblem.value;
+            return problem == null
+                ? _content(context, repository)
+                : _empty(context, repository, problem.title, problem.text);
+          },
+        ),
       ),
     ),
   );
 
-  /// The turn menu and what the shown turns are, once a turn ended or while the branch has
-  /// stashed changes.
-  Widget? _header() {
+  /// The scope menu and what the shown turns are, once a turn ended or in a repository.
+  Widget? _header(bool repository) {
     final shown = widget.state.shown.value;
     final scope = widget.state.shownScope.value;
-    final snapshot = widget.state.shownStash.value;
-    final stash = scope is StashedChanges
-        ? snapshot?.stash
-        : widget.state.git.stash.value;
-    final branch = scope is StashedChanges
-        ? snapshot?.branch
-        : widget.state.git.status.value?.branch;
-    if (shown == null &&
-        stash == null &&
-        widget.state.git.status.value == null) {
-      return null;
-    }
+    if (shown == null && !repository) return null;
     final files = widget.state.changed.value;
     return TurnHeader(
       menuKey: _turnMenu,
@@ -362,50 +332,26 @@ class _DiffViewState extends State<DiffView> {
               removed: files.fold(0, (sum, file) => sum + file.removed),
             )
           : null,
-      shown: shown,
-      stash: stash,
-      branch: branch,
-      git: widget.state.git.status,
+      repository: repository,
       onSelect: (scope) => unawaited(widget.state.showTurns(scope)),
       // Reverting applies to the turn shown, not to all turns.
       onRevert: switch ((scope, shown)) {
         (OneTurn() || LatestTurn(), final shown?) => () => unawaited(
-          confirmRevert(context, widget.state, shown.to),
+          confirmRevert(context, widget.state, shown.to.number),
         ),
         _ => null,
       },
-      onRestore: () {
-        if (stash != null) unawaited(widget.state.git.restoreStash(stash));
-      },
-      onDiscard: () => unawaited(_confirmDiscard(stash, branch)),
     );
   }
 
-  /// Asks before deleting the stashed changes, then deletes them.
-  Future<void> _confirmDiscard(BridgeStash? stash, String? branch) async {
-    if (stash == null) return;
-    final count = stash.files.length;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => DangerDialog(
-        title: 'Discard stashed changes?',
-        action: 'Discard',
-        children: [
-          Text(
-            'The $count ${count == 1 ? 'file' : 'files'} stashed on $branch at '
-            '${formatClockMs(stash.createdMs)} are deleted and cannot be restored. Your '
-            'uncommitted changes, commits and branches stay.',
-            style: DangerDialog.text(context),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true) await widget.state.git.discardStash(stash);
-  }
-
-  /// Says why nothing is shown, below the turn menu when a turn ended.
-  Widget _empty(BuildContext context, String title, String text) {
-    final header = _header();
+  /// Says why nothing is shown, below the scope menu when there is one.
+  Widget _empty(
+    BuildContext context,
+    bool repository,
+    String title,
+    String text,
+  ) {
+    final header = _header(repository);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -446,7 +392,7 @@ class _DiffViewState extends State<DiffView> {
     );
   }
 
-  Widget _content(BuildContext context) {
+  Widget _content(BuildContext context, bool repository) {
     final ws = context.ws;
     if (!_loaded) {
       return const SizedBox.expand();
@@ -455,20 +401,19 @@ class _DiffViewState extends State<DiffView> {
       final scope = widget.state.shownScope.value;
       final title = switch (scope) {
         UncommittedChanges() => 'No uncommitted changes',
-        StashedChanges() => 'No stashed changes',
         AllTurns() => 'No changes in these turns',
         _ => 'No changes in this turn',
       };
       return widget.settings.value.hideWhitespace
           ? _empty(
               context,
+              repository,
               '$title with whitespace hidden',
               '${Fixed.hideWhitespace.display} shows them.',
             )
-          : _empty(context, title, switch (scope) {
+          : _empty(context, repository, title, switch (scope) {
               UncommittedChanges() =>
                 'The checkout is the same as its last commit.',
-              StashedChanges() => 'The stash contains no changed files.',
               _ => 'The project was the same at its end as at its start.',
             });
     }
@@ -517,7 +462,7 @@ class _DiffViewState extends State<DiffView> {
         ),
         Expanded(
           child: PatchPane(
-            header: _header(),
+            header: _header(repository),
             change: _selected,
             lines: _lines,
             widest: _widest,

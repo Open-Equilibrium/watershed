@@ -19,7 +19,7 @@ import 'fake_backend.dart';
 import 'fake_workspace.dart';
 import 'focus_kit.dart';
 
-const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
+const info = SessionInfo(project: 'acme-api');
 
 void main() {
   late FakeWorkspace fake;
@@ -30,6 +30,10 @@ void main() {
     fake = FakeWorkspace();
     workspace = WorkspaceState(fake);
     await workspace.start(show: session == null);
+    if (session != null) {
+      await session.loadStart();
+      await session.open('thread-1');
+    }
     await tester.pumpWidget(
       MaterialApp(
         theme: liquidTheme(Brightness.light),
@@ -43,6 +47,14 @@ void main() {
     await tester.pumpAndSettle();
     addTearDown(workspace.dispose);
   }
+
+  /// The project behind an agent session, which records what the app asks of it.
+  FakeProject project(SessionState state) => state.project as FakeProject;
+
+  /// A session of a project with one thread, `thread-1`, in the sidebar.
+  SessionState agent() => SessionState(
+    FakeProject()..threadList = [threadOf('thread-1', title: 'Fix login')],
+  );
 
   Finder title() => find.byKey(const Key('page-title'));
   List<String?> renames() => [
@@ -62,7 +74,7 @@ void main() {
     await show(tester);
     expect(inSidebar('Private'), findsOneWidget);
     expect(inSidebar('Untitled'), findsOneWidget);
-    expect(inSidebar('Agent sessions'), findsOneWidget);
+    expect(inSidebar('Threads'), findsOneWidget);
     expect(find.byType(ChatView), findsNothing);
     final field = tester.widget<TextField>(title());
     expect(field.focusNode!.hasFocus, isTrue);
@@ -166,7 +178,7 @@ void main() {
   testWidgets('a Page and the agent session take turns beside the sidebar', (
     tester,
   ) async {
-    await show(tester, session: SessionState(FakeBackend()));
+    await show(tester, session: agent());
     expect(find.byType(ChatView), findsOneWidget);
     expect(find.byType(WorkspacePage), findsNothing);
 
@@ -175,7 +187,7 @@ void main() {
     expect(find.byType(WorkspacePage), findsOneWidget);
     expect(find.byType(ChatView), findsNothing);
 
-    await tester.tap(find.byKey(const Key('session-card')));
+    await tester.tap(find.byKey(const Key('session-thread-1')));
     await tester.pumpAndSettle();
     expect(find.byType(ChatView), findsOneWidget);
 
@@ -196,7 +208,7 @@ void main() {
       MaterialApp(
         theme: liquidTheme(Brightness.light),
         home: AgentShell(
-          state: SessionState(FakeBackend()),
+          state: agent(),
           info: info,
           workspaceProblem: 'another Liquid session holds this replica',
         ),
@@ -224,41 +236,40 @@ void main() {
   testWidgets('a question that came behind a Page waits once shown', (
     tester,
   ) async {
-    final backend = FakeBackend();
-    await show(tester, session: SessionState(backend));
+    final state = agent();
+    await show(tester, session: state);
     await tester.tap(inSidebar('Untitled'));
     await tester.pumpAndSettle();
-    backend.controller.add(
+    project(state).session.emit(
       event(
-        BridgeEventKind.userInputRequested,
-        request: const BridgeRequest(
-          id: 'q1',
-          question: BridgeQuestion(
-            kind: BridgeQuestionKind.confirm,
-            title: 'Run the tests?',
-            detail: '',
-            options: [],
-          ),
-        ),
+        BridgeEventKind.requestOpened,
+        901,
+        request: questionsOf('q1', [questionOf('run', 'Run the tests?')]),
       ),
     );
     await tester.pump();
     await tester.pump(const Duration(seconds: 2));
 
-    await tester.tap(find.byKey(const Key('session-card')));
+    await tester.tap(find.byKey(const Key('session-thread-1')));
     await tester.pump();
-    await tester.tap(find.text('Yes'));
+    await tester.enterText(find.byKey(const Key('answer')), 'Yes');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
-    expect(backend.calls.where((call) => call.startsWith('confirm')), isEmpty);
+    expect(
+      project(state).session.calls,
+      isEmpty,
+      reason: 'too early to answer',
+    );
+
     await tester.pump(const Duration(milliseconds: 500));
-    await tester.tap(find.text('Yes'));
-    expect(backend.calls.last, 'confirm q1 true');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(project(state).session.calls, ['answer q1 run=Yes']);
   });
 
   testWidgets(
     'a Workspace problem shows in the sidebar while no Page is open',
     (tester) async {
-      await show(tester, session: SessionState(FakeBackend()));
+      await show(tester, session: agent());
       fake.refuse = 'the replica is read-only';
       await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
       await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
@@ -477,9 +488,8 @@ void main() {
   testWidgets(
     'a hovered session card shows its ··· in place of the status word',
     (tester) async {
-      await show(tester, session: SessionState(FakeBackend()));
-      final card = find.byKey(const Key('session-card'));
-      final status = find.descendant(of: card, matching: find.text('idle'));
+      await show(tester, session: agent());
+      final card = find.byKey(const Key('session-thread-1'));
       final more = find.descendant(
         of: card,
         matching: find.byTooltip('More actions'),
@@ -492,14 +502,12 @@ void main() {
             : tester.widget<Opacity>(fades.first).opacity;
       }
 
-      expect(opacity(status), 1);
       expect(opacity(more), 0);
 
       final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
       await mouse.addPointer(location: tester.getCenter(card));
       addTearDown(mouse.removePointer);
       await tester.pumpAndSettle();
-      expect(opacity(status), 0);
       expect(opacity(more), 1);
     },
   );

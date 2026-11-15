@@ -1,10 +1,11 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../controls.dart';
-import '../rust/api/events.dart';
+import '../format.dart';
+import '../rust/api/session.dart';
 import '../session/session_state.dart';
 import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
@@ -15,25 +16,18 @@ import '../workspace/explorer.dart';
 import '../workspace/workspace_state.dart';
 import 'session_menus.dart';
 
-/// What the sidebar shows about a session.
+/// What the sidebar shows about the project.
 @immutable
 class SessionInfo {
-  const SessionInfo({
-    required this.project,
-    required this.harness,
-    required this.device,
-    this.path,
-  });
+  const SessionInfo({required this.project, this.path});
 
   final String project;
 
   /// The project's folder, when known.
   final String? path;
-  final String harness;
-  final String device;
 }
 
-/// The open session's title, or "New session" before it has one.
+/// The open session's title, or "New thread" before it has one.
 class SessionTitle extends StatelessWidget {
   const SessionTitle({super.key, required this.state, this.style});
 
@@ -44,7 +38,7 @@ class SessionTitle extends StatelessWidget {
   Widget build(BuildContext context) => ValueListenableBuilder(
     valueListenable: state.sessionTitle,
     builder: (context, title, _) => Text(
-      title ?? 'New session',
+      title ?? 'New thread',
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       style: style,
@@ -55,8 +49,8 @@ class SessionTitle extends StatelessWidget {
 /// No Page is open without a Workspace.
 final _noPage = ValueNotifier<OpenPage?>(null);
 
-/// The Explorer above the agent sessions with project, harness and device per session, and
-/// Settings in its footer (approved Pages mockups).
+/// The Explorer above the project's agent sessions, with Settings in its footer (approved Pages
+/// mockups).
 class Sidebar extends StatelessWidget {
   const Sidebar({
     super.key,
@@ -84,210 +78,9 @@ class Sidebar extends StatelessWidget {
   /// Shows the session in place of the open Page.
   final VoidCallback? onShowSession;
 
-  /// Runs `action` on the open session's file and title; a session pi keeps in memory has none.
-  Future<void> _openSessionFile(
-    BuildContext context,
-    SessionState state,
-    Future<void> Function(String path, String title) action,
-  ) async {
-    final generation = state.generation;
-    final String? path;
-    try {
-      path = await state.sessionFile();
-    } on Object catch (error) {
-      state.notify(BridgeLevel.error, 'Could not read the session: $error');
-      return;
-    }
-    // Another session opened meanwhile: the file and the title it shows would differ.
-    if (!context.mounted || generation != state.generation) return;
-    if (path == null) {
-      state.notify(
-        BridgeLevel.info,
-        'pi keeps this session in memory, so it has no file.',
-      );
-      return;
-    }
-    await action(path, state.sessionTitle.value ?? 'New session');
-  }
-
-  /// The project and the session's card, which shows the session when tapped.
-  List<Widget> _session(
-    BuildContext context,
-    SessionState state,
-    SessionInfo info,
-    TextStyle small,
-  ) {
-    final ws = context.ws;
-    return [
-      RowMenu(
-        actions: [
-          if (info.path case final path?)
-            RowAction(
-              Platform.isMacOS ? 'Open in Finder' : 'Open in file manager',
-              () => openInFileManager(state, path),
-            ),
-          RowAction(
-            'New agent session',
-            onNewSession ?? () => unawaited(state.newSession()),
-            shortcut: Keymap.of(context).label(Command.newSession),
-          ),
-          null,
-          RowAction(
-            'Remove all checkpoints…',
-            () => confirmRemoveCheckpoints(context, state, info.project),
-            danger: true,
-          ),
-        ],
-        builder: (context, menu, _) => Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: WsMetrics.space3,
-            vertical: WsMetrics.space2,
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  info.project,
-                  style: TextStyle(
-                    color: ws.textMuted,
-                    fontWeight: WsMetrics.fwMedium,
-                  ),
-                ),
-              ),
-              menu,
-            ],
-          ),
-        ),
-      ),
-      RowMenu(
-        actions: [
-          RowAction(
-            'Export record',
-            () => _openSessionFile(
-              context,
-              state,
-              (path, title) =>
-                  exportSessionRecord(state, path: path, title: title),
-            ),
-          ),
-          null,
-          RowAction(
-            'Delete session…',
-            () => _openSessionFile(
-              context,
-              state,
-              (path, title) => confirmDeleteSession(
-                context,
-                state,
-                path: path,
-                title: title,
-              ),
-            ),
-            danger: true,
-          ),
-        ],
-        // Marked while it shows rather than a Page.
-        builder: (context, menu, shown) => ValueListenableBuilder(
-          valueListenable: workspace?.open ?? _noPage,
-          builder: (context, open, card) => Semantics(
-            selected: open == null,
-            child: Shortcuts(
-              shortcuts: activateKeys,
-              child: InkWell(
-                key: const Key('session-card'),
-                onTap: onShowSession,
-                borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-                child: Ink(
-                  decoration: BoxDecoration(
-                    color: open == null ? ws.hover : null,
-                    borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-                  ),
-                  child: card,
-                ),
-              ),
-            ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-              WsMetrics.space6,
-              WsMetrics.space2,
-              WsMetrics.space3,
-              WsMetrics.space2,
-            ),
-            child: ValueListenableBuilder(
-              valueListenable: state.status,
-              builder: (context, status, _) {
-                final (label, color) = statusLabel(context, status);
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 7,
-                          height: 7,
-                          decoration: BoxDecoration(
-                            color: color,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: WsMetrics.space3),
-                        Expanded(child: SessionTitle(state: state)),
-                        // The "···" takes the status word's place while it shows; the dot
-                        // keeps the status.
-                        Stack(
-                          alignment: Alignment.centerRight,
-                          children: [
-                            Opacity(
-                              opacity: shown ? 0 : 1,
-                              child: Text(
-                                label,
-                                style: TextStyle(
-                                  color: color,
-                                  fontSize: WsMetrics.fsSmall,
-                                ),
-                              ),
-                            ),
-                            menu,
-                          ],
-                        ),
-                      ],
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.only(left: 15),
-                      // The checkout's branch, live.
-                      child: ValueListenableBuilder(
-                        valueListenable: state.git.status,
-                        builder: (context, git, _) => Text(
-                          [
-                            info.harness,
-                            ?(git?.branch ?? git?.commit),
-                            info.device,
-                          ].join(' · '),
-                          style: small,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
-        ),
-      ),
-    ];
-  }
-
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    final small = TextStyle(
-      color: ws.textFaint,
-      fontSize: WsMetrics.fsSmall,
-      height: WsMetrics.lhSmall / WsMetrics.fsSmall,
-    );
     return Container(
       width: WsMetrics.widthSide,
       decoration: BoxDecoration(
@@ -356,9 +149,19 @@ class Sidebar extends StatelessWidget {
                             _ => const SizedBox.shrink(),
                           },
                         ),
-                      const SidebarHeading('Agent sessions'),
-                      if ((state, info) case (final state?, final info?))
-                        ..._session(context, state, info, small),
+                      const SidebarHeading('Threads'),
+                      if ((state, info) case (final state?, final info?)) ...[
+                        _ProjectRow(
+                          state: state,
+                          info: info,
+                          onNewSession: onNewSession,
+                        ),
+                        _Sessions(
+                          state: state,
+                          workspace: workspace,
+                          onShow: onShowSession,
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -408,6 +211,245 @@ class Sidebar extends StatelessWidget {
   }
 }
 
+/// The project's row, whose menu opens its folder or starts a session.
+class _ProjectRow extends StatelessWidget {
+  const _ProjectRow({
+    required this.state,
+    required this.info,
+    required this.onNewSession,
+  });
+
+  final SessionState state;
+  final SessionInfo info;
+  final VoidCallback? onNewSession;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return RowMenu(
+      actions: [
+        if (info.path case final path?)
+          RowAction(
+            'Copy path',
+            () => unawaited(Clipboard.setData(ClipboardData(text: path))),
+          ),
+        RowAction(
+          'New thread',
+          onNewSession ?? () => unawaited(state.newSession()),
+          shortcut: Keymap.of(context).label(Command.newSession),
+        ),
+      ],
+      builder: (context, menu, _) => Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: WsMetrics.space3,
+          vertical: WsMetrics.space2,
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                info.project,
+                style: TextStyle(
+                  color: ws.textMuted,
+                  fontWeight: WsMetrics.fwMedium,
+                ),
+              ),
+            ),
+            menu,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The project's sessions, newest first, as the state lists them. The open one is marked while no
+/// Page is open.
+class _Sessions extends StatelessWidget {
+  const _Sessions({
+    required this.state,
+    required this.workspace,
+    required this.onShow,
+  });
+
+  final SessionState state;
+  final WorkspaceState? workspace;
+  final VoidCallback? onShow;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: Listenable.merge([
+      state.recent,
+      state.sessionTitle,
+      state.status,
+      workspace?.open ?? _noPage,
+    ]),
+    builder: (context, _) {
+      final open = workspace?.open.value == null;
+      final current = state.session?.id;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final thread in state.recent.value)
+            _SessionRow(
+              state: state,
+              thread: thread,
+              selected: open && thread.id == current,
+              status: thread.id == current
+                  ? state.status.value
+                  : thread.running
+                  ? RunStatus.running
+                  : RunStatus.idle,
+              onShow: onShow,
+            ),
+        ],
+      );
+    },
+  );
+}
+
+/// One session of the project: its status or last change, and the menu for export, archive and
+/// delete.
+class _SessionRow extends StatelessWidget {
+  const _SessionRow({
+    required this.state,
+    required this.thread,
+    required this.selected,
+    required this.status,
+    required this.onShow,
+  });
+
+  final SessionState state;
+  final BridgeThreadSummary thread;
+  final bool selected;
+  final RunStatus status;
+  final VoidCallback? onShow;
+
+  /// The status word and its colour: the status while one runs, else when the session last changed.
+  (String, Color) _label(BuildContext context) {
+    final ws = context.ws;
+    if (thread.archived) return ('archived', ws.textFaint);
+    if (status != RunStatus.idle) return statusLabel(context, status);
+    final updated = thread.updatedMs;
+    return (
+      updated == null ? '' : formatAgo(updated, DateTime.now()),
+      ws.textFaint,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    final (text, color) = _label(context);
+    return RowMenu(
+      actions: [
+        if (selected)
+          RowAction('Export record', () => exportSessionRecord(state)),
+        RowAction(
+          thread.archived ? 'Unarchive' : 'Archive thread',
+          () => unawaited(state.archive(thread.id, archived: !thread.archived)),
+          // T3 does not archive a running thread.
+          enabled: !thread.running,
+        ),
+        null,
+        RowAction(
+          'Delete',
+          () => unawaited(confirmDeleteSession(context, state, thread)),
+          danger: true,
+        ),
+      ],
+      // Marked while it shows rather than a Page.
+      builder: (context, menu, shown) => Semantics(
+        selected: selected,
+        child: Shortcuts(
+          shortcuts: activateKeys,
+          child: InkWell(
+            key: Key('session-${thread.id}'),
+            onTap: () {
+              if (state.session?.id != thread.id) {
+                unawaited(state.open(thread.id));
+              }
+              onShow?.call();
+            },
+            borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+            child: Ink(
+              decoration: BoxDecoration(
+                color: selected ? ws.hover : null,
+                borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  WsMetrics.space6,
+                  WsMetrics.space2,
+                  WsMetrics.space3,
+                  WsMetrics.space2,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: BoxDecoration(
+                            color: color,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: WsMetrics.space3),
+                        Expanded(
+                          child: Text(
+                            thread.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        // The "···" takes the status word's place while it shows; the dot keeps
+                        // the status.
+                        Stack(
+                          alignment: Alignment.centerRight,
+                          children: [
+                            Opacity(
+                              opacity: shown ? 0 : 1,
+                              child: Text(
+                                text,
+                                style: TextStyle(
+                                  color: color,
+                                  fontSize: WsMetrics.fsSmall,
+                                ),
+                              ),
+                            ),
+                            menu,
+                          ],
+                        ),
+                      ],
+                    ),
+                    if (thread.branch case final branch?)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 15),
+                        child: Text(
+                          branch,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: ws.textFaint,
+                            fontSize: WsMetrics.fsSmall,
+                            height: WsMetrics.lhSmall / WsMetrics.fsSmall,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Short status text and its color.
 (String, Color) statusLabel(BuildContext context, RunStatus status) {
   final ws = context.ws;
@@ -415,7 +457,5 @@ class Sidebar extends StatelessWidget {
     RunStatus.idle => ('idle', ws.textFaint),
     RunStatus.running => ('running', ws.accent),
     RunStatus.waitingForYou => ('waiting', ws.warning),
-    RunStatus.exited => ('exited', ws.textFaint),
-    RunStatus.failed => ('failed', ws.danger),
   };
 }

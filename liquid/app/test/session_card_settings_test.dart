@@ -68,6 +68,7 @@ void main() {
     expect(settings.shows(CardItem.changes), isFalse);
     expect(settings.hidden, {CardItem.changes});
     expect(CardItem.values.map((item) => item.id), [
+      'workspace',
       'branch',
       'gitActions',
       'changes',

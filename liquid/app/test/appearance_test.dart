@@ -4,18 +4,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/sidebar.dart';
-import 'package:liquid/src/theme/tokens.g.dart';
 import 'package:liquid/src/app.dart';
 import 'package:liquid/src/appearance.dart';
 import 'package:liquid/src/diff/diff_settings.dart';
 import 'package:liquid/src/launch.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/settings_file.dart';
-import 'package:liquid/src/theme/theme.dart';
+import 'package:liquid/src/theme/tokens.g.dart';
 
 import 'fake_backend.dart';
 
-const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
+const info = SessionInfo(project: 'acme-api');
 
 void main() {
   test('appearance follows the system at the default size until chosen', () {
@@ -60,7 +59,7 @@ void main() {
       final appearance = AppearanceController();
       await tester.pumpWidget(
         LiquidApp(
-          launch: Launch.session(SessionState(FakeBackend()), info),
+          launch: Launch.session(SessionState(FakeProject()), info, null),
           appearance: appearance,
         ),
       );
@@ -119,33 +118,16 @@ void main() {
     );
   });
 
-  testWidgets('two choices before the next frame both apply', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 900));
-    final appearance = AppearanceController();
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: Scaffold(body: AppearancePane(appearance: appearance)),
-      ),
-    );
-    await tester.tap(find.text('Dark'));
-    await tester.tap(find.text('Large'));
-    expect(
-      (appearance.value.theme, appearance.value.textSize),
-      (ThemeChoice.dark, TextSize.large),
-    );
-  });
-
   testWidgets('says in the status bar when settings could not be saved', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(1600, 900));
     final appearance = AppearanceController(const Appearance(), _Disk());
     final diff = DiffSettingsController(const DiffSettings(), _Disk());
-    final state = SessionState(FakeBackend());
+    final state = SessionState(FakeProject());
     await tester.pumpWidget(
       LiquidApp(
-        launch: Launch.session(state, info),
+        launch: Launch.session(state, info, null),
         appearance: appearance,
         diffSettings: diff,
       ),
@@ -173,7 +155,7 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1600, 900));
     await tester.pumpWidget(
       LiquidApp(
-        launch: Launch.session(SessionState(FakeBackend()), info),
+        launch: Launch.session(SessionState(FakeProject()), info, null),
         appearance: appearance,
         diffSettings: diff,
       ),

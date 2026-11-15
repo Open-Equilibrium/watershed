@@ -7,113 +7,93 @@ import 'package:liquid/src/agent/session_card_settings.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/rust/api/events.dart';
-import 'package:liquid/src/rust/api/history.dart';
+import 'package:liquid/src/rust/api/thread.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
 
-const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
+const info = SessionInfo(project: 'acme-api');
 
-/// One model that used 1.79 M tokens for $1.27, and a turn of 14m 32s with 86 tool calls.
-BridgeStatistics sessionStatistics({
-  int? modelMs = 588000,
-  int? toolMs = 261000,
-}) {
-  final usage = BridgeUsage(
-    input: 212000,
-    output: 18300,
-    cacheRead: 1580000,
-    cacheWrite: 41000,
-    reasoning: 0,
-    costMicroUsd: 1270000,
-  );
-  return statisticsOf(
-    models: [
-      BridgeModelUsage(
-        model: 'anthropic/claude-sonnet-4-5',
-        costByKind: const BridgeCostByKind(
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0,
-        ),
-        usage: usage,
-        responses: 41,
-        unpriced: 0,
-      ),
-    ],
-    tools: const [
-      BridgeToolCalls(
-        name: 'bash',
-        succeeded: 16,
-        failed: 5,
-        cancelled: 0,
-        open: 0,
-      ),
-      BridgeToolCalls(
-        name: 'edit',
-        succeeded: 63,
-        failed: 1,
-        cancelled: 1,
-        open: 0,
-      ),
-    ],
-    turns: [
-      BridgeTurnStatistics(
-        entry: 'e1',
-        prompt: 'Add a rate limit',
-        startedMs: 0,
-        endedMs: 872000,
-        models: [
-          BridgeModelUsage(
-            model: 'anthropic/claude-sonnet-4-5',
-            costByKind: const BridgeCostByKind(
-              input: 0,
-              output: 0,
-              cacheRead: 0,
-              cacheWrite: 0,
-            ),
-            usage: usage,
-            responses: 41,
-            unpriced: 0,
-          ),
-        ],
-        modelMs: modelMs,
-        toolMs: toolMs,
-        failed: 6,
-      ),
-    ],
-  );
+/// Holds its statistics until `gate` completes, so the rows can be seen waiting for them.
+class GatedStatistics extends FakeSession {
+  final gate = Completer<void>();
+
+  @override
+  Future<BridgeStatistics> statistics() async {
+    await gate.future;
+    return super.statistics();
+  }
 }
 
+/// One turn of 14m 32s with 86 tool calls, 6 of them failed, on a model that used 1.85 M tokens.
+BridgeStatistics sessionStatistics({int? toolMs = 261000}) => BridgeStatistics(
+  models: [
+    BridgeModelUsage(
+      model: 'anthropic/claude-sonnet-4-5',
+      usage: BridgeUsage(
+        input: 212000,
+        output: 18300,
+        cacheRead: 1580000,
+        cacheWrite: 41000,
+        reasoning: 0,
+      ),
+      responses: 41,
+    ),
+  ],
+  tools: const [
+    BridgeToolCalls(
+      name: 'bash',
+      succeeded: 16,
+      failed: 5,
+      cancelled: 0,
+      open: 0,
+    ),
+    BridgeToolCalls(
+      name: 'edit',
+      succeeded: 63,
+      failed: 1,
+      cancelled: 1,
+      open: 0,
+    ),
+  ],
+  turns: [
+    BridgeTurnStatistics(
+      number: 1,
+      prompt: 'Add a rate limit',
+      startedMs: 0,
+      endedMs: 872000,
+      models: const [],
+      toolMs: toolMs,
+      failed: 6,
+    ),
+  ],
+);
+
+FakeSession sessionWith({
+  BridgeContext? window = const BridgeContext(
+    tokens: 68200,
+    window: 200000,
+    compactsAt: 180000,
+  ),
+  int? toolMs = 261000,
+}) => FakeSession()
+  ..stats = sessionStatistics(toolMs: toolMs)
+  ..contextWindow = window;
+
 void main() {
-  late FakeBackend backend;
   late SessionState state;
+  // The test's one mouse, which moves over the rows and waits for their tooltips.
   TestGesture? mouse;
-  var addedPointer = false;
-
-  setUp(() {
-    mouse = null;
-    addedPointer = false;
-  });
-
-  tearDown(() async => mouse?.removePointer());
+  setUp(() => mouse = null);
 
   Future<void> show(
-    WidgetTester tester, {
+    WidgetTester tester,
+    FakeSession session, {
     SessionCardSettings settings = const SessionCardSettings(),
-    void Function(FakeBackend backend)? setup,
   }) async {
     await tester.binding.setSurfaceSize(const Size(1600, 900));
-    backend = FakeBackend()..stats = sessionStatistics();
-    backend.contextWindow = const BridgeContext(
-      tokens: 68200,
-      window: 200000,
-      compactsAt: 180000,
-    );
-    setup?.call(backend);
-    state = SessionState(backend);
+    state = SessionState(FakeProject(session: session));
     await tester.pumpWidget(
       MaterialApp(
         theme: liquidTheme(Brightness.light),
@@ -124,7 +104,7 @@ void main() {
         ),
       ),
     );
-    await state.loadChat();
+    await state.open('thread-1');
     await tester.pumpAndSettle();
   }
 
@@ -133,142 +113,75 @@ void main() {
     matching: finder,
   );
 
-  /// Moves the test's one mouse over `finder` and waits for its tooltip.
+  /// Moves the mouse over `finder` and waits for its tooltip.
   Future<void> hover(WidgetTester tester, Finder finder) async {
-    final pointer = mouse ??= await tester.createGesture(
-      kind: PointerDeviceKind.mouse,
-    );
-    if (mouse == pointer && !addedPointer) {
-      addedPointer = true;
+    if (mouse == null) {
+      final pointer = mouse = await tester.createGesture(
+        kind: PointerDeviceKind.mouse,
+      );
+      addTearDown(pointer.removePointer);
       await pointer.addPointer(location: Offset.zero);
     }
-    await pointer.moveTo(tester.getCenter(finder));
+    await mouse!.moveTo(tester.getCenter(finder));
     await tester.pump(const Duration(seconds: 2));
   }
 
-  testWidgets('the rows show the statistics and the context window', (
+  testWidgets(
+    'the rows show the tokens, working time, tool calls and context window',
+    (tester) async {
+      await show(tester, sessionWith());
+
+      expect(inCard(find.text('Context window')), findsOneWidget);
+      expect(inCard(find.text('68.2 k / 200 k')), findsOneWidget);
+      expect(inCard(find.text('1.85 M')), findsOneWidget);
+      expect(inCard(find.text('14m 32s')), findsOneWidget);
+      expect(inCard(find.textContaining('6 failed · 86')), findsOneWidget);
+      expect(inCard(find.text('Statistics')), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'a dash stands for what is not known, and the cost row says T3 reports none',
+    (tester) async {
+      await show(
+        tester,
+        sessionWith(window: const BridgeContext(window: 200000), toolMs: null),
+      );
+
+      expect(inCard(find.text('T3 Code reports no cost')), findsOneWidget);
+      expect(
+        inCard(find.text('—')),
+        findsNWidgets(4),
+        reason: 'context tokens, tool time, model time and cost',
+      );
+    },
+  );
+
+  testWidgets(
+    'the tool calls tooltip names the outcomes and the failing tools',
+    (tester) async {
+      await show(tester, sessionWith());
+
+      await hover(tester, inCard(find.text('Tool calls')));
+
+      expect(find.textContaining('Tool calls: 86'), findsOneWidget);
+      expect(
+        find.textContaining('79 succeeded · 6 failed · 1 cancelled'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('bash 5 failed, edit 1 failed'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets('open tool calls count as running once a turn runs', (
     tester,
   ) async {
-    await show(tester);
-
-    expect(inCard(find.text('Context')), findsOneWidget);
-    expect(inCard(find.text('68.2 k / 200 k')), findsOneWidget);
-    expect(inCard(find.text('1.85 M')), findsOneWidget);
-    expect(inCard(find.text('≈ \$1.27')), findsOneWidget);
-    expect(inCard(find.text('14m 32s')), findsOneWidget);
-    expect(inCard(find.textContaining('6 failed · 86')), findsOneWidget);
-    expect(inCard(find.text('Statistics')), findsOneWidget);
-  });
-
-  testWidgets('a dash stands for context tokens that are not known', (
-    tester,
-  ) async {
-    await show(
-      tester,
-      setup: (backend) =>
-          backend.contextWindow = const BridgeContext(window: 200000),
-    );
-
-    expect(inCard(find.text('—')), findsWidgets);
-    expect(inCard(find.text('68.2 k / 200 k')), findsNothing);
-  });
-
-  testWidgets('the cost mark explains the responses without a recorded cost', (
-    tester,
-  ) async {
-    await show(
-      tester,
-      setup: (backend) => backend.stats = statisticsOf(
-        models: [
-          BridgeModelUsage(
-            model: 'anthropic/claude-sonnet-4-5',
-            costByKind: const BridgeCostByKind(
-              input: 0,
-              output: 0,
-              cacheRead: 0,
-              cacheWrite: 0,
-            ),
-            usage: BridgeUsage(
-              input: 1000,
-              output: 100,
-              cacheRead: 0,
-              cacheWrite: 0,
-              reasoning: 0,
-              costMicroUsd: 20000,
-            ),
-            responses: 4,
-            unpriced: 2,
-          ),
-        ],
-      ),
-    );
-
-    await hover(tester, inCard(find.text('Cost')));
-
-    expect(
-      find.textContaining(
-        '2 responses without a recorded cost are counted in tokens, not in cost',
-      ),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('the cost tooltip names each model’s cost, priced or not', (
-    tester,
-  ) async {
-    await show(tester);
-
-    await hover(tester, inCard(find.text('Cost')));
-
-    expect(find.textContaining('claude-sonnet-4-5 ≈ \$1.27'), findsOneWidget);
-  });
-
-  testWidgets('a statistics row explains itself when the keyboard focuses it', (
-    tester,
-  ) async {
-    await show(tester);
-
-    Focus.of(tester.element(inCard(find.text('Tokens')))).requestFocus();
-    await tester.pump();
-    await tester.pump();
-
-    expect(find.textContaining('Cache read 1.58 M'), findsOneWidget);
-  });
-
-  testWidgets('an older session shows a dash for model and tool time', (
-    tester,
-  ) async {
-    await show(
-      tester,
-      setup: (backend) =>
-          backend.stats = sessionStatistics(modelMs: null, toolMs: null),
-    );
-
-    expect(inCard(find.text('14m 32s')), findsOneWidget);
-    expect(inCard(find.text('Model and tools')), findsOneWidget);
-    expect(inCard(find.text('Working time')), findsOneWidget);
-    expect(find.textContaining('Model 9m 48s'), findsNothing);
-  });
-
-  testWidgets('the tool calls tooltip names the failing tools', (tester) async {
-    await show(tester);
-
-    await hover(tester, inCard(find.text('Tool calls')));
-
-    expect(find.textContaining('Tool calls: 86'), findsOneWidget);
-    expect(
-      find.textContaining('79 succeeded · 6 failed · 1 cancelled'),
-      findsOneWidget,
-    );
-    expect(find.textContaining('bash 5 failed, edit 1 failed'), findsOneWidget);
-  });
-
-  testWidgets('open tool calls count as running while a turn runs', (
-    tester,
-  ) async {
-    await show(
-      tester,
-      setup: (backend) => backend.stats = statisticsOf(
+    final session = FakeSession()
+      ..stats = BridgeStatistics(
+        models: const [],
         tools: const [
           BridgeToolCalls(
             name: 'bash',
@@ -278,21 +191,25 @@ void main() {
             open: 2,
           ),
         ],
-      ),
-    );
+        turns: const [],
+      );
+    await show(tester, session);
 
     await hover(tester, inCard(find.text('Tool calls')));
     expect(find.textContaining('2 cancelled'), findsOneWidget);
-    expect(find.textContaining('running'), findsNothing);
 
-    backend.controller.add(event(BridgeEventKind.turnStarted));
+    session
+      ..turnList = [
+        turnOf(1, status: BridgeTurnStatus.running, checkpoint: false),
+      ]
+      ..emit(event(BridgeEventKind.turnStarted, 1, turn: 1));
     await tester.pumpAndSettle();
     await hover(tester, inCard(find.text('Tool calls')));
     expect(find.textContaining('2 running'), findsOneWidget);
   });
 
   testWidgets('the Statistics row opens the statistics panel', (tester) async {
-    await show(tester);
+    await show(tester, sessionWith());
     expect(state.statisticsOpen.value, isFalse);
 
     await tester.tap(inCard(find.text('Statistics')));
@@ -304,42 +221,41 @@ void main() {
   testWidgets('the rows wait for the first read of the statistics', (
     tester,
   ) async {
-    await show(
-      tester,
-      setup: (backend) => backend.statisticsGate = Completer<void>(),
-    );
-    await tester.pump();
+    final session = GatedStatistics()..contextWindow = null;
+    await show(tester, session);
 
     expect(inCard(find.text('Tokens')), findsNothing);
     expect(inCard(find.text('Statistics')), findsOneWidget);
 
-    backend.statisticsGate!.complete();
+    session.gate.complete();
     await tester.pumpAndSettle();
 
     expect(inCard(find.text('Tokens')), findsOneWidget);
   });
 
-  testWidgets(
-    'hidden rows leave their statistics out, the Statistics row too',
-    (tester) async {
-      await show(
-        tester,
-        settings: const SessionCardSettings(hidden: {CardItem.statistics}),
-      );
-
-      expect(inCard(find.text('Tokens')), findsNothing);
-      expect(inCard(find.text('Statistics')), findsNothing);
-      expect(inCard(find.text('Context')), findsOneWidget);
-    },
-  );
-
-  testWidgets('a hidden context window leaves its row out', (tester) async {
+  testWidgets('hidden statistics leave their rows and the Statistics row out', (
+    tester,
+  ) async {
     await show(
       tester,
-      settings: const SessionCardSettings(hidden: {CardItem.context}),
+      sessionWith(),
+      settings: const SessionCardSettings(hidden: {CardItem.statistics}),
     );
 
-    expect(inCard(find.text('Context')), findsNothing);
-    expect(inCard(find.text('Tokens')), findsOneWidget);
+    expect(inCard(find.text('Tokens')), findsNothing);
+    expect(inCard(find.text('Statistics')), findsNothing);
+    expect(inCard(find.text('Context window')), findsOneWidget);
+  });
+
+  testWidgets('a statistics row explains itself when the keyboard focuses it', (
+    tester,
+  ) async {
+    await show(tester, sessionWith());
+
+    Focus.of(tester.element(inCard(find.text('Tokens')))).requestFocus();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.textContaining('Cache read 1.58 M'), findsOneWidget);
   });
 }

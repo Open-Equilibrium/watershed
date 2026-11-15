@@ -5,17 +5,19 @@ import 'agent/sidebar.dart';
 import 'rust/api/session.dart';
 import 'rust/api/workspace.dart';
 import 'session/backend.dart';
-import 'session/branch_bases.dart';
 import 'session/session_state.dart';
 import 'workspace/workspace_state.dart';
 
-/// The session the app opens, or why it opened none.
+/// The agent host the app opens, or why it opened none.
 class Launch {
-  const Launch.session(this.state, this.info) : problem = null;
-  const Launch.problem(this.problem) : state = null, info = null;
+  const Launch.session(this.state, this.info, this.host) : problem = null;
+  const Launch.problem(this.problem) : state = null, info = null, host = null;
 
   final SessionState? state;
   final SessionInfo? info;
+
+  /// The T3 server, which stops when the app quits.
+  final AgentHost? host;
   final String? problem;
 }
 
@@ -26,64 +28,42 @@ String projectName(String project) =>
         .pathSegments
         .lastWhere((part) => part.isNotEmpty, orElse: () => '/');
 
-/// Starts pi for the project the environment names; the start page then begins or continues a
-/// session.
-/// Without Watershed's pi extension a turn would have no checkpoints, so the app refuses to start
-/// pi.
+/// Starts the pinned T3 for the project the environment names, with its data in
+/// `LIQUID_T3_HOME` or else `defaultHome`; the start page then begins or continues a session.
 Future<Launch> launchFromEnvironment(
   Map<String, String> environment, {
-  BranchBases? bases,
+  required String defaultHome,
 }) async {
   final project = environment['LIQUID_PROJECT'];
-  final extension = environment['LIQUID_PI_EXTENSION'];
-  // pi reads a relative extension path inside the project, which could supply its own.
-  if (project == null || extension == null || !File(extension).isAbsolute) {
+  final binary = environment['LIQUID_T3'];
+  // A relative program would be looked up from wherever Liquid started.
+  if (project == null || binary == null || !File(binary).isAbsolute) {
     return const Launch.problem(
-      'Start Liquid with LIQUID_PROJECT set to a project directory and LIQUID_PI_EXTENSION set '
-      'to the absolute path of meta-harness/pi-extension/watershed.ts.',
+      'Start Liquid with LIQUID_PROJECT set to a project directory and LIQUID_T3 set to the '
+      'absolute path of the pinned t3 executable.',
     );
   }
-  // Starting pi in a missing directory fails like a missing pi.
   if (!Directory(project).existsSync()) {
     return Launch.problem('LIQUID_PROJECT names no directory: $project');
   }
-  // pi starts inside the project, which could supply a relative program or session file; a
-  // bare program name is looked up on PATH.
-  if (environment['LIQUID_PI'] case final pi?
-      when pi.contains('/') && !File(pi).isAbsolute) {
-    return Launch.problem('LIQUID_PI must be an absolute path: $pi');
+  final home = environment['LIQUID_T3_HOME'] ?? defaultHome;
+  if (!File(home).isAbsolute) {
+    return Launch.problem('LIQUID_T3_HOME must be an absolute path: $home');
   }
-  if (environment['LIQUID_PI_SESSION'] case final session?
-      when !File(session).isAbsolute) {
-    return Launch.problem(
-      'LIQUID_PI_SESSION must be an absolute path: $session',
-    );
-  }
-  final name = projectName(project);
+  final root = Directory(project).absolute.path;
   try {
-    final session = await AgentSession.start(
-      config: SessionConfig(
-        program: environment['LIQUID_PI'] ?? 'pi',
-        extensionPath: extension,
-        // A stored session reopens with its chat and branches after a restart.
-        session: environment['LIQUID_PI_SESSION'],
-        cwd: project,
-      ),
+    final host = await AgentHost.start(binary: binary, home: home);
+    final state = SessionState(
+      RustProjectBackend(host, await host.project(root: root)),
     );
-    final state = SessionState(RustSessionBackend(session), bases: bases);
-    // A reopened session shows its current branch right away.
-    unawaited(state.loadChat());
+    unawaited(state.loadStart());
     return Launch.session(
       state,
-      SessionInfo(
-        project: name,
-        harness: 'pi',
-        device: Platform.localHostname,
-        path: Directory(project).absolute.path,
-      ),
+      SessionInfo(project: projectName(project), path: root),
+      host,
     );
   } on Object catch (error) {
-    return Launch.problem('pi did not start: $error');
+    return Launch.problem('T3 Code did not start: $error');
   }
 }
 

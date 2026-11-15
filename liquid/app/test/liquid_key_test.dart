@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
-import 'package:liquid/src/diff/diff_view.dart';
+import 'package:liquid/src/diff/diff_panel.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/shortcuts/keymap.dart';
@@ -12,19 +12,22 @@ import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
 
-const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
+const info = SessionInfo(project: 'acme-api');
 
 void main() {
-  late FakeBackend backend;
+  late FakeProject project;
 
+  /// Shows an open session with `settings`, its keys as the person configured them.
   Future<void> show(WidgetTester tester, ShortcutSettings settings) async {
     await tester.binding.setSurfaceSize(const Size(1600, 900));
-    backend = FakeBackend();
+    project = FakeProject();
+    final state = SessionState(project);
+    await state.open('thread-1');
     await tester.pumpWidget(
       MaterialApp(
         theme: liquidTheme(Brightness.light),
         home: AgentShell(
-          state: SessionState(backend),
+          state: state,
           info: info,
           shortcuts: ShortcutController.memory(settings),
         ),
@@ -42,35 +45,40 @@ void main() {
     return handled;
   }
 
-  Future<void> hold(WidgetTester tester, LogicalKeyboardKey key) async {
-    await tester.sendKeyDownEvent(key, platform: 'macos');
-    await tester.pump(const Duration(milliseconds: 700));
+  /// Presses `key` with ⌘, as the macOS keyboard sends it.
+  Future<void> command(WidgetTester tester, LogicalKeyboardKey key) async {
+    await tester.sendKeyDownEvent(
+      LogicalKeyboardKey.metaLeft,
+      platform: 'macos',
+    );
+    await tester.sendKeyEvent(key, platform: 'macos');
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft, platform: 'macos');
+    await tester.pumpAndSettle();
   }
 
-  int newSessions() =>
-      backend.calls.where((call) => call == 'new session').length;
+  /// Asks the agent a question with one text answer, in place of the composer.
+  Future<void> askInput(WidgetTester tester, String text) async {
+    project.session.emit(
+      event(
+        BridgeEventKind.requestOpened,
+        1,
+        request: questionsOf('q1', [questionOf('name', text)]),
+      ),
+    );
+    await tester.pumpAndSettle();
+    // A question takes keys once it could be read.
+    await tester.pump(const Duration(milliseconds: 500));
+  }
 
   testWidgets(
-    'the Liquid key runs Liquid commands, and their ⌘ keys still do',
+    'the Liquid key runs a Liquid command, and its ⌘ key runs it too',
     (tester) async {
       await show(tester, ShortcutSettings.liquidKey());
 
-      expect(await liquid(tester, LogicalKeyboardKey.keyN), isTrue);
-      expect(newSessions(), 1);
-      await tester.sendKeyDownEvent(
-        LogicalKeyboardKey.metaLeft,
-        platform: 'macos',
-      );
-      await tester.sendKeyEvent(LogicalKeyboardKey.keyN, platform: 'macos');
-      await tester.sendKeyUpEvent(
-        LogicalKeyboardKey.metaLeft,
-        platform: 'macos',
-      );
-      await tester.pumpAndSettle();
-      expect(newSessions(), 2);
-
-      await liquid(tester, LogicalKeyboardKey.keyD);
-      expect(find.byType(DiffView), findsOneWidget);
+      expect(await liquid(tester, LogicalKeyboardKey.keyD), isTrue);
+      expect(find.byType(DiffPanel), findsOneWidget);
+      await command(tester, LogicalKeyboardKey.keyD);
+      expect(find.byType(DiffPanel), findsNothing);
     },
   );
 
@@ -78,37 +86,24 @@ void main() {
     'holding the Liquid key shows its shortcuts and ⌘ no longer does',
     (tester) async {
       await show(tester, ShortcutSettings.liquidKey());
-      backend.controller.add(event(BridgeEventKind.turnStarted));
-      backend.controller.add(
-        event(
-          BridgeEventKind.userInputRequested,
-          request: const BridgeRequest(
-            id: 'q1',
-            question: BridgeQuestion(
-              kind: BridgeQuestionKind.editor,
-              title: 'Commit message',
-              detail: 'draft',
-              options: [],
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
 
-      await hold(tester, LogicalKeyboardKey.metaLeft);
-      expect(find.text('⇪⏎'), findsNothing);
+      await tester.sendKeyDownEvent(
+        LogicalKeyboardKey.metaLeft,
+        platform: 'macos',
+      );
+      await tester.pump(const Duration(milliseconds: 700));
+      expect(find.text('⇪1'), findsNothing);
       await tester.sendKeyUpEvent(
         LogicalKeyboardKey.metaLeft,
         platform: 'macos',
       );
 
-      await hold(tester, liquidKey);
-      expect(find.text('⇪⏎'), findsOneWidget);
+      await tester.sendKeyDownEvent(liquidKey, platform: 'macos');
+      await tester.pump(const Duration(milliseconds: 700));
       expect(find.text('⇪1'), findsOneWidget);
-      expect(find.text('esc'), findsWidgets);
       await tester.sendKeyUpEvent(liquidKey, platform: 'macos');
       await tester.pump();
-      expect(find.text('⇪⏎'), findsNothing);
+      expect(find.text('⇪1'), findsNothing);
     },
   );
 
@@ -122,9 +117,9 @@ void main() {
     );
 
     await liquid(tester, LogicalKeyboardKey.keyD);
-    expect(find.byType(DiffView), findsNothing);
+    expect(find.byType(DiffPanel), findsNothing);
     await liquid(tester, LogicalKeyboardKey.keyE);
-    expect(find.byType(DiffView), findsOneWidget);
+    expect(find.byType(DiffPanel), findsOneWidget);
   });
 
   testWidgets('the Standard profile leaves the Liquid key alone', (
@@ -132,94 +127,39 @@ void main() {
   ) async {
     await show(tester, ShortcutSettings.standard());
 
-    expect(await liquid(tester, LogicalKeyboardKey.keyN), isFalse);
-    expect(newSessions(), 0);
-    await hold(tester, liquidKey);
-    expect(find.text('⌘1'), findsNothing);
-    await tester.sendKeyUpEvent(liquidKey, platform: 'macos');
-    await hold(tester, LogicalKeyboardKey.metaLeft);
-    expect(find.text('⏎'), findsOneWidget, reason: '⌘ reveals the hints');
-    expect(
-      find.text('⌘1'),
-      findsNothing,
-      reason: 'the menu bar shows the app-wide keys',
-    );
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft, platform: 'macos');
+    expect(await liquid(tester, LogicalKeyboardKey.keyD), isFalse);
+    expect(find.byType(DiffPanel), findsNothing);
   });
 
-  testWidgets('⇪⏎ on an editor question answers once, without a new line', (
+  testWidgets('⏎ answers a question with its typed text, once', (tester) async {
+    await show(tester, ShortcutSettings.standard());
+    await askInput(tester, 'Commit message');
+
+    await tester.enterText(find.byKey(const Key('answer')), 'draft');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter, platform: 'macos');
+    await tester.pumpAndSettle();
+    expect(project.session.calls, ['answer q1 name=draft']);
+  });
+
+  testWidgets('an input question answers with its rebound key, not with ⏎', (
     tester,
   ) async {
-    await show(tester, ShortcutSettings.liquidKey());
-    backend.controller.add(event(BridgeEventKind.turnStarted));
-    backend.controller.add(
-      event(
-        BridgeEventKind.userInputRequested,
-        request: const BridgeRequest(
-          id: 'q1',
-          question: BridgeQuestion(
-            kind: BridgeQuestionKind.editor,
-            title: 'Commit message',
-            detail: 'draft',
-            options: [],
-          ),
-        ),
+    await show(
+      tester,
+      ShortcutSettings.standard().change(
+        Command.answer,
+        const Keys(LogicalKeyboardKey.keyY, meta: true),
       ),
     );
+    await askInput(tester, 'Your name');
+    await tester.enterText(find.byKey(const Key('answer')), 'Bob');
+    // An unbound ⏎ reaches the text field, which reports it as its done action.
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter, platform: 'macos');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
-    // A question takes keys once it could be read.
-    await tester.pump(const Duration(milliseconds: 500));
+    expect(project.session.calls, isEmpty);
 
-    await liquid(tester, LogicalKeyboardKey.enter);
-    expect(backend.calls.where((call) => call.startsWith('answer')), [
-      'answer q1 draft',
-    ]);
+    await command(tester, LogicalKeyboardKey.keyY);
+    expect(project.session.calls, ['answer q1 name=Bob']);
   });
-
-  testWidgets(
-    'an input question answers with its keys, not with ⏎ once rebound',
-    (tester) async {
-      await show(
-        tester,
-        ShortcutSettings.standard().change(
-          Command.answer,
-          const Keys(LogicalKeyboardKey.keyY, meta: true),
-        ),
-      );
-      backend.controller.add(
-        event(
-          BridgeEventKind.userInputRequested,
-          request: BridgeRequest(
-            id: 'q1',
-            question: BridgeQuestion(
-              kind: BridgeQuestionKind.input,
-              title: 'Your name',
-              detail: '',
-              options: const [],
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const Key('answer')), 'Bob');
-      // An unbound ⏎ reaches the text field, which reports it as its done action.
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter, platform: 'macos');
-      await tester.testTextInput.receiveAction(TextInputAction.done);
-      await tester.pumpAndSettle();
-      expect(backend.calls.where((call) => call.startsWith('answer')), isEmpty);
-      await tester.sendKeyDownEvent(
-        LogicalKeyboardKey.metaLeft,
-        platform: 'macos',
-      );
-      await tester.sendKeyEvent(LogicalKeyboardKey.keyY, platform: 'macos');
-      await tester.sendKeyUpEvent(
-        LogicalKeyboardKey.metaLeft,
-        platform: 'macos',
-      );
-      await tester.pumpAndSettle();
-      expect(backend.calls.where((call) => call.startsWith('answer')), [
-        'answer q1 Bob',
-      ]);
-    },
-  );
 }

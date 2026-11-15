@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,8 +8,7 @@ import '../controls.dart';
 import '../diff/revert_dialog.dart';
 import '../format.dart';
 import '../rust/api/events.dart';
-import '../rust/api/history.dart';
-import '../session/session_graph.dart';
+import '../rust/api/thread.dart';
 import '../session/session_state.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
@@ -17,9 +17,8 @@ import 'input_lane.dart';
 import 'sidebar.dart';
 import 'start_page.dart';
 
-/// The chat timeline of the current branch. It builds only visible items, each item rebuilds
-/// alone while its text streams (client architecture rules 5 and 6), and scrolling to the top
-/// reads earlier stored entries.
+/// The chat timeline of the session. It builds only visible items, and each item rebuilds alone
+/// while its text streams (client architecture rules 5 and 6).
 class ChatView extends StatefulWidget {
   const ChatView({
     super.key,
@@ -31,8 +30,8 @@ class ChatView extends StatefulWidget {
 
   final SessionState state;
 
-  /// Shows the Diff panel with a turn's changes, by the turn's id.
-  final ValueChanged<String>? onOpenDiff;
+  /// Shows the Diff panel with a turn's changes, by the turn's number.
+  final ValueChanged<int>? onOpenDiff;
 
   /// The session's project, harness and device, as the start page greets with them.
   final SessionInfo info;
@@ -45,11 +44,7 @@ class ChatView extends StatefulWidget {
 }
 
 class _ChatViewState extends State<ChatView> {
-  /// How close to the oldest item reading earlier entries starts, in pixels.
-  static const _readAhead = 600.0;
-
-  /// Earlier pages a scroll to an entry reads at most, and the jumps it makes to build the entry.
-  static const _revealPages = 50;
+  /// Jumps a scroll makes at most to build the item it brings into view.
   static const _revealJumps = 6;
 
   final _scroll = ScrollController();
@@ -90,41 +85,31 @@ class _ChatViewState extends State<ChatView> {
   }
 
   void _scrollRequested() {
-    final entry = widget.state.scrollChatTo.value;
-    if (entry == null) return;
+    final turn = widget.state.scrollChatTo.value;
+    if (turn == null) return;
     widget.state.scrollChatTo.value = null;
-    unawaited(_scrollTo(entry));
+    unawaited(_scrollTo(turn));
   }
 
-  /// Reads earlier pages until the chat shows `entry`, then brings its first item into view. A
-  /// list builds only the items near its view, so the scroll first jumps near the item, where
-  /// the item builds, and repeats the jump a few times if the estimate missed.
-  Future<void> _scrollTo(String entry) async {
-    final state = widget.state;
-    // Earlier pages of this branch cannot bring in an entry of another one.
-    if (!state.onBranch(entry)) return;
-    for (
-      var page = 0;
-      page < _revealPages && _indexOf(entry) < 0 && state.chatMore.value;
-      page++
-    ) {
-      await state.loadEarlier();
-    }
+  /// Brings the first item of `turn` into view. A list builds only the items near its view, so
+  /// the scroll first jumps near the item, where it builds, and repeats the jump if the estimate
+  /// missed.
+  Future<void> _scrollTo(int turn) async {
     for (var jump = 0; jump < _revealJumps; jump++) {
-      final index = _indexOf(entry);
+      final index = widget.state.items.value.indexWhere(
+        (item) => item.turn == turn,
+      );
       if (index < 0 || !mounted) return;
-      final built = _itemKeys[state.items.value[index].id]?.currentContext;
+      final built =
+          _itemKeys[widget.state.items.value[index].id]?.currentContext;
       if (built != null && built.mounted) {
         await Scrollable.ensureVisible(built, alignment: 0.5);
         return;
       }
-      _jumpNear(index, state.items.value.length);
+      _jumpNear(index, widget.state.items.value.length);
       await WidgetsBinding.instance.endOfFrame;
     }
   }
-
-  int _indexOf(String entry) =>
-      widget.state.items.value.indexWhere((item) => item.entry == entry);
 
   /// Jumps so the item at `index` of `count` lies near the middle of the view. The list is
   /// reversed, so offset 0 is the newest item and the estimate counts the items newer than it,
@@ -147,72 +132,77 @@ class _ChatViewState extends State<ChatView> {
     final state = widget.state;
     return InputLane(
       input: widget.input,
-      child: NotificationListener<Notification>(
-        onNotification: (notification) {
-          // Layout changes count as well: a newest page that fits the viewport never scrolls.
-          if (notification
-              case ScrollNotification(:final metrics) ||
-                  ScrollMetricsNotification(:final metrics)) {
-            if (metrics.pixels >= metrics.maxScrollExtent - _readAhead) {
-              state.loadEarlier();
-            }
-          }
-          return false;
-        },
-        child: ValueListenableBuilder(
-          valueListenable: state.items,
-          // A session without a conversation shows the start page.
-          builder: (context, items, _) => items.isEmpty
-              ? StartPage(state: state, info: widget.info)
-              // Messages start at the top and flow down; a long chat
-              // still keeps its newest message above the input.
-              : Align(
-                  alignment: Alignment.topCenter,
-                  child: ListView.builder(
-                    controller: _scroll,
-                    shrinkWrap: true,
-                    reverse: true,
-                    padding: EdgeInsets.only(
-                      top: WsMetrics.space5,
-                      bottom:
-                          WsMetrics.space5 +
-                          (widget.input == null ? 0 : inputClearance),
+      child: ListenableBuilder(
+        listenable: Listenable.merge([state.items, state.request]),
+        // A session without a conversation shows the start page.
+        builder: (context, _) {
+          final items = state.items.value;
+          if (items.isEmpty) return StartPage(state: state, info: widget.info);
+          // A pending approval sits under the last item, where the agent waits for it.
+          final request = state.request.value;
+          final approval = request?.approval;
+          final offset = approval == null ? 0 : 1;
+          // Messages start at the top and flow down; a long chat still keeps its newest message
+          // above the input.
+          return Align(
+            alignment: Alignment.topCenter,
+            child: ListView.builder(
+              controller: _scroll,
+              shrinkWrap: true,
+              reverse: true,
+              padding: EdgeInsets.only(
+                top: WsMetrics.space5,
+                bottom:
+                    WsMetrics.space5 +
+                    (widget.input == null ? 0 : inputClearance),
+              ),
+              itemCount: items.length + offset,
+              itemBuilder: (context, index) {
+                if (index < offset) {
+                  return Center(
+                    child: SizedBox(
+                      width: readingWidth,
+                      child: Padding(
+                        padding: const EdgeInsets.only(
+                          bottom: WsMetrics.space4,
+                        ),
+                        child: ApprovalRow(
+                          state: state,
+                          request: request!,
+                          approval: approval!,
+                        ),
+                      ),
                     ),
-                    itemCount: items.length,
-                    itemBuilder: (context, index) {
-                      final item = items[items.length - 1 - index];
-                      return Center(
-                        key: _itemKeys.putIfAbsent(item.id, GlobalKey.new),
-                        child: SizedBox(
-                          width: readingWidth,
-                          child: Padding(
-                            padding: const EdgeInsets.only(
-                              bottom: WsMetrics.space4,
-                            ),
-                            child: RepaintBoundary(
-                              child: switch ((item.marker, item.turnEnd)) {
-                                (final marker?, _) => BranchMark(
-                                  marker: marker,
-                                ),
-                                (_, final turn?) => TurnChanges(
-                                  turn: turn,
-                                  onOpenDiff: widget.onOpenDiff == null
-                                      ? null
-                                      : () => widget.onOpenDiff!(turn.id),
-                                  onRevert: () => unawaited(
-                                    confirmRevert(context, state, turn),
-                                  ),
-                                ),
-                                _ => ItemTile(item: item, state: state),
-                              },
+                  );
+                }
+                final item = items[items.length - 1 - (index - offset)];
+                return Center(
+                  key: _itemKeys.putIfAbsent(item.id, GlobalKey.new),
+                  child: SizedBox(
+                    width: readingWidth,
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: WsMetrics.space4),
+                      child: RepaintBoundary(
+                        child: switch (item.turnEnd) {
+                          final turn? => TurnChanges(
+                            turn: turn,
+                            onOpenDiff: widget.onOpenDiff == null
+                                ? null
+                                : () => widget.onOpenDiff!(turn.number),
+                            onRevert: () => unawaited(
+                              confirmRevert(context, state, turn.number),
                             ),
                           ),
-                        ),
-                      );
-                    },
+                          null => ItemTile(item: item, state: state),
+                        },
+                      ),
+                    ),
                   ),
-                ),
-        ),
+                );
+              },
+            ),
+          );
+        },
       ),
     );
   }
@@ -236,15 +226,15 @@ class TurnChanges extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    final files = turn.files ?? 0;
+    final files = turn.files;
     final style = TextStyle(color: ws.textMuted, fontSize: WsMetrics.fsCompact);
     return Row(
       children: [
         Text('$files changed file${files == 1 ? '' : 's'}', style: style),
         const SizedBox(width: WsMetrics.space4),
-        Text('+${turn.added ?? 0}', style: style.copyWith(color: ws.success)),
+        Text('+${turn.added}', style: style.copyWith(color: ws.success)),
         const SizedBox(width: WsMetrics.space2),
-        Text('−${turn.removed ?? 0}', style: style.copyWith(color: ws.danger)),
+        Text('−${turn.removed}', style: style.copyWith(color: ws.danger)),
         if (onOpenDiff case final open?) ...[
           const SizedBox(width: WsMetrics.space3),
           GhostButton(label: 'Open diff', onPressed: open),
@@ -265,46 +255,128 @@ class TurnChanges extends StatelessWidget {
   }
 }
 
-/// Where the current branch leaves the others.
-class BranchMark extends StatelessWidget {
-  const BranchMark({super.key, required this.marker});
+/// T3's pending approval, in the Chat under the last item: what the agent asks to run, why, and
+/// its answers. Decline and Approve show; the other options sit under More.
+class ApprovalRow extends StatelessWidget {
+  const ApprovalRow({
+    super.key,
+    required this.state,
+    required this.request,
+    required this.approval,
+  });
 
-  final BranchMarker marker;
+  final SessionState state;
+  final BridgeRequest request;
+  final BridgeApproval approval;
 
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    final style = TextStyle(color: ws.accent, fontSize: WsMetrics.fsSmall);
-    final ref = marker.ref;
+    final options = approval.options.isEmpty
+        ? _defaultOptions
+        : approval.options;
+    final primary = [
+      for (final option in options)
+        if (option.decision == 'decline' || option.decision == 'accept') option,
+    ];
+    final more = [
+      for (final option in options)
+        if (option.decision != 'decline' && option.decision != 'accept') option,
+    ];
+    void answer(BridgeApprovalOption option) =>
+        unawaited(state.respond(request, option.decision));
+    final small = TextStyle(color: ws.textMuted, fontSize: WsMetrics.fsCompact);
     return Container(
-      height: 24,
-      padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
+      padding: const EdgeInsets.all(WsMetrics.space4),
       decoration: BoxDecoration(
-        color: ws.accentSubtle,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+        color: ws.subtle,
+        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: WsMetrics.space2,
         children: [
-          Icon(LucideIcons.gitBranch, size: 13, color: ws.accent),
-          const SizedBox(width: WsMetrics.space2),
-          if (ref != null) ...[
-            RefBadge(ref: ref),
-            const SizedBox(width: WsMetrics.space2),
-          ] else ...[
-            Text('New session branch', style: style),
-            const SizedBox(width: WsMetrics.space1),
-          ],
-          Text('continues after step ${marker.step}', style: style),
-          const Spacer(),
-          if (marker.other case final other?)
-            Text('$other: ${marker.otherMore} more', style: style),
+          Text(
+            _approvalTitle(approval.kind),
+            style: Theme.of(context).textTheme.labelMedium,
+          ),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 160),
+            child: SingleChildScrollView(
+              child: SelectableText(approval.prompt, style: monoStyle(context)),
+            ),
+          ),
+          if (approval.reason case final reason?) Text(reason, style: small),
+          Row(
+            spacing: WsMetrics.space3,
+            children: [
+              Icon(LucideIcons.shield, size: 12, color: ws.warning),
+              Text(
+                'Waiting for approval',
+                style: TextStyle(
+                  color: ws.warning,
+                  fontSize: WsMetrics.fsCompact,
+                ),
+              ),
+              const Spacer(),
+              for (final option in primary) _answerButton(option, answer),
+              if (more.isNotEmpty)
+                PopupMenuButton<BridgeApprovalOption>(
+                  tooltip: 'More approval options',
+                  onSelected: answer,
+                  itemBuilder: (context) => [
+                    for (final option in more)
+                      PopupMenuItem(value: option, child: Text(option.label)),
+                  ],
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: WsMetrics.space3,
+                    ),
+                    child: Text('More', style: small),
+                  ),
+                ),
+            ],
+          ),
         ],
       ),
     );
   }
+
+  Widget _answerButton(
+    BridgeApprovalOption option,
+    void Function(BridgeApprovalOption) answer,
+  ) {
+    final button = option.decision == 'accept'
+        ? PrimaryButton(label: option.label, onPressed: () => answer(option))
+        : SecondaryButton(label: option.label, onPressed: () => answer(option));
+    final warning = option.warning;
+    return warning == null ? button : Tooltip(message: warning, child: button);
+  }
 }
 
-/// One timeline entry: a user bubble, model prose, a line for reasoning or a tool row.
+/// The options of an approval the agent sent without any, in T3's order.
+const _defaultOptions = [
+  BridgeApprovalOption(decision: 'cancel', label: 'Cancel'),
+  BridgeApprovalOption(decision: 'decline', label: 'Decline'),
+  BridgeApprovalOption(
+    decision: 'acceptForSession',
+    label: 'Always allow this session',
+  ),
+  BridgeApprovalOption(decision: 'accept', label: 'Approve'),
+];
+
+/// The title of an approval of T3's `kind`.
+String _approvalTitle(String kind) => switch (kind) {
+  'command' => 'Command approval',
+  'file_change' || 'file-change' => 'File change approval',
+  'file_read' || 'file-read' => 'File read approval',
+  'permission' => 'App permission approval',
+  'mcp-elicitation' => 'App access approval',
+  _ => 'Approval',
+};
+
+/// One timeline entry: a user message, model prose, a line for reasoning, an error or a tool
+/// row. Messages show their actions while the pointer is over them, as T3 does.
 class ItemTile extends StatelessWidget {
   const ItemTile({super.key, required this.item, required this.state});
 
@@ -315,130 +387,163 @@ class ItemTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final ws = context.ws;
     final prose = Theme.of(context).textTheme.bodyLarge;
-    return ValueListenableBuilder(
-      valueListenable: item.text,
-      builder: (context, text, _) => switch (item.kind) {
-        BridgeItemKind.userMessage => Align(
-          alignment: Alignment.centerRight,
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: readingWidth * 0.8),
-            padding: const EdgeInsets.symmetric(
-              horizontal: WsMetrics.space5,
-              vertical: WsMetrics.space4,
+    return ListenableBuilder(
+      listenable: Listenable.merge([item.text, item.outcome]),
+      builder: (context, _) {
+        final text = item.text.value;
+        return switch (item.kind) {
+          BridgeItemKind.userMessage => _HoverActions(
+            end: true,
+            message: Align(
+              alignment: Alignment.centerRight,
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: readingWidth * 0.8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: WsMetrics.space5,
+                  vertical: WsMetrics.space4,
+                ),
+                decoration: BoxDecoration(
+                  color: ws.hover,
+                  borderRadius: BorderRadius.circular(WsMetrics.radiusXl),
+                ),
+                child: Text(text, style: prose),
+              ),
             ),
-            decoration: BoxDecoration(
-              color: ws.hover,
-              borderRadius: BorderRadius.circular(WsMetrics.radiusXl),
-            ),
-            child: Text(text, style: prose),
-          ),
-        ),
-        // The text's own scrolling must not read earlier entries: it stops here.
-        BridgeItemKind.assistantMessage => NotificationListener<Notification>(
-          onNotification: (notification) =>
-              notification is ScrollNotification ||
-              notification is ScrollMetricsNotification,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: SelectableText(text, style: prose)),
-              if (item.entry case final entry?)
-                _AnswerMenu(state: state, entry: entry, text: text),
+            actions: [
+              GhostButton(
+                label: 'Edit from here',
+                onPressed: () =>
+                    unawaited(confirmRevert(context, state, item.turn)),
+              ),
+              GhostButton(
+                label: 'Copy message',
+                onPressed: () =>
+                    unawaited(Clipboard.setData(ClipboardData(text: text))),
+              ),
             ],
           ),
-        ),
-        BridgeItemKind.reasoning => Text(
-          'Thinking',
-          style: TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall),
-        ),
-        _ => ToolRow(item: item),
+          BridgeItemKind.assistantMessage => _HoverActions(
+            end: false,
+            message: SelectableText(text, style: prose),
+            actions: [
+              GhostButton(
+                label: 'Copy message',
+                onPressed: () =>
+                    unawaited(Clipboard.setData(ClipboardData(text: text))),
+              ),
+              if (item.outcome.value != null)
+                GhostButton(
+                  label: 'Fork from this response',
+                  onPressed: () => unawaited(state.fork(item.turn)),
+                ),
+            ],
+          ),
+          BridgeItemKind.reasoning => Text(
+            'Thinking',
+            style: TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall),
+          ),
+          BridgeItemKind.error => _ErrorRow(text: text),
+          _ => ToolRow(item: item),
+        };
       },
     );
   }
 }
 
-/// An agent answer's ··· menu: Copy takes the answer's text, and Branch from here continues the
-/// session from the answer.
-class _AnswerMenu extends StatelessWidget {
-  const _AnswerMenu({
-    required this.state,
-    required this.entry,
-    required this.text,
+/// A message with its actions, which show while the pointer is over the message.
+class _HoverActions extends StatefulWidget {
+  const _HoverActions({
+    required this.end,
+    required this.message,
+    required this.actions,
   });
 
-  final SessionState state;
+  /// Whether the message sits at the end of the row, as a user message does.
+  final bool end;
+  final Widget message;
+  final List<Widget> actions;
 
-  /// The stored entry the answer comes from.
-  final String entry;
+  @override
+  State<_HoverActions> createState() => _HoverActionsState();
+}
 
-  /// The answer's text, which Copy takes.
+class _HoverActionsState extends State<_HoverActions> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    onEnter: (_) => setState(() => _hovered = true),
+    onExit: (_) => setState(() => _hovered = false),
+    child: Column(
+      crossAxisAlignment: widget.end
+          ? CrossAxisAlignment.end
+          : CrossAxisAlignment.start,
+      children: [
+        widget.message,
+        // Kept in place when hidden, so the message does not move when they show.
+        Opacity(
+          opacity: _hovered ? 1 : 0,
+          child: IgnorePointer(
+            ignoring: !_hovered,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: widget.actions,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+/// An error the agent or its provider reported; a JSON error payload shows its message.
+class _ErrorRow extends StatelessWidget {
+  const _ErrorRow({required this.text});
+
   final String text;
 
   @override
-  Widget build(BuildContext context) => SizedBox.square(
-    dimension: 28,
-    child: PopupMenuButton<String>(
-      key: const Key('answer menu'),
-      tooltip: 'More',
-      padding: EdgeInsets.zero,
-      icon: Icon(LucideIcons.ellipsis, size: 16, color: context.ws.textFaint),
-      onSelected: (action) {
-        if (action == 'copy') {
-          unawaited(Clipboard.setData(ClipboardData(text: text)));
-        } else {
-          _branch();
-        }
-      },
-      itemBuilder: (context) {
-        final ws = context.ws;
-        final busy = _busy;
-        return [
-          const PopupMenuItem(value: 'copy', child: Text('Copy')),
-          // The reason shows under the item while the agent runs, which the item says it waits for.
-          PopupMenuItem(
-            value: 'branch',
-            enabled: !busy,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('Branch from here'),
-                if (busy)
-                  Text(
-                    'Available once the agent is idle',
-                    style: TextStyle(
-                      fontSize: WsMetrics.fsSmall,
-                      color: ws.textFaint,
-                    ),
-                  ),
-              ],
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: WsMetrics.space4,
+        vertical: WsMetrics.space3,
+      ),
+      decoration: BoxDecoration(
+        color: ws.dangerSubtle,
+        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(LucideIcons.circleX, size: 14, color: ws.danger),
+          const SizedBox(width: WsMetrics.space3),
+          Expanded(
+            child: SelectableText(
+              _errorMessage(text),
+              style: TextStyle(color: ws.danger, fontSize: WsMetrics.fsCompact),
             ),
           ),
-        ];
-      },
-    ),
-  );
-
-  bool get _busy {
-    final status = state.status.value;
-    return status == RunStatus.running || status == RunStatus.waitingForYou;
+        ],
+      ),
+    );
   }
 
-  /// Branches from the answer once the agent is idle, as the branch is made from stored entries
-  /// only. The item is disabled while the agent runs, so this only guards a run that starts with
-  /// the menu open.
-  void _branch() {
-    if (_busy) return;
-    unawaited(
-      state.branch(entry).catchError((Object error) {
-        state.notify(BridgeLevel.error, 'The session could not branch: $error');
-        return false;
-      }),
-    );
+  static String _errorMessage(String text) {
+    try {
+      if (jsonDecode(text) case {'error': {'message': final String message}}
+          when message.trim().isNotEmpty) {
+        return message;
+      }
+    } on FormatException {
+      // Plain text, shown as it is.
+    }
+    return text;
   }
 }
 
-/// A tool call: its state, tool and target, and its outcome.
+/// A tool call: its state, tool and target, and how long it ran.
 class ToolRow extends StatelessWidget {
   const ToolRow({super.key, required this.item});
 
@@ -451,27 +556,11 @@ class ToolRow extends StatelessWidget {
       valueListenable: item.outcome,
       builder: (context, outcome, _) {
         final (mark, markColor) = switch (outcome) {
-          (failed: true, durationMs: _, lines: _) => (LucideIcons.x, ws.danger),
-          (failed: false, durationMs: _, lines: _) => (
-            LucideIcons.check,
-            ws.success,
-          ),
+          (failed: true, durationMs: _) => (LucideIcons.x, ws.danger),
+          (failed: false, durationMs: _) => (LucideIcons.check, ws.success),
           null => (LucideIcons.loader, ws.textFaint),
         };
-        // A file change shows its lines, other tools how long they ran.
-        final lines = outcome?.lines;
-        final trailing = [
-          if (lines != null)
-            ...toneSpans(
-              ws,
-              lineParts(
-                lines.added > 0 ? lines.added : null,
-                lines.removed > 0 ? lines.removed : null,
-              ),
-            )
-          else if (outcome?.durationMs != null)
-            TextSpan(text: formatDuration(outcome!.durationMs!)),
-        ];
+        final duration = outcome?.durationMs;
         return Container(
           height: 32,
           padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
@@ -508,13 +597,14 @@ class ToolRow extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              Text.rich(
-                TextSpan(children: trailing),
-                style: TextStyle(
-                  color: ws.textMuted,
-                  fontSize: WsMetrics.fsSmall,
+              if (duration != null)
+                Text(
+                  formatDuration(duration),
+                  style: TextStyle(
+                    color: ws.textMuted,
+                    fontSize: WsMetrics.fsSmall,
+                  ),
                 ),
-              ),
             ],
           ),
         );
@@ -522,54 +612,3 @@ class ToolRow extends StatelessWidget {
     );
   }
 }
-
-/// A branch's letter in the accent color.
-class RefBadge extends StatelessWidget {
-  const RefBadge({super.key, required this.ref});
-
-  final String ref;
-
-  @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space2),
-      decoration: BoxDecoration(
-        color: ws.accent,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
-      ),
-      child: Text(
-        ref,
-        style: TextStyle(
-          color: ws.onAccent,
-          fontSize: WsMetrics.fsSmall,
-          height: WsMetrics.lhSmall / WsMetrics.fsSmall,
-          fontWeight: WsMetrics.fwMedium,
-        ),
-      ),
-    );
-  }
-}
-
-/// How a part of a changed-lines count reads; the chat gives each tone its color.
-enum Tone { good, bad, plain }
-
-/// Changed lines as `+added −removed`, leaving out a missing count.
-List<(String, Tone)> lineParts(int? added, int? removed) => [
-  if (added != null) ('+$added', Tone.good),
-  if (added != null && removed != null) (' ', Tone.plain),
-  if (removed != null) ('−$removed', Tone.bad),
-];
-
-/// `parts` as spans in their tones' colors.
-List<TextSpan> toneSpans(WsPalette ws, List<(String, Tone)> parts) => [
-  for (final (text, tone) in parts)
-    TextSpan(
-      text: text,
-      style: switch (tone) {
-        Tone.good => TextStyle(color: ws.success),
-        Tone.bad => TextStyle(color: ws.danger),
-        Tone.plain => null,
-      },
-    ),
-];

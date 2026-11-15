@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/events.dart';
-import 'package:liquid/src/rust/api/history.dart';
+import 'package:liquid/src/rust/api/thread.dart';
 import 'package:liquid/src/session/session_statistics.dart';
 
 BridgeUsage tokens({
@@ -8,214 +8,122 @@ BridgeUsage tokens({
   int output = 0,
   int cacheRead = 0,
   int cacheWrite = 0,
-  int cost = 0,
 }) => BridgeUsage(
   input: input,
   output: output,
   cacheRead: cacheRead,
   cacheWrite: cacheWrite,
   reasoning: 0,
-  costMicroUsd: cost,
 );
 
-BridgeModelUsage model(
-  String name,
-  BridgeUsage usage, {
-  int responses = 1,
-  int unpriced = 0,
-}) => BridgeModelUsage(
-  model: name,
-  usage: usage,
-  costByKind: const BridgeCostByKind(
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-  ),
-  responses: responses,
-  unpriced: unpriced,
-);
+BridgeModelUsage model(String name, BridgeUsage usage, {int responses = 1}) =>
+    BridgeModelUsage(model: name, usage: usage, responses: responses);
 
 BridgeTurnStatistics turn({
   required String prompt,
   int? startedMs,
   int? endedMs,
-  List<BridgeModelUsage> models = const [],
-  int? modelMs,
   int? toolMs,
-  int failed = 0,
 }) => BridgeTurnStatistics(
-  entry: 'e-$prompt',
+  number: 0,
   prompt: prompt,
   startedMs: startedMs,
   endedMs: endedMs,
-  models: models,
-  modelMs: modelMs,
+  models: const [],
   toolMs: toolMs,
-  failed: failed,
+  failed: 0,
+);
+
+BridgeStatistics stats({
+  List<BridgeModelUsage> models = const [],
+  List<BridgeToolCalls> tools = const [],
+  List<BridgeTurnStatistics> turns = const [],
+  int? startedMs,
+  int? endedMs,
+}) => BridgeStatistics(
+  models: models,
+  tools: tools,
+  turns: turns,
+  startedMs: startedMs,
+  endedMs: endedMs,
 );
 
 void main() {
-  test('sums tokens, cost and responses over the models', () {
+  test('tokens and responses add up over the models, and a model name drops its provider', () {
     final statistics = SessionStatistics(
-      BridgeStatistics(
+      stats(
         models: [
           model(
             'anthropic/claude-sonnet',
-            tokens(
-              input: 1000,
-              output: 200,
-              cacheRead: 3000,
-              cacheWrite: 50,
-              cost: 1000000,
-            ),
+            tokens(input: 1000, output: 200, cacheRead: 3000, cacheWrite: 50),
             responses: 4,
-            unpriced: 1,
           ),
-          model(
-            'openai/gpt',
-            tokens(input: 500, output: 100),
-            responses: 2,
-            unpriced: 2,
-          ),
+          model('openai/gpt', tokens(input: 500, output: 100), responses: 2),
         ],
-        tools: const [],
-        turns: const [],
       ),
     );
 
     expect(
       statistics.tokens,
       4850,
-      reason: 'input, cache reads and writes, output',
+      reason: 'input, cache reads and writes, and output',
     );
-    expect(statistics.cost, 1000000);
     expect(statistics.responses, 6);
-    expect(statistics.unpriced, 3);
     expect(statistics.models.map((it) => it.name), ['claude-sonnet', 'gpt']);
+    expect(modelName(''), 'Without a model');
   });
 
-  test('splits working time into model, tools and other, clamped at zero', () {
+  test('working time adds the turns whose clock is known, and turns are numbered from 1', () {
     final statistics = SessionStatistics(
-      BridgeStatistics(
-        models: const [],
-        tools: const [],
+      stats(
         turns: [
-          turn(
-            prompt: 'one',
-            startedMs: 0,
-            endedMs: 10000,
-            modelMs: 6000,
-            toolMs: 3000,
-          ),
-          turn(
-            prompt: 'two',
-            startedMs: 20000,
-            endedMs: 25000,
-            modelMs: 6000,
-            toolMs: 0,
-          ),
+          turn(prompt: 'done', startedMs: 0, endedMs: 10000),
+          turn(prompt: 'running', startedMs: 20000),
         ],
       ),
     );
 
-    expect(statistics.workingMs, 15000);
-    expect(statistics.modelMs, 12000);
-    expect(statistics.toolMs, 3000);
-    expect(
-      statistics.otherMs,
-      1000,
-      reason: 'a turn whose requests overlap its clock keeps no negative other time',
-    );
+    expect(statistics.workingMs, 10000);
+    expect(statistics.turns.map((turn) => (turn.index, turn.workingMs)), [
+      (1, 10000),
+      (2, null),
+    ]);
   });
 
-  test('a turn without timing entries leaves model and tool time unknown', () {
-    final statistics = SessionStatistics(
-      BridgeStatistics(
-        models: const [],
-        tools: const [],
+  test('tool time adds up only when every turn has it, and model time is never reported', () {
+    final known = SessionStatistics(
+      stats(
         turns: [
-          turn(
-            prompt: 'new',
-            startedMs: 0,
-            endedMs: 4000,
-            modelMs: 3000,
-            toolMs: 1000,
-          ),
+          turn(prompt: 'one', startedMs: 0, endedMs: 10000, toolMs: 3000),
+          turn(prompt: 'two', startedMs: 20000, endedMs: 25000, toolMs: 1000),
+        ],
+      ),
+    );
+    expect(known.toolMs, 4000);
+
+    final partial = SessionStatistics(
+      stats(
+        turns: [
+          turn(prompt: 'new', startedMs: 0, endedMs: 4000, toolMs: 1000),
           turn(prompt: 'older', startedMs: 5000, endedMs: 9000),
         ],
       ),
     );
-
-    expect(
-      statistics.workingMs,
-      8000,
-      reason: 'the turn clocks need no timing entries',
-    );
-    expect(statistics.modelMs, isNull);
-    expect(statistics.toolMs, isNull);
-    expect(statistics.otherMs, isNull);
-    expect(statistics.turns.last.workingMs, 4000);
-    expect(statistics.turns.last.modelMs, isNull);
-  });
-
-  test('the session span runs from its first entry to its last', () {
-    final statistics = SessionStatistics(
-      const BridgeStatistics(
-        models: [],
-        tools: [],
-        turns: [],
-        startedMs: 1000,
-        endedMs: 7500000,
-      ),
-    );
-
-    expect(statistics.spanMs, 7499000);
-    expect(
-      SessionStatistics(
-        const BridgeStatistics(models: [], tools: [], turns: []),
-      ).spanMs,
-      isNull,
-    );
+    expect(partial.toolMs, isNull);
   });
 
   test(
-    'open tool calls are running while a turn runs, cancelled otherwise',
+    'the session span runs from its first entry to its last, or is unknown',
     () {
-      final stats = BridgeStatistics(
-        models: const [],
-        tools: [
-          const BridgeToolCalls(
-            name: 'bash',
-            succeeded: 16,
-            failed: 5,
-            cancelled: 1,
-            open: 2,
-          ),
-        ],
-        turns: const [],
-      );
-
-      final idle = SessionStatistics(stats);
       expect(
-        [
-          idle.toolCalls,
-          idle.toolsSucceeded,
-          idle.toolsFailed,
-          idle.toolsCancelled,
-          idle.toolsRunning,
-        ],
-        [24, 16, 5, 3, 0],
+        SessionStatistics(stats(startedMs: 1000, endedMs: 7500000)).spanMs,
+        7499000,
       );
-      final running = SessionStatistics(stats, running: true);
-      expect(
-        [running.toolCalls, running.toolsCancelled, running.toolsRunning],
-        [24, 1, 2],
-      );
+      expect(SessionStatistics(stats()).spanMs, isNull);
     },
   );
 
-  test('a tool counts its open calls as running while a turn runs, else as cancelled', () {
+  test('an open tool call is running while a turn runs, and cancelled once none does', () {
     const tool = BridgeToolCalls(
       name: 'bash',
       succeeded: 16,
@@ -225,14 +133,17 @@ void main() {
     );
 
     final idle = ToolStatistics(tool, turnRunning: false);
-    expect(
-      [idle.succeeded, idle.failed, idle.cancelled, idle.running, idle.total],
-      [16, 5, 3, 0, 24],
-    );
+    expect([idle.cancelled, idle.running, idle.total], [3, 0, 24]);
     final busy = ToolStatistics(tool, turnRunning: true);
+    expect([busy.cancelled, busy.running, busy.total], [1, 2, 24]);
+
+    final session = SessionStatistics(
+      stats(tools: const [tool]),
+      running: true,
+    );
     expect(
-      [busy.succeeded, busy.failed, busy.cancelled, busy.running, busy.total],
-      [16, 5, 1, 2, 24],
+      [session.toolCalls, session.toolsCancelled, session.toolsRunning],
+      [24, 1, 2],
     );
   });
 
@@ -240,14 +151,9 @@ void main() {
     'the three largest models have a series of their own, the rest share one',
     () {
       final statistics = SessionStatistics(
-        BridgeStatistics(
+        stats(
           models: [
-            for (final name in ['a', 'b', 'c', 'd'])
-              model('p/$name', tokens(cost: 1)),
-          ],
-          tools: const [],
-          turns: [
-            turn(prompt: 'x', models: [model('p/d', tokens(cost: 1))]),
+            for (final name in ['a', 'b', 'c', 'd']) model('p/$name', tokens()),
           ],
         ),
       );

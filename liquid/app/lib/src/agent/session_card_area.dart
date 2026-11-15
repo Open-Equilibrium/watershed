@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../diff/diff_panel.dart';
 import '../diff/diff_settings.dart';
+import '../diff/turn_scope.dart';
 import '../session/session_state.dart';
 import '../shortcuts/keymap.dart';
 import '../theme/tokens.g.dart';
@@ -89,7 +90,6 @@ class SessionCardArea extends StatelessWidget {
   const SessionCardArea({
     super.key,
     required this.state,
-    required this.device,
     required this.settings,
     required this.visibility,
     required this.diffSettings,
@@ -101,9 +101,6 @@ class SessionCardArea extends StatelessWidget {
   });
 
   final SessionState state;
-
-  /// This computer's name, which a pull request summary reads from.
-  final String device;
   final SessionCardSettingsController settings;
   final CardVisibility visibility;
 
@@ -113,8 +110,8 @@ class SessionCardArea extends StatelessWidget {
   /// The window's width, which bounds the Diff panel.
   final double viewportWidth;
 
-  /// Opens the Diff panel with the latest turn, as the Changes row does.
-  final VoidCallback onChanges;
+  /// Opens the Diff panel with the scope the Changes row names.
+  final ValueChanged<DiffScope> onChanges;
 
   /// Closes the popover and gives focus back to its button.
   final VoidCallback onDismiss;
@@ -156,7 +153,6 @@ class SessionCardArea extends StatelessWidget {
       skipTraversal: true,
       child: SessionCard(
         state: state,
-        device: device,
         settings: settings,
         onChanges: onChanges,
         beside: visibility.beside,

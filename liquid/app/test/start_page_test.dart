@@ -1,27 +1,25 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/session_menus.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
-import 'package:liquid/src/agent/start_page.dart';
-import 'package:liquid/src/rust/api/events.dart';
+import 'package:liquid/src/agent/start_page.dart' show StartChips;
 import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/session/session_state.dart';
+import 'package:liquid/src/settings_page.dart';
 import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
 
-const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
+const info = SessionInfo(project: 'acme-api', path: '/work/acme-api');
 
 void main() {
-  late FakeBackend backend;
+  late FakeProject project;
   late SessionState state;
-  // The targets the system's opener was asked to show, instead of starting Finder.
+  // What the system's opener was asked to show, instead of starting Finder.
   final opened = <String>[];
 
   setUp(() {
@@ -33,20 +31,30 @@ void main() {
   });
   tearDown(() => runOpener = Process.run);
 
+  /// Shows the start page of a project with `providers`, its branches `main` and `develop`, and
+  /// its `threads`.
   Future<void> show(
     WidgetTester tester, {
-    void Function()? setUp,
+    List<BridgeProvider>? providers,
+    List<BridgeThreadSummary> threads = const [],
     Size size = const Size(1600, 900),
   }) async {
     await tester.binding.setSurfaceSize(size);
-    backend = FakeBackend()
-      ..modelList = const [
-        BridgeModel(provider: 'faux', id: 'faux-1', name: 'Faux One'),
-        BridgeModel(provider: 'faux', id: 'faux-2', name: 'Faux Two'),
-      ]
-      ..model = 'faux/faux-1';
-    setUp?.call();
-    state = SessionState(backend);
+    project = FakeProject()
+      ..providerList =
+          providers ??
+          [
+            providerOf(
+              models: [
+                modelOf('claude-opus-5-5', 'Claude Opus 5.5'),
+                modelOf('claude-sonnet-5-5', 'Claude Sonnet 5.5'),
+              ],
+            ),
+          ]
+      ..threadList = threads
+      ..gitBackend.refList.add(refOf('develop'));
+    state = SessionState(project);
+    await state.loadStart();
     await tester.pumpWidget(
       MaterialApp(
         theme: liquidTheme(Brightness.light),
@@ -56,461 +64,299 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> newSessionKey(WidgetTester tester) async {
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+  /// Types `text` into the composer and sends it with the start page's button.
+  Future<void> sendFirst(WidgetTester tester, String text) async {
+    await tester.enterText(find.byKey(const Key('composer')), text);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Submit message'));
     await tester.pumpAndSettle();
   }
 
-  testWidgets('offers recent sessions on the start page and continues one', (
+  testWidgets('the start page greets with the project and its setup chips', (
     tester,
   ) async {
-    final twoHoursAgo = DateTime.now()
-        .subtract(const Duration(hours: 2, minutes: 5))
-        .millisecondsSinceEpoch;
+    await show(tester);
+    expect(find.text('What should we build in acme-api?'), findsOneWidget);
+    final chips = find.byType(StartChips);
+    expect(
+      find.descendant(of: chips, matching: find.text('New worktree')),
+      findsOneWidget,
+      reason: 'a new session starts in a new worktree, as T3 Code does',
+    );
+    expect(
+      find.descendant(of: chips, matching: find.text('From main')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: chips, matching: find.text('Claude Opus 5.5')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: chips, matching: find.text('Full access')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('a new worktree starts from the branch picked', (tester) async {
+    await show(tester);
+    await tester.tap(find.text('From main'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('develop'));
+    await tester.pumpAndSettle();
+    expect(find.text('From develop'), findsOneWidget);
+
+    await sendFirst(tester, 'Fix login');
+    expect(
+      project.calls.single,
+      'start Fix login claude-opus-5-5 base=develop worktree=null fullAccess',
+    );
+  });
+
+  testWidgets('the workspace menu starts the session in the project folder', (
+    tester,
+  ) async {
+    await show(tester);
+    await tester.tap(find.text('New worktree'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Current checkout'));
+    await tester.pumpAndSettle();
+    expect(find.text('From main'), findsNothing);
+
+    await sendFirst(tester, 'Fix login');
+    expect(
+      project.calls.single,
+      'start Fix login claude-opus-5-5 base=null worktree=null fullAccess',
+    );
+  });
+
+  testWidgets('the model menu picks the model the next session starts with', (
+    tester,
+  ) async {
+    await show(tester);
+    await tester.tap(find.byTooltip('Model'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Claude Sonnet 5.5'));
+    await tester.pumpAndSettle();
+    expect(state.model.value?.model, 'claude-sonnet-5-5');
+
+    await sendFirst(tester, 'Fix login');
+    expect(
+      project.calls.single,
+      startsWith('start Fix login claude-sonnet-5-5 '),
+    );
+  });
+
+  testWidgets('the permissions menu names each mode and picks one', (
+    tester,
+  ) async {
+    await show(tester);
+    await tester.tap(find.text('Full access'));
+    await tester.pumpAndSettle();
+    for (final (name, detail) in [
+      ('Supervised', 'Ask before commands and file changes.'),
+      ('Auto-accept edits', 'Auto-approve edits, ask before other actions.'),
+      (
+        'Auto',
+        'Supported providers approve routine actions; others still ask.',
+      ),
+      ('Full access', 'Allow commands and edits without prompts.'),
+    ]) {
+      expect(
+        find.widgetWithText(PopupMenuItem<BridgePermissions>, name),
+        findsOneWidget,
+      );
+      expect(find.text(detail), findsOneWidget);
+    }
+    await tester.tap(find.text('Auto-accept edits'));
+    await tester.pumpAndSettle();
+    expect(find.text('Auto-accept edits'), findsOneWidget);
+
+    await sendFirst(tester, 'Fix login');
+    expect(project.calls.single, endsWith(' autoAcceptEdits'));
+  });
+
+  testWidgets('a model option such as effort is chosen from its chip', (
+    tester,
+  ) async {
     await show(
       tester,
-      setUp: () => backend.storedSessions = [
-        BridgeStoredSession(
-          path: '/sessions/a.jsonl',
-          title: 'Rate limit for /login',
-          modifiedMs: twoHoursAgo,
+      providers: [
+        providerOf(
+          models: [
+            modelOf(
+              'claude-opus-5-5',
+              'Claude Opus 5.5',
+              options: const [
+                BridgeModelOption(
+                  id: 'effort',
+                  label: 'Effort',
+                  choices: ['low', 'high'],
+                  labels: ['Low', 'High'],
+                  default_: 'high',
+                ),
+              ],
+            ),
+          ],
         ),
       ],
     );
-    expect(
-      find.text('What should we build in acme-api?'),
-      findsOneWidget,
-      reason: 'a new session greets with its project, as in T3 Code',
-    );
-    expect(find.text('pi on MacBook'), findsOneWidget);
-    expect(find.text('Recent in acme-api'), findsOneWidget);
-    expect(find.text('continue · 2 h'), findsOneWidget);
-    expect(find.text('Start'), findsOneWidget);
-    expect(find.text(localDevice), findsOneWidget);
+    await tester.tap(find.text('High'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Low'));
+    await tester.pumpAndSettle();
+    expect(find.text('Low'), findsOneWidget);
+    expect(state.model.value?.values, ['low']);
+  });
 
+  testWidgets('long model names fit the window at its minimum size', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      size: const Size(1050, 640),
+      providers: [
+        providerOf(
+          models: [
+            modelOf('faux-1', 'A model with a remarkably long display name'),
+          ],
+        ),
+      ],
+    );
+    expect(find.text('Full access'), findsOneWidget);
+  });
+
+  testWidgets('the sidebar lists the project\'s threads and opens one', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      threads: [threadOf('thread-2', title: 'Rate limit for /login')],
+    );
     await tester.tap(find.text('Rate limit for /login'));
     await tester.pumpAndSettle();
-    expect(backend.calls, contains('switch /sessions/a.jsonl'));
-    expect(
-      backend.calls.last,
-      'history',
-      reason: 'the chat of the continued session is read',
-    );
+    expect(project.calls, contains('open thread-2'));
   });
 
-  testWidgets('starts a new session with Cmd+N only while idle', (
+  testWidgets('a thread is archived from its menu, and a running one is not', (
     tester,
   ) async {
-    await show(tester);
-    await newSessionKey(tester);
-    expect(backend.calls, contains('new session'));
-
-    backend.calls.clear();
-    backend.controller.add(event(BridgeEventKind.turnStarted));
-    await tester.pumpAndSettle();
-    await newSessionKey(tester);
-    expect(backend.calls, isNot(contains('new session')));
-    expect(
-      (state.notice.value?.level, state.notice.value?.text),
-      (BridgeLevel.info, 'Stop the agent before starting a new session.'),
-    );
-    await tester.pump(const Duration(seconds: 7));
-    expect(state.notice.value, isNull, reason: 'information fades');
-  });
-
-  testWidgets('picks the model on the start page', (tester) async {
-    await show(tester);
-    expect(find.text('Faux One'), findsOneWidget);
-    await tester.tap(find.text('Faux One'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Faux Two').last);
-    await tester.pumpAndSettle();
-    expect(backend.calls.last, 'model faux/faux-2');
-    expect(find.text('Faux Two'), findsOneWidget);
-  });
-
-  testWidgets('sizes each chip to its label', (tester) async {
-    await show(tester);
-    // The chips in the input area, not the project's name in the sidebar.
-    double width(String label) => tester
-        .getSize(
-          find
-              .ancestor(
-                of: find.descendant(
-                  of: find.byType(StartChips),
-                  matching: find.text(label),
-                ),
-                matching: find.byType(Container),
-              )
-              .first,
-        )
-        .width;
-    expect(
-      width('acme-api'),
-      lessThan(width('Faux One')),
-      reason: 'compact chips, as the approved mockup shows',
-    );
-  });
-
-  testWidgets('keeps Start reachable with long names in a narrow window', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(800, 600));
-    backend = FakeBackend()
-      ..modelList = const [
-        BridgeModel(
-          provider: 'faux',
-          id: 'faux-1',
-          name: 'A model with a remarkably long display name',
-        ),
-      ]
-      ..model = 'faux/faux-1';
-    state = SessionState(backend);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: AgentShell(
-          state: state,
-          info: const SessionInfo(
-            project: 'a-project-with-a-rather-long-directory-name',
-            harness: 'pi',
-            device: 'MacBook',
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull, reason: 'nothing overflows');
-    await tester.enterText(find.byKey(const Key('composer')), 'Go');
-    await tester.tap(find.text('Start'));
-    await tester.pump();
-    expect(backend.calls, contains('send Go'));
-  });
-
-  testWidgets('scrolls a full list of recent sessions in a small window', (
-    tester,
-  ) async {
-    final now = DateTime.now().millisecondsSinceEpoch;
     await show(
       tester,
-      size: const Size(800, 500),
-      setUp: () => backend.storedSessions = [
-        for (var number = 1; number <= 8; number++)
-          BridgeStoredSession(
-            path: '/sessions/$number.jsonl',
-            title: 'Session $number',
-            modifiedMs: now,
-          ),
+      threads: [
+        threadOf('thread-2', title: 'Fix login'),
+        threadOf('thread-3', title: 'Run tests', running: true),
       ],
     );
-    expect(tester.takeException(), isNull, reason: 'nothing overflows');
-    await tester.scrollUntilVisible(
-      find.text('Session 8'),
-      40,
-      scrollable: find
-          .ancestor(
-            of: find.text('Session 1'),
-            matching: find.byType(Scrollable),
-          )
-          .first,
-    );
-    await tester.tap(find.text('Session 8'));
+    await tester.tap(find.text('Fix login'), buttons: kSecondaryButton);
     await tester.pumpAndSettle();
-    expect(backend.calls, contains('switch /sessions/8.jsonl'));
+    await tester.tap(find.text('Archive thread'));
+    await tester.pumpAndSettle();
+    expect(project.calls, contains('archive thread-2 true'));
+
+    await tester.tap(find.text('Run tests'), buttons: kSecondaryButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Archive thread'));
+    await tester.pumpAndSettle();
+    expect(project.calls, isNot(contains('archive thread-3 true')));
   });
 
-  Future<void> rightClick(WidgetTester tester, Finder target) async {
-    await tester.tap(target, buttons: kSecondaryButton);
+  testWidgets('cancelling a delete deletes nothing', (tester) async {
+    await show(tester, threads: [threadOf('thread-2', title: 'Fix login')]);
+    await tester.tap(find.text('Fix login'), buttons: kSecondaryButton);
     await tester.pumpAndSettle();
-  }
-
-  testWidgets('deletes a recent session with its checkpoints from its row', (
-    tester,
-  ) async {
-    await show(
-      tester,
-      setUp: () => backend
-        ..storedSessions = [
-          BridgeStoredSession(
-            path: '/sessions/a.jsonl',
-            title: 'Rate limit for /login',
-            modifiedMs: DateTime.now().millisecondsSinceEpoch,
-          ),
-        ]
-        ..turnCounts = {'/sessions/a.jsonl': 3},
-    );
-    await rightClick(tester, find.text('Rate limit for /login'));
-    await tester.tap(find.text('Delete session…'));
+    await tester.tap(find.text('Delete'));
     await tester.pumpAndSettle();
-    expect(find.text('Delete “Rate limit for /login”?'), findsOneWidget);
-    expect(
-      find.text(
-        'Its pi session file and its 3 turns’ checkpoints are deleted and cannot be '
-        'restored. Project files, commits and branches stay.',
-      ),
-      findsOneWidget,
-    );
-    await tester.tap(find.text('Delete session'));
+    expect(find.text('Delete thread "Fix login"?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
-    expect(backend.calls, contains('delete /sessions/a.jsonl'));
-    expect(find.text('Rate limit for /login'), findsNothing);
-  });
-
-  testWidgets('deletes the open session after a new one takes its place', (
-    tester,
-  ) async {
-    await show(tester);
-    state.sessionTitle.value = 'Fix flaky sync test';
-    await tester.pumpAndSettle();
-    await rightClick(
-      tester,
-      find.descendant(
-        of: find.byType(Sidebar),
-        matching: find.text('Fix flaky sync test'),
-      ),
-    );
-    await tester.tap(find.text('Delete session…'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Delete session'));
-    await tester.pumpAndSettle();
-    expect(
-      backend.calls.where(
-        (call) => call.startsWith('new') || call.startsWith('delete'),
-      ),
-      ['new session', 'delete /sessions/open.jsonl'],
-    );
+    expect(project.calls.where((call) => call.startsWith('delete')), isEmpty);
   });
 
   testWidgets(
-    'exports a recent session’s record into Downloads and shows it in Finder',
+    'deleting the only thread of a worktree asks about the worktree first',
     (tester) async {
       await show(
         tester,
-        setUp: () => backend.storedSessions = [
-          BridgeStoredSession(
-            path: '/sessions/a.jsonl',
-            title: 'Rate limit for /login',
-            modifiedMs: DateTime.now().millisecondsSinceEpoch,
-          ),
+        threads: [
+          threadOf('thread-2', title: 'Fix login', worktree: '/worktrees/fix'),
         ],
       );
-      await rightClick(tester, find.text('Rate limit for /login'));
-      await tester.tap(find.text('Export record'));
+      project.onlyInWorktree = true;
+      await tester.tap(find.text('Fix login'), buttons: kSecondaryButton);
       await tester.pumpAndSettle();
-      expect(backend.calls, contains('export /sessions/a.jsonl'));
-      expect(opened, [backend.exportFolder], reason: 'the new folder is shown');
+      await tester.tap(find.text('Delete'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
+      expect(find.text('Delete the worktree too?'), findsOneWidget);
       expect(
-        (state.notice.value?.level, state.notice.value?.text),
-        (
-          BridgeLevel.info,
-          'Exported the record of “Rate limit for /login” to Downloads.',
+        find.text(
+          'This thread is the only one linked to this worktree:\n/worktrees/fix',
         ),
+        findsOneWidget,
       );
-      await tester.pump(const Duration(seconds: 7));
+
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(
+        project.calls,
+        contains('delete thread-2 worktree=false'),
+        reason: 'Cancel keeps the worktree and still deletes the thread',
+      );
     },
   );
 
-  testWidgets('says that nothing was exported when the export fails', (
+  testWidgets('confirming deletes the worktree with its only thread', (
     tester,
   ) async {
     await show(
       tester,
-      setUp: () => backend
-        ..storedSessions = [
-          BridgeStoredSession(
-            path: '/sessions/a.jsonl',
-            title: 'Rate limit for /login',
-            modifiedMs: DateTime.now().millisecondsSinceEpoch,
-          ),
-        ]
-        ..exportError = 'disk full',
-    );
-    await rightClick(tester, find.text('Rate limit for /login'));
-    await tester.tap(find.text('Export record'));
-    await tester.pumpAndSettle();
-    expect(
-      (state.notice.value?.level, state.notice.value?.text),
-      (BridgeLevel.error, 'Nothing was exported: disk full'),
-    );
-    expect(opened, isEmpty, reason: 'no folder is shown');
-  });
-
-  testWidgets('exports the open session from its menu', (tester) async {
-    await show(tester);
-    state.sessionTitle.value = 'Fix flaky sync test';
-    await tester.pumpAndSettle();
-    await rightClick(
-      tester,
-      find.descendant(
-        of: find.byType(Sidebar),
-        matching: find.text('Fix flaky sync test'),
-      ),
-    );
-    await tester.tap(find.text('Export record'));
-    await tester.pumpAndSettle();
-    expect(backend.calls, contains('export /sessions/open.jsonl'));
-    await tester.pump(const Duration(seconds: 7));
-  });
-
-  testWidgets('asks about no other session than the one it deletes', (
-    tester,
-  ) async {
-    await show(tester);
-    state.sessionTitle.value = 'Session A';
-    await tester.pumpAndSettle();
-    backend.sessionFileGate = Completer<void>();
-    await rightClick(
-      tester,
-      find.descendant(
-        of: find.byType(Sidebar),
-        matching: find.text('Session A'),
-      ),
-    );
-    await tester.tap(find.text('Delete session…'));
-    await tester.pump();
-    // Another session opens while the open one's file is read.
-    backend.openFile = '/sessions/b.jsonl';
-    await state.continueSession('/sessions/b.jsonl');
-    state.sessionTitle.value = 'Session B';
-    backend.sessionFileGate!.complete();
-    await tester.pumpAndSettle();
-    expect(find.text('Delete “Session B”?'), findsNothing);
-    expect(backend.calls.where((call) => call.startsWith('delete')), isEmpty);
-  });
-
-  testWidgets(
-    'a question that arrives while a deletion is prepared keeps the keys',
-    (tester) async {
-      await show(
-        tester,
-        setUp: () => backend
-          ..storedSessions = [
-            BridgeStoredSession(
-              path: '/sessions/a.jsonl',
-              title: 'Rate limit for /login',
-              modifiedMs: DateTime.now().millisecondsSinceEpoch,
-            ),
-          ]
-          ..storedTurnsGate = Completer(),
-      );
-      await rightClick(tester, find.text('Rate limit for /login'));
-      await tester.tap(find.text('Delete session…'));
-      await tester.pump();
-      backend.controller.add(
-        event(
-          BridgeEventKind.userInputRequested,
-          request: BridgeRequest(
-            id: 'q1',
-            question: BridgeQuestion(
-              kind: BridgeQuestionKind.confirm,
-              title: 'Deploy now?',
-              detail: '',
-              options: const [],
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      backend.storedTurnsGate!.complete();
-      await tester.pumpAndSettle();
-      expect(find.text('Delete “Rate limit for /login”?'), findsNothing);
-      expect(backend.calls.where((call) => call.startsWith('delete')), isEmpty);
-    },
-  );
-
-  testWidgets(
-    'a question that arrives while checkpoints are read keeps the keys',
-    (tester) async {
-      await show(
-        tester,
-        setUp: () => backend
-          ..checkpointed = const [
-            BridgeCheckpointSession(title: 'Rate limit for /login', turns: 3),
-          ]
-          ..checkpointGate = Completer(),
-      );
-      await rightClick(tester, find.text('acme-api').first);
-      await tester.tap(find.text('Remove all checkpoints…'));
-      await tester.pump();
-      backend.controller.add(
-        event(
-          BridgeEventKind.userInputRequested,
-          request: BridgeRequest(
-            id: 'q1',
-            question: BridgeQuestion(
-              kind: BridgeQuestionKind.confirm,
-              title: 'Deploy now?',
-              detail: '',
-              options: const [],
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      backend.checkpointGate!.complete();
-      await tester.pumpAndSettle();
-      expect(find.text('Remove all checkpoints of acme-api?'), findsNothing);
-      expect(backend.calls, isNot(contains('remove all checkpoints')));
-    },
-  );
-
-  testWidgets('removes all checkpoints of the project from its menu', (
-    tester,
-  ) async {
-    await show(
-      tester,
-      setUp: () => backend.checkpointed = const [
-        BridgeCheckpointSession(title: 'Rate limit for /login', turns: 3),
-        BridgeCheckpointSession(title: 'Fix flaky sync test', turns: 1),
+      threads: [
+        threadOf('thread-2', title: 'Fix login', worktree: '/worktrees/fix'),
       ],
     );
-    await rightClick(tester, find.text('acme-api').first);
-    expect(find.text('New agent session'), findsOneWidget);
-    await tester.tap(find.text('Remove all checkpoints…'));
+    project.onlyInWorktree = true;
+    await tester.tap(find.text('Fix login'), buttons: kSecondaryButton);
     await tester.pumpAndSettle();
-    expect(find.text('Remove all checkpoints of acme-api?'), findsOneWidget);
-    expect(find.text('3 turns'), findsOneWidget);
-    expect(find.text('1 turn'), findsOneWidget);
-    await tester.tap(find.text('Remove checkpoints'));
+    await tester.tap(find.text('Delete'));
     await tester.pumpAndSettle();
-    expect(backend.calls, contains('remove all checkpoints'));
-
-    backend.removeError = 'an agent runs in this checkout';
-    backend.checkpointed = const [
-      BridgeCheckpointSession(title: 'Fix flaky sync test', turns: 1),
-    ];
-    await rightClick(tester, find.text('acme-api').first);
-    await tester.tap(find.text('Remove all checkpoints…'));
+    await tester.tap(find.text('Confirm'));
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.tap(find.text('Confirm'));
     await tester.pumpAndSettle();
-    expect(
-      state.notice.value?.text,
-      'Could not remove the checkpoints: an agent runs in this checkout',
-    );
+    expect(project.calls, contains('delete thread-2 worktree=true'));
   });
 
-  testWidgets('opens a row\'s menu from the keyboard', (tester) async {
-    await show(tester);
-    final more = find.descendant(
-      of: find.byTooltip('More actions').first,
-      matching: find.byType(Icon),
-    );
-    Focus.of(tester.element(more)).requestFocus();
-    await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    expect(find.text('Remove all checkpoints…'), findsOneWidget);
-  });
+  testWidgets(
+    'a thread exports its record into Downloads and shows the folder',
+    (tester) async {
+      await show(tester, threads: [threadOf('thread-1', title: 'Fix login')]);
+      await state.open('thread-1');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Fix login'), buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Export record'));
+      await tester.pumpAndSettle();
+      expect(project.session.calls.single, startsWith('export '));
+      expect(opened.single, startsWith('/Downloads/'));
+    },
+  );
 
-  testWidgets('a screen reader finds a row\'s menu before any hover', (
+  testWidgets('Settings picks the writer model for the project', (
     tester,
   ) async {
-    final semantics = tester.ensureSemantics();
     await show(tester);
-    expect(find.bySemanticsLabel('More actions'), findsWidgets);
-    semantics.dispose();
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Writer model'));
+    await tester.pumpAndSettle();
+    expect(find.byType(WriterModelPane), findsOneWidget);
+
+    await tester.tap(find.text('Choose model'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Claude Sonnet 5.5'));
+    await tester.pumpAndSettle();
+    expect(project.calls, contains('writer claude-sonnet-5-5'));
+    expect(find.text('Claude Sonnet 5.5'), findsOneWidget);
   });
 }

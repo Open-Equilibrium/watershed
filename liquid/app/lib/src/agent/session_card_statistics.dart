@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../format.dart';
-import '../rust/api/history.dart';
+import '../rust/api/thread.dart';
+import '../session/session_state.dart';
 import '../session/session_statistics.dart';
-import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import '../workspace/row_menu.dart';
@@ -145,8 +145,8 @@ class _StatisticsRowState extends State<StatisticsRow> {
   }
 }
 
-/// The Context row: the share of the window the next request fills, with a tick where pi
-/// compacts. Its value is a dash while the tokens are not known.
+/// The Context row: the share of the window the next request fills, with a tick where the
+/// agent compacts. Its value is a dash while the tokens are not known.
 class ContextRow extends StatelessWidget {
   const ContextRow({super.key, required this.window});
 
@@ -159,7 +159,7 @@ class ContextRow extends StatelessWidget {
     final limit = window.window;
     final compacts = window.compactsAt;
     return StatisticsRow(
-      label: 'Context',
+      label: 'Context window',
       bar: FillBar(
         fraction: used == null || limit == 0 ? null : used / limit,
         tick: compacts == null || limit == 0 ? null : compacts / limit,
@@ -171,7 +171,7 @@ class ContextRow extends StatelessWidget {
         used == null ? '—' : '${formatTokens(used)} / ${formatTokens(limit)}',
       ),
       tip: [
-        'Context',
+        'Context window',
         if (used == null)
           'Not known right after a compaction'
         else ...[
@@ -184,16 +184,18 @@ class ContextRow extends StatelessWidget {
   }
 }
 
-/// The session's statistics rows, in the card's order: tokens, cost, working time and tool calls.
-/// Each row says what its parts are when hovered.
+/// Whether a turn runs, which counts the open tool calls as running rather than cancelled.
+bool turnRuns(SessionState state) =>
+    state.turns.value.any((turn) => turn.status == BridgeTurnStatus.running);
+
+/// The session's statistics rows, in the card's order: tokens, cost, times and tool calls. Each row
+/// says what its parts are when hovered; T3 reports no cost and no model time (ADR-0293).
 List<Widget> sessionStatisticsRows(
   BuildContext context,
   SessionStatistics statistics,
 ) {
   final ws = context.ws;
   final usage = statistics.usage;
-  final cost = formatCost(statistics.cost);
-  final unpriced = statistics.unpriced;
   final failed = statistics.toolsFailed;
   return [
     StatisticsRow(
@@ -217,26 +219,17 @@ List<Widget> sessionStatisticsRows(
     ),
     StatisticsRow(
       label: 'Cost',
-      value: Row(
-        mainAxisSize: MainAxisSize.min,
-        spacing: 6,
-        children: [
-          Text('≈ $cost'),
-          if (unpriced > 0)
-            Icon(LucideIcons.info, size: 13, color: ws.textFaint),
-        ],
+      faint: true,
+      bar: Text(
+        'T3 Code reports no cost',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: WsMetrics.fsSmall, color: ws.textFaint),
       ),
-      tip: [
-        '≈ $cost as pi recorded it',
-        for (final model in statistics.models)
-          '${model.name} ≈ ${formatCost(model.cost)}',
-        if (unpriced == 1)
-          '1 response without a recorded cost is counted in tokens, not in cost'
-        else if (unpriced > 1)
-          '$unpriced responses without a recorded cost are counted in tokens, not in cost',
-      ],
+      value: const Text('—'),
+      tip: const ['Cost', 'T3 Code reports no cost'],
     ),
-    ..._timeRows(ws, statistics),
+    ..._timeRows(statistics),
     StatisticsRow(
       label: 'Tool calls',
       bar: SegmentBar(
@@ -270,49 +263,28 @@ List<Widget> sessionStatisticsRows(
   ];
 }
 
-/// The working time row, with its model and tool parts when every turn recorded them.
-List<Widget> _timeRows(WsPalette ws, SessionStatistics statistics) {
+/// The working time row, the tool time row, and the model time row, which shows a dash: T3 times
+/// no single model request (ADR-0293).
+List<Widget> _timeRows(SessionStatistics statistics) {
   final working = formatDuration(statistics.workingMs);
-  final (model, tool, other) = (
-    statistics.modelMs,
-    statistics.toolMs,
-    statistics.otherMs,
-  );
-  if (model == null || tool == null || other == null) {
-    return [
-      StatisticsRow(
-        label: 'Working time',
-        value: Text(working),
-        tip: ['Working time $working'],
-      ),
-      StatisticsRow(
-        label: 'Model and tools',
-        faint: true,
-        value: const Text('—'),
-        tip: const [
-          'Model and tool time',
-          'Not recorded: a turn without timing entries counts neither',
-        ],
-      ),
-    ];
-  }
+  final tool = statistics.toolMs;
   return [
     StatisticsRow(
       label: 'Working time',
-      bar: SegmentBar(
-        segments: [
-          BarSegment(model, ws.data1),
-          BarSegment(tool, ws.data2),
-          BarSegment(other, ws.textFaint),
-        ],
-      ),
       value: Text(working),
-      tip: [
-        'Working time $working',
-        'Model ${formatDuration(model)}',
-        'Tools ${formatDuration(tool)}',
-        'Other ${formatDuration(other)}',
-      ],
+      tip: ['Working time $working'],
+    ),
+    StatisticsRow(
+      label: 'Tool time',
+      faint: tool == null,
+      value: Text(tool == null ? '—' : formatDuration(tool)),
+      tip: tool == null ? null : ['Tool time ${formatDuration(tool)}'],
+    ),
+    const StatisticsRow(
+      label: 'Model time',
+      faint: true,
+      value: Text('—'),
+      tip: ['Model time', 'T3 Code reports no timing of single model requests'],
     ),
   ];
 }

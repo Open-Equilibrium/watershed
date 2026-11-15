@@ -7,18 +7,14 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'action_area.dart';
 
-/// Height of the extension widgets' strip above the input area.
-const widgetStripHeight = 36.0;
-
 /// The room the floating input area takes at the bottom of its column; content keeps it free
 /// below its last row. Room the input area takes beyond it, such as for the post-push offer,
 /// [InputLane] keeps free by ending its content higher.
-const inputClearance =
-    widgetStripHeight + actionAreaHeight + 2 * WsMetrics.space4;
+const inputClearance = actionAreaHeight + 2 * WsMetrics.space4;
 
 /// A tab's main column with the input area floating at its bottom, as T3 Code's composer does:
-/// centered, at most the reading width, over a fade into the canvas. Without
-/// an `input` it shows only `child`.
+/// centered, at most the reading width, over a fade into the canvas. Without an `input` it shows
+/// only `child`.
 class InputLane extends StatelessWidget {
   const InputLane({super.key, required this.input, required this.child});
 
@@ -49,10 +45,7 @@ class InputLane extends StatelessWidget {
             ),
           ),
         ),
-        LayoutId(
-          id: _Part.input,
-          child: InputScope(child: input),
-        ),
+        LayoutId(id: _Part.input, child: input),
       ],
     );
   }
@@ -96,20 +89,4 @@ class _LaneLayout extends MultiChildLayoutDelegate {
 
   @override
   bool shouldRelayout(_LaneLayout oldDelegate) => false;
-}
-
-/// Marks the input area, so a tab's own keys can leave typing in it alone.
-class InputScope extends StatelessWidget {
-  const InputScope({super.key, required this.child});
-
-  final Widget child;
-
-  /// Whether the keyboard is in the input area.
-  static bool hasFocus() =>
-      FocusManager.instance.primaryFocus?.context
-          ?.findAncestorWidgetOfExactType<InputScope>() !=
-      null;
-
-  @override
-  Widget build(BuildContext context) => child;
 }

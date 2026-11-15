@@ -1,579 +1,258 @@
-import 'dart:async';
-
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:liquid/src/appearance.dart';
+import 'package:liquid/src/agent/branch_menu.dart';
 import 'package:liquid/src/controls.dart';
-import 'package:liquid/src/agent/shell.dart';
-import 'package:liquid/src/agent/sidebar.dart';
-import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/git.dart';
-import 'package:liquid/src/rust/api/history.dart';
+import 'package:liquid/src/rust/api/thread.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
 
-const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
+/// A checkout whose status stream fails, as a broken repository does.
+class _BrokenGit extends FakeGit {
+  @override
+  Stream<BridgeGitStatus> watch() => Stream.error(Exception('no repository'));
+}
 
 void main() {
-  late FakeBackend backend;
+  late FakeSession session;
+  late FakeGit git;
   late SessionState state;
 
-  testWidgets('Escape and Cancel return the configured dialog result', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: const Scaffold(body: SizedBox()),
-      ),
-    );
-    final context = tester.element(find.byType(Scaffold));
-    for (final escape in [false, true]) {
-      final result = showDialog<String>(
-        context: context,
-        builder: (_) => const ActionDialog(
-          title: 'Confirm',
-          cancelled: 'cancelled',
-          actions: [Text('Proceed')],
-          children: [Text('Choose an action.')],
-        ),
-      );
-      await tester.pumpAndSettle();
-      if (escape) {
-        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      } else {
-        await tester.tap(find.text('Cancel'));
-      }
-      await tester.pumpAndSettle();
-      expect(await result, 'cancelled');
-    }
-  });
-
-  testWidgets('a question puts Cancel left and its main action right', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: const Scaffold(body: SizedBox()),
-      ),
-    );
-    final context = tester.element(find.byType(Scaffold));
-    unawaited(
-      showDialog<void>(
-        context: context,
-        builder: (_) => const ActionDialog(
-          title: 'Keep these changes?',
-          actions: [Text('Commit'), Text('Branch')],
-          children: [Text('Choose an action.')],
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    double left(String label) => tester.getRect(find.text(label)).left;
-    expect(left('Cancel'), lessThan(left('Branch')));
-    expect(left('Branch'), lessThan(left('Commit')));
-    final dialog = tester.getRect(find.byType(Dialog));
-    expect(
-      tester.getRect(find.text('Commit')).right,
-      greaterThan(dialog.center.dx),
-    );
-  });
-
-  Future<void> show(
+  /// Opens a session on the feature branch, with its refs, and shows the branch row. The
+  /// session's turns are `turns`.
+  Future<void> pump(
     WidgetTester tester, {
-    BridgeGitStatus? git,
-    Size size = const Size(1600, 900),
-    TextSize textSize = TextSize.standard,
+    FakeGit? checkout,
+    List<BridgeTurn> turns = const [],
   }) async {
-    await tester.binding.setSurfaceSize(size);
-    backend = FakeBackend()
-      ..git = git ?? gitStatusOf(ahead: 1, changed: 4)
-      ..branches = BridgeBranches(
-        branches: [
-          branchOf('main', current: true),
-          branchOf('feature/token-bucket'),
-          branchOf('fix/sync-flake', stashed: true),
-          branchOf('origin/release-1.2', remote: true),
-        ],
-        running: const [],
-      );
-    state = SessionState(backend);
+    git =
+        checkout ??
+        FakeGit(status: gitStatusOf(branch: 'feature', defaultBranch: false));
+    git.refList = [
+      refOf('main', isDefault: true),
+      refOf('feature', current: true),
+      refOf('fix', worktree: '/worktrees/fix'),
+      refOf('origin/fix', remote: 'origin'),
+    ];
+    session = FakeSession()
+      ..gitBackend = git
+      ..current = snapshotOf(turns: turns)
+      ..turnList = turns;
+    state = SessionState(FakeProject(session: session, git: git));
+    addTearDown(state.dispose);
+    await state.open('thread-1');
     await tester.pumpWidget(
       MaterialApp(
         theme: liquidTheme(Brightness.light),
-        builder: (context, child) =>
-            UiScale(scale: textSize.scale, child: child!),
-        home: AgentShell(state: state, info: info),
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(width: 280, child: BranchRow(state: state)),
+          ),
+        ),
       ),
     );
     await tester.pumpAndSettle();
   }
 
-  Finder chipText(String text) => find.descendant(
-    of: find.byKey(const Key('branch-row')),
-    matching: find.text(text),
+  Future<void> openPicker(WidgetTester tester) async {
+    await tester.tap(find.byKey(const Key('branch-chevron')));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('the branch name and its chevron both open the ref picker', (
+    tester,
+  ) async {
+    await pump(tester);
+    await tester.tap(find.byKey(const Key('branch-name')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('branch-search')), findsOneWidget);
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pumpAndSettle();
+    await openPicker(tester);
+    expect(find.byKey(const Key('branch-search')), findsOneWidget);
+  });
+
+  testWidgets(
+    'the ref picker names each ref, and a search narrows the list and offers a new ref',
+    (tester) async {
+      await pump(tester);
+      await openPicker(tester);
+      for (final detail in ['current', 'default', 'worktree', 'remote']) {
+        expect(find.text(detail), findsOneWidget);
+      }
+      await tester.enterText(find.byKey(const Key('branch-search')), 'fea');
+      await tester.pumpAndSettle();
+      expect(find.text('main'), findsNothing);
+      expect(find.text('Create new ref "fea"'), findsOneWidget);
+    },
   );
 
-  Future<void> openMenu(WidgetTester tester) async {
-    await tester.tap(find.byKey(const Key('branch-row')));
-    await tester.pumpAndSettle();
-  }
-
-  testWidgets('the header and the sidebar show the checkout’s branch', (
+  testWidgets('Enter switches to the first ref the search lists', (
     tester,
   ) async {
-    await show(tester, git: gitStatusOf(ahead: 1, behind: 3));
-    expect(chipText('main'), findsOneWidget);
-    expect(find.text('↑1'), findsOneWidget);
-    expect(find.text('↓3'), findsOneWidget);
-    expect(find.text('pi · main · MacBook'), findsOneWidget);
+    await pump(tester);
+    await openPicker(tester);
+    await tester.enterText(find.byKey(const Key('branch-search')), 'main');
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(git.calls, ['switch main']);
   });
 
-  testWidgets('the branch chip fits the minimum window with Large text', (
+  testWidgets('a remote ref switches to the local branch of its name', (
     tester,
   ) async {
-    await show(
-      tester,
-      git: gitStatusOf(upstream: null),
-      size: const Size(1050, 900),
-      textSize: TextSize.large,
-    );
-    // In a window this narrow the card is a popover, which the sliders button opens.
-    await tester.tap(find.byTooltip('Session card'));
+    await pump(tester);
+    await openPicker(tester);
+    await tester.tap(find.text('origin/fix'));
     await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
-    expect(tester.getSize(chipText('main')).width, greaterThan(0));
-    expect(chipText('no upstream'), findsOneWidget);
-
-    backend.gitError = 'git could not start: No such file or directory';
-    await state.git.refresh();
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
-    expect(find.text('Git unavailable'), findsOneWidget);
+    expect(git.calls, ['switch fix']);
   });
 
-  testWidgets('a detached HEAD shows its commit, broken Git says so', (
-    tester,
-  ) async {
-    await show(tester, git: gitStatusOf(branch: null, upstream: null));
-    expect(chipText('1a2b3c4'), findsOneWidget);
+  testWidgets(
+    'a ref checked out in a worktree opens that worktree in the session',
+    (tester) async {
+      await pump(tester);
+      await openPicker(tester);
+      await tester.tap(find.text('fix'));
+      await tester.pumpAndSettle();
+      expect(session.calls, ['branch fix worktree=/worktrees/fix']);
+    },
+  );
 
-    backend.gitError = 'git could not start: No such file or directory';
-    await state.git.refresh();
-    await tester.pumpAndSettle();
-    expect(find.text('Git unavailable'), findsOneWidget);
-  });
-
-  testWidgets('the branch menu opens through its accessibility action', (
-    tester,
-  ) async {
-    final semantics = tester.ensureSemantics();
-    try {
-      await show(tester, git: gitStatusOf());
-      final chip = tester.getSemantics(find.byKey(const Key('branch-row')));
-      expect(chip.getSemanticsData().hasAction(SemanticsAction.tap), isTrue);
-      tester.binding.renderViews.single.owner!.semanticsOwner!.performAction(
-        chip.id,
-        SemanticsAction.tap,
+  testWidgets(
+    'a switch with uncommitted changes asks first, and Cancel keeps the branch',
+    (tester) async {
+      await pump(tester);
+      git.change(
+        gitStatusOf(
+          branch: 'feature',
+          defaultBranch: false,
+          changes: [fileOf('a.dart')],
+        ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('feature/token-bucket'), findsOneWidget);
-      expect(find.text('origin/release-1.2'), findsOneWidget);
-    } finally {
-      semantics.dispose();
-    }
-  });
+      await openPicker(tester);
+      await tester.tap(find.text('main'));
+      await tester.pumpAndSettle();
+      expect(find.text('Switch to main?'), findsOneWidget);
+      await tester.tap(find.widgetWithText(SecondaryButton, 'Cancel'));
+      await tester.pumpAndSettle();
+      expect(git.calls, isEmpty);
+      await openPicker(tester);
+      await tester.tap(find.text('main'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PrimaryButton, 'Switch branch'));
+      await tester.pumpAndSettle();
+      expect(git.calls, ['switch main']);
+    },
+  );
 
-  testWidgets('switching with uncommitted changes asks where they go', (
-    tester,
-  ) async {
-    await show(tester);
-    await openMenu(tester);
-    expect(find.textContaining('stashed changes ·'), findsOneWidget);
-    expect(
-      find.text(
-        'You have 4 uncommitted changes; switching asks where they go.',
-      ),
-      findsOneWidget,
-    );
-    await tester.tap(find.text('feature/token-bucket'));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'a new name creates and checks out a ref, its spaces made dashes',
+    (tester) async {
+      await pump(tester);
+      await openPicker(tester);
+      await tester.enterText(
+        find.byKey(const Key('branch-search')),
+        'new feature',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Create new ref "new-feature"'));
+      await tester.pumpAndSettle();
+      expect(git.calls, ['create new-feature']);
+    },
+  );
 
-    expect(find.text('Switch branch'), findsWidgets);
-    expect(find.text('Leave my changes on main'), findsOneWidget);
-    await tester.tap(find.text('Bring my changes to feature/token-bucket'));
+  testWidgets('Git refusing a new ref says why', (tester) async {
+    await pump(tester);
+    await openPicker(tester);
+    await tester.enterText(find.byKey(const Key('branch-search')), 'taken');
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    git.refError = Exception('ref exists');
+    await tester.tap(find.text('Create new ref "taken"'));
     await tester.pumpAndSettle();
-    expect(backend.calls.last, 'switch feature/token-bucket');
-
-    await openMenu(tester);
-    await tester.tap(find.text('feature/token-bucket'));
-    await tester.pumpAndSettle();
-    // Leaving them is the default, as in GitHub Desktop.
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    expect(backend.calls.last, 'switch feature/token-bucket leaving changes');
-    // The notice fades.
-    await tester.pump(const Duration(seconds: 7));
-  });
-
-  testWidgets('a branch with stashed changes says that leaving replaces them', (
-    tester,
-  ) async {
-    await show(tester);
-    backend.stashed = BridgeStash(
-      current: true,
-      id: 's1',
-      createdMs: DateTime(2026, 11, 1, 10, 12).millisecondsSinceEpoch,
-      files: [
-        BridgeFileChange(
-          path: 'a.txt',
-          shown: 'a.txt',
-          status: BridgeChangeStatus.modified,
-          added: 1,
-          removed: 0,
-        ),
-      ],
-    );
-    await state.git.refresh();
-    await openMenu(tester);
-    await tester.tap(find.text('feature/token-bucket'));
-    await tester.pumpAndSettle();
-    expect(
-      find.text(
-        '⚠ main already has stashed changes from 10:12 (1 file). Leaving these changes '
-        'replaces them.',
-      ),
-      findsOneWidget,
-    );
-    expect(find.text('Replace stash and switch'), findsOneWidget);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    expect(backend.switchConfirmation, (branch: 'main', stash: 's1'));
-    await tester.pump(const Duration(seconds: 7));
-  });
-
-  testWidgets('without changes a branch switches at once', (tester) async {
-    await show(tester, git: gitStatusOf());
-    await openMenu(tester);
-    await tester.tap(find.text('origin/release-1.2'));
-    await tester.pumpAndSettle();
-    expect(backend.calls.last, 'switch origin/release-1.2');
-    expect(find.text('Switch branch'), findsNothing);
-    // The notice fades.
-    await tester.pump(const Duration(seconds: 7));
-  });
-
-  testWidgets('a change saved while the menu is open is asked about', (
-    tester,
-  ) async {
-    await show(tester, git: gitStatusOf());
-    await openMenu(tester);
-    backend.git = gitStatusOf(changed: 4);
-    await tester.tap(find.text('origin/release-1.2'));
-    await tester.pumpAndSettle();
-    expect(find.text('Leave my changes on main'), findsOneWidget);
-    expect(
-      backend.calls.where((call) => call.startsWith('switch')),
-      isEmpty,
-      reason: 'nothing switches before the person chooses',
-    );
-    await tester.pump(const Duration(seconds: 7));
-  });
-
-  testWidgets('a read overtaken by a newer one still asks about changes', (
-    tester,
-  ) async {
-    await show(tester, git: gitStatusOf());
-    await openMenu(tester);
-    final changed = await (FakeBackend()..git = gitStatusOf(changed: 4))
-        .gitStatus();
-    final selection = backend.statusGate = Completer();
-    await tester.tap(find.text('origin/release-1.2'));
-    await tester.pump();
-    // A poll starts while the switch's own read is pending and outlives it.
-    final poll = backend.statusGate = Completer();
-    unawaited(state.git.refresh());
-    selection.complete(changed);
-    await tester.pump();
-    poll.complete(changed);
-    await tester.pumpAndSettle();
-    expect(find.text('Leave my changes on main'), findsOneWidget);
-    expect(
-      backend.calls.where((call) => call.startsWith('switch')),
-      isEmpty,
-      reason: 'nothing switches before the person chooses',
-    );
-    await tester.pump(const Duration(seconds: 7));
-  });
-
-  testWidgets('a checkout that cannot be read again stops the switch', (
-    tester,
-  ) async {
-    await show(tester, git: gitStatusOf());
-    await openMenu(tester);
-    backend.gitError = 'git could not start: No such file or directory';
-    await tester.tap(find.text('origin/release-1.2'));
-    await tester.pumpAndSettle();
-    expect(
-      backend.calls.where((call) => call.startsWith('switch')),
-      isEmpty,
-      reason: 'the cached status cannot tell whether changes would be lost',
-    );
     expect(
       state.notice.value?.text,
-      'Could not read the checkout: git could not start: No such file or directory',
+      contains('Failed to create and switch ref.'),
     );
-  });
-
-  testWidgets('a changed stash invalidates the open replacement confirmation', (
-    tester,
-  ) async {
-    await show(tester);
-    await openMenu(tester);
-    await tester.tap(find.text('feature/token-bucket'));
-    await tester.pumpAndSettle();
-    backend.stashed = const BridgeStash(
-      current: true,
-      id: 'unconfirmed',
-      createdMs: 1,
-      files: [],
-    );
-    await state.git.refresh();
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-
-    expect(backend.calls.where((call) => call.startsWith('switch ')), isEmpty);
-    expect(
-      find.textContaining('The checkout branch or stash changed.'),
-      findsOneWidget,
-    );
-    await tester.pump(const Duration(seconds: 7));
   });
 
   testWidgets(
-    'leaving refuses a branch list inconsistent with the displayed source',
+    'while a turn runs the picker offers no switch and says to stop it',
     (tester) async {
-      await show(tester);
-      backend.branches = BridgeBranches(
-        branches: [
-          branchOf('main'),
-          branchOf('other', current: true, stashed: true),
-          branchOf('feature/token-bucket'),
-        ],
-        running: const [],
-      );
-      backend.stashed = const BridgeStash(
-        current: true,
-        id: 'other-stash',
-        createdMs: 1,
-        files: [],
-      );
-      await openMenu(tester);
-      await tester.tap(find.text('feature/token-bucket'));
-      await tester.pumpAndSettle();
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
-
+      await pump(tester, turns: [turnOf(1, status: BridgeTurnStatus.running)]);
+      await openPicker(tester);
       expect(
-        backend.calls.where((call) => call.startsWith('switch ')),
-        isEmpty,
-      );
-      expect(
-        find.textContaining('The checkout branch or stash changed.'),
+        find.text('Stop the current turn to switch worktrees.'),
         findsOneWidget,
       );
-      await tester.pump(const Duration(seconds: 7));
+      await tester.tap(find.text('main'));
+      await tester.pumpAndSettle();
+      expect(git.calls, isEmpty);
+      expect(find.byKey(const Key('branch-search')), findsOneWidget);
     },
   );
 
-  testWidgets('leaving confirms the raw branch behind its displayed name', (
+  testWidgets(
+    'a pull request reference typed in the picker offers its checkout',
+    (tester) async {
+      await pump(tester);
+      await openPicker(tester);
+      await tester.enterText(find.byKey(const Key('branch-search')), '#42');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Checkout pull request'));
+      await tester.pump(const Duration(milliseconds: 450));
+      await tester.pumpAndSettle();
+      expect(find.text('Add a feature'), findsOneWidget);
+      expect(git.calls, ['resolve 42']);
+    },
+  );
+
+  testWidgets('a ref list Git cannot read says so and closes the picker', (
     tester,
   ) async {
-    const raw = 'feature/\u202e';
-    const shown = 'feature/<U+202E>';
-    await show(tester, git: gitStatusOf(branch: shown, changed: 1));
-    backend.branches = BridgeBranches(
-      branches: [
-        const BridgeBranch(
-          name: raw,
-          shown: shown,
-          remote: false,
-          committedMs: 0,
-          current: true,
-          stashed: false,
-        ),
-        branchOf('feature/token-bucket'),
-      ],
-      running: const [],
-    );
-    await openMenu(tester);
-    await tester.tap(find.text('feature/token-bucket'));
-    await tester.pumpAndSettle();
-    expect(find.text('Leave my changes on $shown'), findsOneWidget);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-
-    expect(backend.switchConfirmation, (branch: raw, stash: null));
-    await tester.pump(const Duration(seconds: 7));
-  });
-
-  testWidgets('Git refusing to bring the changes offers to leave them', (
-    tester,
-  ) async {
-    await show(tester);
-    backend.outcome = outcomeOf(
-      BridgeGitOutcomeKind.wouldOverwrite,
-      files: ['src/routes/login.ts'],
-    );
-    await openMenu(tester);
-    await tester.tap(find.text('feature/token-bucket'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Bring my changes to feature/token-bucket'));
-    await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-
-    expect(
-      find.text('Could not switch to feature/token-bucket'),
-      findsOneWidget,
-    );
-    expect(find.text('src/routes/login.ts'), findsOneWidget);
-    backend.outcome = outcomeOf(BridgeGitOutcomeKind.done);
-    await tester.tap(find.text('Leave them on main and switch'));
-    await tester.pumpAndSettle();
-    expect(backend.calls.last, 'switch feature/token-bucket leaving changes');
-    // The notice fades.
-    await tester.pump(const Duration(seconds: 7));
+    await pump(tester);
+    git.refError = Exception('busy');
+    await openPicker(tester);
+    expect(state.notice.value?.text, contains('Could not list the refs:'));
+    expect(find.byKey(const Key('branch-search')), findsNothing);
   });
 
   testWidgets(
-    'a refused switch offers Commit changes without retrying the switch',
+    'the branch row opens the ref picker through its accessibility action',
     (tester) async {
-      await show(tester);
-      backend.outcome = outcomeOf(
-        BridgeGitOutcomeKind.wouldOverwrite,
-        files: ['a.txt'],
-      );
-      await openMenu(tester);
-      await tester.tap(find.text('feature/token-bucket'));
+      await pump(tester);
+      final semantics = tester.ensureSemantics();
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Bring my changes to feature/token-bucket'));
+      tester.semantics.tap(find.semantics.byLabel('Branch feature'));
       await tester.pumpAndSettle();
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Commit changes…'));
-      await tester.pumpAndSettle();
-      expect(find.text('Commit changes'), findsOneWidget);
-      expect(
-        backend.calls.where((call) => call.startsWith('switch ')),
-        hasLength(1),
-      );
+      expect(find.byKey(const Key('branch-search')), findsOneWidget);
+      semantics.dispose();
     },
   );
 
-  testWidgets('a refused Leave retry keeps its current refusal visible', (
+  testWidgets('right-clicking the branch name offers to copy it', (
     tester,
   ) async {
-    await show(tester);
-    backend.outcome = outcomeOf(
-      BridgeGitOutcomeKind.wouldOverwrite,
-      files: ['src/routes/login.ts'],
+    await pump(tester);
+    await tester.tap(
+      find.byKey(const Key('branch-name')),
+      buttons: kSecondaryButton,
     );
-    await openMenu(tester);
-    await tester.tap(find.text('feature/token-bucket'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Bring my changes to feature/token-bucket'));
-    await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    backend.outcome = outcomeOf(
-      BridgeGitOutcomeKind.wouldOverwrite,
-      files: ['config.local'],
-    );
-
-    await tester.tap(find.text('Leave them on main and switch'));
-    await tester.pumpAndSettle();
-
-    expect(backend.calls.last, 'switch feature/token-bucket leaving changes');
-    expect(
-      find.text('Could not switch to feature/token-bucket'),
-      findsOneWidget,
-    );
-    expect(find.text('config.local'), findsOneWidget);
-    expect(find.text('src/routes/login.ts'), findsNothing);
-    await tester.tap(find.text('Close'));
-    await tester.pumpAndSettle();
-    await tester.pump(const Duration(seconds: 7));
+    expect(find.text('Copy branch name'), findsOneWidget);
   });
 
-  testWidgets('no branch is chosen while an agent runs in the checkout', (
+  testWidgets('a checkout Git cannot read says so in the branch row', (
     tester,
   ) async {
-    await show(tester);
-    backend.branches = BridgeBranches(
-      branches: [
-        branchOf('main', current: true),
-        branchOf('feature/token-bucket'),
-      ],
-      running: const [
-        BridgeRunningAgent(own: false, title: 'Fix flaky sync test'),
-      ],
-    );
-    await openMenu(tester);
-    expect(
-      find.text(
-        '“Fix flaky sync test” is running in this checkout. Stop it or wait until it '
-        'finishes, then switch branches.',
-      ),
-      findsOneWidget,
-    );
-    await tester.tap(find.text('feature/token-bucket'));
-    await tester.pumpAndSettle();
-    expect(backend.calls.where((call) => call.startsWith('switch')), isEmpty);
-  });
-
-  testWidgets('a new name creates a branch unless Git refuses it', (
-    tester,
-  ) async {
-    await show(tester);
-    await openMenu(tester);
-    await tester.enterText(
-      find.byKey(const Key('branch-search')),
-      'fix..login',
-    );
-    await tester.pumpAndSettle();
-    expect(find.text('No branch matches'), findsOneWidget);
-    expect(
-      find.text('⚠ Git does not allow “..” in a branch name.'),
-      findsOneWidget,
-    );
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    expect(backend.calls.where((call) => call.startsWith('create')), isEmpty);
-
-    await tester.enterText(
-      find.byKey(const Key('branch-search')),
-      'feature/retry-after',
-    );
-    await tester.pumpAndSettle();
-    expect(
-      find.text(
-        'Starts from the current commit on main; your 4 uncommitted changes come along.',
-      ),
-      findsOneWidget,
-    );
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    expect(backend.calls.last, 'create feature/retry-after');
-    // The notice fades.
-    await tester.pump(const Duration(seconds: 7));
+    await pump(tester, checkout: _BrokenGit());
+    expect(find.text('Git unavailable'), findsOneWidget);
   });
 }

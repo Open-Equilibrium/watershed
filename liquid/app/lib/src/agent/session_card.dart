@@ -3,7 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../diff/turn_scope.dart';
-import '../rust/api/history.dart';
+import '../rust/api/git.dart';
+import '../rust/api/thread.dart';
 import '../session/session_statistics.dart';
 import '../session/session_state.dart';
 import '../shortcuts/keymap.dart';
@@ -12,21 +13,20 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'branch_menu.dart';
 import 'git_actions.dart';
-import 'pull_request_status.dart';
-import 'session_card_statistics.dart';
+import 'pull_request_rows.dart';
 import 'session_card_layout.dart';
 import 'session_card_rows.dart';
 import 'session_card_settings.dart';
+import 'session_card_statistics.dart';
 
-/// The session card's rows, in T3 Code's order, shrunk to the space they have: the Version
-/// Control rows, then the session statistics and the context window below a divider. A row is left
-/// out when Liquid has nothing for it, and the Git action row leaves a compact card as T3 Code's
-/// does.
+/// The session card's rows, in T3 Code's order, shrunk to the space they have: the workspace, the
+/// Version Control rows, then the context window and the session statistics below a divider. A row
+/// is left out when Liquid has nothing for it, and the Git action row leaves a compact card as T3
+/// Code's does.
 class SessionCard extends StatefulWidget {
   const SessionCard({
     super.key,
     required this.state,
-    required this.device,
     required this.settings,
     required this.onChanges,
     required this.beside,
@@ -34,9 +34,10 @@ class SessionCard extends StatefulWidget {
   });
 
   final SessionState state;
-  final String device;
   final SessionCardSettingsController settings;
-  final VoidCallback onChanges;
+
+  /// Opens the Diff panel with the scope the Changes row names.
+  final ValueChanged<DiffScope> onChanges;
 
   /// Whether the card sits beside the chat rather than over it as a popover.
   final bool beside;
@@ -62,28 +63,6 @@ class _SessionCardState extends State<SessionCard> {
   void dispose() {
     _menuFirst.dispose();
     super.dispose();
-  }
-
-  /// What changes the rows shown; one listenable, so a rebuild does not subscribe again.
-  late Listenable _changes = _changesOf(widget);
-
-  static Listenable _changesOf(SessionCard widget) => Listenable.merge([
-    widget.settings,
-    widget.state.git.status,
-    widget.state.git.problem,
-    widget.state.git.loaded,
-    widget.state.git.progress,
-    widget.state.pulls.current,
-    widget.state.statistics,
-    widget.state.contextWindow,
-  ]);
-
-  @override
-  void didUpdateWidget(SessionCard old) {
-    super.didUpdateWidget(old);
-    if (old.state != widget.state || old.settings != widget.settings) {
-      _changes = _changesOf(widget);
-    }
   }
 
   /// The content's height at each density, measured for the rows named by `_measuredFor`.
@@ -124,8 +103,24 @@ class _SessionCardState extends State<SessionCard> {
             clipBehavior: Clip.antiAlias,
             child: LayoutBuilder(
               builder: (context, box) => ListenableBuilder(
-                listenable: _changes,
-                builder: (context, _) => _content(context, box.maxHeight),
+                listenable: widget.state.git,
+                builder: (context, _) {
+                  final git = widget.state.git.value;
+                  return ListenableBuilder(
+                    listenable: Listenable.merge([
+                      widget.settings,
+                      widget.state.recent,
+                      widget.state.turns,
+                      widget.state.statistics,
+                      widget.state.status,
+                      widget.state.contextWindow,
+                      git.status,
+                      git.problem,
+                      git.running,
+                    ]),
+                    builder: (context, _) => _content(context, box.maxHeight),
+                  );
+                },
               ),
             ),
           ),
@@ -137,17 +132,18 @@ class _SessionCardState extends State<SessionCard> {
   Widget _content(BuildContext context, double maxHeight) {
     final state = widget.state;
     final shown = widget.settings.value;
-    final status = state.git.status.value;
-    final problem = state.git.problem.value;
+    final git = state.git.value;
+    final status = git.status.value;
+    final problem = git.problem.value;
+    final hasWorkspace =
+        shown.shows(CardItem.workspace) && state.session != null;
     final hasBranch =
         shown.shows(CardItem.branch) && (status != null || problem != null);
-    final hasPull =
-        shown.shows(CardItem.branch) && state.pulls.current.value != null;
-    final hasGit =
-        shown.shows(CardItem.gitActions) &&
-        state.git.loaded.value &&
-        problem == null;
-    final hasChanges = shown.shows(CardItem.changes) && status != null;
+    final hasPull = shown.shows(CardItem.branch) && status != null;
+    final hasGit = shown.shows(CardItem.gitActions) && status != null;
+    // The Changes row names the uncommitted changes only; it is left out while there are none.
+    final uncommitted = status?.changes ?? const [];
+    final hasChanges = shown.shows(CardItem.changes) && uncommitted.isNotEmpty;
     final window = shown.shows(CardItem.context)
         ? state.contextWindow.value
         : null;
@@ -155,7 +151,8 @@ class _SessionCardState extends State<SessionCard> {
     final hasUsage = hasStatistics && state.statistics.value != null;
     // Measurements hold only while the same rows show.
     final signature =
-        '$hasBranch $hasPull $hasGit $hasChanges ${window != null} $hasUsage';
+        '$hasWorkspace $hasBranch $hasPull $hasGit $hasChanges '
+        '${window != null} $hasUsage';
     final measured = _measuredFor == signature
         ? _heights
         : const <CardDensity, double>{};
@@ -167,10 +164,10 @@ class _SessionCardState extends State<SessionCard> {
     _measure(density, signature);
     // T3 Code keeps the Git action row out of a compact card unless an action runs.
     final showGit =
-        hasGit &&
-        (density == CardDensity.full || state.git.progress.value != null);
+        hasGit && (density == CardDensity.full || git.running.value != null);
     // A card with no row left to show keeps one row that opens the rows menu, to refill it.
     final anyRow =
+        hasWorkspace ||
         hasBranch ||
         hasPull ||
         hasGit ||
@@ -199,15 +196,15 @@ class _SessionCardState extends State<SessionCard> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                _Section(rows: [if (hasWorkspace) _WorkspaceRow(state: state)]),
                 _Section(
+                  divided: hasWorkspace,
                   rows: [
                     if (hasBranch) BranchRow(state: state),
-                    if (hasPull)
-                      PullRequestRow(state: state, device: widget.device),
-                    if (showGit)
-                      GitActions(state: state, device: widget.device),
-                    if (hasChanges)
-                      _ChangesRow(state: state, onTap: widget.onChanges),
+                    if (hasPull) PullRequestRows(state: state),
+                    if (showGit) GitActionsControl(state: state),
+                    if (status case final status? when hasChanges)
+                      _ChangesRow(status: status, onTap: widget.onChanges),
                     if (!anyRow) _ChooseRow(onOpen: _openMenuFrom),
                   ],
                 ),
@@ -397,6 +394,50 @@ class _Section extends StatelessWidget {
   }
 }
 
+/// The workspace row: the checkout the open session works in, as T3 Code's workspace section names
+/// it.
+class _WorkspaceRow extends StatelessWidget {
+  const _WorkspaceRow({required this.state});
+
+  final SessionState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return ValueListenableBuilder(
+      valueListenable: state.recent,
+      builder: (context, threads, _) {
+        final worktree = threads
+            .where((thread) => thread.id == state.session?.id)
+            .firstOrNull
+            ?.worktree;
+        // T3 names a worktree by its folder, and a checkout without one as the local checkout.
+        final folder = worktree
+            ?.split('/')
+            .where((part) => part.isNotEmpty)
+            .lastOrNull;
+        return CardRow(
+          key: const Key('workspace-row'),
+          children: [
+            Icon(
+              folder == null ? LucideIcons.folder : LucideIcons.gitBranch,
+              size: 16,
+              color: ws.textFaint,
+            ),
+            Flexible(
+              child: Text(
+                folder ?? 'Local checkout',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 /// The session statistics rows, with the Statistics row that opens the panel. The rows wait for the
 /// first read of the statistics; `divided` is false when the context window above draws the
 /// divider.
@@ -408,18 +449,17 @@ class _StatisticsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: Listenable.merge([state.statistics, state.status]),
+    listenable: Listenable.merge([state.statistics, state.status, state.turns]),
     builder: (context, _) {
       final ws = context.ws;
       final stored = state.statistics.value;
-      final running = state.turnRuns;
       return _Section(
         divided: divided,
         rows: [
           if (stored != null)
             ...sessionStatisticsRows(
               context,
-              SessionStatistics(stored, running: running),
+              SessionStatistics(stored, running: turnRuns(state)),
             ),
           // The Statistics row opens the panel, and names the key that opens it.
           CardRow(
@@ -455,53 +495,41 @@ class _ContextWindow extends StatelessWidget {
       _Section(divided: true, rows: [ContextRow(window: window)]);
 }
 
-/// The Changes row: the latest finished turn's lines, which opens the Diff panel.
+/// The Changes row: the uncommitted changes and their lines. Its tap opens the Diff panel at them.
 class _ChangesRow extends StatelessWidget {
-  const _ChangesRow({required this.state, required this.onTap});
+  const _ChangesRow({required this.status, required this.onTap});
 
-  final SessionState state;
-  final VoidCallback onTap;
+  final BridgeGitStatus status;
+  final ValueChanged<DiffScope> onTap;
 
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    final small = TextStyle(
-      fontSize: WsMetrics.fsSmall,
-      fontWeight: WsMetrics.fwRegular,
-    );
-    return ValueListenableBuilder(
-      valueListenable: state.turns,
-      builder: (context, turns, _) {
-        final latest = finished(turns).lastOrNull;
-        final numbers = monoStyle(context).copyWith(
-          fontSize: WsMetrics.fsSmall,
-          fontWeight: WsMetrics.fwRegular,
-        );
-        return CardRow(
-          key: const Key('changes-row'),
-          onTap: onTap,
-          children: [
-            Icon(LucideIcons.fileDiff, size: 16, color: ws.textFaint),
-            const Text('Changes'),
-            Flexible(
-              child: Text(
-                'latest turn',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: small.copyWith(color: ws.textMuted),
-              ),
+    final added = status.changes.fold(0, (sum, file) => sum + file.added);
+    final removed = status.changes.fold(0, (sum, file) => sum + file.removed);
+    final numbers = monoStyle(context)
+        .copyWith(fontSize: WsMetrics.fsSmall, fontWeight: WsMetrics.fwRegular);
+    return CardRow(
+      key: const Key('changes-row'),
+      onTap: () => onTap(const UncommittedChanges()),
+      children: [
+        Icon(LucideIcons.fileDiff, size: 16, color: ws.textFaint),
+        const Text('Changes'),
+        Flexible(
+          child: Text(
+            'Uncommitted',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: WsMetrics.fsSmall,
+              fontWeight: WsMetrics.fwRegular,
+              color: ws.textMuted,
             ),
-            Text(
-              '+${latest?.added ?? 0}',
-              style: numbers.copyWith(color: ws.success),
-            ),
-            Text(
-              '−${latest?.removed ?? 0}',
-              style: numbers.copyWith(color: ws.danger),
-            ),
-          ],
-        );
-      },
+          ),
+        ),
+        Text('+$added', style: numbers.copyWith(color: ws.success)),
+        Text('−$removed', style: numbers.copyWith(color: ws.danger)),
+      ],
     );
   }
 }

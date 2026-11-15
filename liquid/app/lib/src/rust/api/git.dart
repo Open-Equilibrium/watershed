@@ -5,555 +5,105 @@
 
 import '../frb_generated.dart';
 import 'events.dart';
-import 'history.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `count`, `failed`, `of`, `of`, `outcome`, `running_agents`, `text`, `transfer_outcome`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
+// These functions are ignored because they are not marked as `pub`: `new`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These functions are ignored (category: IgnoreBecauseExplicitAttribute): `run_with`, `watch_with`
 
-/// A local or remote branch.
-class BridgeBranch {
-  /// Its name, such as `main` or `origin/release`, to switch to it.
-  final String name;
-
-  /// Its name as Liquid shows it, with characters that could hide or reorder it written out.
-  final String shown;
-
-  /// Whether it is a remote-tracking branch.
-  final bool remote;
-
-  /// When its last commit was made, in Unix milliseconds.
-  final PlatformInt64 committedMs;
-
-  /// Whether it is checked out.
-  final bool current;
-
-  /// Whether changes were left on it in a stash.
-  final bool stashed;
-
-  const BridgeBranch({
-    required this.name,
-    required this.shown,
-    required this.remote,
-    required this.committedMs,
-    required this.current,
-    required this.stashed,
+// Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<GitCheckout>>
+abstract class GitCheckout implements RustOpaqueInterface {
+  /// Checks a pull request out here, or with `worktree` in its own worktree.
+  Future<BridgeCheckedOut> checkOutPullRequest({
+    required String reference,
+    required bool worktree,
   });
 
-  @override
-  int get hashCode =>
-      name.hashCode ^
-      shown.hashCode ^
-      remote.hashCode ^
-      committedMs.hashCode ^
-      current.hashCode ^
-      stashed.hashCode;
+  /// Creates the branch `name` here and checks it out.
+  Future<void> createBranch({required String name});
 
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeBranch &&
-          runtimeType == other.runtimeType &&
-          name == other.name &&
-          shown == other.shown &&
-          remote == other.remote &&
-          committedMs == other.committedMs &&
-          current == other.current &&
-          stashed == other.stashed;
-}
+  /// Initializes Git in the folder.
+  Future<void> init();
 
-/// The checkout's branches, and the agents running there, which allow no switch.
-class BridgeBranches {
-  /// Local branches, then remote ones no local branch tracks, each most recent first.
-  final List<BridgeBranch> branches;
-
-  /// The agents running in the checkout.
-  final List<BridgeRunningAgent> running;
-
-  const BridgeBranches({required this.branches, required this.running});
-
-  @override
-  int get hashCode => branches.hashCode ^ running.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeBranches &&
-          runtimeType == other.runtimeType &&
-          branches == other.branches &&
-          running == other.running;
-}
-
-/// Commit details, including the branch created when the subsequent commit failed.
-class BridgeCommit {
-  /// The branch now checked out, as Liquid shows names.
-  final String branch;
-
-  /// The committed subject; none after a failed read or when only the branch was created.
-  final String? subject;
-
-  /// Whole files committed; zero when only the branch was created.
-  final PlatformInt64 count;
-
-  const BridgeCommit({required this.branch, this.subject, required this.count});
-
-  @override
-  int get hashCode => branch.hashCode ^ subject.hashCode ^ count.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeCommit &&
-          runtimeType == other.runtimeType &&
-          branch == other.branch &&
-          subject == other.subject &&
-          count == other.count;
-}
-
-/// One whole file and which session turns changed it.
-class BridgeCommitFile {
-  /// The whole-file status and line counts.
-  final BridgeFileChange change;
-
-  /// The attribution lookup completed within its bounds.
-  final bool attributionAvailable;
-
-  /// Session turns that changed it.
-  final Int64List turns;
-
-  /// A checkpoint gap or the current checkout also changed it.
-  final bool edited;
-
-  /// The user staged only part of it.
-  final bool stagedPartly;
-
-  const BridgeCommitFile({
-    required this.change,
-    required this.attributionAvailable,
-    required this.turns,
-    required this.edited,
-    required this.stagedPartly,
+  /// Publishes the repository as `repository` (`owner/name`) on `provider`.
+  Future<void> publish({
+    required String provider,
+    required String repository,
+    required bool public,
   });
 
-  @override
-  int get hashCode =>
-      change.hashCode ^
-      attributionAvailable.hashCode ^
-      turns.hashCode ^
-      edited.hashCode ^
-      stagedPartly.hashCode;
+  /// Pulls; returns T3's result title and description.
+  Future<List<String>> pull();
 
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeCommitFile &&
-          runtimeType == other.runtimeType &&
-          change == other.change &&
-          attributionAvailable == other.attributionAvailable &&
-          turns == other.turns &&
-          edited == other.edited &&
-          stagedPartly == other.stagedPartly;
-}
-
-/// The commit dialog's files and running-agent refusal.
-class BridgeCommitPlan {
-  /// The captured tree identity to confirm when committing these files.
-  final String snapshot;
-
-  /// Every uncommitted whole file.
-  final List<BridgeCommitFile> files;
-
-  /// The agents preventing a commit.
-  final List<BridgeRunningAgent> running;
-
-  const BridgeCommitPlan({
-    required this.snapshot,
-    required this.files,
-    required this.running,
+  /// Refs whose names contain `query`.
+  Future<BridgeRefs> refs({
+    required String query,
+    required PlatformInt64 cursor,
+    required PlatformInt64 limit,
   });
 
-  @override
-  int get hashCode => snapshot.hashCode ^ files.hashCode ^ running.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeCommitPlan &&
-          runtimeType == other.runtimeType &&
-          snapshot == other.snapshot &&
-          files == other.files &&
-          running == other.running;
-}
-
-/// What the head adds to the base on GitHub.
-class BridgeComparison {
-  final PlatformInt64 commits;
-  final PlatformInt64 files;
-  final PlatformInt64 added;
-  final PlatformInt64 removed;
-
-  /// GitHub's comparison page.
-  final String url;
-
-  /// The commit head and base share, from which the Chat's model reads the commits.
-  final String mergeBase;
-
-  const BridgeComparison({
-    required this.commits,
-    required this.files,
-    required this.added,
-    required this.removed,
-    required this.url,
-    required this.mergeBase,
+  /// Resolves a pull request reference: a URL, a checkout command, `123` or `#123`.
+  Future<BridgeResolvedPullRequest> resolvePullRequest({
+    required String reference,
   });
 
-  @override
-  int get hashCode =>
-      commits.hashCode ^
-      files.hashCode ^
-      added.hashCode ^
-      removed.hashCode ^
-      url.hashCode ^
-      mergeBase.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeComparison &&
-          runtimeType == other.runtimeType &&
-          commits == other.commits &&
-          files == other.files &&
-          added == other.added &&
-          removed == other.removed &&
-          url == other.url &&
-          mergeBase == other.mergeBase;
-}
-
-/// How a Git write the user asked for ended.
-class BridgeGitOutcome {
-  final BridgeGitOutcomeKind kind;
-
-  /// The files it names, as Liquid shows file names.
-  final List<String> files;
-
-  /// The agents running in the checkout.
-  final List<BridgeRunningAgent> running;
-
-  /// Failure or post-commit inspection details, with unsafe characters written out.
-  final String detail;
-
-  /// A completed commit, or a created branch when its commit failed.
-  final BridgeCommit? commit;
-
-  /// The destination and counts captured for this push or pull.
-  final BridgeGitTransfer? transfer;
-
-  /// For a created branch, the branch it was created from, exactly as Git names it, to record
-  /// and look up; never shown. None when HEAD was detached.
-  final String? createdFrom;
-
-  const BridgeGitOutcome({
-    required this.kind,
-    required this.files,
-    required this.running,
-    required this.detail,
-    this.commit,
-    this.transfer,
-    this.createdFrom,
+  /// Runs a stacked action, streaming its progress until it finishes or fails.
+  Stream<BridgeGitProgress> run({
+    required BridgeGitAction action,
+    String? message,
+    List<String>? files,
+    required bool featureBranch,
   });
 
-  @override
-  int get hashCode =>
-      kind.hashCode ^
-      files.hashCode ^
-      running.hashCode ^
-      detail.hashCode ^
-      commit.hashCode ^
-      transfer.hashCode ^
-      createdFrom.hashCode;
+  /// The checkout's status now.
+  Future<BridgeGitStatus> status();
 
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeGitOutcome &&
-          runtimeType == other.runtimeType &&
-          kind == other.kind &&
-          files == other.files &&
-          running == other.running &&
-          detail == other.detail &&
-          commit == other.commit &&
-          transfer == other.transfer &&
-          createdFrom == other.createdFrom;
-}
+  /// Checks out `name` as Git does.
+  Future<void> switch_({required String name});
 
-/// How a Git write the user asked for ended, when not with an error to show as it is.
-enum BridgeGitOutcomeKind {
-  /// It was done.
-  done,
-
-  /// Git refused, as it would overwrite the uncommitted changes in `files`; nothing changed.
-  wouldOverwrite,
-
-  /// The stashed changes were restored, but `files` conflict; Git kept the stash.
-  conflicts,
-
-  /// The agents in `running` run in the checkout, so nothing changed.
-  agentRunning,
-
-  /// The checkout has uncommitted changes, so nothing was restored.
-  uncommitted,
-
-  /// The branch has new commits since the changes were left, so nothing was restored.
-  branchMoved,
-
-  /// Git cannot stash the new commits of the submodules `files`, so nothing changed.
-  submoduleChanged,
-
-  /// Git switched, but a hook it ran after failed with `detail`.
-  hookFailed,
-
-  /// Git refused the commit; nothing was committed.
-  commitFailed,
-
-  /// Committed, but a hook left changes uncommitted.
-  hookChanged,
-
-  /// Created and switched to a new branch, but nothing was committed.
-  commitBranchFailed,
-
-  /// Liquid cannot commit while a merge is in progress.
-  mergeInProgress,
-
-  /// A fresh approval is required; transfer carries destination, counts and exact identities.
-  pushDefault,
-
-  /// The upstream has commits the branch lacks; nothing was pushed or pulled.
-  diverged,
-
-  /// The host's Git login failed before transfer; transfer names the remote.
-  signInFailed,
-
-  /// A fetch failed before any push or merge; transfer names its remote.
-  fetchFailed,
-
-  /// A pre-check failed; no push or merge ran.
-  preflightFailed,
-
-  /// Git failed; its own output describes any effects it completed.
-  transferFailed,
-}
-
-/// The checkout's branch and how it stands against its upstream.
-class BridgeGitStatus {
-  /// The branch checked out, or none when HEAD names a commit.
-  final String? branch;
-
-  /// `branch` exactly as Git names it, to record and look up; never shown.
-  final String? rawBranch;
-
-  /// The commit HEAD names, shortened; none before the first commit.
-  final String? commit;
-
-  /// The upstream the branch tracks, such as `origin/main`.
-  final String? upstream;
-
-  /// The upstream's remote, or else origin or the only configured remote.
-  final String? remote;
-  final bool hasRemotes;
-  final bool gone;
-
-  /// Commits the branch has that its upstream lacks.
-  final PlatformInt64 ahead;
-
-  /// Commits the upstream has that the branch lacks, as last fetched.
-  final PlatformInt64 behind;
-
-  /// Files that differ from the last commit.
-  final PlatformInt64 changed;
-
-  /// The stash belonging to this status's branch and commit.
-  final BridgeStash? stash;
-
-  /// The branch advertised as the remote default.
-  final String? defaultBranch;
-
-  /// A merge is in progress.
-  final bool merging;
-
-  /// Conflicted files, as Liquid shows names.
-  final List<String> conflicts;
-
-  /// The Git directory the repository's worktrees share, which identifies it; never shown.
-  final String repository;
-
-  const BridgeGitStatus({
-    this.branch,
-    this.rawBranch,
-    this.commit,
-    this.upstream,
-    this.remote,
-    required this.hasRemotes,
-    required this.gone,
-    required this.ahead,
-    required this.behind,
-    required this.changed,
-    this.stash,
-    this.defaultBranch,
-    required this.merging,
-    required this.conflicts,
-    required this.repository,
+  /// The uncommitted files against `HEAD`.
+  Future<List<BridgeFileChange>> uncommittedChanges({
+    required bool hideWhitespace,
   });
 
-  @override
-  int get hashCode =>
-      branch.hashCode ^
-      rawBranch.hashCode ^
-      commit.hashCode ^
-      upstream.hashCode ^
-      remote.hashCode ^
-      hasRemotes.hashCode ^
-      gone.hashCode ^
-      ahead.hashCode ^
-      behind.hashCode ^
-      changed.hashCode ^
-      stash.hashCode ^
-      defaultBranch.hashCode ^
-      merging.hashCode ^
-      conflicts.hashCode ^
-      repository.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeGitStatus &&
-          runtimeType == other.runtimeType &&
-          branch == other.branch &&
-          rawBranch == other.rawBranch &&
-          commit == other.commit &&
-          upstream == other.upstream &&
-          remote == other.remote &&
-          hasRemotes == other.hasRemotes &&
-          gone == other.gone &&
-          ahead == other.ahead &&
-          behind == other.behind &&
-          changed == other.changed &&
-          stash == other.stash &&
-          defaultBranch == other.defaultBranch &&
-          merging == other.merging &&
-          conflicts == other.conflicts &&
-          repository == other.repository;
-}
-
-/// A push or pull's display names, captured counts and opaque approval identities.
-class BridgeGitTransfer {
-  final String branch;
-  final String remote;
-  final String upstream;
-  final PlatformInt64 ahead;
-  final PlatformInt64 behind;
-  final bool firstPush;
-  final bool gone;
-
-  /// The destination branch, safe to display.
-  final String destination;
-
-  /// Opaque approval identities; return unchanged, never display these strings.
-  final BridgePushConfirmation confirmation;
-
-  const BridgeGitTransfer({
-    required this.branch,
-    required this.remote,
-    required this.upstream,
-    required this.ahead,
-    required this.behind,
-    required this.firstPush,
-    required this.gone,
-    required this.destination,
-    required this.confirmation,
+  /// One uncommitted file's unified diff against `HEAD`.
+  Future<String> uncommittedPatch({
+    required String path,
+    required bool hideWhitespace,
   });
 
-  @override
-  int get hashCode =>
-      branch.hashCode ^
-      remote.hashCode ^
-      upstream.hashCode ^
-      ahead.hashCode ^
-      behind.hashCode ^
-      firstPush.hashCode ^
-      gone.hashCode ^
-      destination.hashCode ^
-      confirmation.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeGitTransfer &&
-          runtimeType == other.runtimeType &&
-          branch == other.branch &&
-          remote == other.remote &&
-          upstream == other.upstream &&
-          ahead == other.ahead &&
-          behind == other.behind &&
-          firstPush == other.firstPush &&
-          gone == other.gone &&
-          destination == other.destination &&
-          confirmation == other.confirmation;
+  /// Streams the status, then each change, including T3's background fetch.
+  Stream<BridgeGitStatus> watch();
 }
 
-/// A name to send back unchanged, and as Liquid shows it.
-class BridgeName {
-  final String name;
-  final String shown;
-
-  const BridgeName({required this.name, required this.shown});
-
-  @override
-  int get hashCode => name.hashCode ^ shown.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeName &&
-          runtimeType == other.runtimeType &&
-          name == other.name &&
-          shown == other.shown;
-}
-
-/// A pull request for the PR chip and its summary, as Liquid shows its text.
-class BridgePullRequest {
+/// The branch's pull request.
+class BridgeBranchPullRequest {
+  /// Its number.
   final PlatformInt64 number;
+
+  /// Its title, with hiding characters written out.
   final String title;
 
-  /// Its page on GitHub, to open in the browser.
+  /// Its web address.
   final String url;
-  final BridgePullRequestState state;
 
-  /// The target repository as `owner/name`.
-  final String repository;
+  /// `open`, `closed` or `merged`.
+  final String state;
+
+  /// Whether it is a draft.
+  final bool draft;
+
+  /// The branch it merges into.
   final String base;
 
-  /// The branch, or `owner:branch` from a fork.
-  final String head;
-
-  /// Checks by outcome; all zero when GitHub reports none.
-  final PlatformInt64 checksPassed;
-  final PlatformInt64 checksFailed;
-  final PlatformInt64 checksPending;
-  final BridgeReviewDecision? review;
-
-  const BridgePullRequest({
+  const BridgeBranchPullRequest({
     required this.number,
     required this.title,
     required this.url,
     required this.state,
-    required this.repository,
+    required this.draft,
     required this.base,
-    required this.head,
-    required this.checksPassed,
-    required this.checksFailed,
-    required this.checksPending,
-    this.review,
   });
 
   @override
@@ -562,455 +112,324 @@ class BridgePullRequest {
       title.hashCode ^
       url.hashCode ^
       state.hashCode ^
-      repository.hashCode ^
-      base.hashCode ^
-      head.hashCode ^
-      checksPassed.hashCode ^
-      checksFailed.hashCode ^
-      checksPending.hashCode ^
-      review.hashCode;
+      draft.hashCode ^
+      base.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgePullRequest &&
+      other is BridgeBranchPullRequest &&
           runtimeType == other.runtimeType &&
           number == other.number &&
           title == other.title &&
           url == other.url &&
           state == other.state &&
-          repository == other.repository &&
-          base == other.base &&
-          head == other.head &&
-          checksPassed == other.checksPassed &&
-          checksFailed == other.checksFailed &&
-          checksPending == other.checksPending &&
-          review == other.review;
+          draft == other.draft &&
+          base == other.base;
 }
 
-/// The reviewed pull request to create.
-class BridgePullRequestDraft {
-  final BridgePullRequestHead identity;
-  final String target;
-  final String base;
-  final String title;
-  final String body;
-  final bool draft;
-
-  const BridgePullRequestDraft({
-    required this.identity,
-    required this.target,
-    required this.base,
-    required this.title,
-    required this.body,
-    required this.draft,
-  });
-
-  @override
-  int get hashCode =>
-      identity.hashCode ^
-      target.hashCode ^
-      base.hashCode ^
-      title.hashCode ^
-      body.hashCode ^
-      draft.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgePullRequestDraft &&
-          runtimeType == other.runtimeType &&
-          identity == other.identity &&
-          target == other.target &&
-          base == other.base &&
-          title == other.title &&
-          body == other.body &&
-          draft == other.draft;
-}
-
-/// The identities a plan showed; return them unchanged when creating. `head_repository` is an
-/// `owner/name` GitHub validated, of letters, digits, `-`, `_` and `.`, so it shows as it is;
-/// never display `head_branch`, whose shown form is the plan's `head`.
-class BridgePullRequestHead {
-  final String host;
-  final String headRepository;
-  final String headBranch;
-  final String headCommit;
-
-  const BridgePullRequestHead({
-    required this.host,
-    required this.headRepository,
-    required this.headBranch,
-    required this.headCommit,
-  });
-
-  @override
-  int get hashCode =>
-      host.hashCode ^
-      headRepository.hashCode ^
-      headBranch.hashCode ^
-      headCommit.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgePullRequestHead &&
-          runtimeType == other.runtimeType &&
-          host == other.host &&
-          headRepository == other.headRepository &&
-          headBranch == other.headBranch &&
-          headCommit == other.headCommit;
-}
-
-/// How a pull request plan, creation or lookup ended, with what it names.
-class BridgePullRequestOutcome {
-  final BridgePullRequestOutcomeKind kind;
-  final BridgePullRequestPlan? plan;
-  final BridgePullRequest? pullRequest;
-
-  /// The target's branches to choose a base from, and whether GitHub may list more.
-  final List<BridgeName> bases;
-  final bool moreBases;
-  final String host;
-  final String remote;
+/// A checked-out pull request's branch and worktree.
+class BridgeCheckedOut {
+  /// The branch.
   final String branch;
-  final String upstream;
-  final String repository;
-  final PlatformInt64 ahead;
-  final PlatformInt64 behind;
-  final bool first;
 
-  /// A page of letters, digits, `-`, `_`, `.` and `/` on a validated host, to open in the
-  /// browser.
-  final String page;
+  /// Its worktree, when checked out in one.
+  final String? worktree;
 
-  /// gh's or Git's message, with credentials removed and hidden characters written out.
-  final String detail;
+  const BridgeCheckedOut({required this.branch, this.worktree});
 
-  const BridgePullRequestOutcome({
+  @override
+  int get hashCode => branch.hashCode ^ worktree.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeCheckedOut &&
+          runtimeType == other.runtimeType &&
+          branch == other.branch &&
+          worktree == other.worktree;
+}
+
+/// T3's stacked Git actions.
+enum BridgeGitAction {
+  /// Commit.
+  commit,
+
+  /// Push.
+  push,
+
+  /// Create a pull request.
+  createPullRequest,
+
+  /// Commit and push.
+  commitPush,
+
+  /// Commit, push and create a pull request.
+  commitPushPullRequest,
+}
+
+/// One progress report of a running action.
+class BridgeGitProgress {
+  /// What it reports.
+  final BridgeGitProgressKind kind;
+
+  /// Its text.
+  final String text;
+
+  /// A finished action's description.
+  final String? description;
+
+  /// The pull request a finished action created or opened.
+  final String? pullRequest;
+
+  const BridgeGitProgress({
     required this.kind,
-    this.plan,
+    required this.text,
+    this.description,
     this.pullRequest,
-    required this.bases,
-    required this.moreBases,
-    required this.host,
-    required this.remote,
-    required this.branch,
-    required this.upstream,
-    required this.repository,
-    required this.ahead,
-    required this.behind,
-    required this.first,
-    required this.page,
-    required this.detail,
   });
 
   @override
   int get hashCode =>
       kind.hashCode ^
-      plan.hashCode ^
-      pullRequest.hashCode ^
-      bases.hashCode ^
-      moreBases.hashCode ^
-      host.hashCode ^
-      remote.hashCode ^
-      branch.hashCode ^
-      upstream.hashCode ^
-      repository.hashCode ^
-      ahead.hashCode ^
-      behind.hashCode ^
-      first.hashCode ^
-      page.hashCode ^
-      detail.hashCode;
+      text.hashCode ^
+      description.hashCode ^
+      pullRequest.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgePullRequestOutcome &&
+      other is BridgeGitProgress &&
           runtimeType == other.runtimeType &&
           kind == other.kind &&
-          plan == other.plan &&
-          pullRequest == other.pullRequest &&
-          bases == other.bases &&
-          moreBases == other.moreBases &&
-          host == other.host &&
-          remote == other.remote &&
-          branch == other.branch &&
-          upstream == other.upstream &&
+          text == other.text &&
+          description == other.description &&
+          pullRequest == other.pullRequest;
+}
+
+/// What a running action reports.
+enum BridgeGitProgressKind {
+  /// A phase started; `text` is T3's label.
+  phase,
+
+  /// A Git hook started; `text` is its name.
+  hook,
+
+  /// `text` is a hook's latest line.
+  output,
+
+  /// The action finished; `text` is T3's result title.
+  finished,
+
+  /// The action failed; `text` says why.
+  failed,
+}
+
+/// A checkout's state.
+class BridgeGitStatus {
+  /// Whether the folder is in a repository.
+  final bool repository;
+
+  /// The checked-out branch; `None` when detached.
+  final String? branch;
+
+  /// Whether it is the default branch.
+  final bool defaultBranch;
+
+  /// Whether the repository has its primary remote.
+  final bool remote;
+
+  /// The hosting provider's name, such as GitHub.
+  final String? provider;
+
+  /// Uncommitted files.
+  final List<BridgeFileChange> changes;
+
+  /// Whether the branch has an upstream.
+  final bool upstream;
+
+  /// Commits the upstream lacks.
+  final PlatformInt64 ahead;
+
+  /// Commits the branch lacks.
+  final PlatformInt64 behind;
+
+  /// Commits the default branch lacks, when known.
+  final PlatformInt64? aheadOfDefault;
+
+  /// The branch's pull request.
+  final BridgeBranchPullRequest? pullRequest;
+
+  const BridgeGitStatus({
+    required this.repository,
+    this.branch,
+    required this.defaultBranch,
+    required this.remote,
+    this.provider,
+    required this.changes,
+    required this.upstream,
+    required this.ahead,
+    required this.behind,
+    this.aheadOfDefault,
+    this.pullRequest,
+  });
+
+  @override
+  int get hashCode =>
+      repository.hashCode ^
+      branch.hashCode ^
+      defaultBranch.hashCode ^
+      remote.hashCode ^
+      provider.hashCode ^
+      changes.hashCode ^
+      upstream.hashCode ^
+      ahead.hashCode ^
+      behind.hashCode ^
+      aheadOfDefault.hashCode ^
+      pullRequest.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeGitStatus &&
+          runtimeType == other.runtimeType &&
           repository == other.repository &&
+          branch == other.branch &&
+          defaultBranch == other.defaultBranch &&
+          remote == other.remote &&
+          provider == other.provider &&
+          changes == other.changes &&
+          upstream == other.upstream &&
           ahead == other.ahead &&
           behind == other.behind &&
-          first == other.first &&
-          page == other.page &&
-          detail == other.detail;
+          aheadOfDefault == other.aheadOfDefault &&
+          pullRequest == other.pullRequest;
 }
 
-/// How a pull request plan, creation or lookup ended.
-enum BridgePullRequestOutcomeKind {
-  /// Planned, created or read.
-  done,
+/// One ref the branch picker lists.
+class BridgeRef {
+  /// Its name.
+  final String name;
 
-  /// The head, base or target changed; `plan` holds the fresh one to review.
-  changed,
+  /// Its name with hiding characters written out.
+  final String shown;
 
-  /// `pull_request` is already open from this head; nothing was created.
-  exists,
+  /// The remote of a remote ref.
+  final String? remote;
 
-  /// HEAD names no branch.
-  noBranch,
-
-  /// The branch has no commit.
-  noCommit,
-
-  /// A merge is in progress.
-  merging,
-
-  /// The repository has no remote.
-  noRemote,
-
-  /// Several remotes and no upstream or origin.
-  ambiguousRemote,
-
-  /// The remote fetches from and pushes to different or several repositories.
-  destinations,
-
-  /// `remote` is not on GitHub or a GitHub Enterprise host gh has a login for; `host` names
-  /// its host, empty for a local path, and `page` the repository's HTTPS page, if known.
-  notGitHub,
-
-  /// `branch` has `ahead` commits not on `remote`, or was never pushed when `first`.
-  needsPush,
-
-  /// `upstream` has `behind` commits `branch` lacks.
-  behind,
-
-  /// GitHub's `branch` is at another commit than the checkout's.
-  headMoved,
-
-  /// gh could not run on the host.
-  ghMissing,
-
-  /// gh is too old for the commands Liquid runs.
-  ghOutdated,
-
-  /// gh has no working login for `host`.
-  signIn,
-
-  /// gh cannot access `repository`.
-  noAccess,
-
-  /// `host` could not be reached or limited the rate.
-  unreachable,
-
-  /// gh failed; `detail` says how.
-  failed,
-
-  /// GitHub refused the pull request; none was created.
-  notCreated,
-
-  /// GitHub returned no result; a pull request may exist.
-  unknown,
-}
-
-/// The create dialog's pushed head, targets, base and comparison.
-class BridgePullRequestPlan {
-  final BridgePullRequestHead identity;
-
-  /// The GitHub host as Liquid shows it.
-  final String host;
-
-  /// The head as GitHub shows it: the branch, or `owner:branch` from a fork.
-  final String head;
-
-  /// GitHub's parent first for a fork, then the head repository, as validated `owner/name`
-  /// that shows as it is.
-  final List<String> targets;
-
-  /// A fork whose parent GitHub did not name; the user chooses the target.
-  final bool parentUnknown;
-
-  /// The chosen or preselected target, one of `targets`; none while the user must choose.
-  final String? target;
-  final BridgeName? defaultBranch;
-  final BridgeName? base;
-  final BridgeComparison? comparison;
-
-  /// GitHub could not compare the head with the base, though both exist.
-  final bool comparisonFailed;
-
-  /// GitHub has no branch `base` in the target.
-  final bool baseMissing;
-
-  /// An open pull request from this head, shown instead of creating another.
-  final BridgePullRequest? open;
-  final PlatformInt64 uncommitted;
-
-  /// The latest commit's subject and body as Git has them, to fill the editable title and
-  /// description; they are sent only as the user reviewed them.
-  final String subject;
-  final String body;
-
-  const BridgePullRequestPlan({
-    required this.identity,
-    required this.host,
-    required this.head,
-    required this.targets,
-    required this.parentUnknown,
-    this.target,
-    this.defaultBranch,
-    this.base,
-    this.comparison,
-    required this.comparisonFailed,
-    required this.baseMissing,
-    this.open,
-    required this.uncommitted,
-    required this.subject,
-    required this.body,
-  });
-
-  @override
-  int get hashCode =>
-      identity.hashCode ^
-      host.hashCode ^
-      head.hashCode ^
-      targets.hashCode ^
-      parentUnknown.hashCode ^
-      target.hashCode ^
-      defaultBranch.hashCode ^
-      base.hashCode ^
-      comparison.hashCode ^
-      comparisonFailed.hashCode ^
-      baseMissing.hashCode ^
-      open.hashCode ^
-      uncommitted.hashCode ^
-      subject.hashCode ^
-      body.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgePullRequestPlan &&
-          runtimeType == other.runtimeType &&
-          identity == other.identity &&
-          host == other.host &&
-          head == other.head &&
-          targets == other.targets &&
-          parentUnknown == other.parentUnknown &&
-          target == other.target &&
-          defaultBranch == other.defaultBranch &&
-          base == other.base &&
-          comparison == other.comparison &&
-          comparisonFailed == other.comparisonFailed &&
-          baseMissing == other.baseMissing &&
-          open == other.open &&
-          uncommitted == other.uncommitted &&
-          subject == other.subject &&
-          body == other.body;
-}
-
-/// A pull request's state on GitHub.
-enum BridgePullRequestState { open, draft, merged, closed }
-
-/// A pull request's title and description as the Chat's model wrote them, to fill the editable
-/// fields.
-class BridgePullRequestText {
-  final String title;
-  final String body;
-
-  /// The commits the model read about, besides any uncommitted files.
-  final PlatformInt64 commits;
-
-  const BridgePullRequestText({
-    required this.title,
-    required this.body,
-    required this.commits,
-  });
-
-  @override
-  int get hashCode => title.hashCode ^ body.hashCode ^ commits.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgePullRequestText &&
-          runtimeType == other.runtimeType &&
-          title == other.title &&
-          body == other.body &&
-          commits == other.commits;
-}
-
-/// Exact identities returned unchanged by the default-branch confirmation dialog.
-class BridgePushConfirmation {
-  final String branch;
-  final String remote;
-  final String reference;
-  final String commit;
-  final String repository;
-
-  const BridgePushConfirmation({
-    required this.branch,
-    required this.remote,
-    required this.reference,
-    required this.commit,
-    required this.repository,
-  });
-
-  @override
-  int get hashCode =>
-      branch.hashCode ^
-      remote.hashCode ^
-      reference.hashCode ^
-      commit.hashCode ^
-      repository.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgePushConfirmation &&
-          runtimeType == other.runtimeType &&
-          branch == other.branch &&
-          remote == other.remote &&
-          reference == other.reference &&
-          commit == other.commit &&
-          repository == other.repository;
-}
-
-/// A pull request's review decision.
-enum BridgeReviewDecision { required_, approved, changesRequested }
-
-/// A branch's stashed changes.
-class BridgeStash {
-  /// The stash commit, which names it to restore or discard it.
-  final String id;
-
-  /// When they were left, in Unix milliseconds.
-  final PlatformInt64 createdMs;
-
-  /// The stashed files, untracked ones as added.
-  final List<BridgeFileChange> files;
-
-  /// Whether the branch is still at the tree the changes were left on, which a restore
-  /// needs.
+  /// Whether it is checked out here.
   final bool current;
 
-  const BridgeStash({
-    required this.id,
-    required this.createdMs,
-    required this.files,
+  /// Whether it is the default branch.
+  final bool default_;
+
+  /// The worktree it is checked out in, if another.
+  final String? worktree;
+
+  const BridgeRef({
+    required this.name,
+    required this.shown,
+    this.remote,
     required this.current,
+    required this.default_,
+    this.worktree,
   });
 
   @override
   int get hashCode =>
-      id.hashCode ^ createdMs.hashCode ^ files.hashCode ^ current.hashCode;
+      name.hashCode ^
+      shown.hashCode ^
+      remote.hashCode ^
+      current.hashCode ^
+      default_.hashCode ^
+      worktree.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgeStash &&
+      other is BridgeRef &&
           runtimeType == other.runtimeType &&
-          id == other.id &&
-          createdMs == other.createdMs &&
-          files == other.files &&
-          current == other.current;
+          name == other.name &&
+          shown == other.shown &&
+          remote == other.remote &&
+          current == other.current &&
+          default_ == other.default_ &&
+          worktree == other.worktree;
+}
+
+/// A page of refs.
+class BridgeRefs {
+  /// The refs.
+  final List<BridgeRef> refs;
+
+  /// The cursor of the next page.
+  final PlatformInt64? next;
+
+  /// How many match.
+  final PlatformInt64 total;
+
+  const BridgeRefs({required this.refs, this.next, required this.total});
+
+  @override
+  int get hashCode => refs.hashCode ^ next.hashCode ^ total.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeRefs &&
+          runtimeType == other.runtimeType &&
+          refs == other.refs &&
+          next == other.next &&
+          total == other.total;
+}
+
+/// A pull request T3 resolved from a reference.
+class BridgeResolvedPullRequest {
+  /// Its number.
+  final PlatformInt64 number;
+
+  /// Its title.
+  final String title;
+
+  /// Its web address.
+  final String url;
+
+  /// The branch it merges into.
+  final String base;
+
+  /// Its branch.
+  final String head;
+
+  /// `open`, `closed` or `merged`.
+  final String state;
+
+  const BridgeResolvedPullRequest({
+    required this.number,
+    required this.title,
+    required this.url,
+    required this.base,
+    required this.head,
+    required this.state,
+  });
+
+  @override
+  int get hashCode =>
+      number.hashCode ^
+      title.hashCode ^
+      url.hashCode ^
+      base.hashCode ^
+      head.hashCode ^
+      state.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeResolvedPullRequest &&
+          runtimeType == other.runtimeType &&
+          number == other.number &&
+          title == other.title &&
+          url == other.url &&
+          base == other.base &&
+          head == other.head &&
+          state == other.state;
 }

@@ -7,98 +7,136 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
-/// How a file changed in a run.
-enum BridgeChangeStatus {
-  /// The file is new.
-  added,
+/// An action the agent asks to run.
+class BridgeApproval {
+  /// T3's kind, such as `command`, `file_change` or `file_read`.
+  final String kind;
 
-  /// The file changed.
-  modified,
+  /// The command, path or other detail.
+  final String prompt;
 
-  /// The file was removed.
-  deleted,
-}
+  /// Why the agent asks.
+  final String? reason;
 
-/// A notification, status entry or widget from an agent extension.
-class BridgeDisplay {
-  /// The extension's status or widget key.
-  final String key;
+  /// The choices, in T3's order.
+  final List<BridgeApprovalOption> options;
 
-  /// The notification level.
-  final BridgeLevel? level;
-
-  /// Widget lines, or `None` when cleared.
-  final List<String>? lines;
-
-  const BridgeDisplay({required this.key, this.level, this.lines});
+  const BridgeApproval({
+    required this.kind,
+    required this.prompt,
+    this.reason,
+    required this.options,
+  });
 
   @override
-  int get hashCode => key.hashCode ^ level.hashCode ^ lines.hashCode;
+  int get hashCode =>
+      kind.hashCode ^ prompt.hashCode ^ reason.hashCode ^ options.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgeDisplay &&
+      other is BridgeApproval &&
           runtimeType == other.runtimeType &&
-          key == other.key &&
-          level == other.level &&
-          lines == other.lines;
+          kind == other.kind &&
+          prompt == other.prompt &&
+          reason == other.reason &&
+          options == other.options;
 }
 
-/// One session event for Dart.
+/// One choice of an approval.
+class BridgeApprovalOption {
+  /// The decision sent back.
+  final String decision;
+
+  /// The label.
+  final String label;
+
+  /// A warning shown with it.
+  final String? warning;
+
+  const BridgeApprovalOption({
+    required this.decision,
+    required this.label,
+    this.warning,
+  });
+
+  @override
+  int get hashCode => decision.hashCode ^ label.hashCode ^ warning.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeApprovalOption &&
+          runtimeType == other.runtimeType &&
+          decision == other.decision &&
+          label == other.label &&
+          warning == other.warning;
+}
+
+/// What a changed file's change is.
+enum BridgeChangeStatus {
+  /// Added.
+  added,
+
+  /// Changed.
+  modified,
+
+  /// Deleted.
+  deleted,
+
+  /// Renamed.
+  renamed,
+}
+
+/// One event, in the thread's stream order.
 class BridgeEvent {
   /// What happened.
   final BridgeEventKind kind;
 
-  /// The item.
+  /// T3's sequence number; a snapshot at this sequence or later already contains the event.
+  final PlatformInt64 sequence;
+
+  /// The turn, for turn and item events.
+  final PlatformInt64? turn;
+
+  /// The item, for item events.
   final BridgeItem? item;
 
-  /// The model request.
-  final BridgeStep? step;
-
-  /// The question.
-  final BridgeRequest? request;
-
-  /// Text whose meaning the kind defines.
+  /// Appended or complete text.
   final String? text;
 
-  /// A notification, status or widget.
-  final BridgeDisplay? display;
+  /// A finished model request's usage.
+  final BridgeUsage? usage;
 
-  /// Whether the agent process exited successfully.
-  final bool? success;
+  /// An opened request.
+  final BridgeRequest? request;
 
-  /// The messages waiting for the running agent.
-  final BridgeQueue? queue;
-
-  /// The turn's checkpoint id, the same id as its `BridgeTurn`.
-  final String? checkpoint;
+  /// A resolved request's id.
+  final String? requestId;
 
   const BridgeEvent({
     required this.kind,
+    required this.sequence,
+    this.turn,
     this.item,
-    this.step,
-    this.request,
     this.text,
-    this.display,
-    this.success,
-    this.queue,
-    this.checkpoint,
+    this.usage,
+    this.request,
+    this.requestId,
   });
 
   @override
   int get hashCode =>
       kind.hashCode ^
+      sequence.hashCode ^
+      turn.hashCode ^
       item.hashCode ^
-      step.hashCode ^
-      request.hashCode ^
       text.hashCode ^
-      display.hashCode ^
-      success.hashCode ^
-      queue.hashCode ^
-      checkpoint.hashCode;
+      usage.hashCode ^
+      request.hashCode ^
+      requestId.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -106,84 +144,64 @@ class BridgeEvent {
       other is BridgeEvent &&
           runtimeType == other.runtimeType &&
           kind == other.kind &&
+          sequence == other.sequence &&
+          turn == other.turn &&
           item == other.item &&
-          step == other.step &&
-          request == other.request &&
           text == other.text &&
-          display == other.display &&
-          success == other.success &&
-          queue == other.queue &&
-          checkpoint == other.checkpoint;
+          usage == other.usage &&
+          request == other.request &&
+          requestId == other.requestId;
 }
 
-/// What happened; the variant names the parts of [`BridgeEvent`] it fills.
+/// What happened.
 enum BridgeEventKind {
-  /// A turn started; no parts.
+  /// A turn started.
   turnStarted,
 
-  /// A turn ended; `checkpoint` with its checkpoint id, if it requested one.
+  /// A turn ended normally.
   turnCompleted,
 
-  /// A turn was stopped; `checkpoint` with its checkpoint id, if it requested one.
+  /// A turn was stopped or failed.
   turnAborted,
 
-  /// `item` with kind, tool and target.
+  /// A turn was queued, removed from the queue, or its changed files became known.
+  turnsChanged,
+
+  /// Turns were reverted; Liquid reloads the Chat from a snapshot.
+  rolledBack,
+
+  /// An item started.
   itemStarted,
 
-  /// `item` id and `text` with the latest partial output.
-  itemUpdated,
-
-  /// `item` id and `text` with the appended text.
+  /// Text was appended to an item.
   contentDelta,
 
-  /// `item` with kind, status and duration, and `text` with the final text.
+  /// An item ended with its whole text.
   itemCompleted,
 
-  /// `step` with usage, stop reason and error.
+  /// A model request finished with its usage.
   modelRequestCompleted,
 
-  /// `request` with its question.
-  userInputRequested,
+  /// The agent asks the person something.
+  requestOpened,
 
-  /// `request` id.
-  userInputResolved,
+  /// A request was answered or withdrawn.
+  requestResolved,
 
-  /// `display` with level and `text`.
-  notification,
-
-  /// `display` with key and optional `text`.
-  statusChanged,
-
-  /// `display` with key and optional lines.
-  widgetChanged,
-
-  /// `text`.
-  inputTextSet,
-
-  /// `text` with the reason the session stopped the agent.
-  failed,
-
-  /// `success`, and `text` with the end of the agent's error output; always the last event.
-  exited,
-
-  /// `queue` with the messages waiting for the running agent.
-  queueChanged,
-
-  /// No parts; the stream dropped partial output that Liquid could not keep up with, so Liquid
-  /// reloads the chat from the session file and continues live (ADR-0272).
+  /// Liquid fell behind the stream; it reloads the Chat from a snapshot and ignores the events
+  /// up to its sequence (ADR-0290).
   fellBehind,
 }
 
-/// One file a run changed.
+/// One changed file and its line counts.
 class BridgeFileChange {
-  /// The path relative to the root of the Git repository the project is in.
+  /// The path, relative to the checkout.
   final String path;
 
-  /// The path as Liquid shows it, on one line, with characters that could hide or reorder it
-  /// written out.
+  /// The path as Liquid shows it, with hiding characters written out.
   final String shown;
 
-  /// How it changed.
+  /// What changed.
   final BridgeChangeStatus status;
 
   /// Added lines.
@@ -220,41 +238,37 @@ class BridgeFileChange {
           removed == other.removed;
 }
 
-/// An item's identity and, depending on the event, its tool call or outcome.
+/// One Chat item.
 class BridgeItem {
-  /// The item id.
+  /// The item's id within the session.
   final PlatformInt64 id;
 
-  /// What it represents, when the event says.
-  final BridgeItemKind? kind;
+  /// What it is.
+  final BridgeItemKind kind;
 
-  /// The tool name of a tool call.
+  /// The tool, for a tool call.
   final String? tool;
 
-  /// What a tool call works on, such as a command or a path, on one line.
+  /// What the tool works on, on one line.
   final String? target;
 
-  /// Whether the item failed.
+  /// Whether it ended, for a finished item.
+  final bool ended;
+
+  /// Whether it failed.
   final bool failed;
 
   /// How long a tool ran.
   final PlatformInt64? durationMs;
 
-  /// The lines a file change added.
-  final PlatformInt64? added;
-
-  /// The lines a file change removed.
-  final PlatformInt64? removed;
-
   const BridgeItem({
     required this.id,
-    this.kind,
+    required this.kind,
     this.tool,
     this.target,
+    required this.ended,
     required this.failed,
     this.durationMs,
-    this.added,
-    this.removed,
   });
 
   @override
@@ -263,10 +277,9 @@ class BridgeItem {
       kind.hashCode ^
       tool.hashCode ^
       target.hashCode ^
+      ended.hashCode ^
       failed.hashCode ^
-      durationMs.hashCode ^
-      added.hashCode ^
-      removed.hashCode;
+      durationMs.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -277,18 +290,17 @@ class BridgeItem {
           kind == other.kind &&
           tool == other.tool &&
           target == other.target &&
+          ended == other.ended &&
           failed == other.failed &&
-          durationMs == other.durationMs &&
-          added == other.added &&
-          removed == other.removed;
+          durationMs == other.durationMs;
 }
 
-/// What an item represents.
+/// What an item is.
 enum BridgeItemKind {
-  /// A user prompt or steering message.
+  /// The person's prompt.
   userMessage,
 
-  /// Text the model wrote for the user.
+  /// The agent's answer.
   assistantMessage,
 
   /// The model's reasoning.
@@ -297,113 +309,97 @@ enum BridgeItemKind {
   /// A shell command.
   commandExecution,
 
-  /// A change to project files.
+  /// A file edit.
   fileChange,
 
-  /// Any other tool call.
+  /// Another tool call.
   dynamicToolCall,
-}
 
-/// How urgent a notification is.
-enum BridgeLevel {
-  /// Information.
-  info,
-
-  /// A warning.
-  warning,
-
-  /// An error.
+  /// An error T3 or the provider reported.
   error,
 }
 
-/// A question from an agent extension.
+/// One question.
 class BridgeQuestion {
-  /// What kind of answer it expects.
-  final BridgeQuestionKind kind;
+  /// The id its answer is sent under.
+  final String id;
 
-  /// The question.
-  final String title;
+  /// A short header.
+  final String header;
 
-  /// The explanation, placeholder or initial text, depending on the kind.
-  final String detail;
+  /// The question, in Markdown.
+  final String question;
 
-  /// The options of a selection.
+  /// The option labels.
   final List<String> options;
 
+  /// The option descriptions, matching `options`.
+  final List<String> descriptions;
+
+  /// Whether several options may be chosen.
+  final bool multiSelect;
+
+  /// Whether a typed answer is allowed.
+  final bool custom;
+
   const BridgeQuestion({
-    required this.kind,
-    required this.title,
-    required this.detail,
+    required this.id,
+    required this.header,
+    required this.question,
     required this.options,
+    required this.descriptions,
+    required this.multiSelect,
+    required this.custom,
   });
 
   @override
   int get hashCode =>
-      kind.hashCode ^ title.hashCode ^ detail.hashCode ^ options.hashCode;
+      id.hashCode ^
+      header.hashCode ^
+      question.hashCode ^
+      options.hashCode ^
+      descriptions.hashCode ^
+      multiSelect.hashCode ^
+      custom.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is BridgeQuestion &&
           runtimeType == other.runtimeType &&
-          kind == other.kind &&
-          title == other.title &&
-          detail == other.detail &&
-          options == other.options;
+          id == other.id &&
+          header == other.header &&
+          question == other.question &&
+          options == other.options &&
+          descriptions == other.descriptions &&
+          multiSelect == other.multiSelect &&
+          custom == other.custom;
 }
 
-/// What kind of question an agent extension asks.
-enum BridgeQuestionKind {
-  /// Choose one of `options`.
-  select,
-
-  /// Confirm or decline; `detail` explains.
-  confirm,
-
-  /// Enter one line; `detail` is the placeholder.
-  input,
-
-  /// Edit multi-line text; `detail` is the initial text.
-  editor,
-}
-
-/// Messages waiting for a running agent, in order.
-class BridgeQueue {
-  /// Steering messages, delivered before the agent's next model request.
-  final List<String> steering;
-
-  /// Follow-up messages, delivered once the agent is done.
-  final List<String> followUp;
-
-  const BridgeQueue({required this.steering, required this.followUp});
-
-  static Future<BridgeQueue> default_() =>
-      RustLib.instance.api.crateApiEventsBridgeQueueDefault();
-
-  @override
-  int get hashCode => steering.hashCode ^ followUp.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeQueue &&
-          runtimeType == other.runtimeType &&
-          steering == other.steering &&
-          followUp == other.followUp;
-}
-
-/// An open request and, depending on the event, what it asks.
+/// A request the agent waits on: an approval or questions.
 class BridgeRequest {
-  /// The request id.
+  /// The request.
   final String id;
 
-  /// The question awaiting an answer.
-  final BridgeQuestion? question;
+  /// The turn that asks.
+  final PlatformInt64 turn;
 
-  const BridgeRequest({required this.id, this.question});
+  /// An approval, or `None` for questions.
+  final BridgeApproval? approval;
+
+  /// The questions, empty for an approval.
+  final List<BridgeQuestion> questions;
+
+  const BridgeRequest({
+    required this.id,
+    required this.turn,
+    this.approval,
+    required this.questions,
+  });
 
   @override
-  int get hashCode => id.hashCode ^ question.hashCode;
+  int get hashCode =>
+      id.hashCode ^ turn.hashCode ^ approval.hashCode ^ questions.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -411,54 +407,27 @@ class BridgeRequest {
       other is BridgeRequest &&
           runtimeType == other.runtimeType &&
           id == other.id &&
-          question == other.question;
+          turn == other.turn &&
+          approval == other.approval &&
+          questions == other.questions;
 }
 
-/// A completed model request's outcome.
-class BridgeStep {
-  /// Tokens and cost.
-  final BridgeUsage usage;
-
-  /// Why the response ended.
-  final String stopReason;
-
-  /// The provider's error.
-  final String? error;
-
-  const BridgeStep({required this.usage, required this.stopReason, this.error});
-
-  @override
-  int get hashCode => usage.hashCode ^ stopReason.hashCode ^ error.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeStep &&
-          runtimeType == other.runtimeType &&
-          usage == other.usage &&
-          stopReason == other.stopReason &&
-          error == other.error;
-}
-
-/// Tokens and cost of one model request.
+/// Tokens of a model request, or of a model over a session. T3 reports no cost (ADR-0293).
 class BridgeUsage {
-  /// Input tokens.
+  /// Input tokens, without cache reads and writes.
   final PlatformInt64 input;
 
   /// Output tokens, including reasoning.
   final PlatformInt64 output;
 
-  /// Input tokens read from cache.
+  /// Input tokens read from the cache.
   final PlatformInt64 cacheRead;
 
-  /// Input tokens written to cache.
+  /// Input tokens written to the cache.
   final PlatformInt64 cacheWrite;
 
-  /// Reasoning tokens, already counted in `output`.
+  /// Reasoning tokens, already in `output`.
   final PlatformInt64 reasoning;
-
-  /// Cost in millionths of a US dollar.
-  final PlatformInt64 costMicroUsd;
 
   const BridgeUsage({
     required this.input,
@@ -466,7 +435,6 @@ class BridgeUsage {
     required this.cacheRead,
     required this.cacheWrite,
     required this.reasoning,
-    required this.costMicroUsd,
   });
 
   static Future<BridgeUsage> default_() =>
@@ -478,8 +446,7 @@ class BridgeUsage {
       output.hashCode ^
       cacheRead.hashCode ^
       cacheWrite.hashCode ^
-      reasoning.hashCode ^
-      costMicroUsd.hashCode;
+      reasoning.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -490,6 +457,5 @@ class BridgeUsage {
           output == other.output &&
           cacheRead == other.cacheRead &&
           cacheWrite == other.cacheWrite &&
-          reasoning == other.reasoning &&
-          costMicroUsd == other.costMicroUsd;
+          reasoning == other.reasoning;
 }
