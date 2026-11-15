@@ -101,7 +101,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Conversation bundle** — One conversation history plus all owned Run bundles.
 - **Host-local session ownership leases** — Exclusive operating-system file leases in the private user-global Workspace store. `PROTOCOL.md` defines their ownership and acquisition contract. Process exit releases leases; none is durable or transferable across hosts.
 - **Stash operation token** — The unique suffix in the message of a stash Liquid saves, such as `Liquid: changes left on main · 7f3a9c0123456789`, which identifies that save independently of the stash list's order.
-- **Session branch** — One path through a pi session's tree of entries, which a revert starts; not a Git branch, which keeps the name "branch" in Liquid.
+- **Session branch** — One path through a pi session's tree of entries, which a revert or Branch from here starts; not a Git branch, which keeps the name "branch" in Liquid.
 - **Session marker** — The persistent `session.lock` observability leaf inside a run directory. It is not ownership authority and cannot grant or revoke the lease.
 - **Reservation orphan** — An empty run artifact retained and inventoried when rollback cannot prove identity-bound deletion. Its cleanup failure remains visible, and compare-then-unlink never removes it.
 - **Event segment** — One append-only canonical JSONL file within a run bundle; rotation bounds individual I/O without starting a new run or resetting sequence/budgets.
@@ -152,8 +152,9 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Agent surface** — Liquid's view of one agent session: the sidebar, the Chat with its session card, the Diff panel beside it when open, the widget strip, the input area and the status bar; ADR-0239 plans to fold it into Chats.
 - **Session card** — The card at the top right of the Chat that holds a session's Git controls and statistics, as T3 Code's thread details card; it sits beside the Chat or opens as a popover.
 - **Context window** — The tokens a model takes in one request; the session card shows how much of it the session uses and where pi compacts the session.
-- **Session statistics** — What a session's stored entries count to, as tokens, cost, working time and tool calls by outcome, never estimated (ADR-0279). The session card shows them as rows with the context window; the statistics panel shows them in full.
-- **Diff panel** — The Diff of the Chat's turns, shown as a panel beside the Chat (⌘D); it replaces the Diff tab.
+- **Session statistics** — What a session's stored entries count to, as tokens, cost, working time and tool calls by outcome, never estimated (ADR-0279). The session card shows them as rows with the context window; the statistics panel, opened with ⌘U from the card's Statistics row, shows them per turn.
+- **Turn** — What an agent does for a prompt, from one start checkpoint to the next; without checkpoints, from one prompt to the next. How the Diff and the statistics number turns is open in [D-105](docs/decisions/open-decisions.html#d-105).
+- **Diff panel** — The Diff of the Chat's turns, shown as a panel beside the Chat (⌘D).
 - **Start page** — What the agent surface shows before a session's first message: the project's recent sessions to continue and chips to set the new one up.
 - **Input area** — The fixed-height area at the bottom of the agent surface: the composer, or in its place an agent question.
 - **Git integration** — Git operations on the projects agents work in — diffs, branches, commits, push, pull requests and worktrees — run by Meta-Harness on its host and presented in Liquid (ADR-0190). It operates the project's own Git repository and is not a Watershed VCS; Liquid's own VCS is History.
