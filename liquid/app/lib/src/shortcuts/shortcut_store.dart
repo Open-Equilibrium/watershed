@@ -7,6 +7,12 @@ import 'package:flutter/services.dart';
 import '../settings_file.dart';
 import 'keymap.dart';
 
+/// An XDG base folder from `environment`; an empty variable counts as unset.
+String? _xdg(Map<String, String> environment, String name) {
+  final value = environment[name];
+  return value == null || value.isEmpty ? null : value;
+}
+
 /// The folder for Liquid's settings in the platform's app data location.
 String settingsDirectory(
   Map<String, String> environment,
@@ -16,7 +22,7 @@ String settingsDirectory(
     '${environment['HOME']}/Library/Application Support/Liquid',
   TargetPlatform.windows => '${environment['APPDATA']}\\Liquid',
   _ =>
-    '${environment['XDG_CONFIG_HOME'] ?? '${environment['HOME']}/.config'}/liquid',
+    '${_xdg(environment, 'XDG_CONFIG_HOME') ?? '${environment['HOME']}/.config'}/liquid',
 };
 
 /// The folder for what belongs to this computer alone, such as its device id: a data folder
@@ -29,7 +35,7 @@ String computerDirectory(
   TargetPlatform.macOS => '${environment['HOME']}/Library/Caches/Liquid',
   TargetPlatform.windows => '${environment['LOCALAPPDATA']}\\Liquid',
   _ =>
-    '${environment['XDG_STATE_HOME'] ?? '${environment['HOME']}/.local/state'}/liquid',
+    '${_xdg(environment, 'XDG_STATE_HOME') ?? '${environment['HOME']}/.local/state'}/liquid',
 };
 
 /// Shortcut settings as a JSON file.

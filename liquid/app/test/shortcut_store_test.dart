@@ -37,6 +37,14 @@ void main() {
     );
     expect(
       settingsDirectory({
+        'HOME': '/home/b',
+        'XDG_CONFIG_HOME': '',
+      }, TargetPlatform.linux),
+      '/home/b/.config/liquid',
+      reason: 'an empty XDG variable counts as unset',
+    );
+    expect(
+      settingsDirectory({
         'APPDATA': r'C:\Users\b\AppData\Roaming',
       }, TargetPlatform.windows),
       r'C:\Users\b\AppData\Roaming\Liquid',
@@ -58,6 +66,14 @@ void main() {
         'XDG_STATE_HOME': '/xdg',
       }, TargetPlatform.linux),
       '/xdg/liquid',
+    );
+    expect(
+      computerDirectory({
+        'HOME': '/home/b',
+        'XDG_STATE_HOME': '',
+      }, TargetPlatform.linux),
+      '/home/b/.local/state/liquid',
+      reason: 'an empty XDG variable counts as unset',
     );
     expect(
       computerDirectory({
