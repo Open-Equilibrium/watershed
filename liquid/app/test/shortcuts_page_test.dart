@@ -214,6 +214,29 @@ void main() {
     );
   });
 
+  testWidgets(
+    'recording keys a Liquid key combination runs asks while the key is off',
+    (tester) async {
+      // New Session's ⇪⌘E stays hidden while the Liquid key is off, and still runs there.
+      final settings = ShortcutSettings.standard().change(
+        Command.newSession,
+        const Keys(LogicalKeyboardKey.keyE, meta: true, liquid: true),
+      );
+      await show(tester, settings);
+      await openSettings(tester);
+      await tester.tap(find.text('⌘U'));
+      await tester.pumpAndSettle();
+      await press(
+        tester,
+        LogicalKeyboardKey.keyE,
+        holding: LogicalKeyboardKey.metaLeft,
+      );
+      expect(find.textContaining('already runs New Session'), findsOneWidget);
+      expect(find.text('Use anyway, clear New Session'), findsOneWidget);
+      expect(shortcuts.value.changed(Command.statistics), isFalse);
+    },
+  );
+
   testWidgets('changing the reveal key hides the hints', (tester) async {
     await show(tester, ShortcutSettings.standard());
     await tester.sendKeyDownEvent(

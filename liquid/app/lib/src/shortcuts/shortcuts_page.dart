@@ -295,7 +295,10 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
       return KeyEventResult.handled;
     }
     final use = reserved(command, keys);
-    final owners = _shortcuts.value.conflicts(command, keys);
+    // Liquid key combinations count while their key is off too: they come back with it.
+    final owners = _shortcuts.value
+        .withLiquidKey(true)
+        .conflicts(command, keys);
     if (use == null && owners.isEmpty) {
       _change(command, keys);
     } else {
