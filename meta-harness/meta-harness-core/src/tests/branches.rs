@@ -741,6 +741,37 @@ fn a_new_branch_starts_at_the_base_it_reports_when_another_git_moves_head() {
 }
 
 #[test]
+fn a_new_branch_never_overwrites_ignored_files_when_another_git_moves_head() {
+    run(async {
+        let repo = Repo::new("create-moved-head-ignored");
+        repo.git(&["branch", "other"]);
+        repo.write("private.txt", "committed\n");
+        repo.git(&["add", "private.txt"]);
+        repo.git(&["commit", "-qm", "private file"]);
+        repo.write(".git/info/exclude", "private.txt\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        let root = repo.path().to_owned();
+        crate::diff::before_create_base(repo.path(), move || {
+            // Another Git checks out `other`, then leaves an ignored file where the base tracks one.
+            let external = Repo(root);
+            external.git(&["switch", "-q", "other"]);
+            external.write("private.txt", "unsaved ignored contents\n");
+            std::mem::forget(external);
+        });
+
+        let created = checkpoints.create_branch("feature/race").await;
+
+        assert!(
+            matches!(created, Err(DiffError::WouldOverwrite(ref paths)) if paths == &["private.txt"]),
+            "{created:?}"
+        );
+        assert_eq!(read(&repo, "private.txt"), "unsaved ignored contents\n");
+        assert_eq!(repo.git(&["branch", "--show-current"]), "other\n");
+        assert_eq!(repo.git(&["branch", "--list", "feature/race"]), "");
+    });
+}
+
+#[test]
 fn fetching_updates_only_the_upstreams_remote_tracking_branches() {
     run(async {
         let clone = Clone::new("fetch");

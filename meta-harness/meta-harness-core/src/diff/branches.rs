@@ -361,7 +361,10 @@ impl WorkingTree {
                 commit.as_str()
             }
         });
-        let args: Vec<&str> = ["switch", "-c", name].into_iter().chain(base).collect();
+        let args: Vec<&str> = ["switch", "--no-overwrite-ignore", "-c", name]
+            .into_iter()
+            .chain(base)
+            .collect();
         match self
             .switching(&args, &start, &BranchTarget::Local(name.to_owned()))
             .await
