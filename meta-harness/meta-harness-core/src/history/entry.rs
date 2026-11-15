@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use super::ChangeCount;
 use super::outcome::patch_lines;
-use crate::pi::{content_text, cost_by_kind, usage, written_lines};
+use crate::pi::{call_target, content_text, cost_by_kind, usage, written_lines};
 use crate::visible::visible_name;
 use crate::{ChangedLines, CostByKind, Phase, Usage};
 
@@ -97,8 +97,8 @@ pub(crate) enum Body {
 pub(crate) struct Call {
     pub id: String,
     pub name: String,
-    /// The arguments as JSON text, shortened when long.
-    pub arguments: String,
+    /// What the call works on, as the transcript shows it; the arguments themselves are not kept.
+    pub target: String,
     /// Lines a `write` call writes.
     pub written_lines: Option<u32>,
 }
@@ -306,7 +306,7 @@ fn message(message: Option<&Value>) -> Body {
                         name: visible_name(
                             call.get("name").and_then(Value::as_str).unwrap_or_default(),
                         ),
-                        arguments: arguments(&full),
+                        target: call_target(&arguments(&full)),
                         written_lines: written_lines(
                             call.get("name").and_then(Value::as_str).unwrap_or_default(),
                             &full,
@@ -469,4 +469,38 @@ pub(crate) fn first_line(text: &str, chars: usize) -> String {
         .find(|line| !line.is_empty())
         .unwrap_or_default();
     line.chars().take(chars).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::History;
+    use crate::pi::TARGET_CHARS;
+
+    #[test]
+    fn a_long_call_keeps_only_a_bounded_text_and_its_transcript_target() {
+        let arguments = json!({"v": (0..100_000).collect::<Vec<u32>>()});
+        let response = json!({"role": "assistant", "content": [{
+            "type": "toolCall", "id": "c1", "name": "bash", "arguments": arguments,
+        }]});
+        let Body::Assistant { calls, .. } = message(Some(&response)) else {
+            panic!("an assistant message");
+        };
+        let [call] = calls.as_slice() else {
+            panic!("one call");
+        };
+        assert!(call.target.chars().count() <= TARGET_CHARS);
+
+        let session = json!({"entries": [
+            {"type": "message", "id": "a1", "parentId": null, "message": response},
+        ], "leafId": "a1"});
+        let shown = History::from_entries(&session).transcript(None, 10).items;
+        let target: String = arguments.to_string().chars().take(TARGET_CHARS).collect();
+        assert_eq!(
+            shown.iter().find_map(|item| item.target.clone()),
+            Some(target)
+        );
+    }
 }

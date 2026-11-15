@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use super::entry::{Body, Entry, OpenCalls, path};
 use super::{Transcript, TranscriptItem};
-use crate::pi::{call_target, item_kind};
+use crate::pi::item_kind;
 use crate::{ChangedLines, ItemKind};
 
 /// Whether a tool call failed, how long it ran and the lines it changed.
@@ -102,7 +102,7 @@ pub(super) fn transcript(
                         .map(|added| ChangedLines { added, removed: 0 });
                     items.push(TranscriptItem {
                         tool: Some(call.name.clone()),
-                        target: Some(call_target(&call.arguments)),
+                        target: Some(call.target.clone()),
                         failed,
                         duration_ms,
                         lines: lines.or(written),

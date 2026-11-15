@@ -381,7 +381,7 @@ fn role(record: &Map<String, Value>) -> Option<&str> {
 }
 
 /// Characters of a call's target kept for one-line summaries.
-const TARGET_CHARS: usize = 120;
+pub(crate) const TARGET_CHARS: usize = 120;
 
 /// The arguments that name the file a call of one of pi's file tools works on.
 pub(crate) const PATH_ARGUMENTS: [&str; 2] = ["path", "file_path"];
