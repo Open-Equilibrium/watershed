@@ -10,10 +10,13 @@ mod diff;
 mod event;
 mod framing;
 mod history;
+mod host;
 mod pi;
 mod record;
 mod session;
 mod stored;
+mod t3;
+mod thread;
 mod visible;
 
 pub use checkpoint::{
@@ -37,6 +40,7 @@ pub use history::{
     ChangeCount, History, ModelUsage, Statistics, ToolCalls, Transcript, TranscriptItem,
     TurnCheckpoints, TurnStatistics,
 };
+pub use host::{AcpAgent, Host, HostConfig, Project, StartThread, Workspace};
 pub(crate) use pi::PiAdapter;
 pub use record::session_record;
 pub use session::{
@@ -46,6 +50,8 @@ pub use session::{
 pub use stored::{
     StoredSession, recent_sessions, session_id, session_title, session_title_of, session_titles,
 };
+pub use t3::T3_VERSION;
+pub use thread::{ChatItem, Snapshot, Thread, ThreadEvent, Turn, TurnFile, TurnStatus};
 pub use visible::{visible_lines, visible_name};
 
 #[cfg(test)]

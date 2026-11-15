@@ -206,6 +206,10 @@ pub enum AgentEvent {
         /// The turn's checkpoint id, which names its end checkpoint; absent when it requested none.
         checkpoint: Option<String>,
     },
+    /// Turns were reverted and left the thread; the Chat reloads from a snapshot.
+    RolledBack,
+    /// A turn's changed files became known, or changed.
+    TurnsChanged,
     /// An item started.
     ItemStarted {
         /// The owning turn.
