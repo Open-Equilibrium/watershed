@@ -346,6 +346,9 @@ class SessionState {
     required bool followUp,
     required int occurrence,
   }) async {
+    // A switch under way decides which session's queue this reads, so the old session's
+    // messages never reach the new one.
+    await _switching?.future;
     final BridgeQueue waiting;
     try {
       waiting = await _backend.clearQueue();

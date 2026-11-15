@@ -1473,6 +1473,26 @@ void main() {
     );
   });
 
+  test('a queue change that starts during a switch sends nothing into the '
+      'new session', () async {
+    backend
+      ..queued = const BridgeQueue(steering: ['a', 'b'], followUp: [])
+      ..switchGate = Completer();
+    final switching = state.newSession();
+    await pumpEventQueue();
+    final removing = state.unqueue('a', followUp: false);
+    await pumpEventQueue();
+    // The new session waits with nothing queued.
+    backend.queued = const BridgeQueue(steering: [], followUp: []);
+    backend.switchGate!.complete();
+    await Future.wait([switching, removing]);
+    expect(
+      backend.calls,
+      isNot(contains('send b')),
+      reason: 'the old session’s queue never reaches the new session',
+    );
+  });
+
   test('a run that a re-sent message starts makes the switch refuse', () async {
     backend
       ..queued = const BridgeQueue(steering: ['a', 'b'], followUp: [])
