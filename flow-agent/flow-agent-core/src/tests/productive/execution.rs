@@ -9,6 +9,7 @@ use super::support::{
 use crate::runtime::{
     context::ContextManifestCheckpoint,
     event_writer::RuntimeEventSink,
+    oauth_credential::CredentialRecord,
     openai_codex::{ProviderToolCall, ProviderTurn},
     productive::{
         ProductiveExecution, execute_productive_flow, execute_productive_flow_with_tool_executor,
@@ -19,6 +20,7 @@ use crate::runtime::{
     types::{EmitMode, RuntimeError, terminal_failure_reason},
     validate::validate_session_log_text,
 };
+use crate::tests::helpers::load_productive_execution_fixture_with_credential;
 use proto::{EventEnvelope, EventType};
 use std::{collections::VecDeque, fs};
 
@@ -816,4 +818,37 @@ fn custom_composite_phase_loop_fails_closed_when_its_bound_is_exhausted() {
         assert!(events.iter().any(|event| event.event_type == event_type));
     }
     assert_eq!(terminal_failure_reason(&events), Some("loop-limit-reached"));
+}
+
+#[test]
+fn a_productive_run_with_an_unsendable_credential_records_no_attempt() {
+    let workspace = workspace_copy("smoke-flow");
+    let fixture = load_productive_execution_fixture_with_credential(
+        &workspace,
+        "smoke-flow",
+        CredentialRecord {
+            credential_type: "oauth".to_owned(),
+            access: "secret-access".to_owned(),
+            refresh: "secret-refresh".to_owned(),
+            expires: u64::MAX,
+            account_id: "secret\naccount".to_owned(),
+            is_fedramp: false,
+        },
+    );
+    let mut provider = ScriptedProvider {
+        bodies: Vec::new(),
+        turns: VecDeque::from([string_provider_turn("response", "done")]),
+    };
+    let mut attempts = MemoryAttempts::default();
+    let mut sink = MemorySink::default();
+
+    let result = execute_productive_flow(
+        fixture.execution(fixture.smoke_flow(), "unsendable-credential"),
+        &mut provider,
+        &mut attempts,
+        &mut sink,
+    );
+
+    assert!(result.is_err(), "{result:?}");
+    assert!(attempts.intents.is_empty(), "{:?}", attempts.intents);
 }

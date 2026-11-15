@@ -438,11 +438,12 @@ fn credential_with_document_len(target: usize) -> CredentialRecord {
     let escaped_controls = growth / 5;
     let escaped_quotes = growth % 5;
     assert!(escaped_controls + escaped_quotes <= MAX_OAUTH_SECRET_BYTES);
-    value.access = format!(
+    // Only `refresh` pads with control bytes: `access` is a header value, which must be visible ASCII.
+    value.refresh = format!(
         "{}{}{}",
         "\u{1}".repeat(escaped_controls),
         "\"".repeat(escaped_quotes),
-        "a".repeat(MAX_OAUTH_SECRET_BYTES - escaped_controls - escaped_quotes)
+        "r".repeat(MAX_OAUTH_SECRET_BYTES - escaped_controls - escaped_quotes)
     );
     assert_eq!(serialized_credential_document_len(&value), target);
     value

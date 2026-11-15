@@ -73,9 +73,9 @@ pub(crate) fn validate_credential_record(
     if credential.credential_type != OAUTH_CREDENTIAL_TYPE || credential.expires == 0 {
         return Err(auth_protocol());
     }
-    validate_field(&credential.access, MAX_OAUTH_SECRET_BYTES)?;
+    validate_header_field(&credential.access, MAX_OAUTH_SECRET_BYTES)?;
     validate_field(&credential.refresh, MAX_OAUTH_SECRET_BYTES)?;
-    validate_field(&credential.account_id, MAX_OAUTH_FIELD_BYTES)?;
+    validate_header_field(&credential.account_id, MAX_OAUTH_FIELD_BYTES)?;
     Ok(())
 }
 
@@ -142,6 +142,16 @@ fn base64url_value(byte: u8) -> Result<u8, RuntimeError> {
 
 pub(crate) fn validate_field(value: &str, maximum: usize) -> Result<(), RuntimeError> {
     if value.is_empty() || value.len() > maximum || value.contains('\0') {
+        return Err(auth_protocol());
+    }
+    Ok(())
+}
+
+/// [`validate_field`] for a value sent in an HTTP header, which must be visible ASCII: the HTTP
+/// client refuses any other byte, such as a newline, when the request is built.
+fn validate_header_field(value: &str, maximum: usize) -> Result<(), RuntimeError> {
+    validate_field(value, maximum)?;
+    if !value.bytes().all(|byte| byte.is_ascii_graphic()) {
         return Err(auth_protocol());
     }
     Ok(())

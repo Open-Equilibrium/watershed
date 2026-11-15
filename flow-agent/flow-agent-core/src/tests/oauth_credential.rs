@@ -135,3 +135,34 @@ fn base64url_decoder_accepts_canonical_chunk_shapes() {
         [248]
     );
 }
+
+#[test]
+fn header_bound_credential_fields_accept_only_visible_ascii() {
+    let credential = CredentialRecord {
+        credential_type: "oauth".to_owned(),
+        access: "access".to_owned(),
+        refresh: "refresh".to_owned(),
+        expires: 1,
+        account_id: "account".to_owned(),
+        is_fedramp: false,
+    };
+    validate_credential_record(&credential).expect("valid credential record");
+
+    // reqwest refuses these header values when a request is built, after the attempt is recorded.
+    for invalid in [
+        CredentialRecord {
+            account_id: "account\nx".to_owned(),
+            ..credential.clone()
+        },
+        CredentialRecord {
+            access: "access x".to_owned(),
+            ..credential.clone()
+        },
+        CredentialRecord {
+            access: "access\u{e9}".to_owned(),
+            ..credential.clone()
+        },
+    ] {
+        assert!(validate_credential_record(&invalid).is_err(), "{invalid:?}");
+    }
+}
