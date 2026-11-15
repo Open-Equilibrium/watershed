@@ -130,10 +130,20 @@ async fn a_thread_runs_turns_and_reverts_files_in_its_worktree() {
         (2, 1, 0)
     );
     assert!(thread.diff(1, 2, false).await.unwrap().contains("+second"));
+    // The thread's Git reads its own worktree, where the append is still uncommitted.
+    let changed = thread.git().status().await.unwrap().changes;
+    assert_eq!(
+        changed.iter().map(|c| c.path.as_str()).collect::<Vec<_>>(),
+        ["contract.txt"]
+    );
 
     assert_eq!(thread.revert(2, true).await.unwrap(), "append second");
     wait(&thread, |s| s.turns.len() == 1).await;
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "first\n");
+    // Turn 1 reverts to the thread's start, which removes the file it created.
+    assert_eq!(thread.revert(1, true).await.unwrap(), "append first");
+    wait(&thread, |s| s.turns.is_empty()).await;
+    assert!(!file.exists());
 
     // The branch picker chose the project folder's checkout; Git follows it at once.
     thread.set_branch("main", Some(&repo)).await.unwrap();
@@ -149,6 +159,41 @@ async fn a_restart_stops_the_t3_server_a_dead_host_left_behind() {
     std::mem::forget(first);
     let second = host(&home).await;
     second.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn t3_starts_in_a_data_folder_that_does_not_exist_yet() {
+    let (_dir, _repo, home) = fixture();
+    // Liquid's first start: no data folder yet and no ACP agents to write into it.
+    let host = Host::start(HostConfig {
+        binary: t3(),
+        home,
+        acp_agents: Vec::new(),
+    })
+    .await
+    .expect("T3 starts");
+    host.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stale_server_record_never_stops_another_process() {
+    let (_dir, _repo, home) = fixture();
+    // A server that died left its record behind; its pid now belongs to another program.
+    let mut other = Command::new("sleep").arg("60").spawn().unwrap();
+    std::fs::create_dir_all(home.join("userdata")).unwrap();
+    std::fs::write(
+        home.join("userdata").join("server-runtime.json"),
+        serde_json::json!({"pid": other.id()}).to_string(),
+    )
+    .unwrap();
+    let host = host(&home).await;
+    assert!(
+        other.try_wait().unwrap().is_none(),
+        "the other program still runs"
+    );
+    host.shutdown().await;
+    other.kill().unwrap();
+    other.wait().unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -227,10 +272,6 @@ async fn statistics_count_a_thread_s_turns_and_tool_calls() {
         .map(|t| t.succeeded + t.failed + t.cancelled + t.open)
         .sum();
     assert!(edits >= 1, "the append's tool call counts: {statistics:?}");
-    assert_eq!(
-        statistics.turns[0].model_ms, None,
-        "T3 reports no model time (ADR-0293)"
-    );
     host.shutdown().await;
 }
 
@@ -260,6 +301,15 @@ async fn a_prompt_sent_while_a_turn_runs_queues_and_can_be_removed() {
         .find(|t| t.status == TurnStatus::Queued)
         .unwrap();
     assert_eq!(turn.prompt, "append later");
+    thread
+        .edit_queued(turn.number, "append edited")
+        .await
+        .unwrap();
+    // Subscribers learn of the edit, so Liquid's queue shows the new text.
+    wait(&thread, |s| {
+        s.turns.iter().any(|t| t.prompt == "append edited")
+    })
+    .await;
     thread.cancel_queued(turn.number).await.unwrap();
     wait(&thread, |s| {
         s.turns.iter().all(|t| t.status != TurnStatus::Queued)

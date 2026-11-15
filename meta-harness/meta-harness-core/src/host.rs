@@ -41,6 +41,9 @@ pub struct Host {
 impl Host {
     /// Writes the ACP agents into T3's settings, starts T3 and connects as its owner.
     pub async fn start(config: HostConfig) -> Result<Self, String> {
+        // T3 starts inside its data folder, which the first start creates.
+        std::fs::create_dir_all(&config.home)
+            .map_err(|e| format!("Could not create T3's data folder: {e}"))?;
         write_settings(&config.home, &config.acp_agents)?;
         let server = Server::start(&config.binary, &config.home).await?;
         let client = Client::connect(&server.origin, &server.token()?).await?;

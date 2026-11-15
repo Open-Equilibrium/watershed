@@ -326,12 +326,13 @@ impl Git {
                 let progress = match event["kind"].as_str() {
                     Some("phase_started") => GitProgress::Phase(text(&event["label"])),
                     Some("hook_started") => GitProgress::Hook(text(&event["hookName"])),
-                    Some("hook_output") => {
-                        match event["text"].as_str().and_then(|t| t.lines().last()) {
-                            Some(line) => GitProgress::Output(line.to_owned()),
-                            None => continue,
-                        }
-                    }
+                    Some("hook_output") => GitProgress::Output(
+                        text(&event["text"])
+                            .lines()
+                            .last()
+                            .unwrap_or_default()
+                            .to_owned(),
+                    ),
                     Some("action_finished") => {
                         let toast = &event["result"]["toast"];
                         GitProgress::Finished {

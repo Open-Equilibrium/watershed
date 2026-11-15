@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::t3::{Projection, millis};
 use crate::thread::{describe, duration, failed, usage_of};
-use crate::{Context, ItemDetail, ItemKind, Usage};
+use crate::{Context, ItemDetail, Usage};
 
 /// What one model used.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -40,7 +40,7 @@ pub struct ToolCalls {
 /// One turn and what it counted to.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TurnStatistics {
-    /// The entry of its first prompt, or of its start checkpoint when no prompt was stored yet.
+    /// T3's run ordinal, as text.
     pub entry: String,
     /// The first line of its first prompt.
     pub prompt: String,
@@ -50,8 +50,6 @@ pub struct TurnStatistics {
     pub ended_ms: Option<u64>,
     /// What each model used, sorted as [`Statistics::models`].
     pub models: Vec<ModelUsage>,
-    /// Time its requests took; `None` when the turn has no timing entries.
-    pub model_ms: Option<u64>,
     /// Time its tools took: for each response, the longest of its tools, summed; `None` when the
     /// turn has no timing entries.
     pub tool_ms: Option<u64>,
@@ -63,7 +61,7 @@ pub struct TurnStatistics {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Statistics {
     /// What each model used over the whole session, the entries before the first turn included,
-    /// sorted by cost and then tokens, largest first.
+    /// largest first by tokens.
     pub models: Vec<ModelUsage>,
     /// The calls of each tool over the whole session, largest total first.
     pub tools: Vec<ToolCalls>,
@@ -109,12 +107,9 @@ pub(crate) fn statistics(projection: &Projection) -> Statistics {
             .iter()
             .filter(|i| i["runId"] == run["id"])
         {
-            let Some((kind, ItemDetail::Tool { name, .. })) = describe(item) else {
+            let Some((_, ItemDetail::Tool { name, .. })) = describe(item) else {
                 continue;
             };
-            if matches!(kind, ItemKind::UserMessage | ItemKind::AssistantMessage) {
-                continue;
-            }
             let calls = match tools.iter().position(|t| t.name == name) {
                 Some(index) => &mut tools[index],
                 None => {
@@ -150,14 +145,14 @@ pub(crate) fn statistics(projection: &Projection) -> Statistics {
             started_ms: millis(&run["startedAt"]),
             ended_ms: millis(&run["completedAt"]),
             models: turn_models,
-            model_ms: None,
             tool_ms: Some(tool_ms),
             failed: failures,
         });
     }
-    let total =
-        |m: &ModelUsage| m.usage.input + m.usage.output + m.usage.cache_read + m.usage.cache_write;
-    models.sort_by_key(|m| std::cmp::Reverse(total(m)));
+    sort_models(&mut models);
+    for turn in &mut turns {
+        sort_models(&mut turn.models);
+    }
     tools.sort_by_key(|t| std::cmp::Reverse(t.succeeded + t.failed + t.cancelled + t.open));
     Statistics {
         started_ms: turns.first().and_then(|t| t.started_ms),
@@ -166,6 +161,13 @@ pub(crate) fn statistics(projection: &Projection) -> Statistics {
         tools,
         turns,
     }
+}
+
+/// Orders models largest first by the tokens they used.
+fn sort_models(models: &mut [ModelUsage]) {
+    let total =
+        |m: &ModelUsage| m.usage.input + m.usage.output + m.usage.cache_read + m.usage.cache_write;
+    models.sort_by_key(|m| std::cmp::Reverse(total(m)));
 }
 
 /// The context window from the latest provider turn that reported one.

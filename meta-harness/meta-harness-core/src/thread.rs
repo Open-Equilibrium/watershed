@@ -629,8 +629,6 @@ fn translate(state: &mut State, change: Change, payload: &Value) -> Vec<AgentEve
                 vec![AgentEvent::ModelRequestCompleted {
                     turn: turn_of(&state.projection, payload),
                     usage,
-                    stop_reason: "stop".to_owned(),
-                    error: None,
                 }]
             }
             _ => Vec::new(),

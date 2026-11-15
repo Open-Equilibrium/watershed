@@ -199,11 +199,7 @@ pub enum AgentEvent {
     ModelRequestCompleted {
         /// The owning turn.
         turn: TurnId,
-        /// Tokens and cost.
+        /// Its tokens.
         usage: Usage,
-        /// Why the response ended, such as `stop`, `toolUse`, `error` or `aborted`.
-        stop_reason: String,
-        /// The provider's error, if the request failed.
-        error: Option<String>,
     },
 }
