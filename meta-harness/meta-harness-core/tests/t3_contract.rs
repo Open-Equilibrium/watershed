@@ -129,7 +129,7 @@ async fn a_thread_runs_turns_and_reverts_files_in_its_worktree() {
         (turns[1].number, turns[1].added, turns[1].removed),
         (2, 1, 0)
     );
-    assert!(thread.diff(1, 2).await.unwrap().contains("+second"));
+    assert!(thread.diff(1, 2, false).await.unwrap().contains("+second"));
 
     assert_eq!(thread.revert(2, true).await.unwrap(), "append second");
     wait(&thread, |s| s.turns.len() == 1).await;

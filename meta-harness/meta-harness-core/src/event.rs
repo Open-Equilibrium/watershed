@@ -23,6 +23,8 @@ pub enum ItemKind {
     FileChange,
     /// Any other tool call.
     DynamicToolCall,
+    /// An error T3 or the provider reported in the Chat.
+    Error,
 }
 
 /// Kind-specific information about a started item.
@@ -39,7 +41,7 @@ pub enum ItemDetail {
     },
 }
 
-/// Tokens and cost of one model request, as the provider reported them.
+/// Tokens of one model request, as the provider reported them; T3 reports no cost (ADR-0293).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Usage {
     /// Input tokens.
@@ -52,31 +54,6 @@ pub struct Usage {
     pub cache_write: u64,
     /// Reasoning tokens, already counted in `output`.
     pub reasoning: u64,
-    /// Cost in millionths of a US dollar.
-    pub cost_micro_usd: u64,
-}
-
-/// What each kind of a request's tokens cost, in millionths of a US dollar. The kinds add up to
-/// the request's cost within rounding.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct CostByKind {
-    /// Input tokens.
-    pub input: u64,
-    /// Output tokens.
-    pub output: u64,
-    /// Input tokens read from the provider's cache.
-    pub cache_read: u64,
-    /// Input tokens written to the provider's cache.
-    pub cache_write: u64,
-}
-
-/// The lines a file change added and removed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ChangedLines {
-    /// Added lines.
-    pub added: u32,
-    /// Removed lines.
-    pub removed: u32,
 }
 
 /// One open request from the agent that waits for the user.
@@ -138,17 +115,6 @@ pub struct Question {
     pub multi_select: bool,
     /// Whether a typed answer is allowed.
     pub custom: bool,
-}
-
-/// How urgent a notification is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NotificationLevel {
-    /// Information.
-    Info,
-    /// A warning.
-    Warning,
-    /// An error.
-    Error,
 }
 
 /// How an item ended.
@@ -228,8 +194,6 @@ pub enum AgentEvent {
         status: ItemStatus,
         /// How long a tool ran, when the agent measured it.
         duration_ms: Option<u64>,
-        /// The lines a file change added and removed.
-        lines: Option<ChangedLines>,
     },
     /// The model finished its response to a request.
     ModelRequestCompleted {
@@ -241,12 +205,5 @@ pub enum AgentEvent {
         stop_reason: String,
         /// The provider's error, if the request failed.
         error: Option<String>,
-    },
-    /// An agent extension shows a notification.
-    Notification {
-        /// How urgent it is.
-        level: NotificationLevel,
-        /// The text.
-        message: String,
     },
 }

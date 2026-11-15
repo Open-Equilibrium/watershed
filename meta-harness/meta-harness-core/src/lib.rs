@@ -14,8 +14,8 @@ mod visible;
 
 pub use context::Context;
 pub use event::{
-    AgentEvent, ApprovalOption, ChangedLines, CostByKind, ItemDetail, ItemId, ItemKind, ItemStatus,
-    NotificationLevel, PendingRequest, Question, Request, RequestId, TurnId, Usage,
+    AgentEvent, ApprovalOption, ItemDetail, ItemId, ItemKind, ItemStatus, PendingRequest, Question,
+    Request, RequestId, TurnId, Usage,
 };
 pub use git::{
     BranchPullRequest, ChangedFile, Git, GitAction, GitActionRequest, GitProgress, GitStatus, Ref,

@@ -267,12 +267,22 @@ impl Thread {
 
     /// The unified diff from the end of turn `from` to the end of turn `to`; turn 0 is the
     /// thread's start.
-    pub async fn diff(&self, from: u64, to: u64) -> Result<String, String> {
+    pub async fn diff(
+        &self,
+        from: u64,
+        to: u64,
+        ignore_whitespace: bool,
+    ) -> Result<String, String> {
         let result = self
             .client
             .call(
                 "orchestration.getTurnDiff",
-                json!({"threadId": self.id, "fromTurnCount": from, "toTurnCount": to}),
+                json!({
+                    "threadId": self.id,
+                    "fromTurnCount": from,
+                    "toTurnCount": to,
+                    "ignoreWhitespace": ignore_whitespace,
+                }),
             )
             .await?;
         Ok(result["diff"].as_str().unwrap_or_default().to_owned())
@@ -604,7 +614,6 @@ fn translate(state: &mut State, change: Change, payload: &Value) -> Vec<AgentEve
                     text: new.to_owned(),
                     status: status_of(payload),
                     duration_ms: duration(payload),
-                    lines: None,
                 });
             }
             events
@@ -807,9 +816,10 @@ fn turn_of(projection: &Projection, record: &Value) -> TurnId {
 }
 
 fn text_of(item: &Value) -> &str {
-    ["text", "output", "aggregatedOutput"]
+    ["text", "output", "aggregatedOutput", "message"]
         .iter()
         .find_map(|key| item[*key].as_str())
+        .or_else(|| item["failure"]["message"].as_str())
         .unwrap_or_default()
 }
 
@@ -853,6 +863,7 @@ pub(crate) fn describe(item: &Value) -> Option<(ItemKind, ItemDetail)> {
             ItemKind::FileChange,
             tool("edit".to_owned(), line("fileName")),
         ),
+        "error" | "system_notice" => (ItemKind::Error, ItemDetail::None),
         "dynamic_tool" | "file_search" | "web_search" => (
             ItemKind::DynamicToolCall,
             tool(
@@ -866,7 +877,7 @@ pub(crate) fn describe(item: &Value) -> Option<(ItemKind, ItemDetail)> {
 }
 
 /// A provider turn's tokens; T3's input includes cache reads and writes, which the model
-/// counts apart. Cost stays zero: T3 reports none per turn (ADR-0293).
+/// counts apart.
 pub(crate) fn usage_of(turn: &Value) -> Option<Usage> {
     let u = &turn["turnTokenUsage"];
     if u["usageStatus"] != "complete" {
@@ -882,6 +893,5 @@ pub(crate) fn usage_of(turn: &Value) -> Option<Usage> {
         cache_read,
         cache_write,
         reasoning: u["reasoningTokens"].as_u64().unwrap_or_default(),
-        cost_micro_usd: 0,
     })
 }

@@ -1,27 +1,22 @@
 //! A thread's exact statistics from T3's records (ADR-0279, ADR-0293): tokens per provider
 //! turn, tool calls by name and outcome, and each turn's working and tool time. T3 reports no
-//! cost per turn and no timing of single model requests, so cost stays zero and model time
-//! unknown.
+//! cost per turn and no timing of single model requests, so neither is counted.
 
 use serde_json::Value;
 
 use crate::t3::{Projection, millis};
 use crate::thread::{describe, duration, failed, usage_of};
-use crate::{Context, CostByKind, ItemDetail, ItemKind, Usage};
+use crate::{Context, ItemDetail, ItemKind, Usage};
 
 /// What one model used.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ModelUsage {
     /// The model as `provider/id`; empty for usage no model produced, such as a compaction summary.
     pub model: String,
-    /// Tokens and cost.
+    /// Its tokens.
     pub usage: Usage,
-    /// What each kind of its tokens cost.
-    pub cost_by_kind: CostByKind,
     /// Responses that reported usage.
     pub responses: u32,
-    /// Responses that reported tokens but no cost above zero.
-    pub unpriced: u32,
 }
 
 /// The calls of one tool, by outcome.
@@ -205,5 +200,4 @@ fn add(models: &mut Vec<ModelUsage>, model: &str, usage: Usage) {
     entry.usage.cache_write += usage.cache_write;
     entry.usage.reasoning += usage.reasoning;
     entry.responses += 1;
-    entry.unpriced += 1;
 }
