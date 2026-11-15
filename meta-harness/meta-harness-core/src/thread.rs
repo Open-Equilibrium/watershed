@@ -863,7 +863,7 @@ pub(crate) fn describe(item: &Value) -> Option<(ItemKind, ItemDetail)> {
             ItemKind::FileChange,
             tool("edit".to_owned(), line("fileName")),
         ),
-        "error" | "system_notice" => (ItemKind::Error, ItemDetail::None),
+        "error" => (ItemKind::Error, ItemDetail::None),
         "dynamic_tool" | "file_search" | "web_search" => (
             ItemKind::DynamicToolCall,
             tool(
