@@ -391,6 +391,63 @@ fn the_bounded_branch_list_keeps_the_current_branch_and_recent_order() {
     });
 }
 
+/// A commit with the tree of HEAD whose committer date is `seconds` after the Unix epoch.
+fn commit_at(repo: &Repo, seconds: u64) -> String {
+    let tree = repo.git(&["rev-parse", "HEAD^{tree}"]);
+    repo.write(
+        ".git/dated-commit",
+        &format!(
+            "tree {}\nauthor Test <test@example.com> {seconds} +0000\ncommitter Test <test@example.com> {seconds} +0000\n\ndated\n",
+            tree.trim()
+        ),
+    );
+    repo.git(&["hash-object", "-t", "commit", "-w", ".git/dated-commit"])
+        .trim()
+        .to_owned()
+}
+
+#[test]
+fn a_remote_stays_hidden_when_an_old_local_branch_past_the_cap_tracks_it() {
+    run(async {
+        let repo = Repo::new("branches-tracked-past-cap");
+        repo.git(&[
+            "remote",
+            "add",
+            "origin",
+            "https://example.invalid/repo.git",
+        ]);
+        let head = repo
+            .git(&["show", "-s", "--format=%ct", "HEAD"])
+            .trim()
+            .parse::<u64>()
+            .expect("commit timestamp");
+        let old = commit_at(&repo, head - 100);
+        let newer = commit_at(&repo, head + 1);
+        let shown = commit_at(&repo, head + 2);
+        let mut refs = format!("{shown} refs/remotes/origin/shown\n{old} refs/heads/old\n");
+        for i in 0..1000 {
+            refs += &format!("{newer} refs/remotes/origin/recent/{i:04}\n");
+        }
+        repo.write(".git/packed-refs", &refs);
+        repo.git(&["config", "branch.old.remote", "origin"]);
+        repo.git(&["config", "branch.old.merge", "refs/heads/shown"]);
+        let checkpoints = Checkpoints::new(repo.path());
+
+        let branches = checkpoints.branches().await.expect("branches").branches;
+
+        assert!(
+            branches.iter().all(|branch| branch.name != "origin/shown"),
+            "a remote that a local branch tracks is hidden even when that branch is past the cap"
+        );
+        assert!(
+            branches
+                .iter()
+                .any(|branch| branch.name == "origin/recent/0000"),
+            "untracked remotes stay listed"
+        );
+    });
+}
+
 #[test]
 fn tracking_a_local_branch_keeps_both_local_branches_in_the_list() {
     run(async {

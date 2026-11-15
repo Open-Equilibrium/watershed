@@ -242,10 +242,16 @@ impl WorkingTree {
             .map(|line| line.split('\0').collect())
             .filter(|row: &Vec<&str>| row.len() == 5)
             .collect();
-        let tracked: HashSet<&str> = rows
-            .iter()
-            .filter(|row| row[0].starts_with("refs/heads/"))
-            .map(|row| row[2])
+        // Every local branch counts, also one the cap leaves out, so no tracked remote is listed.
+        let upstreams = git_bytes(
+            &self.root,
+            &[],
+            &["for-each-ref", "--format=%(upstream)", "refs/heads"],
+        )
+        .await?;
+        let tracked: HashSet<&str> = upstreams
+            .split(|byte| *byte == b'\n')
+            .filter_map(|line| std::str::from_utf8(line).ok())
             .collect();
         let mut branches: Vec<Branch> = rows
             .iter()
