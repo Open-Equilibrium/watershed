@@ -299,3 +299,42 @@ fn a_request_timing_entry_is_not_chat() {
         "the request's timing adds no chat item"
     );
 }
+
+#[test]
+fn an_unanswered_call_on_the_page_keeps_its_outcome_when_later_pages_exist() {
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+          {"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Run both"}},
+          {"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"bash","arguments":{"command":"lost"}},{"type":"toolCall","id":"c2","name":"read","arguments":{"path":"a.ts"}}]}},
+          {"type":"message","id":"r2","parentId":"a1","message":{"role":"toolResult","toolCallId":"c2","toolName":"read","content":[]}},
+          {"type":"message","id":"a2","parentId":"r2","message":{"role":"assistant","content":[{"type":"toolCall","id":"c3","name":"bash","arguments":{"command":"make"}}]}},
+          {"type":"message","id":"r3","parentId":"a2","message":{"role":"toolResult","toolCallId":"c3","toolName":"bash","isError":true,"content":[]}},
+          {"type":"message","id":"a3","parentId":"r3","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}
+        ],"leafId":"a3"}"#,
+    )
+    .expect("JSON");
+    let history = History::from_entries(&data);
+    let calls = |before: &str| -> Vec<(Option<String>, Option<String>, bool)> {
+        history
+            .transcript(Some(before), 2)
+            .items
+            .into_iter()
+            .filter(|item| item.tool.is_some())
+            .map(|item| (item.tool, item.target, item.failed))
+            .collect()
+    };
+    let bash = |target: &str, failed| (Some("bash".to_owned()), Some(target.to_owned()), failed);
+    assert_eq!(
+        calls("a2"),
+        [
+            bash("lost", true),
+            (Some("read".to_owned()), Some("a.ts".to_owned()), false),
+        ],
+        "a call without a result stays unfinished while its page's answered call keeps its own"
+    );
+    assert_eq!(
+        calls("a3"),
+        [bash("make", true)],
+        "the later page shows its failed result"
+    );
+}

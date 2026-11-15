@@ -34,16 +34,19 @@ pub(super) fn transcript(
     let mut ended: HashMap<(&str, usize), Ended> = HashMap::new();
     let mut open = OpenCalls::default();
     let mut response = "";
-    let mut response_on_page = false;
     for (index, entry) in path.iter().enumerate().skip(start) {
         if waiting == 0 {
             break;
         }
         match &entry.body {
             Body::Assistant { calls, .. } => {
+                // A response starts over the open calls, so none of the page's calls can be
+                // answered from its start on, even when some never got a result.
+                if index >= end {
+                    break;
+                }
                 open.respond(calls);
                 response = &entry.id;
-                response_on_page = index < end;
             }
             Body::ToolTiming { call, duration_ms } => open.ended(call, *duration_ms),
             Body::ToolResult {
@@ -53,10 +56,9 @@ pub(super) fn transcript(
                 ..
             } => {
                 let duration_ms = open.timing(call).flatten();
+                // The open calls belong to the latest response, which is on the page.
                 if let Some((place, _)) = open.answer(call) {
-                    if response_on_page {
-                        waiting = waiting.saturating_sub(1);
-                    }
+                    waiting = waiting.saturating_sub(1);
                     ended.insert((response, place), (*failed, duration_ms, *lines));
                 }
             }
