@@ -15,6 +15,8 @@ pub(crate) struct Projection {
     pub messages: Vec<Value>,
     pub turn_items: Vec<Value>,
     pub checkpoints: Vec<Value>,
+    /// Items a fork shows from its source thread, which never change.
+    pub inherited: Vec<Value>,
 }
 
 /// Which record an event changed, with its value before.
@@ -43,6 +45,11 @@ impl Projection {
             messages: list("messages"),
             turn_items: list("turnItems"),
             checkpoints: list("checkpoints"),
+            inherited: list("visibleTurnItems")
+                .into_iter()
+                .filter(|row| row["visibility"] != "local")
+                .map(|row| row["item"].clone())
+                .collect(),
         }
     }
 
@@ -111,6 +118,37 @@ impl Projection {
             Some(other) => *other = link.clone(),
             None => list.push(link.clone()),
         }
+    }
+
+    /// The records as T3's projection names them.
+    pub fn to_json(&self) -> Value {
+        serde_json::json!({
+            "thread": self.thread,
+            "runs": self.runs,
+            "attempts": self.attempts,
+            "providerThreads": self.provider_threads,
+            "providerTurns": self.provider_turns,
+            "runtimeRequests": self.runtime_requests,
+            "messages": self.messages,
+            "turnItems": self.turn_items,
+            "checkpoints": self.checkpoints,
+        })
+    }
+
+    /// A run's prompt: its user message, or the queued prompt's turn item before T3 stored the
+    /// message.
+    pub fn prompt(&self, run: &Value) -> &str {
+        let id = &run["userMessageId"];
+        self.messages
+            .iter()
+            .find(|m| &m["id"] == id)
+            .or_else(|| {
+                self.turn_items
+                    .iter()
+                    .find(|i| i["type"] == "user_message" && &i["messageId"] == id)
+            })
+            .and_then(|record| record["text"].as_str())
+            .unwrap_or_default()
     }
 
     pub fn run(&self, id: &Value) -> Option<&Value> {

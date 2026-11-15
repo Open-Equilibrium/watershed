@@ -1,58 +1,29 @@
-//! Meta-Harness core: controls coding agents behind an agent-neutral session and event model
-//! (ADR-0184).
+//! Meta-Harness core: runs coding agents on its own T3 Code server and presents them in an
+//! agent-neutral session and event model (ADR-0280, ADR-0281).
 
 #![deny(missing_docs)]
 
-mod checkout;
-mod checkpoint;
 mod context;
-mod diff;
 mod event;
-mod framing;
-mod history;
 mod host;
-mod pi;
-mod record;
-mod session;
-mod stored;
+mod statistics;
 mod t3;
 mod thread;
 mod visible;
 
-pub use checkpoint::{
-    Branches, Checkpoint, Checkpoints, CommitFile, CommitPlan, Phase, RevertFile, RevertPlan,
-};
 pub use context::Context;
-pub use diff::{
-    Branch, BranchTarget, ChangeStatus, Changes, Commit, Comparison, DiffError, FileChange,
-    GitStatus, GitTransfer, PullRequest, PullRequestDraft, PullRequestError, PullRequestPlan,
-    PullRequestState, PullRequestText, PushConfirmation, RevertConfirmation, ReviewDecision, Stash,
-    Whitespace, Worktree, WorktreeFile, WorktreeFileState, WorktreeRemoval, WorktreeRemoved,
-    without_credentials,
-};
 pub use event::{
-    AgentEvent, Answer, ApprovalOption, ChangedLines, CostByKind, Delivery, EntryKind, ItemDetail,
-    ItemId, ItemKind, ItemStatus, NotificationLevel, PendingRequest, Question, Queue, Request,
-    RequestId, SessionTree, TreeNode, TurnId, Usage, UserInput,
+    AgentEvent, ApprovalOption, ChangedLines, CostByKind, ItemDetail, ItemId, ItemKind, ItemStatus,
+    NotificationLevel, PendingRequest, Question, Request, RequestId, TurnId, Usage,
 };
-pub(crate) use framing::{Frame, LineFramer};
-pub use history::{
-    ChangeCount, History, ModelUsage, Statistics, ToolCalls, Transcript, TranscriptItem,
-    TurnCheckpoints, TurnStatistics,
+pub use host::{
+    AcpAgent, Host, HostConfig, Model, ModelChoice, ModelOption, Permissions, Project, Provider,
+    StartThread, ThreadSummary, Workspace,
 };
-pub use host::{AcpAgent, Host, HostConfig, Permissions, Project, StartThread, Workspace};
-pub(crate) use pi::PiAdapter;
-pub use record::session_record;
-pub use session::{
-    AgentCommand, CommandError, MAX_RECORD_BYTES, Model, Pending, Responder, Session, SessionEvent,
-    SessionState, Stopper,
-};
-pub use stored::{
-    StoredSession, recent_sessions, session_id, session_title, session_title_of, session_titles,
-};
+pub use statistics::{ModelUsage, Statistics, ToolCalls, TurnStatistics};
 pub use t3::T3_VERSION;
 pub use thread::{ChatItem, Snapshot, Thread, ThreadEvent, Turn, TurnFile, TurnStatus};
-pub use visible::{visible_lines, visible_name};
+pub use visible::{visible, visible_lines, visible_name};
 
 #[cfg(test)]
 mod tests;

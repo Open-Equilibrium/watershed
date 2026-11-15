@@ -1,4 +1,4 @@
-//! Agent-neutral agent events, using T3 Code's provider runtime vocabulary (ADR-0195).
+//! Agent-neutral agent events, in T3 Code's vocabulary (ADR-0281).
 
 /// One turn: a user prompt until the agent settles, including its retries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -79,43 +79,6 @@ pub struct ChangedLines {
     pub removed: u32,
 }
 
-/// What a session entry holds.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EntryKind {
-    /// A user message.
-    User,
-    /// A model response.
-    Assistant,
-    /// A tool result.
-    ToolResult,
-    /// A system message that changed prompt sections or tools.
-    System,
-    /// An extension's custom entry.
-    Custom,
-    /// Any other entry.
-    Other,
-}
-
-/// One entry of a session's branch tree.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TreeNode {
-    /// The agent's entry id.
-    pub id: String,
-    /// The parent entry, or `None` for a root.
-    pub parent: Option<String>,
-    /// What the entry holds.
-    pub kind: EntryKind,
-}
-
-/// A session's entries as a tree, in append order.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SessionTree {
-    /// The entries; every parent precedes its children.
-    pub nodes: Vec<TreeNode>,
-    /// The entry the next message continues from.
-    pub leaf: Option<String>,
-}
-
 /// One open request from the agent that waits for the user.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RequestId(pub String);
@@ -175,50 +138,6 @@ pub struct Question {
     pub multi_select: bool,
     /// Whether a typed answer is allowed.
     pub custom: bool,
-}
-
-/// A question an agent extension asks the user.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum UserInput {
-    /// Choose one of several options.
-    Select {
-        /// The question.
-        title: String,
-        /// The options in display order.
-        options: Vec<String>,
-    },
-    /// Confirm or decline.
-    Confirm {
-        /// The question.
-        title: String,
-        /// Further explanation.
-        message: String,
-    },
-    /// Enter one line of text.
-    Input {
-        /// The question.
-        title: String,
-        /// Placeholder text.
-        placeholder: String,
-    },
-    /// Edit multi-line text.
-    Editor {
-        /// The question.
-        title: String,
-        /// The initial text.
-        prefill: String,
-    },
-}
-
-/// The user's reply to a [`UserInput`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Answer {
-    /// The chosen option or entered text.
-    Value(String),
-    /// The reply to a confirmation.
-    Confirmed(bool),
-    /// The user dismissed the question.
-    Cancelled,
 }
 
 /// How urgent a notification is.
@@ -288,13 +207,6 @@ pub enum AgentEvent {
         /// Kind-specific information.
         detail: ItemDetail,
     },
-    /// A running item reported its latest partial output.
-    ItemUpdated {
-        /// The item.
-        item: ItemId,
-        /// The latest partial output text.
-        output: String,
-    },
     /// Text was appended to a streaming item.
     ContentDelta {
         /// The item.
@@ -330,18 +242,6 @@ pub enum AgentEvent {
         /// The provider's error, if the request failed.
         error: Option<String>,
     },
-    /// An agent extension asks the user a question.
-    UserInputRequested {
-        /// The request.
-        request: RequestId,
-        /// The question.
-        input: UserInput,
-    },
-    /// The user answered a question.
-    UserInputResolved {
-        /// The request.
-        request: RequestId,
-    },
     /// An agent extension shows a notification.
     Notification {
         /// How urgent it is.
@@ -349,44 +249,4 @@ pub enum AgentEvent {
         /// The text.
         message: String,
     },
-    /// An agent extension, or the session while a turn waits for a revert, set or cleared a
-    /// status entry.
-    StatusChanged {
-        /// The extension's status key.
-        key: String,
-        /// The text, or `None` when cleared.
-        text: Option<String>,
-    },
-    /// An agent extension set or cleared a widget of text lines.
-    WidgetChanged {
-        /// The extension's widget key.
-        key: String,
-        /// The lines, or `None` when cleared.
-        lines: Option<Vec<String>>,
-    },
-    /// An agent extension replaced the text in the input area.
-    InputTextSet {
-        /// The text.
-        text: String,
-    },
-    /// The messages waiting for a running agent changed.
-    QueueChanged(Queue),
-}
-
-/// Messages waiting for a running agent, in order.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Queue {
-    /// Steering messages, delivered before the agent's next model request.
-    pub steering: Vec<String>,
-    /// Follow-up messages, delivered once the agent is done.
-    pub follow_up: Vec<String>,
-}
-
-/// How a message reaches an agent that is already running; an idle agent starts with it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Delivery {
-    /// Before the agent's next model request.
-    Steer,
-    /// Once the agent is done.
-    FollowUp,
 }

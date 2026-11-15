@@ -8,8 +8,8 @@ use std::process::Command;
 use std::time::Duration;
 
 use meta_harness_core::{
-    AcpAgent, AgentEvent, Host, HostConfig, Permissions, Request, Snapshot, StartThread, Thread,
-    ThreadEvent, TurnStatus, Workspace,
+    AcpAgent, AgentEvent, Host, HostConfig, ModelChoice, Permissions, Request, Snapshot,
+    StartThread, Thread, ThreadEvent, TurnStatus, Workspace,
 };
 
 const AGENT: &str = "scripted";
@@ -70,9 +70,28 @@ async fn host(home: &Path) -> Host {
     .expect("T3 starts")
 }
 
+fn worktree() -> Workspace {
+    Workspace::NewWorktree {
+        base: "main".to_owned(),
+    }
+}
+
+fn start(text: &str, workspace: Workspace, permissions: Permissions) -> StartThread {
+    StartThread {
+        text: text.to_owned(),
+        model: ModelChoice {
+            instance: AGENT.to_owned(),
+            model: AGENT.to_owned(),
+            options: Vec::new(),
+        },
+        workspace,
+        permissions,
+    }
+}
+
 /// Waits until the thread's snapshot satisfies `done`, failing after a minute.
 async fn wait(thread: &Thread, done: impl Fn(&Snapshot) -> bool) -> Snapshot {
-    tokio::time::timeout(Duration::from_secs(60), async {
+    let waited = tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             let (snapshot, mut events) = thread.subscribe();
             if done(&snapshot) {
@@ -81,8 +100,8 @@ async fn wait(thread: &Thread, done: impl Fn(&Snapshot) -> bool) -> Snapshot {
             events.recv().await;
         }
     })
-    .await
-    .expect("the thread gets there within a minute")
+    .await;
+    waited.unwrap_or_else(|_| panic!("not there within a minute: {:#?}", thread.snapshot()))
 }
 
 /// Whether `n` turns completed with their checkpoints.
@@ -102,15 +121,7 @@ async fn a_thread_runs_turns_and_reverts_files_in_its_worktree() {
     let host = host(&home).await;
     let project = host.project(&repo).await.unwrap();
     let thread = project
-        .start(StartThread {
-            text: "append first".to_owned(),
-            instance: AGENT.to_owned(),
-            model: AGENT.to_owned(),
-            workspace: Workspace::NewWorktree {
-                base: "main".to_owned(),
-            },
-            permissions: Permissions::FullAccess,
-        })
+        .start(start("append first", worktree(), Permissions::FullAccess))
         .await
         .unwrap();
     wait(&thread, completed(1)).await;
@@ -150,15 +161,7 @@ async fn a_snapshot_names_the_events_it_already_contains() {
     let host = host(&home).await;
     let project = host.project(&repo).await.unwrap();
     let thread = project
-        .start(StartThread {
-            text: "append once".to_owned(),
-            instance: AGENT.to_owned(),
-            model: AGENT.to_owned(),
-            workspace: Workspace::NewWorktree {
-                base: "main".to_owned(),
-            },
-            permissions: Permissions::FullAccess,
-        })
+        .start(start("append once", worktree(), Permissions::FullAccess))
         .await
         .unwrap();
     let (before, mut events) = thread.subscribe();
@@ -185,13 +188,7 @@ async fn a_supervised_thread_waits_for_the_person_to_approve() {
     let host = host(&home).await;
     let project = host.project(&repo).await.unwrap();
     let thread = project
-        .start(StartThread {
-            text: "ask".to_owned(),
-            instance: AGENT.to_owned(),
-            model: AGENT.to_owned(),
-            workspace: Workspace::Checkout,
-            permissions: Permissions::Supervised,
-        })
+        .start(start("ask", Workspace::Checkout, Permissions::Supervised))
         .await
         .unwrap();
     let (asked, mut events) = {
@@ -212,6 +209,140 @@ async fn a_supervised_thread_waits_for_the_person_to_approve() {
     }));
     assert!(done.requests.is_empty());
     assert!(done.transcript.iter().any(|item| item.text == "Approved."));
+    host.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn statistics_count_a_thread_s_turns_and_tool_calls() {
+    let (_dir, repo, home) = fixture();
+    let host = host(&home).await;
+    let project = host.project(&repo).await.unwrap();
+    let thread = project
+        .start(start("append one", worktree(), Permissions::FullAccess))
+        .await
+        .unwrap();
+    wait(&thread, completed(1)).await;
+    let statistics = thread.statistics();
+    assert_eq!(statistics.turns.len(), 1);
+    assert_eq!(statistics.turns[0].prompt, "append one");
+    let edits: u32 = statistics
+        .tools
+        .iter()
+        .map(|t| t.succeeded + t.failed + t.cancelled + t.open)
+        .sum();
+    assert!(edits >= 1, "the append's tool call counts: {statistics:?}");
+    assert_eq!(
+        statistics.turns[0].model_ms, None,
+        "T3 reports no model time (ADR-0293)"
+    );
+    host.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_prompt_sent_while_a_turn_runs_queues_and_can_be_removed() {
+    let (_dir, repo, home) = fixture();
+    let host = host(&home).await;
+    let project = host.project(&repo).await.unwrap();
+    let thread = project
+        .start(start("wait", Workspace::Checkout, Permissions::FullAccess))
+        .await
+        .unwrap();
+    wait(&thread, |s| {
+        s.turns.iter().any(|t| t.status == TurnStatus::Running)
+    })
+    .await;
+    thread.send("append later", false).await.unwrap();
+    let queued = wait(&thread, |s| {
+        s.turns
+            .iter()
+            .any(|t| t.status == TurnStatus::Queued && !t.prompt.is_empty())
+    })
+    .await;
+    let turn = queued
+        .turns
+        .iter()
+        .find(|t| t.status == TurnStatus::Queued)
+        .unwrap();
+    assert_eq!(turn.prompt, "append later");
+    thread.cancel_queued(turn.number).await.unwrap();
+    wait(&thread, |s| {
+        s.turns.iter().all(|t| t.status != TurnStatus::Queued)
+    })
+    .await;
+    thread.stop().await.unwrap();
+    wait(&thread, |s| {
+        s.turns.iter().all(|t| t.status == TurnStatus::Aborted)
+    })
+    .await;
+    host.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn deleting_a_worktree_s_only_thread_can_delete_the_worktree() {
+    let (_dir, repo, home) = fixture();
+    let host = host(&home).await;
+    let project = host.project(&repo).await.unwrap();
+    let thread = project
+        .start(start("append one", worktree(), Permissions::FullAccess))
+        .await
+        .unwrap();
+    wait(&thread, completed(1)).await;
+    let listed = project.threads().await.unwrap();
+    let summary = listed.iter().find(|t| t.id == thread.id()).unwrap();
+    let folder = summary.worktree.clone().unwrap();
+    assert!(project.only_thread_in_worktree(summary).await.unwrap());
+    project.delete(summary, true).await.unwrap();
+    assert!(!folder.exists());
+    assert!(
+        project
+            .threads()
+            .await
+            .unwrap()
+            .iter()
+            .all(|t| t.id != thread.id())
+    );
+    host.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn forking_a_response_starts_a_thread_with_the_turns_up_to_it() {
+    let (_dir, repo, home) = fixture();
+    let host = host(&home).await;
+    let project = host.project(&repo).await.unwrap();
+    let thread = project
+        .start(start("append first", worktree(), Permissions::FullAccess))
+        .await
+        .unwrap();
+    wait(&thread, completed(1)).await;
+    thread.send("append second", false).await.unwrap();
+    wait(&thread, completed(2)).await;
+    let fork = project.open(&thread.fork(1).await.unwrap()).await.unwrap();
+    let forked = wait(&fork, |s| {
+        s.transcript.iter().any(|i| i.text == "append first")
+    })
+    .await;
+    assert!(forked.transcript.iter().all(|i| i.text != "append second"));
+    host.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_writer_model_is_set_once_for_every_thread() {
+    let (_dir, _repo, home) = fixture();
+    let host = host(&home).await;
+    let writer = ModelChoice {
+        instance: "claudeAgent".to_owned(),
+        model: "claude-haiku-5-5".to_owned(),
+        options: vec![("effort".to_owned(), "high".to_owned())],
+    };
+    host.set_writer_model(&writer).await.unwrap();
+    assert_eq!(host.writer_model().await.unwrap(), Some(writer));
+    assert!(
+        host.providers()
+            .await
+            .unwrap()
+            .iter()
+            .any(|p| p.instance == AGENT)
+    );
     host.shutdown().await;
 }
 

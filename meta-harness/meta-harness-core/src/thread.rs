@@ -284,6 +284,141 @@ impl Thread {
         Ok(prompt)
     }
 
+    /// The thread's exact statistics (ADR-0279).
+    pub fn statistics(&self) -> crate::Statistics {
+        crate::statistics::statistics(&self.state().projection)
+    }
+
+    /// The context window the latest request filled, if the provider reports it.
+    pub fn context(&self) -> Option<crate::Context> {
+        crate::statistics::context(&self.state().projection)
+    }
+
+    /// The thread's title.
+    pub fn title(&self) -> String {
+        self.state().projection.thread["title"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned()
+    }
+
+    /// T3's record of the thread, as Meta-Harness holds it, for the session record (ADR-0257).
+    pub fn record(&self) -> Value {
+        self.state().projection.to_json()
+    }
+
+    /// T3's "Fork from this response": a new thread that continues from the end of turn
+    /// `turn`. Returns its id.
+    pub async fn fork(&self, turn: u64) -> Result<String, String> {
+        let (run, title) = {
+            let state = self.state();
+            let run = state
+                .projection
+                .runs
+                .iter()
+                .find(|r| r["ordinal"].as_u64() == Some(turn) && r["status"] != "rolled_back")
+                .map(|r| r["id"].clone())
+                .ok_or(format!("Turn {turn} is not in this thread."))?;
+            (
+                run,
+                state.projection.thread["title"]
+                    .as_str()
+                    .unwrap_or("Chat")
+                    .to_owned(),
+            )
+        };
+        let target = fresh_id("thread");
+        self.client
+            .call(
+                "orchestration.dispatchCommand",
+                json!({
+                    "type": "thread.fork",
+                    "commandId": fresh_id("cmd"),
+                    "createdBy": "user",
+                    "creationSource": "web",
+                    "sourceThreadId": self.id,
+                    "targetThreadId": target,
+                    "sourcePoint": {"type": "run", "runId": run},
+                    "title": format!("{title} fork"),
+                }),
+            )
+            .await?;
+        Ok(target)
+    }
+
+    /// Changes what the agent may do without asking, from the next turn on.
+    pub async fn set_permissions(&self, permissions: crate::Permissions) -> Result<(), String> {
+        self.dispatch(json!({"type": "thread.runtime-mode.set", "runtimeMode": permissions.mode()}))
+            .await
+    }
+
+    /// Changes the model for the next turn.
+    pub async fn set_model(&self, model: &crate::ModelChoice) -> Result<(), String> {
+        self.dispatch(
+            json!({"type": "thread.model-selection.set", "modelSelection": model.to_t3()}),
+        )
+        .await
+    }
+
+    /// The thread's model.
+    pub fn model(&self) -> Option<crate::ModelChoice> {
+        crate::ModelChoice::from_t3(&self.state().projection.thread["modelSelection"])
+    }
+
+    /// "Send now" on a queued turn: starts it when idle, else steers the running turn with it.
+    pub async fn send_queued_now(&self, turn: u64) -> Result<(), String> {
+        let (queued, running) = {
+            let state = self.state();
+            let runs = &state.projection.runs;
+            let queued = run_id(runs, |r| {
+                r["ordinal"].as_u64() == Some(turn) && r["status"] == "queued"
+            })
+            .ok_or(format!("Turn {turn} is not queued."))?;
+            let running = run_id(runs, |r| {
+                matches!(
+                    r["status"].as_str(),
+                    Some("starting" | "running" | "waiting")
+                )
+            });
+            (queued, running)
+        };
+        match running {
+            Some(target) => {
+                self.dispatch(json!({
+                    "type": "queued-message.promote-to-steer",
+                    "queuedRunId": queued,
+                    "targetRunId": target,
+                }))
+                .await
+            }
+            None => {
+                self.dispatch(json!({"type": "queued-run.start", "runId": queued}))
+                    .await
+            }
+        }
+    }
+
+    /// Replaces a queued turn's prompt.
+    pub async fn edit_queued(&self, turn: u64, text: &str) -> Result<(), String> {
+        let run = self.queued(turn)?;
+        self.dispatch(json!({"type": "queued-run.edit", "runId": run, "text": text}))
+            .await
+    }
+
+    /// Removes a queued turn.
+    pub async fn cancel_queued(&self, turn: u64) -> Result<(), String> {
+        let run = self.queued(turn)?;
+        self.dispatch(json!({"type": "queued-run.cancel", "runId": run}))
+            .await
+    }
+
+    fn queued(&self, turn: u64) -> Result<Value, String> {
+        run_id(&self.state().projection.runs, |r| {
+            r["ordinal"].as_u64() == Some(turn) && r["status"] == "queued"
+        })
+        .ok_or(format!("Turn {turn} is not queued."))
+    }
+
     /// Answers an approval with one of its options' decisions.
     pub async fn respond(&self, request: &RequestId, decision: &str) -> Result<(), String> {
         self.dispatch(json!({
@@ -341,6 +476,10 @@ impl Thread {
     }
 }
 
+fn run_id(runs: &[Value], matches: impl Fn(&Value) -> bool) -> Option<Value> {
+    runs.iter().find(|r| matches(r)).map(|r| r["id"].clone())
+}
+
 /// Applies one message of T3's thread stream and hands its agent events to the subscribers.
 fn apply(state: &mut State, message: &Value) {
     if message["kind"] != "event" {
@@ -391,7 +530,7 @@ fn translate(state: &mut State, change: Change, payload: &Value) -> Vec<AgentEve
                     checkpoint: Some(turn.0.to_string()),
                 }],
                 Some("rolled_back") => vec![AgentEvent::RolledBack],
-                _ => Vec::new(),
+                _ => vec![AgentEvent::TurnsChanged],
             }
         }
         Change::TurnItem(before) => {
@@ -468,9 +607,14 @@ fn translate(state: &mut State, change: Change, payload: &Value) -> Vec<AgentEve
 fn snapshot(state: &mut State) -> Snapshot {
     let projection = state.projection.clone();
     let transcript = projection
-        .turn_items
+        .inherited
         .iter()
-        .filter(|item| projection.visible(item))
+        .chain(
+            projection
+                .turn_items
+                .iter()
+                .filter(|item| projection.visible(item)),
+        )
         .filter_map(|item| {
             let (kind, detail) = describe(item)?;
             Some(ChatItem {
@@ -527,13 +671,7 @@ fn turns(projection: &Projection) -> Vec<Turn> {
                     Some("interrupted" | "failed" | "cancelled") => TurnStatus::Aborted,
                     _ => TurnStatus::Running,
                 },
-                prompt: projection
-                    .messages
-                    .iter()
-                    .find(|m| m["id"] == run["userMessageId"])
-                    .and_then(|m| m["text"].as_str())
-                    .unwrap_or_default()
-                    .to_owned(),
+                prompt: projection.prompt(run).to_owned(),
                 started_ms: millis(&run["startedAt"]),
                 ended_ms: millis(&run["completedAt"]),
                 added: files.iter().map(|f| f.added).sum(),
@@ -652,20 +790,25 @@ fn text_of(item: &Value) -> &str {
         .unwrap_or_default()
 }
 
-fn status_of(item: &Value) -> ItemStatus {
-    if item["status"] == "failed" || item["exitCode"].as_i64().is_some_and(|code| code != 0) {
+pub(crate) fn status_of(item: &Value) -> ItemStatus {
+    if failed(item) {
         ItemStatus::Failed
     } else {
         ItemStatus::Completed
     }
 }
 
-fn duration(item: &Value) -> Option<u64> {
+/// Whether a tool call failed: its status, or a command's exit code.
+pub(crate) fn failed(item: &Value) -> bool {
+    item["status"] == "failed" || item["exitCode"].as_i64().is_some_and(|code| code != 0)
+}
+
+pub(crate) fn duration(item: &Value) -> Option<u64> {
     millis(&item["completedAt"])?.checked_sub(millis(&item["startedAt"])?)
 }
 
 /// What a T3 turn item is in the agent-neutral model; `None` for items the Chat does not show.
-fn describe(item: &Value) -> Option<(ItemKind, ItemDetail)> {
+pub(crate) fn describe(item: &Value) -> Option<(ItemKind, ItemDetail)> {
     let line = |key: &str| {
         item[key]
             .as_str()
@@ -701,7 +844,7 @@ fn describe(item: &Value) -> Option<(ItemKind, ItemDetail)> {
 
 /// A provider turn's tokens; T3's input includes cache reads and writes, which the model
 /// counts apart. Cost stays zero: T3 reports none per turn (ADR-0293).
-fn usage_of(turn: &Value) -> Option<Usage> {
+pub(crate) fn usage_of(turn: &Value) -> Option<Usage> {
     let u = &turn["turnTokenUsage"];
     if u["usageStatus"] != "complete" {
         return None;
