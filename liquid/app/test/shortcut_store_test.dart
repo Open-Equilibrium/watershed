@@ -326,6 +326,35 @@ void main() {
     expect(await store.load(), diff);
   });
 
+  test(
+    'two changes queued behind failing Liquid key turn-offs keep the key on',
+    () async {
+      final host = FakeHost();
+      final store = ShortcutStore(file);
+      final shortcuts = await ShortcutController.load(store, host);
+      await shortcuts.change(ShortcutSettings.liquidKey());
+
+      final disable = Completer<void>();
+      host.gate = disable;
+      host.failure = PlatformException(code: 'approval', message: 'denied');
+      final first = shortcuts.change(ShortcutSettings.standard());
+      await pumpEventQueue();
+      // A second turn-off, with different settings, is queued while the first waits on the host.
+      final second = shortcuts.change(
+        ShortcutSettings.standard().change(
+          Command.diff,
+          const Keys(LogicalKeyboardKey.keyD, meta: true),
+        ),
+      );
+      disable.complete();
+      await Future.wait([first, second]);
+
+      expect(host.calls, [true, false, false], reason: 'both turn-offs failed');
+      expect(shortcuts.value, ShortcutSettings.liquidKey());
+      expect(await store.load(), ShortcutSettings.liquidKey());
+    },
+  );
+
   test('the first frame does not wait for the Liquid key', () async {
     final store = ShortcutStore(file);
     await store.save(ShortcutSettings.liquidKey());

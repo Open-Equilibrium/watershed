@@ -174,8 +174,13 @@ class ShortcutController extends SavedSettings<ShortcutSettings> {
           }
         }
         // A newer change may have replaced value meanwhile; what settled is what the computer
-        // has, and the newer change settles on its own turn.
-        _settled = value.liquidKey == _applied ? value : next;
+        // has, and the newer change settles on its own turn. When neither matches, the computer
+        // still has the settings settled before.
+        if (value.liquidKey == _applied) {
+          _settled = value;
+        } else if (next.liquidKey == _applied) {
+          _settled = next;
+        }
         if (store || changed) await save();
       });
 
