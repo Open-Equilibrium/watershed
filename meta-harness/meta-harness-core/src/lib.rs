@@ -26,7 +26,7 @@ pub use host::{
     StartThread, ThreadSummary, Workspace,
 };
 pub use statistics::{ModelUsage, Statistics, ToolCalls, TurnStatistics};
-pub use t3::T3_VERSION;
+pub use t3::t3_version;
 pub use thread::{ChatItem, Snapshot, Thread, ThreadEvent, Turn, TurnFile, TurnStatus};
 pub use visible::{visible, visible_lines, visible_name};
 

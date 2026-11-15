@@ -7,7 +7,7 @@ mod server;
 pub(crate) use client::Client;
 pub(crate) use projection::{Change, Projection};
 pub(crate) use server::Server;
-pub use server::T3_VERSION;
+pub use server::t3_version;
 
 use serde_json::Value;
 

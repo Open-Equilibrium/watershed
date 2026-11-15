@@ -201,9 +201,10 @@ jobs:
       - *node
       - *mac-host
 
-      - name: Test the Meta-Harness pi extension
-        if: needs.scope.outputs.meta_harness == 'true'
-        run: node --test meta-harness/pi-extension/watershed.test.ts
+      - name: Install pinned T3 Code
+        if: needs.scope.outputs.meta_harness == 'true' || needs.scope.outputs.liquid == 'true'
+        shell: bash
+        run: echo "META_HARNESS_T3=$(node scripts/install-t3.mjs "$RUNNER_TEMP/t3")" >> "$GITHUB_ENV"
 
       - *rust
 

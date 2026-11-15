@@ -466,10 +466,15 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertEqual(
             step_run(workflow, "Render HTML docs"), "node scripts/check-html-render.mjs"
         )
-        assert_step_state(self, workflow, "Test the Meta-Harness pi extension", job="test",
-                          condition="needs.scope.outputs.meta_harness == 'true'")
-        self.assertEqual(step_run(workflow, "Test the Meta-Harness pi extension"),
-                         "node --test meta-harness/pi-extension/watershed.test.ts")
+        assert_step_state(
+            self, workflow, "Install pinned T3 Code", job="test",
+            condition="needs.scope.outputs.meta_harness == 'true' || "
+            "needs.scope.outputs.liquid == 'true'",
+        )
+        self.assertEqual(
+            step_run(workflow, "Install pinned T3 Code"),
+            'echo "META_HARNESS_T3=$(node scripts/install-t3.mjs "$RUNNER_TEMP/t3")" >> "$GITHUB_ENV"',
+        )
 
         assert_step_state(self, workflow, "Run M1.2 installer contract tests", job="flow-agent")
         self.assertEqual(

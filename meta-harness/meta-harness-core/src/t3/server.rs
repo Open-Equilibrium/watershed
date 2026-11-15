@@ -4,8 +4,13 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
-/// The T3 Code release Meta-Harness runs; an upgrade changes it after the contract tests pass.
-pub const T3_VERSION: &str = "0.1.9";
+/// The T3 Code release Meta-Harness runs, as `meta-harness/t3.lock` pins it.
+pub fn t3_version() -> &'static str {
+    include_str!("../../../t3.lock")
+        .lines()
+        .find_map(|line| line.strip_prefix("version "))
+        .map_or("", str::trim)
+}
 
 /// Environment that keeps T3 from sending anything to its analytics (ADR-0281). Agent activity
 /// publishing stays off because Meta-Harness never runs `t3 connect`, which stores what
@@ -123,7 +128,7 @@ async fn wait_for_origin(runtime: &Path, pid: Option<u32>) -> Result<String, Str
         if let Ok(text) = std::fs::read_to_string(runtime)
             && let Ok(value) = serde_json::from_str::<serde_json::Value>(&text)
             && value["pid"].as_u64() == pid.map(u64::from)
-            && value["serverVersion"].as_str() == Some(T3_VERSION)
+            && value["serverVersion"].as_str() == Some(t3_version())
             && let Some(origin) = value["origin"].as_str()
         {
             return Ok(origin.to_owned());
@@ -131,6 +136,7 @@ async fn wait_for_origin(runtime: &Path, pid: Option<u32>) -> Result<String, Str
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     Err(format!(
-        "T3 {T3_VERSION} did not start listening within 30 s"
+        "T3 {} did not start listening within 30 s",
+        t3_version()
     ))
 }
