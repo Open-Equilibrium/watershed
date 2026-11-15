@@ -1,4 +1,4 @@
-//! What a session's stored entries count to: the figures of Liquid's statistics view (ADR-0279).
+//! What a session's stored entries count to: the statistics shown in Liquid's statistics panel (ADR-0279).
 //! Every entry counts once, on every branch, in stored order. A turn starts at each start
 //! checkpoint, or at each prompt in a session without checkpoints, and its clock runs to its end
 //! checkpoint or the next start; entries outside every turn count only toward the session.
@@ -126,7 +126,7 @@ struct Invocation {
     duration_ms: Option<u64>,
 }
 
-/// The figures while the entries are counted.
+/// The statistics while the entries are counted.
 #[derive(Default)]
 struct Count<'a> {
     turns: Vec<Turn>,
@@ -308,7 +308,7 @@ impl<'a> Count<'a> {
     }
 }
 
-/// Adds what an entry spent to `models`. Only responses count toward the response figures.
+/// Adds what an entry spent to `models`. Only responses count toward the response statistics.
 fn count_spend(models: &mut HashMap<String, ModelUsage>, entry: &Entry) {
     let Some(spend) = entry.spend.as_deref() else {
         return;
