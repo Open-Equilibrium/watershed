@@ -12,6 +12,7 @@ use crate::event::{
     AgentEvent, ApprovalOption, ItemDetail, ItemId, ItemKind, ItemStatus, PendingRequest, Question,
     Request, RequestId, TurnId, Usage,
 };
+use crate::git::count;
 use crate::t3::{Change, Client, Projection, fresh_id, millis};
 
 /// Events a subscriber may fall behind by before it is dropped; it then restores from a new
@@ -130,12 +131,13 @@ impl State {
 pub struct Thread {
     client: Client,
     id: String,
+    root: String,
     state: Arc<Mutex<State>>,
 }
 
 impl Thread {
     /// Subscribes to the thread and returns once T3 sent its snapshot.
-    pub(crate) async fn follow(client: Client, id: String) -> Result<Self, String> {
+    pub(crate) async fn follow(client: Client, id: String, root: String) -> Result<Self, String> {
         let mut stream = client
             .stream(
                 "orchestration.subscribeThread",
@@ -164,7 +166,12 @@ impl Thread {
                 apply(&mut state, &message);
             }
         });
-        Ok(Self { client, id, state })
+        Ok(Self {
+            client,
+            id,
+            root,
+            state,
+        })
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
@@ -174,6 +181,29 @@ impl Thread {
     /// T3's thread id.
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    /// Git for the thread's checkout: its worktree, else the project folder.
+    pub fn git(&self) -> crate::Git {
+        let cwd = self.worktree().map_or_else(
+            || self.root.clone(),
+            |path| path.to_string_lossy().into_owned(),
+        );
+        crate::Git::new(self.client.clone(), cwd, Some(self.id.clone()))
+    }
+
+    /// Points the thread at `branch`, after the branch picker switched or chose a worktree.
+    pub async fn set_branch(
+        &self,
+        branch: &str,
+        worktree: Option<&std::path::Path>,
+    ) -> Result<(), String> {
+        self.dispatch(json!({
+            "type": "thread.metadata.update",
+            "branch": branch,
+            "worktreePath": worktree.map(|p| p.to_string_lossy().into_owned()),
+        }))
+        .await
     }
 
     /// The thread's own worktree, if it has one.
@@ -755,13 +785,6 @@ fn pending(projection: &Projection, item: &Value) -> Option<PendingRequest> {
         turn: turn_of(projection, item),
         request,
     })
-}
-
-fn count(value: &Value) -> u32 {
-    value
-        .as_u64()
-        .and_then(|n| u32::try_from(n).ok())
-        .unwrap_or(u32::MAX)
 }
 
 /// The turn a turn item or provider turn belongs to: its run's ordinal.

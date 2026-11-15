@@ -8,8 +8,8 @@ use std::process::Command;
 use std::time::Duration;
 
 use meta_harness_core::{
-    AcpAgent, AgentEvent, Host, HostConfig, ModelChoice, Permissions, Request, Snapshot,
-    StartThread, Thread, ThreadEvent, TurnStatus, Workspace,
+    AcpAgent, AgentEvent, GitAction, GitActionRequest, GitProgress, Host, HostConfig, ModelChoice,
+    Permissions, Request, Snapshot, StartThread, Thread, ThreadEvent, TurnStatus, Workspace,
 };
 
 const AGENT: &str = "scripted";
@@ -37,19 +37,11 @@ fn fixture() -> (tempdir::Dir, PathBuf, PathBuf) {
     std::fs::create_dir(&repo).unwrap();
     git(&repo, &["init", "-q", "-b", "main"]);
     std::fs::write(repo.join("README.md"), "contract\n").unwrap();
+    // T3's commits need an identity; the host's may have none.
+    git(&repo, &["config", "user.name", "Contract"]);
+    git(&repo, &["config", "user.email", "contract@example.invalid"]);
     git(&repo, &["add", "."]);
-    git(
-        &repo,
-        &[
-            "-c",
-            "user.name=t",
-            "-c",
-            "user.email=t@t",
-            "commit",
-            "-qm",
-            "start",
-        ],
-    );
+    git(&repo, &["commit", "-qm", "start"]);
     let home = dir.path().join("t3");
     (dir, repo, home)
 }
@@ -343,6 +335,90 @@ async fn the_writer_model_is_set_once_for_every_thread() {
             .iter()
             .any(|p| p.instance == AGENT)
     );
+    host.shutdown().await;
+}
+
+/// Runs a stacked action and returns how it ended.
+async fn run(
+    git: &meta_harness_core::Git,
+    action: GitAction,
+    message: Option<&str>,
+) -> GitProgress {
+    let mut progress = git
+        .run(GitActionRequest {
+            action,
+            message: message.map(str::to_owned),
+            files: None,
+            feature_branch: false,
+        })
+        .await
+        .unwrap();
+    let mut last = None;
+    while let Some(step) = progress.recv().await {
+        last = Some(step);
+    }
+    last.expect("the action reports how it ended")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn git_commits_branches_and_pushes_as_t3_does() {
+    let (dir, repo, home) = fixture();
+    let origin = dir.path().join("origin.git");
+    git(dir.path(), &["init", "-q", "--bare", "origin.git"]);
+    git(
+        &repo,
+        &["remote", "add", "origin", &origin.to_string_lossy()],
+    );
+    git(&repo, &["push", "-q", "-u", "origin", "main"]);
+    let host = host(&home).await;
+    let project = host.project(&repo).await.unwrap();
+    let git = project.git();
+
+    std::fs::write(repo.join("README.md"), "contract\nchanged\n").unwrap();
+    let status = git.status().await.unwrap();
+    assert_eq!(status.branch.as_deref(), Some("main"));
+    assert!(status.repository && status.remote && status.default_branch);
+    assert_eq!(status.changes.len(), 1);
+    assert!(
+        git.uncommitted_diff(false)
+            .await
+            .unwrap()
+            .contains("+changed")
+    );
+
+    git.create_branch("feature").await.unwrap();
+    let refs = git.refs("feat", 0, 50).await.unwrap();
+    assert!(refs.refs.iter().any(|r| r.name == "feature" && r.current));
+    let ended = run(&git, GitAction::CommitPush, Some("Change the readme")).await;
+    assert!(matches!(ended, GitProgress::Finished { .. }), "{ended:?}");
+    let status = git.status().await.unwrap();
+    assert!(status.changes.is_empty() && status.upstream);
+    assert_eq!(status.ahead, 0);
+    let pushed = Command::new("git")
+        .args(["log", "-1", "--format=%s", "feature"])
+        .current_dir(&origin)
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&pushed.stdout).trim(),
+        "Change the readme"
+    );
+
+    git.switch("main").await.unwrap();
+    assert_eq!(git.status().await.unwrap().branch.as_deref(), Some("main"));
+    host.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn git_initializes_a_folder_without_a_repository() {
+    let (dir, _repo, home) = fixture();
+    let plain = dir.path().join("plain");
+    std::fs::create_dir(&plain).unwrap();
+    let host = host(&home).await;
+    let git = host.project(&plain).await.unwrap().git();
+    assert!(!git.status().await.unwrap().repository);
+    git.init().await.unwrap();
+    assert!(git.status().await.unwrap().repository);
     host.shutdown().await;
 }
 

@@ -87,6 +87,7 @@ impl Host {
         Ok(Project {
             client: self.client.clone(),
             id,
+            root,
         })
     }
 
@@ -322,6 +323,7 @@ pub struct StartThread {
 pub struct Project {
     client: Client,
     id: String,
+    root: String,
 }
 
 impl Project {
@@ -352,6 +354,11 @@ impl Project {
             )
             .await?;
         self.open(&thread).await
+    }
+
+    /// Git for the project folder.
+    pub fn git(&self) -> crate::Git {
+        crate::Git::new(self.client.clone(), self.root.clone(), None)
     }
 
     /// The project's threads, newest first.
@@ -404,11 +411,10 @@ impl Project {
         self.dispatch(json!({"type": "thread.delete", "threadId": thread.id}))
             .await?;
         if let (true, Some(path)) = (worktree, &thread.worktree) {
-            let root = self.root().await?;
             self.client
                 .call(
                     "vcs.removeWorktree",
-                    json!({"cwd": root, "path": path.to_string_lossy(), "force": true}),
+                    json!({"cwd": self.root, "path": path.to_string_lossy(), "force": true}),
                 )
                 .await?;
         }
@@ -426,21 +432,6 @@ impl Project {
             .await
     }
 
-    async fn root(&self) -> Result<String, String> {
-        let mut shell = self
-            .client
-            .stream("orchestration.subscribeShell", json!({}))
-            .await?;
-        let snapshot = shell.recv().await.ok_or("T3 sent no projects")?;
-        snapshot["snapshot"]["projects"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|p| p["id"] == self.id.as_str())
-            .and_then(|p| p["workspaceRoot"].as_str().map(str::to_owned))
-            .ok_or_else(|| "T3 no longer has this project.".to_owned())
-    }
-
     async fn dispatch(&self, mut command: Value) -> Result<(), String> {
         command["commandId"] = json!(crate::t3::fresh_id("cmd"));
         self.client
@@ -451,7 +442,7 @@ impl Project {
 
     /// Follows the existing thread `id`.
     pub async fn open(&self, id: &str) -> Result<Thread, String> {
-        Thread::follow(self.client.clone(), id.to_owned()).await
+        Thread::follow(self.client.clone(), id.to_owned(), self.root.clone()).await
     }
 }
 

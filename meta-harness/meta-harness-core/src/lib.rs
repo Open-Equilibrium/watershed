@@ -5,6 +5,7 @@
 
 mod context;
 mod event;
+mod git;
 mod host;
 mod statistics;
 mod t3;
@@ -15,6 +16,10 @@ pub use context::Context;
 pub use event::{
     AgentEvent, ApprovalOption, ChangedLines, CostByKind, ItemDetail, ItemId, ItemKind, ItemStatus,
     NotificationLevel, PendingRequest, Question, Request, RequestId, TurnId, Usage,
+};
+pub use git::{
+    BranchPullRequest, ChangedFile, Git, GitAction, GitActionRequest, GitProgress, GitStatus, Ref,
+    Refs, ResolvedPullRequest,
 };
 pub use host::{
     AcpAgent, Host, HostConfig, Model, ModelChoice, ModelOption, Permissions, Project, Provider,
