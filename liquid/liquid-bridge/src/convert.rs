@@ -1,11 +1,12 @@
 //! Conversions between the core's model and the types Dart receives.
 
+use std::ffi::OsString;
+
 use meta_harness_core::{
-    AgentEvent, ChangeStatus, CommandError, ContextDetail, ContextMessage, ContextPart, EntryKind,
-    FileChange, ItemDetail, ItemKind, ItemStatus, MAX_RECORD_BYTES, Model, NotificationLevel,
-    Queue, RecordKind, RevertConfirmation, RevertFile, SessionEvent, StepContext, StoredSession,
-    ToolOutcome, Trajectory, TrajectoryRecord, Transcript, TranscriptItem, TreeNode,
-    TurnCheckpoints, Usage, UserInput, visible_name,
+    AgentEvent, ChangeStatus, CommandError, Context, CostByKind, EntryKind, FileChange, ItemDetail,
+    ItemKind, ItemStatus, MAX_RECORD_BYTES, Model, ModelUsage, NotificationLevel, Queue,
+    RevertConfirmation, RevertFile, SessionEvent, Statistics, StoredSession, ToolCalls, Transcript,
+    TranscriptItem, TreeNode, TurnCheckpoints, TurnStatistics, Usage, UserInput, visible_name,
 };
 
 use crate::api::events::{
@@ -14,10 +15,9 @@ use crate::api::events::{
     BridgeStep, BridgeUsage,
 };
 use crate::api::history::{
-    BridgeContextDetail, BridgeContextMessage, BridgeContextPart, BridgeEntryKind, BridgeRecord,
-    BridgeRecordKind, BridgeRevertConfirmation, BridgeRevertFile, BridgeStepContext,
-    BridgeToolOutcome, BridgeTrajectory, BridgeTranscript, BridgeTranscriptItem, BridgeTreeNode,
-    BridgeTurn,
+    BridgeContext, BridgeCostByKind, BridgeEntryKind, BridgeModelUsage, BridgeRevertConfirmation,
+    BridgeRevertFile, BridgeStatistics, BridgeToolCalls, BridgeTranscript, BridgeTranscriptItem,
+    BridgeTreeNode, BridgeTurn, BridgeTurnStatistics,
 };
 use crate::api::session::{BridgeModel, BridgeStoredSession};
 
@@ -34,6 +34,9 @@ pub(crate) fn describe(error: CommandError) -> String {
         CommandError::ExtensionMissing => {
             "Watershed's pi extension is not loaded, so turns would run without checkpoints"
                 .to_owned()
+        }
+        CommandError::SessionChanged => {
+            "the session changed while its history was read; try again".to_owned()
         }
     }
 }
@@ -68,47 +71,6 @@ impl From<TreeNode> for BridgeTreeNode {
                 EntryKind::Custom => BridgeEntryKind::Custom,
                 EntryKind::Other => BridgeEntryKind::Other,
             },
-            preview: node.preview,
-            label: node.label,
-            at_ms: node.at_ms.map(int),
-            failed: node.failed,
-        }
-    }
-}
-
-impl From<Trajectory> for BridgeTrajectory {
-    fn from(trajectory: Trajectory) -> Self {
-        Self {
-            records: trajectory.records.into_iter().map(Into::into).collect(),
-            duration_ms: int(trajectory.duration_ms),
-        }
-    }
-}
-
-impl From<TrajectoryRecord> for BridgeRecord {
-    fn from(record: TrajectoryRecord) -> Self {
-        Self {
-            entry: record.entry,
-            turn: int(record.turn),
-            kind: match record.kind {
-                RecordKind::User => BridgeRecordKind::User,
-                RecordKind::Message => BridgeRecordKind::Message,
-                RecordKind::Tool => BridgeRecordKind::Tool,
-            },
-            label: record.label,
-            detail: record.detail,
-            target: record.target,
-            changed_file: record.changed_file,
-            start_ms: int(record.start_ms),
-            duration_ms: record.duration_ms.map(int),
-            first_token_ms: record.first_token_ms.map(int),
-            model: record.model,
-            usage: record.usage.map(Into::into),
-            stop_reason: record.stop_reason,
-            failed: record.failed,
-            context: record.context.map(Into::into),
-            outcome: record.outcome.into(),
-            added_chars: int(record.added_chars),
         }
     }
 }
@@ -148,63 +110,6 @@ impl From<TranscriptItem> for BridgeTranscriptItem {
     }
 }
 
-impl From<ToolOutcome> for BridgeToolOutcome {
-    fn from(outcome: ToolOutcome) -> Self {
-        Self {
-            added: outcome.added.map(int),
-            removed: outcome.removed.map(int),
-            exit_code: outcome.exit_code,
-            tests_passed: outcome.tests.map(|tests| int(tests.passed)),
-            tests_failed: outcome.tests.map(|tests| int(tests.failed)),
-        }
-    }
-}
-
-impl From<ContextDetail> for BridgeContextDetail {
-    fn from(detail: ContextDetail) -> Self {
-        let parts = |parts: Vec<ContextPart>| {
-            parts
-                .into_iter()
-                .map(|part| BridgeContextPart {
-                    name: part.name,
-                    chars: int(part.chars),
-                })
-                .collect()
-        };
-        Self {
-            sections: parts(detail.sections),
-            tools: parts(detail.tools),
-            messages: detail.messages.into_iter().map(Into::into).collect(),
-        }
-    }
-}
-
-impl From<ContextMessage> for BridgeContextMessage {
-    fn from(message: ContextMessage) -> Self {
-        Self {
-            entry: message.entry,
-            label: message.label,
-            chars: int(message.chars),
-            in_context: message.in_context,
-            fresh: message.fresh,
-        }
-    }
-}
-
-impl From<StepContext> for BridgeStepContext {
-    fn from(context: StepContext) -> Self {
-        Self {
-            prompt_chars: int(context.prompt_chars),
-            sections: context.sections,
-            tools: context.tools,
-            tool_chars: int(context.tool_chars),
-            messages: int(context.messages),
-            message_chars: int(context.message_chars),
-            new_since_previous: context.new_since_previous,
-        }
-    }
-}
-
 impl From<TurnCheckpoints> for BridgeTurn {
     fn from(turn: TurnCheckpoints) -> Self {
         let counted = |count: fn(&meta_harness_core::ChangeCount) -> u64| {
@@ -224,6 +129,79 @@ impl From<TurnCheckpoints> for BridgeTurn {
             ended_ms: turn.ended_ms.map(int),
             ended: turn.ended,
             failure: turn.failure,
+        }
+    }
+}
+
+impl From<Statistics> for BridgeStatistics {
+    fn from(statistics: Statistics) -> Self {
+        Self {
+            models: statistics.models.into_iter().map(Into::into).collect(),
+            tools: statistics.tools.into_iter().map(Into::into).collect(),
+            turns: statistics.turns.into_iter().map(Into::into).collect(),
+            started_ms: statistics.started_ms.map(int),
+            ended_ms: statistics.ended_ms.map(int),
+        }
+    }
+}
+
+impl From<CostByKind> for BridgeCostByKind {
+    fn from(cost: CostByKind) -> Self {
+        Self {
+            input: int(cost.input),
+            output: int(cost.output),
+            cache_read: int(cost.cache_read),
+            cache_write: int(cost.cache_write),
+        }
+    }
+}
+
+impl From<ModelUsage> for BridgeModelUsage {
+    fn from(model: ModelUsage) -> Self {
+        Self {
+            model: model.model,
+            usage: model.usage.into(),
+            cost_by_kind: model.cost_by_kind.into(),
+            responses: int(model.responses),
+            unpriced: int(model.unpriced),
+        }
+    }
+}
+
+impl From<ToolCalls> for BridgeToolCalls {
+    fn from(tool: ToolCalls) -> Self {
+        Self {
+            name: tool.name,
+            succeeded: int(tool.succeeded),
+            failed: int(tool.failed),
+            cancelled: int(tool.cancelled),
+            open: int(tool.open),
+            duration_ms: tool.duration_ms.map(int),
+        }
+    }
+}
+
+impl From<TurnStatistics> for BridgeTurnStatistics {
+    fn from(turn: TurnStatistics) -> Self {
+        Self {
+            entry: turn.entry,
+            prompt: turn.prompt,
+            started_ms: turn.started_ms.map(int),
+            ended_ms: turn.ended_ms.map(int),
+            models: turn.models.into_iter().map(Into::into).collect(),
+            model_ms: turn.model_ms.map(int),
+            tool_ms: turn.tool_ms.map(int),
+            failed: int(turn.failed),
+        }
+    }
+}
+
+impl From<Context> for BridgeContext {
+    fn from(context: Context) -> Self {
+        Self {
+            tokens: context.tokens.map(int),
+            window: int(context.window),
+            compacts_at: context.compacts_at.map(int),
         }
     }
 }
@@ -303,7 +281,7 @@ impl From<ItemKind> for BridgeItemKind {
     }
 }
 
-fn event(kind: BridgeEventKind) -> BridgeEvent {
+pub(crate) fn event(kind: BridgeEventKind) -> BridgeEvent {
     BridgeEvent {
         kind,
         item: None,
@@ -313,6 +291,7 @@ fn event(kind: BridgeEventKind) -> BridgeEvent {
         display: None,
         success: None,
         queue: None,
+        checkpoint: None,
     }
 }
 
@@ -366,8 +345,14 @@ impl From<AgentEvent> for BridgeEvent {
         use BridgeEventKind as Kind;
         match agent {
             AgentEvent::TurnStarted { .. } => event(Kind::TurnStarted),
-            AgentEvent::TurnCompleted { .. } => event(Kind::TurnCompleted),
-            AgentEvent::TurnAborted { .. } => event(Kind::TurnAborted),
+            AgentEvent::TurnCompleted { checkpoint, .. } => BridgeEvent {
+                checkpoint,
+                ..event(Kind::TurnCompleted)
+            },
+            AgentEvent::TurnAborted { checkpoint, .. } => BridgeEvent {
+                checkpoint,
+                ..event(Kind::TurnAborted)
+            },
             AgentEvent::ItemStarted {
                 item: id,
                 kind,
@@ -499,13 +484,16 @@ impl From<AgentEvent> for BridgeEvent {
     }
 }
 
-impl From<StoredSession> for BridgeStoredSession {
-    fn from(stored: StoredSession) -> Self {
-        Self {
-            path: stored.path.display().to_string(),
+impl TryFrom<StoredSession> for BridgeStoredSession {
+    /// The path, when it is not UTF-8 and so cannot name the session to reopen.
+    type Error = OsString;
+
+    fn try_from(stored: StoredSession) -> Result<Self, Self::Error> {
+        Ok(Self {
+            path: stored.path.into_os_string().into_string()?,
             title: stored.title,
             modified_ms: int(stored.modified_ms),
-        }
+        })
     }
 }
 

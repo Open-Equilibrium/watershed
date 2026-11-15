@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
+import 'package:liquid/src/controls.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/shortcuts/keymap.dart';
@@ -71,10 +72,7 @@ void main() {
     expect(find.text('⇪N'), findsOneWidget);
     expect(find.text('⌘N'), findsOneWidget);
     expect(find.text('tap ⇪'), findsOneWidget);
-    expect(find.text('Trajectory'), findsWidgets);
     expect(find.text('Fold or unfold the folder'), findsOneWidget);
-    expect(find.text('Collapse or expand the turn'), findsOneWidget);
-    expect(find.text('Collapse all turns'), findsOneWidget);
 
     await press(tester, LogicalKeyboardKey.escape);
     expect(find.text('tap ⇪'), findsNothing);
@@ -97,37 +95,59 @@ void main() {
     expect(find.text('main checkout · this window'), findsOneWidget);
   });
 
+  testWidgets(
+    'a default that the user’s own ⌘U takes shows unbound in Settings',
+    (tester) async {
+      // Loaded from a stored file, as the app starts, where the default gives way.
+      await show(
+        tester,
+        ShortcutSettings.fromJson(
+          ShortcutSettings.standard()
+              .change(
+                Command.focusInput,
+                const Keys(LogicalKeyboardKey.keyU, meta: true),
+              )
+              .toJson(),
+        ),
+      );
+      await openSettings(tester);
+
+      expect(find.text('⌘U'), findsOneWidget, reason: 'only the user’s own ⌘U');
+      expect(find.text('Reset to ⌘U'), findsOneWidget);
+    },
+  );
+
   testWidgets('recording new keys switches to Custom and offers a reset', (
     tester,
   ) async {
     await show(tester, ShortcutSettings.standard());
     await openSettings(tester);
 
-    await tester.tap(find.text('⌘3'));
+    await tester.tap(find.text('⌘D'));
     await tester.pumpAndSettle();
     expect(find.text('Press keys…'), findsOneWidget);
     await press(
       tester,
-      LogicalKeyboardKey.keyD,
+      LogicalKeyboardKey.keyE,
       holding: LogicalKeyboardKey.metaLeft,
     );
 
     expect(shortcuts.value.bindings(Command.diff), [
-      const Keys(LogicalKeyboardKey.keyD, meta: true),
+      const Keys(LogicalKeyboardKey.keyE, meta: true),
     ]);
     expect(store.saved, shortcuts.value);
     expect(find.text('based on Standard'), findsOneWidget);
     expect(find.text('1 shortcut changed'), findsOneWidget);
 
-    await tester.tap(find.text('Reset to ⌘3'));
+    await tester.tap(find.text('Reset to ⌘D'));
     await tester.pumpAndSettle();
     expect(shortcuts.value.changed(Command.diff), isFalse);
 
-    await tester.tap(find.text('⌘3'));
+    await tester.tap(find.text('⌘D'));
     await tester.pumpAndSettle();
     await press(tester, LogicalKeyboardKey.escape);
     expect(find.text('Press keys…'), findsNothing, reason: 'esc cancels');
-    expect(find.text('⌘3'), findsOneWidget, reason: 'and keeps Settings open');
+    expect(find.text('⌘D'), findsOneWidget, reason: 'and keeps Settings open');
   });
 
   testWidgets('keys another action in the area runs ask before they move', (
@@ -159,17 +179,164 @@ void main() {
     expect(shortcuts.value, ShortcutSettings.standard());
   });
 
+  testWidgets('Reset names every command it takes keys from', (tester) async {
+    // Diff runs New Session's ⇪N, and Focus Input its ⌘N.
+    final settings = ShortcutSettings.liquidKey()
+        .change(
+          Command.diff,
+          const Keys(LogicalKeyboardKey.keyN, liquid: true),
+          clear: [Command.newSession],
+        )
+        .change(
+          Command.focusInput,
+          const Keys(LogicalKeyboardKey.keyN, meta: true),
+          clear: [Command.newSession],
+        );
+    await show(tester, settings);
+    await openSettings(tester);
+    await tester.tap(find.text('Reset to ⇪N'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('already runs Diff'), findsOneWidget);
+    expect(find.textContaining('already runs Focus Input'), findsOneWidget);
+
+    await tester.tap(find.text('Use anyway, clear Diff and Focus Input'));
+    await tester.pumpAndSettle();
+    expect(
+      shortcuts.value.conflicts(
+        Command.newSession,
+        const Keys(LogicalKeyboardKey.keyN, liquid: true),
+      ),
+      isEmpty,
+    );
+    expect(
+      shortcuts.value.bindings(Command.focusInput),
+      isNot(contains(const Keys(LogicalKeyboardKey.keyN, meta: true))),
+    );
+  });
+
+  testWidgets(
+    'recording keys a Liquid key combination runs asks while the key is off',
+    (tester) async {
+      // New Session's ⇪⌘E stays hidden while the Liquid key is off, and still runs there.
+      final settings = ShortcutSettings.standard().change(
+        Command.newSession,
+        const Keys(LogicalKeyboardKey.keyE, meta: true, liquid: true),
+      );
+      await show(tester, settings);
+      await openSettings(tester);
+      await tester.tap(find.text('⌘U'));
+      await tester.pumpAndSettle();
+      await press(
+        tester,
+        LogicalKeyboardKey.keyE,
+        holding: LogicalKeyboardKey.metaLeft,
+      );
+      expect(find.textContaining('already runs New Session'), findsOneWidget);
+      expect(find.text('Use anyway, clear New Session'), findsOneWidget);
+      expect(shortcuts.value.changed(Command.statistics), isFalse);
+    },
+  );
+
+  testWidgets('changing the reveal key hides the hints', (tester) async {
+    await show(tester, ShortcutSettings.standard());
+    await tester.sendKeyDownEvent(
+      LogicalKeyboardKey.metaLeft,
+      platform: 'macos',
+    );
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(find.byType(KeyBadge), findsWidgets);
+
+    await shortcuts.change(ShortcutSettings.liquidKey());
+    await tester.pumpAndSettle();
+    expect(
+      find.byType(KeyBadge),
+      findsNothing,
+      reason:
+          'the hints shown for ⌘ do not stay once the Liquid key reveals them',
+    );
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft, platform: 'macos');
+  });
+
+  testWidgets(
+    'resetting a command whose keys another command took asks first',
+    (tester) async {
+      await show(tester, ShortcutSettings.liquidKey());
+      await openSettings(tester);
+      await tester.tap(find.text('⇪D'));
+      await tester.pumpAndSettle();
+      await press(tester, LogicalKeyboardKey.keyN, holding: liquidKey);
+      await tester.tap(find.text('Use anyway, clear New Session'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Reset to ⇪N'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('already runs Diff'), findsOneWidget);
+      expect(shortcuts.value.bindings(Command.newSession), [
+        const Keys(LogicalKeyboardKey.keyN, meta: true),
+      ], reason: 'nothing changes before the user agrees');
+
+      await tester.tap(find.text('Use anyway, clear Diff'));
+      await tester.pumpAndSettle();
+      expect(shortcuts.value.bindings(Command.newSession), [
+        const Keys(LogicalKeyboardKey.keyN, liquid: true),
+        const Keys(LogicalKeyboardKey.keyN, meta: true),
+      ]);
+      expect(shortcuts.value.bindings(Command.diff), [
+        const Keys(LogicalKeyboardKey.keyD, meta: true),
+      ]);
+    },
+  );
+
+  testWidgets('choosing a profile while a conflict is shown cancels it', (
+    tester,
+  ) async {
+    // Custom gives ⌘N to Focus Input, which Standard gives to New Session.
+    await show(
+      tester,
+      ShortcutSettings.standard()
+          .change(
+            Command.focusInput,
+            const Keys(LogicalKeyboardKey.keyN, meta: true),
+            clear: [Command.newSession],
+          )
+          .choose(Profile.standard),
+    );
+    await openSettings(tester);
+    await tester.tap(find.text('⌘D'));
+    await tester.pumpAndSettle();
+    await press(
+      tester,
+      LogicalKeyboardKey.keyN,
+      holding: LogicalKeyboardKey.metaLeft,
+    );
+    expect(find.text('Use anyway, clear New Session'), findsOneWidget);
+
+    await tester.tap(find.text('Custom'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Use anyway, clear New Session'),
+      findsNothing,
+      reason: 'in Custom, Focus Input owns ⌘N, so the old owner is stale',
+    );
+    expect(shortcuts.value.bindings(Command.diff), [
+      const Keys(LogicalKeyboardKey.keyD, meta: true),
+    ]);
+    expect(shortcuts.value.bindings(Command.focusInput), [
+      const Keys(LogicalKeyboardKey.keyN, meta: true),
+    ]);
+  });
+
   testWidgets('recording the keys a command already has changes nothing', (
     tester,
   ) async {
     await show(tester, ShortcutSettings.standard());
     await openSettings(tester);
 
-    await tester.tap(find.text('⌘3'));
+    await tester.tap(find.text('⌘D'));
     await tester.pumpAndSettle();
     await press(
       tester,
-      LogicalKeyboardKey.digit3,
+      LogicalKeyboardKey.keyD,
       holding: LogicalKeyboardKey.metaLeft,
     );
     expect(find.text('Press keys…'), findsNothing, reason: 'recording ends');
@@ -194,11 +361,30 @@ void main() {
     expect(shortcuts.value.changed(Command.newSession), isFalse);
   });
 
+  testWidgets('the Liquid key with Shift is refused, as macOS takes it', (
+    tester,
+  ) async {
+    await show(tester, ShortcutSettings.liquidKey());
+    await openSettings(tester);
+    await tester.tap(find.text('⇪N'));
+    await tester.pumpAndSettle();
+    await tester.sendKeyDownEvent(liquidKey, platform: 'macos');
+    await press(
+      tester,
+      LogicalKeyboardKey.keyM,
+      holding: LogicalKeyboardKey.shiftLeft,
+    );
+    await tester.sendKeyUpEvent(liquidKey, platform: 'macos');
+    await tester.pumpAndSettle();
+    expect(find.text('⇧⇪M is kept for capitals.'), findsOneWidget);
+    expect(shortcuts.value.changed(Command.newSession), isFalse);
+  });
+
   testWidgets('leaving the recording row stops recording', (tester) async {
     await show(tester, ShortcutSettings.standard());
     await openSettings(tester);
 
-    await tester.tap(find.text('⌘3'));
+    await tester.tap(find.text('⌘D'));
     await tester.pumpAndSettle();
     await tester.tap(find.byType(TextField));
     await tester.pumpAndSettle();
@@ -245,6 +431,11 @@ void main() {
         find.descendant(of: find.byType(SettingsPage), matching: reason),
         findsOneWidget,
       );
+      expect(
+        find.byTooltip('Dismiss'),
+        findsNothing,
+        reason: 'the Liquid key keeps its own notice, not the save notice',
+      );
 
       host.failure = null;
       await tester.tap(find.text('Custom'));
@@ -263,15 +454,15 @@ void main() {
     await show(tester, ShortcutSettings.standard());
     await openSettings(tester);
 
-    await tester.enterText(find.byType(TextField), 'branch');
+    await tester.enterText(find.byType(TextField), 'whitespace');
     await tester.pumpAndSettle();
-    expect(find.text('Branch from the step'), findsOneWidget);
+    expect(find.text('Hide or show whitespace changes'), findsOneWidget);
     expect(find.text('New Session'), findsNothing);
 
-    await tester.enterText(find.byType(TextField), '⌘2');
+    await tester.enterText(find.byType(TextField), '⌘D');
     await tester.pumpAndSettle();
-    expect(find.text('Trajectory'), findsWidgets);
-    expect(find.text('Diff'), findsNothing);
+    expect(find.text('Diff'), findsWidgets);
+    expect(find.text('New Session'), findsNothing);
   });
 
   testWidgets('lists every key that never changes', (tester) async {
@@ -347,17 +538,17 @@ void main() {
   group('a change that would replace a kept Custom profile', () {
     final kept = ShortcutSettings.liquidKey().change(
       Command.diff,
-      const Keys(LogicalKeyboardKey.keyD, liquid: true),
+      const Keys(LogicalKeyboardKey.keyE, liquid: true),
     );
-    const commandD = Keys(LogicalKeyboardKey.keyD, meta: true);
+    const commandE = Keys(LogicalKeyboardKey.keyE, meta: true);
 
     Future<void> recordDiff(WidgetTester tester) async {
       await openSettings(tester);
-      await tester.tap(find.text('⌘3'));
+      await tester.tap(find.text('⌘D'));
       await tester.pumpAndSettle();
       await press(
         tester,
-        LogicalKeyboardKey.keyD,
+        LogicalKeyboardKey.keyE,
         holding: LogicalKeyboardKey.metaLeft,
       );
     }
@@ -369,7 +560,7 @@ void main() {
         expect(find.text('Replace the Custom profile?'), findsOneWidget);
         expect(
           find.text(
-            'Changing Diff to ⌘D starts a new Custom profile from Standard. '
+            'Changing Diff to ⌘E starts a new Custom profile from Standard. '
             'This replaces your current Custom profile, which has 1 changed '
             'shortcut.',
           ),
@@ -386,11 +577,11 @@ void main() {
       }
 
       // Settings are still open after esc.
-      await tester.tap(find.text('⌘3'));
+      await tester.tap(find.text('⌘D'));
       await tester.pumpAndSettle();
       await press(
         tester,
-        LogicalKeyboardKey.keyD,
+        LogicalKeyboardKey.keyE,
         holding: LogicalKeyboardKey.metaLeft,
       );
       expect(find.text('Replace the Custom profile?'), findsOneWidget);
@@ -419,7 +610,7 @@ void main() {
           }
           expect(shortcuts.value.profile, Profile.custom);
           expect(shortcuts.value.base, Profile.standard);
-          expect(shortcuts.value.bindings(Command.diff), [commandD]);
+          expect(shortcuts.value.bindings(Command.diff), [commandE]);
           expect(shortcuts.value.changes.length, 1);
         },
       );
@@ -440,12 +631,40 @@ void main() {
       expect(shortcuts.value, kept, reason: 'the kept Custom profile is back');
     });
 
+    testWidgets(
+      'another profile than the one it asked under ends the question',
+      (tester) async {
+        // Asked under the Liquid key profile: Standard keeps the kept Custom profile, so it
+        // still "replaces" it, but ⇪E would be hidden under Standard.
+        await show(tester, kept.choose(Profile.liquidKey));
+        await openSettings(tester);
+        await tester.tap(find.text('⇪D'));
+        await tester.pumpAndSettle();
+        await press(tester, LogicalKeyboardKey.keyE, holding: liquidKey);
+        expect(find.text('Replace the Custom profile?'), findsOneWidget);
+
+        await tester.tap(find.text('Standard'));
+        await tester.pumpAndSettle();
+        expect(find.text('Replace the Custom profile?'), findsNothing);
+        expect(find.text('Replace Custom'), findsNothing);
+        expect(
+          find.text('Press keys…'),
+          findsNothing,
+          reason: 'recording ends',
+        );
+        expect(shortcuts.value.profile, Profile.standard);
+        expect(shortcuts.value.bindings(Command.diff), [
+          const Keys(LogicalKeyboardKey.keyD, meta: true),
+        ], reason: 'nothing is replaced, so no command loses its keys');
+      },
+    );
+
     testWidgets('only the question shows, not an earlier refusal', (
       tester,
     ) async {
       await show(tester, kept.choose(Profile.standard));
       await openSettings(tester);
-      await tester.tap(find.text('⌘3'));
+      await tester.tap(find.text('⌘D'));
       await tester.pumpAndSettle();
       await press(
         tester,
@@ -455,7 +674,7 @@ void main() {
       expect(find.text('⌘Q is kept for Quit.'), findsOneWidget);
       await press(
         tester,
-        LogicalKeyboardKey.keyD,
+        LogicalKeyboardKey.keyE,
         holding: LogicalKeyboardKey.metaLeft,
       );
       expect(find.text('Replace the Custom profile?'), findsOneWidget);
@@ -471,7 +690,7 @@ void main() {
       );
       await recordDiff(tester);
       expect(find.text('Replace the Custom profile?'), findsNothing);
-      expect(shortcuts.value.bindings(Command.diff), [commandD]);
+      expect(shortcuts.value.bindings(Command.diff), [commandE]);
     });
   });
 }

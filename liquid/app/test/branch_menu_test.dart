@@ -115,12 +115,12 @@ void main() {
   }
 
   Finder chipText(String text) => find.descendant(
-    of: find.byKey(const Key('branch-chip')),
+    of: find.byKey(const Key('branch-row')),
     matching: find.text(text),
   );
 
   Future<void> openMenu(WidgetTester tester) async {
-    await tester.tap(find.byKey(const Key('branch-chip')));
+    await tester.tap(find.byKey(const Key('branch-row')));
     await tester.pumpAndSettle();
   }
 
@@ -143,6 +143,9 @@ void main() {
       size: const Size(1050, 900),
       textSize: TextSize.large,
     );
+    // In a window this narrow the card is a popover, which the sliders button opens.
+    await tester.tap(find.byTooltip('Session card'));
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(tester.getSize(chipText('main')).width, greaterThan(0));
     expect(chipText('no upstream'), findsOneWidget);
@@ -172,7 +175,7 @@ void main() {
     final semantics = tester.ensureSemantics();
     try {
       await show(tester, git: gitStatusOf());
-      final chip = tester.getSemantics(find.byKey(const Key('branch-chip')));
+      final chip = tester.getSemantics(find.byKey(const Key('branch-row')));
       expect(chip.getSemanticsData().hasAction(SemanticsAction.tap), isTrue);
       tester.binding.renderViews.single.owner!.semanticsOwner!.performAction(
         chip.id,
@@ -265,6 +268,68 @@ void main() {
     expect(find.text('Switch branch'), findsNothing);
     // The notice fades.
     await tester.pump(const Duration(seconds: 7));
+  });
+
+  testWidgets('a change saved while the menu is open is asked about', (
+    tester,
+  ) async {
+    await show(tester, git: gitStatusOf());
+    await openMenu(tester);
+    backend.git = gitStatusOf(changed: 4);
+    await tester.tap(find.text('origin/release-1.2'));
+    await tester.pumpAndSettle();
+    expect(find.text('Leave my changes on main'), findsOneWidget);
+    expect(
+      backend.calls.where((call) => call.startsWith('switch')),
+      isEmpty,
+      reason: 'nothing switches before the person chooses',
+    );
+    await tester.pump(const Duration(seconds: 7));
+  });
+
+  testWidgets('a read overtaken by a newer one still asks about changes', (
+    tester,
+  ) async {
+    await show(tester, git: gitStatusOf());
+    await openMenu(tester);
+    final changed = await (FakeBackend()..git = gitStatusOf(changed: 4))
+        .gitStatus();
+    final selection = backend.statusGate = Completer();
+    await tester.tap(find.text('origin/release-1.2'));
+    await tester.pump();
+    // A poll starts while the switch's own read is pending and outlives it.
+    final poll = backend.statusGate = Completer();
+    unawaited(state.git.refresh());
+    selection.complete(changed);
+    await tester.pump();
+    poll.complete(changed);
+    await tester.pumpAndSettle();
+    expect(find.text('Leave my changes on main'), findsOneWidget);
+    expect(
+      backend.calls.where((call) => call.startsWith('switch')),
+      isEmpty,
+      reason: 'nothing switches before the person chooses',
+    );
+    await tester.pump(const Duration(seconds: 7));
+  });
+
+  testWidgets('a checkout that cannot be read again stops the switch', (
+    tester,
+  ) async {
+    await show(tester, git: gitStatusOf());
+    await openMenu(tester);
+    backend.gitError = 'git could not start: No such file or directory';
+    await tester.tap(find.text('origin/release-1.2'));
+    await tester.pumpAndSettle();
+    expect(
+      backend.calls.where((call) => call.startsWith('switch')),
+      isEmpty,
+      reason: 'the cached status cannot tell whether changes would be lost',
+    );
+    expect(
+      state.notice.value?.text,
+      'Could not read the checkout: git could not start: No such file or directory',
+    );
   });
 
   testWidgets('a changed stash invalidates the open replacement confirmation', (

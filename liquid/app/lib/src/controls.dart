@@ -123,39 +123,43 @@ class _Button extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final button = Material(
-      color: background,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-        side: outline == null ? BorderSide.none : BorderSide(color: outline!),
-      ),
-      child: InkWell(
-        onTap: onPressed,
-        focusNode: focusNode,
-        canRequestFocus: focusNode != null,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-        child: Container(
-          height: 28,
-          padding: const EdgeInsets.symmetric(horizontal: _buttonPadding),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            // Centered when a layout stretches the button.
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (icon case final icon?) ...[
-                Icon(icon, size: 16, color: foreground),
-                const SizedBox(width: WsMetrics.space2),
-              ],
-              // Cut short only where a layout leaves the button too little room.
-              Flexible(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: _buttonLabel.copyWith(color: foreground),
+    final button = Semantics(
+      button: true,
+      enabled: onPressed != null,
+      child: Material(
+        color: background,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+          side: outline == null ? BorderSide.none : BorderSide(color: outline!),
+        ),
+        child: InkWell(
+          onTap: onPressed,
+          focusNode: focusNode,
+          canRequestFocus: focusNode != null,
+          borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+          child: Container(
+            height: 28,
+            padding: const EdgeInsets.symmetric(horizontal: _buttonPadding),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              // Centered when a layout stretches the button.
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (icon case final icon?) ...[
+                  Icon(icon, size: 16, color: foreground),
+                  const SizedBox(width: WsMetrics.space2),
+                ],
+                // Cut short only where a layout leaves the button too little room.
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: _buttonLabel.copyWith(color: foreground),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -181,14 +185,6 @@ const _buttonLabel = TextStyle(
   fontSize: WsMetrics.fsCompact,
 );
 const _buttonPadding = WsMetrics.space4;
-
-/// The width a shared button with `label` takes, for layouts that must know before drawing it.
-double buttonWidth(BuildContext context, String label) =>
-    measureText(
-      label,
-      DefaultTextStyle.of(context).style.merge(_buttonLabel),
-    ).width +
-    2 * _buttonPadding;
 
 class PrimaryButton extends StatelessWidget {
   const PrimaryButton({
@@ -530,16 +526,56 @@ class InputCard extends StatelessWidget {
   );
 }
 
-/// The size `text` takes in `style`; the measuring painter is released at once.
-Size measureText(String text, TextStyle style) {
+/// Shows `value` in a field's controller as text Liquid assigned to it, and returns whether the
+/// text changed. The field keeps this controller until it builds again, so typing and reads agree
+/// at once; a changed text then gets a fresh controller (see [adoptController]), because ⌘Z would
+/// otherwise bring back the text this replaced. Unchanged text only moves the selection.
+bool writeText(TextEditingController controller, TextEditingValue value) {
+  if (controller.text != value.text) {
+    controller.value = value;
+    return true;
+  }
+  if (value.selection.isValid) controller.selection = value.selection;
+  return false;
+}
+
+/// Gives a field its fresh controller when it builds after [writeText], holding what the old one
+/// holds then, so keys typed since the write are kept. `listener` moves to the fresh controller. The
+/// old one is disposed after that frame.
+TextEditingController adoptController(
+  TextEditingController previous, {
+  VoidCallback? listener,
+}) {
+  if (listener != null) previous.removeListener(listener);
+  final fresh = TextEditingController.fromValue(previous.value);
+  if (listener != null) fresh.addListener(listener);
+  WidgetsBinding.instance.addPostFrameCallback((_) => previous.dispose());
+  return fresh;
+}
+
+/// The size `text` takes in `style` at the text scale `scaler`; the measuring painter is released
+/// at once.
+Size measureText(String text, TextStyle style, TextScaler scaler) {
   final painter = TextPainter(
     text: TextSpan(text: text, style: style),
     textDirection: TextDirection.ltr,
+    textScaler: scaler,
   )..layout();
   final size = painter.size;
   painter.dispose();
   return size;
 }
+
+/// Wraps a text field so that, while an input method composes in `controller`, its keys go to the
+/// input method and not to the shortcuts above: ⏎ commits the text, arrows pick its candidates.
+Widget composingField(TextEditingController controller, Widget field) => Focus(
+  canRequestFocus: false,
+  skipTraversal: true,
+  onKeyEvent: (_, _) => controller.value.composing.isCollapsed
+      ? KeyEventResult.ignored
+      : KeyEventResult.skipRemainingHandlers,
+  child: field,
+);
 
 /// ⏎ and Space activate the focused control, before a view's own keys take them.
 const activateKeys = <ShortcutActivator, Intent>{

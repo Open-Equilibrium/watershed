@@ -25,14 +25,18 @@ class RowAction {
   final String? shortcut;
 }
 
-/// A row whose menu opens on right-click or from the "···" that shows while the pointer is
-/// over it, as T3 Code's thread list and Notion's pages do.
+/// A row whose menu opens on right-click or from the "···" that shows inside the row while the
+/// pointer is over it or the keyboard is on the button, as T3 Code's thread list and Notion's
+/// pages do.
 class RowMenu extends StatefulWidget {
-  const RowMenu({super.key, required this.actions, required this.child});
+  const RowMenu({super.key, required this.actions, required this.builder});
 
   /// The menu's items, groups split by `null`.
   final List<RowAction?> actions;
-  final Widget child;
+
+  /// Lays out the row. `menu` is the "···", which the row places at its right end inside its
+  /// highlight; `shown` says whether it is seen now, for a row that gives it another's place.
+  final Widget Function(BuildContext context, Widget menu, bool shown) builder;
 
   @override
   State<RowMenu> createState() => _RowMenuState();
@@ -92,51 +96,46 @@ class _RowMenuState extends State<RowMenu> {
   }
 
   @override
-  Widget build(BuildContext context) => MouseRegion(
-    onEnter: (_) => setState(() => _hovered = true),
-    onExit: (_) => setState(() => _hovered = false),
-    child: GestureDetector(
-      onSecondaryTapUp: (details) => _open(details.globalPosition),
-      child: Row(
-        children: [
-          Expanded(child: widget.child),
-          // Always there for the keyboard and screen readers; seen on hover or focus.
-          Opacity(
-            opacity: _hovered || _focused ? 1 : 0,
-            alwaysIncludeSemantics: true,
-            child: Semantics(
-              label: 'More actions',
-              button: true,
-              child: Tooltip(
-                message: 'More actions',
-                excludeFromSemantics: true,
-                child: Builder(
-                  builder: (context) => InkWell(
-                    borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
-                    onFocusChange: (focused) =>
-                        setState(() => _focused = focused),
-                    onTap: () {
-                      final box = context.findRenderObject()! as RenderBox;
-                      _open(
-                        box.localToGlobal(box.size.bottomLeft(Offset.zero)),
-                      );
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: WsMetrics.space2,
-                      ),
-                      child: Icon(
-                        LucideIcons.ellipsis,
-                        size: 16,
-                        color: context.ws.textMuted,
-                      ),
-                    ),
-                  ),
-                ),
+  Widget build(BuildContext context) {
+    final shown = _hovered || _focused;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onSecondaryTapUp: (details) => _open(details.globalPosition),
+        child: widget.builder(context, _menu(shown), shown),
+      ),
+    );
+  }
+
+  /// The "···" button: always there for the keyboard and screen readers, seen while `shown`.
+  Widget _menu(bool shown) => Opacity(
+    opacity: shown ? 1 : 0,
+    alwaysIncludeSemantics: true,
+    child: Semantics(
+      label: 'More actions',
+      button: true,
+      child: Tooltip(
+        message: 'More actions',
+        excludeFromSemantics: true,
+        child: Builder(
+          builder: (context) => InkWell(
+            borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
+            onFocusChange: (focused) => setState(() => _focused = focused),
+            onTap: () {
+              final box = context.findRenderObject()! as RenderBox;
+              _open(box.localToGlobal(box.size.bottomLeft(Offset.zero)));
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space2),
+              child: Icon(
+                LucideIcons.ellipsis,
+                size: 16,
+                color: context.ws.textMuted,
               ),
             ),
           ),
-        ],
+        ),
       ),
     ),
   );
@@ -157,7 +156,8 @@ Future<void> confirmDeleteSession(
     state.notify(BridgeLevel.error, 'Could not read the session: $error');
     return;
   }
-  if (!context.mounted) return;
+  // A question that arrived meanwhile takes the keys, so no dialog opens over it.
+  if (!context.mounted || state.asking) return;
   final checkpoints = switch (turns) {
     0 => 'Its pi session file is deleted',
     1 => 'Its pi session file and its turn’s checkpoints are deleted',
@@ -194,7 +194,8 @@ Future<void> confirmRemoveCheckpoints(
     state.notify(BridgeLevel.error, 'Could not read the checkpoints: $error');
     return;
   }
-  if (!context.mounted) return;
+  // A question that arrived meanwhile takes the keys, so no dialog opens over it.
+  if (!context.mounted || state.asking) return;
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (context) {
@@ -207,11 +208,11 @@ Future<void> confirmRemoveCheckpoints(
           Text(switch (sessions.length) {
             0 => 'No session has checkpoints in this project.',
             1 =>
-              '1 session keeps its chat and Trajectory, but no longer shows turn changes '
+              '1 session keeps its chat, but no longer shows turn changes '
                   'or reverts files. Project files, commits and branches stay. Git frees the '
                   'space at its next cleanup.',
             final count =>
-              '$count sessions keep their chats and Trajectories, but no longer show turn '
+              '$count sessions keep their chats, but no longer show turn '
                   'changes or revert files. Project files, commits and branches stay. Git '
                   'frees the space at its next cleanup.',
           }, style: DangerDialog.text(context)),
@@ -262,6 +263,33 @@ Future<void> confirmRemoveCheckpoints(
   if (confirmed == true) await state.removeAllCheckpoints();
 }
 
+/// Writes the record of the session stored at `path`, named `title`, into Downloads and shows the
+/// new folder in the system's file manager; when nothing was written, nothing is shown.
+Future<void> exportSessionRecord(
+  SessionState state, {
+  required String path,
+  required String title,
+}) async {
+  final folder = await state.exportRecord(
+    path: path,
+    title: title,
+    host: Platform.localHostname,
+    day: _localDay(DateTime.now()),
+  );
+  if (folder != null) await openInFileManager(state, folder);
+}
+
+/// The local date as `YYYY-MM-DD`, which names a record's folder.
+String _localDay(DateTime now) =>
+    '${now.year.toString().padLeft(4, '0')}-'
+    '${now.month.toString().padLeft(2, '0')}-'
+    '${now.day.toString().padLeft(2, '0')}';
+
+/// Starts the system's opener, `open` on macOS and `xdg-open` elsewhere. Tests replace it.
+@visibleForTesting
+Future<ProcessResult> Function(String program, List<String> arguments)
+runOpener = Process.run;
+
 /// Shows the folder at `path` in the system's file manager; a failure is reported.
 Future<void> openInFileManager(SessionState state, String path) =>
     _openWithSystem(state, path);
@@ -278,7 +306,7 @@ Future<void> openInBrowser(SessionState state, String url) async {
 /// Opens `target` with the system's default application; a failure is reported.
 Future<void> _openWithSystem(SessionState state, String target) async {
   try {
-    final result = await Process.run(Platform.isMacOS ? 'open' : 'xdg-open', [
+    final result = await runOpener(Platform.isMacOS ? 'open' : 'xdg-open', [
       target,
     ]);
     if (result.exitCode != 0) {

@@ -1,6 +1,11 @@
 use super::super::oauth_credential::jwt_with_account;
+use crate::runtime::endpoint_credential::EndpointCredential;
 use crate::runtime::oauth_credential::CredentialRecord;
 use std::{fs, path::Path};
+
+pub(super) fn endpoint_credential(base_url: &str, key: &str) -> EndpointCredential {
+    EndpointCredential::new(base_url, key).expect("fixture endpoint credential is valid")
+}
 
 pub(super) fn credential(expires: u64) -> CredentialRecord {
     CredentialRecord {

@@ -1,11 +1,12 @@
 use crate::runtime::types::RuntimeError;
 use serde::Deserialize;
+use std::fmt;
 
 pub(crate) const MAX_OAUTH_FIELD_BYTES: usize = 8 * 1024;
 pub(crate) const MAX_OAUTH_SECRET_BYTES: usize = 64 * 1024;
 pub(crate) const OAUTH_CREDENTIAL_TYPE: &str = "oauth";
 
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub(crate) struct CredentialRecord {
     #[serde(rename = "type")]
     pub(crate) credential_type: String,
@@ -16,6 +17,20 @@ pub(crate) struct CredentialRecord {
     pub(crate) account_id: String,
     #[serde(rename = "isFedramp")]
     pub(crate) is_fedramp: bool,
+}
+
+impl fmt::Debug for CredentialRecord {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CredentialRecord")
+            .field("credential_type", &self.credential_type)
+            .field("access", &"<redacted>")
+            .field("refresh", &"<redacted>")
+            .field("expires", &self.expires)
+            .field("account_id", &"<redacted>")
+            .field("is_fedramp", &self.is_fedramp)
+            .finish()
+    }
 }
 
 #[derive(Deserialize)]
@@ -36,10 +51,20 @@ struct JwtAuthClaim {
     chatgpt_account_is_fedramp: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(crate) struct AccountRouting {
     pub(crate) account_id: String,
     pub(crate) is_fedramp: bool,
+}
+
+impl fmt::Debug for AccountRouting {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AccountRouting")
+            .field("account_id", &"<redacted>")
+            .field("is_fedramp", &self.is_fedramp)
+            .finish()
+    }
 }
 
 pub(crate) fn validate_credential_record(
@@ -48,9 +73,9 @@ pub(crate) fn validate_credential_record(
     if credential.credential_type != OAUTH_CREDENTIAL_TYPE || credential.expires == 0 {
         return Err(auth_protocol());
     }
-    validate_field(&credential.access, MAX_OAUTH_SECRET_BYTES)?;
+    validate_header_field(&credential.access, MAX_OAUTH_SECRET_BYTES)?;
     validate_field(&credential.refresh, MAX_OAUTH_SECRET_BYTES)?;
-    validate_field(&credential.account_id, MAX_OAUTH_FIELD_BYTES)?;
+    validate_header_field(&credential.account_id, MAX_OAUTH_FIELD_BYTES)?;
     Ok(())
 }
 
@@ -117,6 +142,16 @@ fn base64url_value(byte: u8) -> Result<u8, RuntimeError> {
 
 pub(crate) fn validate_field(value: &str, maximum: usize) -> Result<(), RuntimeError> {
     if value.is_empty() || value.len() > maximum || value.contains('\0') {
+        return Err(auth_protocol());
+    }
+    Ok(())
+}
+
+/// [`validate_field`] for a value sent in an HTTP header, which must be visible ASCII: the HTTP
+/// client refuses any other byte, such as a newline, when the request is built.
+fn validate_header_field(value: &str, maximum: usize) -> Result<(), RuntimeError> {
+    validate_field(value, maximum)?;
+    if !value.bytes().all(|byte| byte.is_ascii_graphic()) {
         return Err(auth_protocol());
     }
     Ok(())

@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
+use super::{pipe, unblocked};
 use crate::{
     History, StoredSession, recent_sessions, session_id, session_title, session_title_of,
     session_titles,
@@ -90,26 +91,6 @@ fn lists_the_projects_recent_sessions_newest_first() {
     );
 }
 
-/// Makes a named pipe at `path`.
-fn pipe(path: &Path) {
-    let status = std::process::Command::new("mkfifo")
-        .arg(path)
-        .status()
-        .expect("mkfifo runs");
-    assert!(status.success());
-}
-
-/// Runs `read` on its own thread and fails, rather than hangs, when a pipe blocks it.
-fn unblocked<T: Send + 'static>(read: impl FnOnce() -> T + Send + 'static) -> T {
-    let (done, finished) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = done.send(read());
-    });
-    finished
-        .recv_timeout(Duration::from_secs(5))
-        .expect("a pipe must not block the read")
-}
-
 #[test]
 fn passes_over_a_named_pipe_in_the_session_directory() {
     let dir = std::env::temp_dir().join(format!("watershed-fifo-{}", std::process::id()));
@@ -174,6 +155,54 @@ fn lists_a_linked_session_file_but_not_a_linked_pipe() {
 }
 
 #[test]
+fn leaves_out_the_open_session_also_through_a_link() {
+    let dir = std::env::temp_dir().join(format!("watershed-open-link-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("directory");
+    let prompt = r#"{"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Open now"}}"#;
+    session(&dir, "open", "/work/acme-api", &[prompt], 3_000);
+    std::os::unix::fs::symlink(dir.join("open.jsonl"), dir.join("linked.jsonl")).expect("link");
+    session(&dir, "other", "/work/acme-api", &[prompt], 1_000);
+    let recent = recent_sessions(
+        &dir,
+        Path::new("/work/acme-api"),
+        Some(&dir.join("open.jsonl")),
+        1,
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(
+        recent
+            .expect("listing")
+            .into_iter()
+            .map(|session| session.path)
+            .collect::<Vec<_>>(),
+        [dir.join("other.jsonl")],
+        "a link to the open session is the open session, so another one fills the limit"
+    );
+}
+
+#[test]
+fn linked_aliases_of_one_session_list_once() {
+    let dir = std::env::temp_dir().join(format!("watershed-hard-links-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("directory");
+    let prompt = r#"{"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Again"}}"#;
+    session(&dir, "newer", "/work/acme-api", &[prompt], 3_000);
+    std::fs::hard_link(dir.join("newer.jsonl"), dir.join("alias.jsonl")).expect("hard link");
+    session(&dir, "older", "/work/acme-api", &[prompt], 1_000);
+    let recent = recent_sessions(&dir, Path::new("/work/acme-api"), None, 2);
+    let _ = std::fs::remove_dir_all(&dir);
+    let paths: Vec<_> = recent
+        .expect("listing")
+        .into_iter()
+        .map(|session| session.path)
+        .collect();
+    // Both names of the newer session share one entry, so the older one still fits the limit.
+    assert_eq!(paths.len(), 2, "{paths:?}");
+    assert_eq!(paths.last(), Some(&dir.join("older.jsonl")));
+}
+
+#[test]
 fn names_the_open_session_as_the_start_page_does() {
     let dir = std::env::temp_dir().join(format!("watershed-title-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -191,6 +220,17 @@ fn names_the_open_session_as_the_start_page_does() {
         1,
     );
     session(&dir, "empty", "/work/acme-api", &[], 1);
+    // A cleared name gives way to the first prompt, as an unnamed session does.
+    session(
+        &dir,
+        "cleared",
+        "/work/acme-api",
+        &[
+            user,
+            r#"{"type":"session_info","id":"i1","parentId":"u1","name":""}"#,
+        ],
+        1,
+    );
     // A prompt that starts with a blank line is named by its first words, as Liquid names it.
     let spaced = r#"{"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"\n  Fix login\nand more"}}"#;
     session(&dir, "spaced", "/work/acme-api", &[spaced], 1);
@@ -200,6 +240,7 @@ fn names_the_open_session_as_the_start_page_does() {
 
     assert_eq!(title("prompt").as_deref(), Some("Add a limiter"));
     assert_eq!(title("named").as_deref(), Some("Rate limit for /login"));
+    assert_eq!(title("cleared").as_deref(), Some("Add a limiter"));
     assert_eq!(title("empty"), None, "nothing to name it by yet");
     assert_eq!(
         session_title(&dir.join("prompt.jsonl"), Path::new("/work/web-shop")),

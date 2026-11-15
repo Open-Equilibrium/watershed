@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'agent/session_card_settings.dart';
 import 'agent/shell.dart';
 import 'appearance.dart';
 import 'diff/diff_settings.dart';
@@ -23,6 +24,7 @@ class LiquidApp extends StatelessWidget {
     required this.launch,
     this.shortcuts,
     this.diffSettings,
+    this.cardSettings,
     this.appearance,
     this.workspace,
     this.workspaceProblem,
@@ -35,6 +37,7 @@ class LiquidApp extends StatelessWidget {
   final String? workspaceProblem;
   final ShortcutController? shortcuts;
   final DiffSettingsController? diffSettings;
+  final SessionCardSettingsController? cardSettings;
 
   /// Theme and text size; the system theme at the default size, unsaved, without it.
   final AppearanceController? appearance;
@@ -74,6 +77,7 @@ class LiquidApp extends StatelessWidget {
                 workspaceProblem: workspaceProblem,
                 shortcuts: shortcuts,
                 diffSettings: diffSettings,
+                cardSettings: cardSettings,
                 appearance: appearance,
               )
             : Scaffold(

@@ -5,7 +5,11 @@ use super::super::{
         validate_conversation_entry, validate_digest, validate_id,
         validate_run_creation_identity_marker_name,
     },
-    conversation_stream::{append_anchored_canonical_jsonl_batch, sync_anchored_stream},
+    conversation_stream::{
+        append_anchored_canonical_jsonl_batch, conversation_file_sync_checkpoint,
+        sync_anchored_stream,
+    },
+    run_log::RunLogRecord,
     storage::{canonical_json, required_child},
 };
 use super::{
@@ -22,7 +26,8 @@ use crate::runtime::{
     digest::sha256_hex,
     fs_guards::{
         AnchoredDir, AnchoredFile, is_segmented_jsonl_ordinal, open_anchored_file_for_read,
-        path_io_error, segmented_jsonl_path, sync_anchored_directory,
+        open_anchored_file_for_update, path_io_error, segmented_jsonl_path,
+        sync_anchored_directory, sync_durable, truncate_durable,
     },
     segmented_appender::session_stream_inventory,
     stage_results::reconcile_operation_and_cleanup,
@@ -491,6 +496,25 @@ fn status_append_was_applied(
                 "conversation status history entry does not match its status summary",
             ));
         }
+    } else {
+        let record = appended.strip_suffix(b"\n").ok_or_else(|| {
+            protocol("conversation status Run Log append is not a complete JSONL record")
+        })?;
+        let record: RunLogRecord = serde_json::from_slice(record)
+            .map_err(|_| protocol("conversation status Run Log append is malformed"))?;
+        let matches_kind = matches!(
+            (kind, &record),
+            (StatusAppendKind::AttemptIntent, RunLogRecord::Intent { .. })
+                | (
+                    StatusAppendKind::AttemptResult,
+                    RunLogRecord::TerminalResult { .. }
+                )
+        );
+        if !matches_kind {
+            return Err(protocol(
+                "conversation status Run Log append does not match its transaction kind",
+            ));
+        }
     }
     Ok(true)
 }
@@ -536,16 +560,11 @@ fn finalize_status_append_recovery(
         kind,
         run_session_id,
         segment_ordinal,
-        prior_bytes,
         ..
     } = &transaction.mutation
     else {
         return Ok(());
     };
-    let newly_named_segment = *segment_ordinal > 1 && *prior_bytes == 0;
-    if !applied && !newly_named_segment {
-        return Ok(());
-    }
     if !applied {
         let target = status_append_target(
             conversation,
@@ -570,6 +589,50 @@ fn finalize_status_append_recovery(
     }
     let base = status_append_base(conversation, *kind, run_session_id.as_deref())?;
     sync_anchored_stream(&base, STATUS_APPEND_STREAM_LIMITS)
+}
+
+/// Discards the bytes of a torn append, so the append counts as never applied (ADR-0259).
+///
+/// A target longer than its recorded prior length but shorter than the recorded append is torn:
+/// its bytes are the uncommitted tail of the append the transaction names. Every other length is
+/// left to `status_append_was_applied`, which refuses it without changing the target.
+fn roll_back_torn_status_append(
+    conversation: &AnchoredDir,
+    transaction: &ConversationStatusTransaction,
+) -> Result<(), RuntimeError> {
+    let ConversationStatusMutation::Append {
+        kind,
+        run_session_id,
+        segment_ordinal,
+        prior_bytes,
+        appended_bytes,
+        ..
+    } = &transaction.mutation
+    else {
+        return Ok(());
+    };
+    let target = status_append_target(
+        conversation,
+        *kind,
+        run_session_id.as_deref(),
+        *segment_ordinal,
+    )?;
+    let len = match target.metadata() {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => metadata.len(),
+        _ => return Ok(()),
+    };
+    let applied_bytes = prior_bytes
+        .checked_add(*appended_bytes)
+        .ok_or_else(|| protocol("conversation status transaction byte count overflow"))?;
+    if len <= *prior_bytes || len >= applied_bytes {
+        return Ok(());
+    }
+    let (file, _) = open_anchored_file_for_update(&target)?;
+    truncate_durable(&file, target.diagnostic_path(), *prior_bytes)
+        .map_err(|source| path_io_error(target.diagnostic_path(), source))?;
+    conversation_file_sync_checkpoint(target.diagnostic_path())?;
+    sync_durable(&file, target.diagnostic_path())
+        .map_err(|source| path_io_error(target.diagnostic_path(), source))
 }
 
 pub(in crate::runtime::conversations) fn recover_status_transaction(
@@ -608,6 +671,7 @@ pub(in crate::runtime::conversations) fn recover_status_transaction(
             "conversation status summary does not match its transaction",
         ));
     }
+    roll_back_torn_status_append(conversation, &transaction)?;
     let mutation_applied = status_transaction_was_applied(conversation, &transaction)?;
     finalize_status_append_recovery(conversation, &transaction, mutation_applied)?;
     let selected = if mutation_applied {

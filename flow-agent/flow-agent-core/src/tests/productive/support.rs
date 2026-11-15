@@ -12,7 +12,8 @@ pub(super) use crate::tests::helpers::{
 };
 pub(super) use attempts::MemoryAttempts;
 pub(super) use providers::{
-    DefinitiveFailureProvider, FakeProvider, ScriptedProvider, single_tool_provider_turn,
+    DefinitiveFailureProvider, FakeProvider, ReplyInvalidProvider, ScriptedProvider,
+    single_tool_provider_turn,
 };
 pub(super) use recovery::{
     CompletionBoundaryRecordingRecovery, CountingObjectRecovery, DefaultRecovery,

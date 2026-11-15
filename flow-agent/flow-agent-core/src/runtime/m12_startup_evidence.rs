@@ -47,8 +47,8 @@ fn fixed_executor_policy() -> core_policy::PolicyArtifact {
 pub struct M12ExecutorStartupMeasurement {
     /// Preparation and readiness through validated Tool result and enforcement receipt.
     pub executor_elapsed: Duration,
-    /// Mandatory own-file protection confirmed by the validated Executor receipt.
-    pub self_protection_active: bool,
+    /// Mandatory Flow-owned write protection confirmed by the validated Executor receipt.
+    pub flow_owned_write_protection_active: bool,
 }
 
 fn is_prefixed_lower_sha256(value: &str) -> bool {
@@ -61,7 +61,7 @@ pub fn ensure_m12_executor_host() -> Result<(), String> {
         .map_err(|_| "M1.2 Executor startup requires a supported native Tool host".to_owned())
 }
 
-/// Measures one fixed no-op Tool through the real prepared Executor boundary.
+/// Measures one fixed no-op Tool through the real prepared Executor.
 pub fn run_m12_executor_startup(workspace: &Path) -> Result<M12ExecutorStartupMeasurement, String> {
     ensure_m12_executor_host()?;
     let policy = fixed_executor_policy();
@@ -119,7 +119,9 @@ pub fn run_m12_executor_startup(workspace: &Path) -> Result<M12ExecutorStartupMe
 
     Ok(M12ExecutorStartupMeasurement {
         executor_elapsed,
-        self_protection_active: execution.enforcement.self_protection_active,
+        flow_owned_write_protection_active: execution
+            .enforcement
+            .flow_owned_write_protection_active,
     })
 }
 

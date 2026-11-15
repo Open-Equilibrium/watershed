@@ -9,6 +9,7 @@ pub(crate) mod conversations;
 pub(crate) mod credential_store;
 pub(crate) mod deadlines;
 pub(crate) mod digest;
+pub(crate) mod endpoint_credential;
 pub(crate) mod error;
 pub(crate) mod event_construction;
 pub(crate) mod event_writer;
@@ -58,7 +59,8 @@ pub(crate) mod validate;
 pub(crate) mod workspace_text;
 
 pub use auth::{
-    AuthLoginMode, AuthStatus, login_openai_codex, logout_openai_codex, openai_codex_auth_status,
+    AuthLoginMode, AuthStatus, login_openai_codex, login_openai_compatible, logout_openai_codex,
+    logout_openai_compatible, openai_codex_auth_status, openai_compatible_auth_status,
 };
 pub use authoring::{
     create_global_registry_block, initialize_global_config, read_authoring_file,
@@ -69,6 +71,7 @@ pub use cancellation::{
     settle_productive_operation,
 };
 pub use conversations::{conversation_status, project_tool_run_log};
+pub use endpoint_credential::OPENAI_COMPATIBLE_PROVIDER_ID;
 pub use executor::{
     ExecutorSelection, ExecutorSelectionSource, configure_default_executor,
     configure_executor_path, executor_check,

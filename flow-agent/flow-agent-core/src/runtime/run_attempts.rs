@@ -1,7 +1,9 @@
 use crate::runtime::{
     context::{ContextHistory, ContextObject},
     digest::sha256_hex,
-    error::PROVIDER_ERROR_REASON,
+    error::{
+        PROVIDER_ERROR_REASON, PROVIDER_REPLY_INVALID_REASON, ProviderFailure, ProviderFailureKind,
+    },
     types::{CANCELLED_REASON, RuntimeError},
 };
 use proto::EventType;
@@ -111,15 +113,29 @@ pub(crate) struct RunAttemptResult {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ProviderTerminalClassification {
     ProviderError,
+    ProviderReplyInvalid,
     Cancelled,
 }
 
 impl ProviderTerminalClassification {
-    const ALL: [Self; 2] = [Self::ProviderError, Self::Cancelled];
+    const ALL: [Self; 3] = [
+        Self::ProviderError,
+        Self::ProviderReplyInvalid,
+        Self::Cancelled,
+    ];
+
+    /// The classification of a settled provider failure.
+    pub(crate) fn for_failure(failure: &ProviderFailure) -> Self {
+        match failure.kind() {
+            ProviderFailureKind::ReplyInvalid => Self::ProviderReplyInvalid,
+            ProviderFailureKind::Definitive | ProviderFailureKind::Uncertain => Self::ProviderError,
+        }
+    }
 
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::ProviderError => PROVIDER_ERROR_REASON,
+            Self::ProviderReplyInvalid => PROVIDER_REPLY_INVALID_REASON,
             Self::Cancelled => CANCELLED_REASON,
         }
     }

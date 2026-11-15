@@ -395,6 +395,28 @@ fn incremental_reader_recovers_after_callback_error_or_unwind() {
         }
         assert_eq!(cursor, 2);
 
+        // The delivered sequence 2 stays covered by the retained prefix digest after the failure.
+        fs::write(
+            &path,
+            format!(
+                "{started}{}{completed}",
+                progress.replace("\"value\":1", "\"value\":2")
+            ),
+        )
+        .expect("delivered event is rewritten");
+        let mut delivered = Vec::new();
+        let error = reader
+            .visit_verified_after(cursor, 3, |_event, line| {
+                delivered.push(line.to_owned());
+                Ok(())
+            })
+            .expect_err("a rewritten delivered event is detected after a callback failure");
+        assert!(matches!(
+            error,
+            RuntimeError::Protocol(message) if message.contains("append-only")
+        ));
+        assert!(delivered.is_empty());
+
         let changed = started.replace("evt-started", "evt-mutated");
         fs::write(&path, format!("{changed}{progress}{completed}"))
             .expect("previously observed event is replaced");
@@ -593,7 +615,7 @@ fn reader_rejects_cursors_ahead_of_authoritative_history_and_recovers() {
 }
 
 #[test]
-fn reader_rejects_an_incomplete_suffix_after_session_ownership_ends() {
+fn reader_ignores_an_incomplete_suffix_after_session_ownership_ends() {
     let workspace = empty_workspace("tail-inactive-partial");
     let session_dir = crate::tests::helpers::ensure_workspace_session_dir(&workspace);
     let path = session_dir.join("tailinactivepartial001.jsonl");
@@ -621,23 +643,23 @@ fn reader_rejects_an_incomplete_suffix_after_session_ownership_ends() {
     );
 
     ownership.release().expect("session ownership releases");
-    let existing_err = reader
-        .read_incremental_after(1)
-        .expect_err("existing reader rejects inactive incomplete suffix");
-    assert!(matches!(
-        existing_err,
-        RuntimeError::Protocol(message) if message.contains("incomplete final JSONL line")
-    ));
+    assert!(
+        reader
+            .read_incremental_after(1)
+            .expect("existing reader ignores the uncommitted suffix")
+            .is_empty()
+    );
 
     let mut fresh_reader =
         SessionEventReader::open(&workspace, "tailinactivepartial001").expect("fresh reader opens");
-    let fresh_err = fresh_reader
-        .read_after(0)
-        .expect_err("fresh reader rejects inactive incomplete suffix");
-    assert!(matches!(
-        fresh_err,
-        RuntimeError::Protocol(message) if message.contains("incomplete final JSONL line")
-    ));
+    assert_eq!(
+        sequences(
+            &fresh_reader
+                .read_after(0)
+                .expect("fresh reader ignores the suffix")
+        ),
+        [1]
+    );
 }
 
 #[test]
@@ -687,12 +709,9 @@ fn reader_ownership_ignores_an_active_replacement_at_the_original_workspace_path
         .expect("source runtime dirs")
         .sessions;
     let anchored_source = AnchoredWorkspace::open(&workspace).expect("source workspace opens");
-    let started = session_event_line(session_id, "evt-started", EventType::SessionStarted, 1);
-    fs::write(
-        sessions.path.join(format!("{session_id}.jsonl")),
-        format!("{started}{{\"event_id\":"),
-    )
-    .expect("inactive partial source stream written");
+    // An empty stream is the only one whose authority still depends on session ownership.
+    fs::write(sessions.path.join(format!("{session_id}.jsonl")), b"")
+        .expect("inactive empty source stream written");
     let source_ownership = acquire_anchored_session_lock(&anchored_source, &sessions, session_id)
         .expect("source ownership authority seeded");
     source_ownership
@@ -719,10 +738,7 @@ fn reader_ownership_ignores_an_active_replacement_at_the_original_workspace_path
     fs::rename(&workspace, &replacement).expect("replacement moved aside");
     fs::rename(&moved_workspace, &workspace).expect("source workspace restored");
 
-    assert_protocol_contains(
-        result,
-        "contains an incomplete final JSONL line without active session ownership",
-    );
+    assert_protocol_contains(result, "is empty without active session ownership");
 }
 
 #[test]

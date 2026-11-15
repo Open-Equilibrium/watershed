@@ -154,7 +154,7 @@ class _StatusBarState extends State<StatusBar> {
               ),
               const SizedBox(width: WsMetrics.space6),
               Text(
-                '${formatCompact(totals.input)} in · ${formatCompact(totals.output)} out',
+                '${formatTokens(totals.input)} in · ${formatTokens(totals.output)} out',
                 style: text,
               ),
               const SizedBox(width: WsMetrics.space6),

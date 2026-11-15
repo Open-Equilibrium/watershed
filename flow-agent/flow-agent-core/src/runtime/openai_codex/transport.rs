@@ -1,5 +1,7 @@
 use super::OPENAI_CODEX_ORIGINATOR;
-use super::protocol::{ProviderTurn, decode_responses_turn, provider_error_message};
+use super::protocol::{
+    ProviderTurn, decode_responses_turn, provider_error_message, provider_reply_invalid,
+};
 use crate::runtime::{
     deadlines::{AwaitInterruption, HttpDeadlines, await_deadline_or_cancellation},
     responses::SseDecoder,
@@ -8,6 +10,30 @@ use crate::runtime::{
 use std::sync::atomic::AtomicBool;
 
 const MAX_PROVIDER_ERROR_BODY_BYTES: usize = 64 * 1024;
+
+/// How one Responses request authenticates, and what must end its stream.
+#[derive(Clone, Copy)]
+pub(crate) enum ResponsesAuth<'a> {
+    /// The ChatGPT subscription: account routing headers; the `[DONE]` sentinel ends the stream.
+    Subscription(&'a crate::runtime::oauth_credential::CredentialRecord),
+    /// An OpenAI-compatible endpoint key: bearer only; the terminal event ends the stream.
+    ApiKey(&'a str),
+}
+
+impl ResponsesAuth<'_> {
+    fn requires_done_sentinel(self) -> bool {
+        matches!(self, Self::Subscription(_))
+    }
+
+    /// The subscription reply runs to its `[DONE]` sentinel; an endpoint reply ends at its terminal event.
+    fn decoder(self) -> SseDecoder {
+        if self.requires_done_sentinel() {
+            SseDecoder::default()
+        } else {
+            SseDecoder::ending_at_terminal_event()
+        }
+    }
+}
 
 #[cfg(test)]
 pub(crate) fn request_responses_at_with_deadlines_and_cancellation(
@@ -22,7 +48,12 @@ pub(crate) fn request_responses_at_with_deadlines_and_cancellation(
             RuntimeError::definitive_provider_error(None, "HTTP client construction failed")
         })?;
         request_responses_with_client_async(
-            client, endpoint, credential, body, deadlines, cancelled,
+            client,
+            endpoint,
+            ResponsesAuth::Subscription(credential),
+            body,
+            deadlines,
+            cancelled,
         )
         .await
     })?
@@ -31,41 +62,59 @@ pub(crate) fn request_responses_at_with_deadlines_and_cancellation(
 pub(crate) async fn request_responses_with_client_async(
     client: reqwest::Client,
     endpoint: &str,
-    credential: &crate::runtime::oauth_credential::CredentialRecord,
+    auth: ResponsesAuth<'_>,
     body: &serde_json::Value,
     deadlines: HttpDeadlines,
     cancelled: &AtomicBool,
 ) -> Result<ProviderTurn, RuntimeError> {
-    let mut response = await_deadline_or_cancellation(
-        deadlines.header,
-        cancelled,
-        routed_request(
-            client
-                .post(endpoint)
+    let turn = send_responses_request(client, endpoint, auth, body, deadlines, cancelled).await;
+    match auth {
+        // A provider may echo the credential it received in an error; it must not reach Run Logs.
+        ResponsesAuth::ApiKey(key) => turn.map_err(|error| error.without_secret(key)),
+        ResponsesAuth::Subscription(credential) => {
+            turn.map_err(|error| error.without_secret(&credential.access))
+        }
+    }
+}
+
+async fn send_responses_request(
+    client: reqwest::Client,
+    endpoint: &str,
+    auth: ResponsesAuth<'_>,
+    body: &serde_json::Value,
+    deadlines: HttpDeadlines,
+    cancelled: &AtomicBool,
+) -> Result<ProviderTurn, RuntimeError> {
+    let request = client
+        .post(endpoint)
+        .header(reqwest::header::ACCEPT, "text/event-stream")
+        .header(
+            reqwest::header::USER_AGENT,
+            concat!("flow-agent/", env!("CARGO_PKG_VERSION")),
+        )
+        .json(body);
+    let request = match auth {
+        ResponsesAuth::Subscription(credential) => routed_request(
+            request
                 .bearer_auth(&credential.access)
                 .header("chatgpt-account-id", &credential.account_id)
-                .header("originator", OPENAI_CODEX_ORIGINATOR)
-                .header(reqwest::header::ACCEPT, "text/event-stream")
-                .header(
-                    reqwest::header::USER_AGENT,
-                    concat!("flow-agent/", env!("CARGO_PKG_VERSION")),
-                )
-                .json(body),
+                .header("originator", OPENAI_CODEX_ORIGINATOR),
             credential.is_fedramp,
-        )
-        .send(),
-    )
-    .await
-    .map_err(|interruption| match interruption {
-        AwaitInterruption::Cancelled => RuntimeError::Cancelled,
-        AwaitInterruption::DeadlineElapsed => {
-            RuntimeError::uncertain_provider_error("Responses header deadline elapsed")
-        }
-    })?
-    .map_err(|_| RuntimeError::uncertain_provider_error("Responses request failed"))?;
+        ),
+        ResponsesAuth::ApiKey(key) => request.bearer_auth(key),
+    };
+    let mut response = await_deadline_or_cancellation(deadlines.header, cancelled, request.send())
+        .await
+        .map_err(|interruption| match interruption {
+            AwaitInterruption::Cancelled => RuntimeError::Cancelled,
+            AwaitInterruption::DeadlineElapsed => {
+                RuntimeError::uncertain_provider_error("Responses header deadline elapsed")
+            }
+        })?
+        .map_err(|_| RuntimeError::uncertain_provider_error("Responses request failed"))?;
     let status = response.status();
     if !status.is_success() {
-        let message = read_provider_error_message(&mut response, deadlines, cancelled).await;
+        let message = read_provider_error_message(&mut response, deadlines, cancelled).await?;
         return Err(RuntimeError::definitive_provider_error(
             Some(status.as_u16()),
             message,
@@ -81,12 +130,11 @@ pub(crate) async fn request_responses_with_client_async(
         .next()
         .is_some_and(|value| value.trim().eq_ignore_ascii_case("text/event-stream"))
     {
-        return Err(RuntimeError::definitive_provider_error(
-            Some(status.as_u16()),
+        return Err(provider_reply_invalid(
             "Responses reply is not text/event-stream",
         ));
     }
-    let mut decoder = SseDecoder::default();
+    let mut decoder = auth.decoder();
     while let Some(chunk) =
         await_deadline_or_cancellation(deadlines.read, cancelled, response.chunk())
             .await
@@ -101,25 +149,19 @@ pub(crate) async fn request_responses_with_client_async(
         decoder
             .push(&chunk)
             .map_err(|error| RuntimeError::uncertain_provider_error(error.to_string()))?;
-        if decoder.terminal_sentinel() {
+        if decoder.reply_ended() {
             break;
         }
     }
     let parsed = decoder
         .finish()
         .map_err(|error| RuntimeError::uncertain_provider_error(error.to_string()))?;
-    if !parsed.terminal_sentinel {
+    if auth.requires_done_sentinel() && !parsed.terminal_sentinel {
         return Err(RuntimeError::uncertain_provider_error(
             "Responses stream ended without terminal sentinel",
         ));
     }
-    decode_responses_turn(&parsed.values).map_err(|error| {
-        if error.provider_failure().is_some() {
-            error
-        } else {
-            RuntimeError::definitive_provider_error(None, error.to_string())
-        }
-    })
+    decode_responses_turn(&parsed.values)
 }
 
 fn routed_request(request: reqwest::RequestBuilder, is_fedramp: bool) -> reqwest::RequestBuilder {
@@ -134,13 +176,14 @@ async fn read_provider_error_message(
     response: &mut reqwest::Response,
     deadlines: HttpDeadlines,
     cancelled: &AtomicBool,
-) -> String {
+) -> Result<String, RuntimeError> {
     let mut body = Vec::new();
     while body.len() < MAX_PROVIDER_ERROR_BODY_BYTES {
         let chunk =
             match await_deadline_or_cancellation(deadlines.read, cancelled, response.chunk()).await
             {
                 Ok(Ok(Some(chunk))) => chunk,
+                Err(AwaitInterruption::Cancelled) => return Err(RuntimeError::Cancelled),
                 _ => break,
             };
         let remaining = MAX_PROVIDER_ERROR_BODY_BYTES - body.len();
@@ -149,7 +192,7 @@ async fn read_provider_error_message(
             break;
         }
     }
-    direct_provider_message(&body)
+    Ok(direct_provider_message(&body))
 }
 
 fn direct_provider_message(body: &[u8]) -> String {

@@ -1,5 +1,5 @@
 use super::super::helpers::empty_workspace;
-use super::support::credential;
+use super::support::{credential, endpoint_credential};
 use crate::runtime::{
     credential_store::{CREDENTIAL_STORE_MAX_BYTES, CredentialStore},
     oauth_credential::{CredentialRecord, MAX_OAUTH_FIELD_BYTES, MAX_OAUTH_SECRET_BYTES},
@@ -40,6 +40,246 @@ fn credential_store_replaces_atomically_and_logout_is_local() {
 }
 
 #[test]
+fn credential_store_keeps_each_provider_slot_through_every_write() {
+    let workspace = empty_workspace("credential-store-provider-slots");
+    let store = CredentialStore::at(workspace.join("private/credentials.json"));
+    let subscription = credential(300_000);
+    let endpoint = endpoint_credential("https://models.example.test/v1", "sk-slot-fixture");
+    store
+        .replace_with_clock(&subscription, || Duration::ZERO, |_| {})
+        .expect("subscription credential stores");
+    store
+        .replace_endpoint_with_clock(&endpoint, || Duration::ZERO, |_| {})
+        .expect("endpoint credential stores beside it");
+    assert_eq!(
+        store.read().expect("subscription reads"),
+        Some(subscription.clone())
+    );
+    assert_eq!(
+        store.read_endpoint().expect("endpoint reads"),
+        Some(endpoint.clone())
+    );
+
+    let refreshed = credential(900_000);
+    store
+        .resolve_with_clock(
+            || Ok(1),
+            |_| Ok(refreshed.clone()),
+            || Duration::ZERO,
+            |_| {},
+        )
+        .expect("subscription refreshes");
+    assert_eq!(
+        store.read_endpoint().expect("refresh keeps the endpoint"),
+        Some(endpoint.clone())
+    );
+
+    assert!(store.logout().expect("subscription logs out"));
+    assert_eq!(store.read().expect("subscription is gone"), None);
+    assert_eq!(
+        store
+            .read_endpoint()
+            .expect("subscription logout keeps the endpoint"),
+        Some(endpoint)
+    );
+
+    assert!(
+        store
+            .logout_endpoint_with_clock(|| Duration::ZERO, |_| {})
+            .expect("endpoint logs out")
+    );
+    assert_eq!(store.read_endpoint().expect("endpoint is gone"), None);
+}
+
+#[test]
+fn credential_store_reads_subscription_only_files_and_isolates_a_broken_endpoint_slot() {
+    let workspace = empty_workspace("credential-store-slot-compat");
+    let path = workspace.join("private/credentials.json");
+    let store = CredentialStore::at(path.clone());
+    let subscription = credential(900_000);
+    store
+        .replace_with_clock(&subscription, || Duration::ZERO, |_| {})
+        .expect("private document initializes");
+
+    let subscription_only = serde_json::to_vec(&serde_json::json!({
+        "openai-codex": subscription.clone(),
+    }))
+    .expect("subscription-only document");
+    fs::write(&path, subscription_only).expect("subscription-only fixture");
+    assert_eq!(
+        store.read().expect("subscription-only file reads"),
+        Some(subscription.clone())
+    );
+    assert_eq!(
+        store
+            .read_endpoint()
+            .expect("file without endpoint slot reads"),
+        None
+    );
+
+    let broken_endpoint = serde_json::to_vec(&serde_json::json!({
+        "openai-codex": subscription.clone(),
+        "openai-compatible": {
+            "type": "api-key",
+            "baseUrl": "http://models.example.test/v1",
+            "key": "sk-broken-fixture",
+        },
+    }))
+    .expect("broken endpoint document");
+    fs::write(&path, broken_endpoint).expect("broken endpoint fixture");
+    assert_eq!(
+        store
+            .read()
+            .expect("a broken endpoint slot leaves the subscription"),
+        Some(subscription.clone())
+    );
+    assert!(store.read_endpoint().is_err());
+
+    store
+        .replace_with_clock(&credential(1_200_000), || Duration::ZERO, |_| {})
+        .expect("subscription login stores beside the broken endpoint slot");
+    assert!(
+        store.read_endpoint().is_err(),
+        "the broken endpoint slot is kept and still fails closed"
+    );
+}
+
+const BROKEN_ENDPOINT: &str = r#"{ "type" : "api-key", "baseUrl": "http://models.example.test/v1", "key": "sk-broken-fixture" }"#;
+const BROKEN_SUBSCRIPTION: &str =
+    r#"{"type":"oauth","access":"a","refresh":"r","expires":1,"accountId":"x"}"#;
+const UNKNOWN_SLOT: &str = r#"{"nested": [1, 2, 3], "note": "kept"}"#;
+
+fn assert_document_keeps(path: &std::path::Path, raw_entries: &[&str]) {
+    let document = fs::read_to_string(path).expect("credential document reads");
+    for entry in raw_entries {
+        assert!(
+            document.contains(entry),
+            "{entry} was not kept byte for byte in {document}"
+        );
+    }
+}
+
+#[test]
+fn credential_store_keeps_an_undecodable_endpoint_slot_through_subscription_writes() {
+    let workspace = empty_workspace("credential-store-keep-endpoint-slot");
+    let path = workspace.join("private/credentials.json");
+    let store = CredentialStore::at(path.clone());
+    store
+        .replace_with_clock(&credential(900_000), || Duration::ZERO, |_| {})
+        .expect("private document initializes");
+    let subscription =
+        serde_json::to_string(&credential(900_000)).expect("subscription record serializes");
+    fs::write(
+        &path,
+        format!(
+            r#"{{"openai-codex":{subscription},"openai-compatible":{BROKEN_ENDPOINT},"future-provider":{UNKNOWN_SLOT}}}"#
+        ),
+    )
+    .expect("mixed document written");
+    assert!(store.read_endpoint().is_err());
+
+    store
+        .replace_with_clock(&credential(1_200_000), || Duration::ZERO, |_| {})
+        .expect("subscription login stores");
+    assert_document_keeps(&path, &[BROKEN_ENDPOINT, UNKNOWN_SLOT]);
+    assert!(store.read_endpoint().is_err());
+
+    store
+        .replace_with_clock(&credential(300_000), || Duration::ZERO, |_| {})
+        .expect("near-expiry subscription stores");
+    store
+        .resolve_with_clock(
+            || Ok(1),
+            |_| Ok(credential(900_000)),
+            || Duration::ZERO,
+            |_| {},
+        )
+        .expect("subscription refreshes");
+    assert_document_keeps(&path, &[BROKEN_ENDPOINT, UNKNOWN_SLOT]);
+
+    assert!(store.logout().expect("subscription logs out"));
+    assert_document_keeps(&path, &[BROKEN_ENDPOINT, UNKNOWN_SLOT]);
+
+    store
+        .replace_endpoint_with_clock(
+            &endpoint_credential("https://models.example.test/v1", "sk-slot-fixture"),
+            || Duration::ZERO,
+            |_| {},
+        )
+        .expect("endpoint login replaces its own broken slot");
+    assert!(
+        store
+            .read_endpoint()
+            .expect("replaced slot reads")
+            .is_some()
+    );
+    assert_document_keeps(&path, &[UNKNOWN_SLOT]);
+}
+
+#[test]
+fn credential_store_keeps_an_undecodable_subscription_slot_through_endpoint_writes() {
+    let workspace = empty_workspace("credential-store-keep-subscription-slot");
+    let path = workspace.join("private/credentials.json");
+    let store = CredentialStore::at(path.clone());
+    store
+        .replace_endpoint_with_clock(
+            &endpoint_credential("https://models.example.test/v1", "sk-slot-fixture"),
+            || Duration::ZERO,
+            |_| {},
+        )
+        .expect("private document initializes");
+    let endpoint = serde_json::to_string(&endpoint_credential(
+        "https://models.example.test/v1",
+        "sk-slot-fixture",
+    ))
+    .expect("endpoint record serializes");
+    fs::write(
+        &path,
+        format!(r#"{{"openai-codex":{BROKEN_SUBSCRIPTION},"openai-compatible":{endpoint}}}"#),
+    )
+    .expect("mixed document written");
+    assert!(store.read().is_err());
+
+    store
+        .replace_endpoint_with_clock(
+            &endpoint_credential("https://models.example.test/v1", "sk-next-fixture"),
+            || Duration::ZERO,
+            |_| {},
+        )
+        .expect("endpoint login stores beside the broken subscription slot");
+    assert_document_keeps(&path, &[BROKEN_SUBSCRIPTION]);
+    assert!(store.read().is_err());
+
+    assert!(
+        store
+            .logout_endpoint_with_clock(|| Duration::ZERO, |_| {})
+            .expect("endpoint logs out")
+    );
+    assert_document_keeps(&path, &[BROKEN_SUBSCRIPTION]);
+    assert!(store.read().is_err());
+}
+
+#[test]
+fn credential_store_reads_unknown_slots_as_absent() {
+    let workspace = empty_workspace("credential-store-unknown-slot");
+    let path = workspace.join("private/credentials.json");
+    let store = CredentialStore::at(path.clone());
+    store.logout().expect("private empty document initializes");
+    fs::write(&path, br#"{"unknown":true}"#).expect("unknown-slot document written");
+
+    assert_eq!(
+        store.read().expect("unknown slot is not a subscription"),
+        None
+    );
+    assert_eq!(
+        store
+            .read_endpoint()
+            .expect("unknown slot is not an endpoint"),
+        None
+    );
+}
+
+#[test]
 fn credential_resolution_refreshes_near_expiry_under_the_store_lock() {
     let workspace = empty_workspace("credential-resolution-refresh");
     let store = CredentialStore::at(workspace.join("private/credentials.json"));
@@ -50,7 +290,7 @@ fn credential_resolution_refreshes_near_expiry_under_the_store_lock() {
 
     let resolved = store
         .resolve_with_clock(
-            1,
+            || Ok(1),
             |prior| {
                 refreshes.set(refreshes.get() + 1);
                 assert_eq!(prior.expires, 300_000);
@@ -82,7 +322,7 @@ fn protected_credential_store_coordinates_the_end_to_end_lifecycle() {
     assert!(
         store
             .resolve_with_clock(
-                1,
+                || Ok(1),
                 |_| Err(RuntimeError::Protocol("refresh rejected".to_owned())),
                 || Duration::ZERO,
                 |_| {},
@@ -96,7 +336,12 @@ fn protected_credential_store_coordinates_the_end_to_end_lifecycle() {
 
     let replacement = credential(900_000);
     let resolved = store
-        .resolve_with_clock(1, |_| Ok(replacement.clone()), || Duration::ZERO, |_| {})
+        .resolve_with_clock(
+            || Ok(1),
+            |_| Ok(replacement.clone()),
+            || Duration::ZERO,
+            |_| {},
+        )
         .expect("protected credential refreshes");
     assert_eq!(resolved, replacement);
     assert_eq!(
@@ -118,7 +363,6 @@ fn credential_store_rejects_malformed_and_oversized_documents() {
 
     for document in [
         b"not-json".as_slice(),
-        br#"{"unknown":true}"#.as_slice(),
         br#"{"openai-codex":{"type":"oauth","access":"a","refresh":"r","expires":1,"accountId":"x"}}"#
             .as_slice(),
         br#"{"openai-codex":{"type":"api-key","access":"x","refresh":"x","expires":1,"accountId":"x"}}"#
@@ -194,11 +438,12 @@ fn credential_with_document_len(target: usize) -> CredentialRecord {
     let escaped_controls = growth / 5;
     let escaped_quotes = growth % 5;
     assert!(escaped_controls + escaped_quotes <= MAX_OAUTH_SECRET_BYTES);
-    value.access = format!(
+    // Only `refresh` pads with control bytes: `access` is a header value, which must be visible ASCII.
+    value.refresh = format!(
         "{}{}{}",
         "\u{1}".repeat(escaped_controls),
         "\"".repeat(escaped_quotes),
-        "a".repeat(MAX_OAUTH_SECRET_BYTES - escaped_controls - escaped_quotes)
+        "r".repeat(MAX_OAUTH_SECRET_BYTES - escaped_controls - escaped_quotes)
     );
     assert_eq!(serialized_credential_document_len(&value), target);
     value
@@ -218,7 +463,7 @@ fn credential_resolution_requires_or_reuses_a_current_credential() {
     let store = CredentialStore::at(workspace.join("private/credentials.json"));
     let error = store
         .resolve_with_clock(
-            1,
+            || Ok(1),
             |_| panic!("an absent credential cannot refresh"),
             || Duration::ZERO,
             |_| {},
@@ -233,7 +478,7 @@ fn credential_resolution_requires_or_reuses_a_current_credential() {
         .expect("current credential stores");
     let resolved = store
         .resolve_with_clock(
-            1,
+            || Ok(1),
             |_| panic!("a current credential must not refresh"),
             || Duration::ZERO,
             |_| {},
@@ -254,7 +499,7 @@ fn credential_refresh_failure_preserves_the_prior_record() {
     assert!(
         store
             .resolve_with_clock(
-                1,
+                || Ok(1),
                 |_| Err(RuntimeError::Protocol("refresh rejected".to_owned())),
                 || Duration::ZERO,
                 |_| {},
@@ -266,7 +511,7 @@ fn credential_refresh_failure_preserves_the_prior_record() {
     assert!(
         store
             .resolve_with_clock(
-                1,
+                || Ok(1),
                 |_| {
                     let mut invalid = credential(900_000);
                     invalid.credential_type = "api-key".to_owned();
@@ -302,7 +547,7 @@ fn credential_refresh_reuses_a_winner_after_lock_contention() {
 
     let resolved = store
         .resolve_with_clock(
-            1,
+            || Ok(1),
             |_| panic!("the losing refresh must reuse the winner's credential"),
             || Duration::ZERO,
             |_| {
@@ -355,7 +600,7 @@ fn credential_resolution_requires_reauthentication_for_an_undecodable_record() {
     let (_workspace, store, _) = store_with_undecodable_record("credential-undecodable-resolve");
     let error = store
         .resolve_with_clock(
-            1,
+            || Ok(1),
             |_| panic!("an undecodable record cannot refresh"),
             || Duration::ZERO,
             |_| {},

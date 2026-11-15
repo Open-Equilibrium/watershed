@@ -3,22 +3,17 @@ name: CI
 on:
   workflow_dispatch:
     inputs:
-      mac_self_protection_evaluation:
+      mac_flow_owned_write_protection_evaluation:
         description: Run the experimental Mac guard probe (not release proof)
         type: boolean
         default: false
   pull_request:
     branches: [main]
+  # Topic branches run through their pull request, or on request before one exists, so a commit
+  # never starts two runs that compete for the macOS runners.
   push:
     branches:
       - main
-      - "feat/**"
-      - "fix/**"
-      - "docs/**"
-      - "test/**"
-      - "ci/**"
-      - "chore/**"
-      - "refactor/**"
 
 # A newer push or pull request update cancels its earlier run; every main commit keeps its own.
 concurrency:
@@ -280,11 +275,11 @@ jobs:
       - *mac-host
 
       - name: Establish experimental Mac unprotected red control
-        if: matrix.os == 'xcode-27' && github.event_name == 'workflow_dispatch' && inputs.mac_self_protection_evaluation
+        if: matrix.os == 'xcode-27' && github.event_name == 'workflow_dispatch' && inputs.mac_flow_owned_write_protection_evaluation
         timeout-minutes: 2
         shell: bash
         run: |
-          if python3 scripts/probe-macos-self-protection.py --mode baseline; then
+          if python3 scripts/probe-macos-flow-owned-write-protection.py --mode baseline; then
             echo 'Unprotected control unexpectedly satisfied the guard assertions' >&2
             exit 1
           else
@@ -293,13 +288,13 @@ jobs:
           fi
 
       - name: Evaluate experimental Mac profile and launcher (not release proof)
-        if: matrix.os == 'xcode-27' && github.event_name == 'workflow_dispatch' && inputs.mac_self_protection_evaluation
+        if: matrix.os == 'xcode-27' && github.event_name == 'workflow_dispatch' && inputs.mac_flow_owned_write_protection_evaluation
         timeout-minutes: 2
         shell: bash
         run: |
           probe_status=0
           for probe_mode in profile guarded-launch host-build lifecycle-baseline lifecycle; do
-            if python3 scripts/probe-macos-self-protection.py --mode "$probe_mode"; then
+            if python3 scripts/probe-macos-flow-owned-write-protection.py --mode "$probe_mode"; then
               result=0
             else
               result=$?
@@ -310,7 +305,7 @@ jobs:
           exit "$probe_status"
 
       - name: Compare native App Sandbox (not release proof)
-        if: matrix.os == 'xcode-27' && github.event_name == 'workflow_dispatch' && inputs.mac_self_protection_evaluation && !cancelled()
+        if: matrix.os == 'xcode-27' && github.event_name == 'workflow_dispatch' && inputs.mac_flow_owned_write_protection_evaluation && !cancelled()
         timeout-minutes: 6
         run: python3 scripts/probe-macos-app-sandbox.py
 
@@ -379,7 +374,7 @@ jobs:
         shell: bash
         run: |
           FLOW_EXECUTOR_UNDER_TEST="$M12_INSTALLED_EXECUTOR" \
-            cargo nextest run --locked -p flow-agent-executor --test native_contract --test native_self_protection
+            cargo nextest run --locked -p flow-agent-executor --test native_contract --test native_flow_owned_write_protection
 
       - name: Run public Custom Executor conformance
         shell: bash
@@ -494,6 +489,15 @@ jobs:
         run: |
           flutter pub get --enforce-lockfile
           flutter analyze
+          flutter test --coverage
+          node ../../scripts/check-dart-coverage.mjs
+
+      - name: Check the Liquid app on macOS
+        if: matrix.os == 'xcode-27'
+        working-directory: liquid/app
+        run: |
+          flutter pub get --enforce-lockfile
+          flutter analyze
           flutter test
 
       - name: Check the generated Liquid bridge
@@ -511,14 +515,18 @@ jobs:
         if: matrix.os == 'xcode-27'
         run: sh liquid/app/macos/LiquidKey/test.sh
 
-      # Not required until it runs reliably (TESTING.md).
+      # Also generates the Flutter configuration that the RunnerTests step below needs.
       - name: Build the Liquid macOS app
         if: matrix.os == 'xcode-27'
-        continue-on-error: true
         working-directory: liquid/app
         run: |
           flutter pub get --enforce-lockfile
           flutter build macos --debug
+
+      - name: Run the Liquid macOS app tests
+        if: matrix.os == 'xcode-27'
+        working-directory: liquid/app
+        run: xcodebuild test -workspace macos/Runner.xcworkspace -scheme Runner -destination 'platform=macOS'
 
   # Branch protection requires these two names. Each passes only when every job passed or
   # was skipped because the scope did not select it, so splitting jobs needs no ruleset change.

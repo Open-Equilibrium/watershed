@@ -1,0 +1,5 @@
+flow:
+  id: inspect-flow
+  name: InspectFlow
+  phase_refs: [inspect, summarize]
+  transitions: [{from_phase_ref: inspect, to_phase_ref: summarize, when: {path: [], equals: {type: map, value: {k: {type: map, value: {k: {type: map, value: {k: {type: map, value: {k: {type: map, value: {k: {type: map, value: {k: {type: map, value: {k: {type: map, value: {k: {type: map, value: {k: {type: map, value: {k: {type: map, value: {k: {type: map, value: {k: {type: map, value: {k: {type: map, value: {k: {type: map, value: {k: {type: boolean, value: true}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}]

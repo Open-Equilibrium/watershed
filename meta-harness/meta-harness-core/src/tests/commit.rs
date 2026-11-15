@@ -263,6 +263,33 @@ fn commit_creates_and_switches_a_branch_and_commits_deletions() {
 }
 
 #[test]
+fn a_commit_onto_a_new_branch_reports_the_base_the_branch_started_from() {
+    run(async {
+        let repo = Repo::new("commit-created-from-race");
+        identity(&repo);
+        repo.git(&["branch", "-M", "main"]);
+        repo.git(&["branch", "other"]);
+        repo.write("a.txt", "changed\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        let root = repo.path().to_owned();
+        crate::diff::before_create_base(repo.path(), move || {
+            // Another Git checks out `other` after Liquid read main as the base.
+            let external = Repo(root);
+            external.git(&["switch", "-q", "other"]);
+            std::mem::forget(external);
+        });
+
+        let commit = checkpoints
+            .commit_current(&["a.txt".into()], "Message", Some("feature"))
+            .await
+            .unwrap();
+
+        assert_eq!(commit.created_from.as_deref(), Some("main"));
+        assert_eq!(repo.git(&["branch", "--show-current"]), "feature\n");
+    });
+}
+
+#[test]
 fn commit_staged_deletions_and_renames_preserve_excluded_staging() {
     run(async {
         for rename in [false, true] {
@@ -571,6 +598,8 @@ fn commit_plan_attributes_turns_outside_edits_and_partial_staging() {
                 ended: true,
                 failure: None,
                 changed: None,
+                stop_reason: None,
+                stop_error: None,
             });
         }
         repo.git(&["add", "a.txt"]);
@@ -795,12 +824,12 @@ fn commit_includes_an_untracked_nested_repository() {
 }
 
 #[test]
-fn commit_plan_uses_the_first_available_start_as_its_baseline() {
+fn a_missing_first_start_leaves_its_stretch_unattributed() {
     use crate::TurnCheckpoints;
     run(async {
         let repo = Repo::new("attribution-missing-first");
         let checkpoints = Checkpoints::new(repo.path());
-        repo.write("a.txt", "your edit\n");
+        repo.write("a.txt", "an edit by turn one, whose start is missing\n");
         checkpoints.capture(&at("t2", Phase::Start)).await.unwrap();
         repo.write("a.txt", "turn edit\n");
         checkpoints.capture(&at("t2", Phase::End)).await.unwrap();
@@ -818,13 +847,73 @@ fn commit_plan_uses_the_first_available_start_as_its_baseline() {
                 ended: true,
                 failure: None,
                 changed: None,
+                stop_reason: None,
+                stop_error: None,
             })
             .collect();
         let plan = checkpoints.commit_plan(&turns).await.unwrap();
-        assert_eq!(plan.files[0].turns, [2]);
-        assert!(
-            plan.files[0].edited,
-            "the edit before the first available start is yours"
+        // The edit may be turn one's, which has no checkpoint to tell it apart from the user's.
+        assert!(!plan.files[0].attribution_available);
+        assert!(plan.files[0].turns.is_empty());
+        assert!(!plan.files[0].edited);
+    });
+}
+
+#[test]
+fn a_turn_without_its_start_leaves_only_its_stretch_unattributed() {
+    use crate::TurnCheckpoints;
+    run(async {
+        let repo = Repo::new("attribution-missing-gap");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints.capture(&at("t1", Phase::Start)).await.unwrap();
+        repo.write("a.txt", "turn one\n");
+        checkpoints.capture(&at("t1", Phase::End)).await.unwrap();
+        // Turn two's checkpoints are missing, so its edit lies in no checkpointed stretch.
+        repo.write("b.txt", "turn two\n");
+        checkpoints.capture(&at("t3", Phase::Start)).await.unwrap();
+        repo.write("c.txt", "turn three\n");
+        checkpoints.capture(&at("t3", Phase::End)).await.unwrap();
+        let turns: Vec<_> = (1..=3)
+            .map(|number| TurnCheckpoints {
+                session: "s1".into(),
+                turn: if number == 2 {
+                    "t2".into()
+                } else {
+                    format!("t{number}")
+                },
+                number,
+                start_entry: "start".into(),
+                end_entry: Some("end".into()),
+                prompt_entry: None,
+                prompt: String::new(),
+                started_ms: None,
+                stop_reason: None,
+                stop_error: None,
+                ended_ms: None,
+                ended: true,
+                failure: None,
+                changed: None,
+            })
+            .collect();
+        let plan = checkpoints.commit_plan(&turns).await.unwrap();
+        let attributed: Vec<_> = plan
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.change.path.as_str(),
+                    file.attribution_available,
+                    file.turns.clone(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            attributed,
+            [
+                ("a.txt", true, vec![1]),
+                ("b.txt", false, vec![]),
+                ("c.txt", true, vec![3]),
+            ]
         );
     });
 }
@@ -853,6 +942,8 @@ fn a_turn_without_its_end_checkpoint_keeps_its_changes() {
                 ended: false,
                 failure: None,
                 changed: None,
+                stop_reason: None,
+                stop_error: None,
             })
             .collect();
         let plan = checkpoints.commit_plan(&turns).await.unwrap();
@@ -896,6 +987,102 @@ fn commit_refuses_selected_content_changed_since_the_plan() {
 }
 
 #[test]
+fn commit_refuses_a_mode_change_git_would_skip() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        let repo = Repo::new("commit-mode-skipped");
+        identity(&repo);
+        repo.write("script.sh", "run\n");
+        repo.git(&["add", "script.sh"]);
+        repo.git(&["commit", "-qm", "script"]);
+        // Git ignores an executable bit when this is false, so a commit would leave it out.
+        repo.git(&["config", "core.fileMode", "false"]);
+        std::fs::set_permissions(
+            repo.path().join("script.sh"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        repo.write("a.txt", "edited\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        let plan = checkpoints.commit_plan(&[]).await.unwrap();
+        let head = repo.git(&["rev-parse", "HEAD"]);
+
+        let result = checkpoints
+            .commit(
+                &plan.snapshot,
+                &["a.txt".into(), "script.sh".into()],
+                "Message",
+                None,
+            )
+            .await;
+
+        assert!(matches!(result, Err(DiffError::Git(_))), "{result:?}");
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    });
+}
+
+#[test]
+fn commit_refuses_a_content_and_mode_change_git_would_partly_commit() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        let repo = Repo::new("commit-mode-and-content");
+        identity(&repo);
+        repo.write("script.sh", "run\n");
+        repo.git(&["add", "script.sh"]);
+        repo.git(&["commit", "-qm", "script"]);
+        // With this false, Git commits the new contents of script.sh but leaves its executable bit out.
+        repo.git(&["config", "core.fileMode", "false"]);
+        std::fs::set_permissions(
+            repo.path().join("script.sh"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        repo.write("script.sh", "run more\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        let plan = checkpoints.commit_plan(&[]).await.unwrap();
+        let head = repo.git(&["rev-parse", "HEAD"]);
+
+        let result = checkpoints
+            .commit(&plan.snapshot, &["script.sh".into()], "Message", None)
+            .await;
+
+        assert!(matches!(result, Err(DiffError::Git(_))), "{result:?}");
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    });
+}
+
+#[test]
+fn commit_takes_added_and_deleted_files_when_git_ignores_file_modes() {
+    run(async {
+        let repo = Repo::new("commit-mode-ignored-add-delete");
+        identity(&repo);
+        repo.write("old.txt", "old\n");
+        repo.git(&["add", "old.txt"]);
+        repo.git(&["commit", "-qm", "old"]);
+        // A new or deleted file changes its mode from or to 000000; that is no executable bit.
+        repo.git(&["config", "core.fileMode", "false"]);
+        repo.write("new.txt", "new\n");
+        std::fs::remove_file(repo.path().join("old.txt")).unwrap();
+        let checkpoints = Checkpoints::new(repo.path());
+        let plan = checkpoints.commit_plan(&[]).await.unwrap();
+
+        let result = checkpoints
+            .commit(
+                &plan.snapshot,
+                &["new.txt".into(), "old.txt".into()],
+                "Message",
+                None,
+            )
+            .await;
+
+        assert!(result.is_ok(), "{result:?}");
+        let tracked = repo.git(&["ls-files"]);
+        assert!(tracked.lines().any(|file| file == "new.txt"), "{tracked}");
+        assert!(!tracked.lines().any(|file| file == "old.txt"), "{tracked}");
+    });
+}
+
+#[test]
 fn new_branch_commit_failure_reports_the_branch_after_either_hook() {
     use std::os::unix::fs::PermissionsExt;
     run(async {
@@ -908,14 +1095,21 @@ fn new_branch_commit_failure_reports_the_branch_after_either_hook() {
             std::fs::write(&hook, "#!/bin/sh\necho hook-refused >&2\nexit 1\n").unwrap();
             std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
             let head = repo.git(&["rev-parse", "HEAD"]);
+            let base = repo.git(&["branch", "--show-current"]);
             let error = checkpoints
                 .commit_current(&["a.txt".into()], "Message", Some("feat"))
                 .await
                 .unwrap_err();
-            let DiffError::CommitOnBranchFailed { branch, error } = error else {
+            let DiffError::CommitOnBranchFailed {
+                branch,
+                from,
+                error,
+            } = error
+            else {
                 panic!("missing created branch outcome: {error:?}");
             };
             assert_eq!(branch, "feat");
+            assert_eq!(from.as_deref(), Some(base.trim_end()));
             assert!(matches!(
                 error.as_ref(),
                 DiffError::HookFailed(_) | DiffError::CommitFailed(_)
@@ -962,6 +1156,8 @@ fn attribution_bounds_keep_files_without_partial_labels() {
             ended: true,
             failure: None,
             changed: None,
+            stop_reason: None,
+            stop_error: None,
         };
         let complete = checkpoints
             .commit_plan(std::slice::from_ref(&turn))
@@ -1020,6 +1216,8 @@ fn malformed_checkpoint_ids_list_files_without_attribution() {
             ended: true,
             failure: None,
             changed: None,
+            stop_reason: None,
+            stop_error: None,
         };
         let plan = Checkpoints::new(repo.path())
             .commit_plan(&[turn])

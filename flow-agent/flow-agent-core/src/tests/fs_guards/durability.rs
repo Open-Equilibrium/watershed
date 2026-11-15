@@ -1,5 +1,8 @@
 use super::super::helpers::empty_workspace;
-use crate::runtime::fs_guards::sync_directory;
+use crate::runtime::fs_guards::{
+    PowerLoss, apply_power_loss, finish_durable_trace, start_durable_trace, sync_directory,
+    sync_durable, truncate_durable, write_durable,
+};
 use std::fs;
 use std::{os::unix::fs::symlink, process::Command, sync::mpsc, time::Duration};
 
@@ -50,4 +53,70 @@ fn unix_directory_sync_rejects_a_fifo_without_waiting_for_a_writer() {
         .expect("FIFO rejection completes without a writer");
     worker.join().expect("directory sync worker joins");
     result.expect_err("a FIFO is not a directory durability boundary");
+}
+
+#[test]
+fn power_loss_keeps_only_the_bytes_synced_before_it() {
+    let workspace = empty_workspace("power-loss-synced-prefix");
+    let path = workspace.join("log.jsonl");
+    let mut file = fs::File::create(&path).expect("log created");
+    start_durable_trace(&workspace, None);
+    write_durable(&mut file, &path, b"synced\n").expect("record written");
+    sync_durable(&file, &path).expect("record synced");
+    write_durable(&mut file, &path, b"unsynced\n").expect("record written");
+
+    apply_power_loss(&workspace, PowerLoss::Drop);
+    finish_durable_trace(&workspace);
+
+    assert_eq!(fs::read(&path).expect("log reads"), b"synced\n");
+}
+
+#[test]
+fn power_loss_cuts_the_last_unsynced_write_before_its_line_feed() {
+    let workspace = empty_workspace("power-loss-cut-line");
+    let path = workspace.join("log.jsonl");
+    let mut file = fs::File::create(&path).expect("log created");
+    start_durable_trace(&workspace, None);
+    write_durable(&mut file, &path, b"synced\n").expect("record written");
+    sync_durable(&file, &path).expect("record synced");
+    write_durable(&mut file, &path, b"unsynced\n").expect("record written");
+
+    apply_power_loss(&workspace, PowerLoss::CutLastWrite);
+    finish_durable_trace(&workspace);
+
+    assert_eq!(fs::read(&path).expect("log reads"), b"synced\nunsynced");
+}
+
+#[test]
+fn power_loss_restores_an_unsynced_truncation() {
+    let workspace = empty_workspace("power-loss-unsynced-truncation");
+    let path = workspace.join("log.jsonl");
+    let mut file = fs::File::create(&path).expect("log created");
+    start_durable_trace(&workspace, None);
+    write_durable(&mut file, &path, b"original").expect("record written");
+    sync_durable(&file, &path).expect("record synced");
+    truncate_durable(&file, &path, 4).expect("record truncates");
+
+    apply_power_loss(&workspace, PowerLoss::Drop);
+    finish_durable_trace(&workspace);
+
+    assert_eq!(fs::read(&path).expect("log reads"), b"original");
+}
+
+#[test]
+fn power_loss_restores_an_unsynced_truncation_of_a_file_written_before_the_trace() {
+    let workspace = empty_workspace("power-loss-untraced-truncation");
+    let path = workspace.join("log.jsonl");
+    fs::write(&path, b"original").expect("log is synced before the trace");
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .expect("log opens");
+    start_durable_trace(&workspace, None);
+    truncate_durable(&file, &path, 4).expect("log truncates");
+
+    apply_power_loss(&workspace, PowerLoss::Drop);
+    finish_durable_trace(&workspace);
+
+    assert_eq!(fs::read(&path).expect("log reads"), b"original");
 }

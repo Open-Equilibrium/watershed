@@ -1,5 +1,5 @@
 use super::OPENAI_CODEX_PROVIDER_ID;
-use crate::runtime::{digest::sha256_hex, types::RuntimeError};
+use crate::runtime::{digest::sha256_hex, responses::is_failure_event, types::RuntimeError};
 use proto::parse_unique_json;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -106,9 +106,18 @@ pub(crate) fn responses_request_input_bytes(
         })
 }
 
+/// Decodes a reply's events. Every shape error is a reply that ended but broke the Responses
+/// format, so it is reply-invalid rather than a definitive provider error (PROTOCOL.md).
 pub(crate) fn decode_responses_turn(
     events: &[serde_json::Value],
 ) -> Result<ProviderTurn, RuntimeError> {
+    decode_reply_events(events).map_err(|error| match error {
+        RuntimeError::Protocol(message) => provider_reply_invalid(message),
+        error => error,
+    })
+}
+
+fn decode_reply_events(events: &[serde_json::Value]) -> Result<ProviderTurn, RuntimeError> {
     let mut created_id = None;
     let mut completed_id = None;
     let mut completed = 0usize;
@@ -120,7 +129,7 @@ pub(crate) fn decode_responses_turn(
 
     for event in events {
         if completed != 0 {
-            return Err(provider_protocol(
+            return Err(provider_reply_invalid(
                 "response contains data after its successful terminal event",
             ));
         }
@@ -143,10 +152,15 @@ pub(crate) fn decode_responses_turn(
                     .get("item")
                     .ok_or_else(|| provider_protocol("output_item.done lacks item"))?
                     .clone();
+                if item.get("type").and_then(serde_json::Value::as_str) == Some("message")
+                    && item.get("content").is_none()
+                {
+                    return Err(provider_reply_invalid("output item without content"));
+                }
                 if item.get("type").and_then(serde_json::Value::as_str) == Some("function_call") {
                     let call = decode_tool_call(&item)?;
                     if !tool_call_ids.insert(call.call_id.clone()) {
-                        return Err(provider_protocol(format!(
+                        return Err(provider_reply_invalid(format!(
                             "response repeated function call id {}",
                             call.call_id
                         )));
@@ -160,7 +174,7 @@ pub(crate) fn decode_responses_turn(
                 completed_id = Some(response_id(event)?.to_owned());
                 token_usage = decode_token_usage(event)?;
             }
-            "response.error" | "response.failed" | "response.incomplete" | "error" => {
+            event_type if is_failure_event(event_type) => {
                 return Err(RuntimeError::definitive_provider_error(
                     None,
                     provider_error_message(event)
@@ -482,4 +496,12 @@ fn required_non_empty_string<'a>(
 
 fn provider_protocol(message: impl Into<String>) -> RuntimeError {
     RuntimeError::Protocol(format!("OpenAI Codex provider: {}", message.into()))
+}
+
+/// A reply that ended but broke the Responses format; the message is Flow Agent's own.
+pub(super) fn provider_reply_invalid(detail: impl AsRef<str>) -> RuntimeError {
+    RuntimeError::provider_reply_invalid(format!(
+        "Flow Agent rejected the provider reply: {}",
+        detail.as_ref()
+    ))
 }

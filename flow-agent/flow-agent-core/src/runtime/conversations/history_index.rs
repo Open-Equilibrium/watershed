@@ -13,7 +13,7 @@ use crate::runtime::{
     digest::sha256_hex,
     fs_guards::{
         AnchoredDir, AnchoredFile, open_anchored_file_for_read, path_io_error,
-        segmented_jsonl_path, segmented_jsonl_segment_count,
+        segmented_jsonl_path, segmented_jsonl_segment_count, sync_durable,
     },
     stage_results::reconcile_operation_and_cleanup,
     types::{RuntimeError, SessionStreamLimits},
@@ -91,6 +91,7 @@ pub(crate) struct HistoryIndexMetrics {
     pub(crate) event_state_payload_peak: u64,
     pub(crate) event_work: u64,
     pub(crate) event_work_limit: u64,
+    pub(crate) event_lines_visited: u64,
     pub(crate) work: u64,
     pub(crate) work_limit: u64,
 }
@@ -370,7 +371,7 @@ impl ConversationHistoryIndex {
             let index_leaf = if final_count == 0 {
                 let leaf = index_run_leaf(0, 0);
                 let file = create_scratch_file(&scratch.dir, &leaf)?;
-                file.sync_all()
+                sync_durable(&file, &scratch.dir.file(&leaf).path)
                     .map_err(|source| path_io_error(&scratch.dir.file(&leaf).path, source))?;
                 leaf
             } else {
@@ -462,6 +463,7 @@ impl ConversationHistoryIndex {
                 event_state_payload_peak: self.event_metrics.state_payload_peak,
                 event_work: self.event_metrics.work,
                 event_work_limit: self.event_metrics.work_limit,
+                event_lines_visited: self.event_metrics.lines_visited,
                 work: self.work.used,
                 work_limit: self.work.limit,
             }));

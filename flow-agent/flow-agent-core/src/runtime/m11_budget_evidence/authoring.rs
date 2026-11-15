@@ -49,6 +49,7 @@ pub(super) fn authoring_max_definition_transaction(
     let home = temp_root.join(".flow");
     initialize_global_config_at(&home, None).map_err(|error| error.to_string())?;
     let block = maximum_tool();
+    let expected = maximum_tool();
     let started = Instant::now();
     let path = create_global_registry_block_at(&home, block).map_err(|error| error.to_string())?;
     let bytes = fs::read(&path).map_err(|error| error.to_string())?;
@@ -62,7 +63,7 @@ pub(super) fn authoring_max_definition_transaction(
     let reloaded =
         parse_registry_block("maximum-tool.yaml", &source).map_err(|error| error.to_string())?;
     drop(source);
-    if reloaded != maximum_tool() {
+    if reloaded != expected {
         return Err("maximum Tool transaction did not round-trip semantically".to_owned());
     }
     let elapsed = started.elapsed();

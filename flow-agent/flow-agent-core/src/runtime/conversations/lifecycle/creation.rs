@@ -28,7 +28,7 @@ use crate::runtime::{
     digest::sha256_hex,
     fs_guards::{
         AnchoredDir, AnchoredDirectoryIdentity, DirectoryErrorMode, create_anchored_file,
-        open_anchored_file_for_read, path_io_error, sync_anchored_directory,
+        open_anchored_file_for_read, path_io_error, sync_anchored_directory, sync_durable,
     },
     session_bundle::SessionBundlePaths,
     stage_results::reconcile_controlled_stages,
@@ -302,8 +302,8 @@ fn cleanup_new_empty_conversation(
 
 fn create_anchored_empty_file(parent: &AnchoredDir, leaf: &str) -> Result<(), RuntimeError> {
     let path = parent.file(leaf);
-    create_anchored_file(&path)?
-        .sync_all()
+    let file = create_anchored_file(&path)?;
+    sync_durable(&file, path.diagnostic_path())
         .map_err(|source| path_io_error(path.diagnostic_path(), source))
 }
 

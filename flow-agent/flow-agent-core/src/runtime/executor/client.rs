@@ -25,10 +25,12 @@ pub(crate) enum ExecutorPreflightOutcome {
     Rejected(proto::ExecutorErrorCodeV0),
 }
 
-/// Validated result and self-protection evidence from one Tool execution.
+/// Validated result and Flow-owned write protection evidence from one Tool execution.
 pub(crate) struct ExecutorToolExecution {
     pub(crate) enforcement: proto::EnforcementReceiptV0,
     pub(crate) outcome: ToolExecutionOutcome,
+    /// Whether a process of the Tool's group survived cleanup after the Executor's answer.
+    pub(crate) cleanup_unknown: bool,
     #[cfg(any(test, feature = "m12-startup-evidence"))]
     pub(crate) request_hash: String,
 }
@@ -108,17 +110,24 @@ impl PreparedExecutor {
             prepared: _prepared,
             process,
         } = waiting;
-        match start_one_shot(process)? {
+        let started = start_one_shot(process)?;
+        match started.response {
             proto::ExecutorResponseV0::Completed {
                 enforcement,
                 tool_result,
                 ..
             } => {
-                validate_receipt_identity(&enforcement, self.selection.probe())?;
+                let outcome = validate_completed(
+                    &enforcement,
+                    tool_result,
+                    self.selection.probe(),
+                    started.cleanup_unknown,
+                )?;
                 Ok(ExecutorDispatchOutcome::Completed(Box::new(
                     ExecutorToolExecution {
                         enforcement,
-                        outcome: decode_tool_outcome(tool_result)?,
+                        outcome,
+                        cleanup_unknown: started.cleanup_unknown,
                         #[cfg(any(test, feature = "m12-startup-evidence"))]
                         request_hash: _prepared.request_hash,
                     },
@@ -159,6 +168,23 @@ impl PreparedExecutor {
     }
 }
 
+/// Validates a terminal Completed answer. A surviving process group keeps only a valid answer, so
+/// an invalid one fails stop instead of dropping the unknown cleanup.
+fn validate_completed(
+    enforcement: &proto::EnforcementReceiptV0,
+    tool_result: proto::ExecutorToolResultV0,
+    probe: &proto::ExecutorProbeV0,
+    cleanup_unknown: bool,
+) -> Result<ToolExecutionOutcome, RuntimeError> {
+    match validate_receipt_identity(enforcement, probe)
+        .and_then(|()| decode_tool_outcome(tool_result))
+    {
+        Ok(outcome) => Ok(outcome),
+        Err(_) if cleanup_unknown => std::process::abort(),
+        Err(error) => Err(error),
+    }
+}
+
 fn invalid_request(_: proto::ExecutorProtocolError) -> RuntimeError {
     invalid_response("Flow constructed an invalid Executor protocol document")
 }
@@ -185,7 +211,7 @@ mod tests {
         ExecutorPreflightProcess, c_close, preflight_one_shot, preflight_one_shot_at_deadline,
         preflight_one_shot_with_deadline, start_one_shot,
     };
-    use super::{ExecutorSelection, PreparedExecutor};
+    use super::{ExecutorSelection, PreparedExecutor, validate_completed};
     use crate::runtime::run_attempts::{RunAttemptOutcome, ToolTerminalClassification};
     use crate::runtime::{
         executor::ExecutorSelectionSource, fs_guards::AnchoredWorkspace,
@@ -195,7 +221,10 @@ mod tests {
         collections::BTreeMap,
         fs::File,
         os::fd::{AsRawFd as _, OwnedFd},
-        os::unix::{fs::MetadataExt as _, process::CommandExt as _},
+        os::unix::{
+            fs::MetadataExt as _,
+            process::{CommandExt as _, ExitStatusExt as _},
+        },
         path::Path,
         process::Command,
         time::{Duration, Instant},
@@ -412,6 +441,71 @@ mod tests {
     }
 
     #[test]
+    fn prepare_tool_rejects_a_present_non_utf8_allowed_variable() {
+        if crate::tests::run_isolated_test("WATERSHED_EXECUTOR_NON_UTF8_CHILD") {
+            return;
+        }
+        use std::os::unix::ffi::OsStringExt as _;
+        const NAME: &str = "WATERSHED_EXECUTOR_NON_UTF8_FIXTURE";
+        // This test owns its process; the value is one synthetic non-UTF-8 byte.
+        unsafe { std::env::set_var(NAME, std::ffi::OsString::from_vec(vec![0xff])) };
+        let root = crate::tests::empty_workspace();
+        let workspace = AnchoredWorkspace::open(&root).expect("workspace opens");
+        let executor = preparation_fixture(vec![retained_object(&root)]);
+        let mut policy = executor_policy();
+        policy.commands[0].environment.allow = vec![NAME.to_owned()];
+        let invocation = ToolInvocation {
+            executable: "/bin/echo".to_owned(),
+            argv: vec!["literal argument".to_owned()],
+        };
+        let Err(error) = executor.prepare_tool(
+            &workspace,
+            &policy,
+            &policy.commands[0],
+            &invocation,
+            "non-utf8-request",
+        ) else {
+            panic!("a present non-UTF-8 allowed variable fails closed");
+        };
+        assert!(
+            matches!(
+                error,
+                RuntimeError::Executor(ref failure)
+                    if failure.code() == proto::ExecutorErrorCodeV0::PolicyUnsupported
+            ),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn prepared_protected_descriptors_are_close_on_exec() {
+        let root = crate::tests::empty_workspace();
+        let workspace = AnchoredWorkspace::open(&root).expect("workspace opens");
+        let executor = preparation_fixture(vec![retained_object(&root)]);
+        let policy = executor_policy();
+        let invocation = ToolInvocation {
+            executable: "/bin/echo".to_owned(),
+            argv: vec!["literal argument".to_owned()],
+        };
+        let prepared = executor
+            .prepare_tool(
+                &workspace,
+                &policy,
+                &policy.commands[0],
+                &invocation,
+                "cloexec-request",
+            )
+            .expect("host request is prepared");
+        for descriptor in &prepared.protected_descriptors {
+            let flags = rustix::io::fcntl_getfd(descriptor).expect("descriptor flags read");
+            assert!(
+                flags.contains(rustix::io::FdFlags::CLOEXEC),
+                "a retained descriptor must not leak into children"
+            );
+        }
+    }
+
+    #[test]
     fn one_shot_executor_works_without_parent_standard_descriptors() {
         const CHILD_ENV: &str = "WATERSHED_EXECUTOR_WITHOUT_STDIO_CHILD";
         if std::env::var_os(CHILD_ENV).is_none() && std::env::var_os("NEXTEST").is_none() {
@@ -493,7 +587,7 @@ mod tests {
                 executor: proto::EXECUTOR_NAME_V0.to_owned(),
                 executor_version: "test".to_owned(),
                 platform: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
-                self_protection_active: true,
+                flow_owned_write_protection_active: true,
             },
             request_id: request.request_id.clone(),
             schema: proto::EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
@@ -561,8 +655,9 @@ mod tests {
         let ExecutorPreflightProcess::Ready(waiting) = preflight else {
             panic!("cancellation fixture must reach readiness")
         };
-        let terminal =
-            start_one_shot(waiting).expect("Executor returns canonical cancellation evidence");
+        let terminal = start_one_shot(waiting)
+            .expect("Executor returns canonical cancellation evidence")
+            .response;
         interrupter.join().expect("interrupt thread joins");
         crate::settle_productive_operation();
 
@@ -647,6 +742,40 @@ mod tests {
     }
 
     #[test]
+    fn host_environment_that_is_not_nfc_is_refused_before_launch() {
+        if crate::tests::run_isolated_test("WATERSHED_EXECUTOR_NFC_CHILD") {
+            return;
+        }
+        const NAME: &str = "WATERSHED_EXECUTOR_DECOMPOSED_FIXTURE";
+        // This test owns its process; the value is synthetic fixture data.
+        unsafe {
+            std::env::set_var(NAME, "Cafe\u{301}");
+        }
+        let root = crate::tests::empty_workspace();
+        let workspace = AnchoredWorkspace::open(&root).expect("workspace opens");
+        let executor = preparation_fixture(vec![retained_object(&root)]);
+        let mut policy = executor_policy();
+        policy.commands[0].environment.allow = vec![NAME.to_owned()];
+        let invocation = ToolInvocation {
+            executable: "/bin/echo".to_owned(),
+            argv: Vec::new(),
+        };
+        let Err(RuntimeError::Executor(failure)) = executor.prepare_tool(
+            &workspace,
+            &policy,
+            &policy.commands[0],
+            &invocation,
+            "decomposed-environment",
+        ) else {
+            panic!("a host environment value that is not NFC must not be dispatched");
+        };
+        assert_eq!(
+            failure.code(),
+            proto::ExecutorErrorCodeV0::PolicyUnsupported
+        );
+    }
+
+    #[test]
     fn prepared_executor_request_hash_uses_run_log_format() {
         let hash = crate::runtime::digest::prefixed_sha256_hex(b"canonical Executor request");
         let digest = hash
@@ -697,7 +826,7 @@ mod tests {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[test]
     fn executor_descriptor_is_moved_above_protected_slots_under_fd_pressure() {
-        use super::transport::duplicate_executor_descriptor;
+        use super::super::process::duplicate_executor_descriptor;
         let pressure = (0..proto::EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0 + 8)
             .map(|_| File::open("/dev/null").expect("fd pressure source"))
             .collect::<Vec<_>>();
@@ -709,9 +838,8 @@ mod tests {
         assert!(executor.as_raw_fd() > last_protected_slot);
     }
 
-    #[test]
-    fn terminal_receipt_identity_must_match_the_prepared_probe() {
-        let probe = proto::ExecutorProbeV0 {
+    fn probe_fixture() -> proto::ExecutorProbeV0 {
+        proto::ExecutorProbeV0 {
             backend: format!("fake-{}-{}", std::env::consts::OS, std::env::consts::ARCH),
             backend_version: "1".to_owned(),
             executor: proto::EXECUTOR_NAME_V0.to_owned(),
@@ -720,8 +848,61 @@ mod tests {
             protocol_versions: vec![proto::EXECUTOR_PROTOCOL_VERSION_V0.to_owned()],
             ready: true,
             schema: proto::EXECUTOR_PROBE_SCHEMA_V0.to_owned(),
-            supported_policy_features: vec![proto::EXECUTOR_FEATURE_SELF_PROTECTION_V0.to_owned()],
+            supported_policy_features: vec![
+                proto::EXECUTOR_FEATURE_FLOW_OWNED_WRITE_PROTECTION_V0.to_owned(),
+            ],
+        }
+    }
+
+    #[test]
+    fn surviving_group_with_mismatched_receipt_identity_fails_stop() {
+        const CHILD_ENV: &str = "WATERSHED_EXECUTOR_SURVIVOR_IDENTITY_CHILD";
+        let probe = probe_fixture();
+        let receipt = proto::EnforcementReceiptV0 {
+            applied_policy_digest: "0".repeat(64),
+            backend: "other-backend".to_owned(),
+            backend_version: probe.backend_version.clone(),
+            executor: probe.executor.clone(),
+            executor_version: probe.executor_version.clone(),
+            platform: probe.platform.clone(),
+            flow_owned_write_protection_active: true,
         };
+        let tool_result = || proto::ExecutorToolResultV0 {
+            classification: None,
+            exit_code: Some(0),
+            status: proto::ExecutorToolStatusV0::Completed,
+            stderr_base64: proto::encode_executor_stream_v0(&[]),
+            stdout_base64: proto::encode_executor_stream_v0(&[]),
+        };
+        assert!(
+            validate_completed(&receipt, tool_result(), &probe, false).is_err(),
+            "without a surviving group the invalid answer is an ordinary error"
+        );
+        if std::env::var_os(CHILD_ENV).is_none() {
+            // The child re-runs only this test, so its abort cannot end the caller.
+            let test_name = std::thread::current()
+                .name()
+                .expect("test thread has a name")
+                .to_owned();
+            let status = Command::new(std::env::current_exe().expect("test executable resolves"))
+                .args(["--exact", &test_name, "--nocapture"])
+                .env(CHILD_ENV, "1")
+                .status()
+                .expect("isolated child starts");
+            assert_eq!(
+                status.signal(),
+                Some(rustix::process::Signal::ABORT.as_raw()),
+                "a surviving group with an invalid answer must fail stop: {status:?}"
+            );
+            return;
+        }
+        let outcome = validate_completed(&receipt, tool_result(), &probe, true);
+        panic!("a surviving group with an invalid answer returned {outcome:?} instead of aborting");
+    }
+
+    #[test]
+    fn terminal_receipt_identity_must_match_the_prepared_probe() {
+        let probe = probe_fixture();
         let receipt = proto::EnforcementReceiptV0 {
             applied_policy_digest: "0".repeat(64),
             backend: probe.backend.clone(),
@@ -729,7 +910,7 @@ mod tests {
             executor: probe.executor.clone(),
             executor_version: probe.executor_version.clone(),
             platform: probe.platform.clone(),
-            self_protection_active: true,
+            flow_owned_write_protection_active: true,
         };
         assert!(validate_receipt_identity(&receipt, &probe).is_ok());
         for field in [

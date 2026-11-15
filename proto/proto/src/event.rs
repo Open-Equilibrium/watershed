@@ -2,7 +2,7 @@ use crate::{
     JSON_NESTING_REQUIREMENT_V0, PROTOCOL_VERSION_V0,
     canonical::{
         UniqueJsonValue, canonical_json, is_nfc, json_nesting_reaches_limit,
-        nfc_json_string_values, nfc_string,
+        nfc_json_string_values, nfc_string, normalized_key_collision,
     },
     error::{CanonicalJsonError, EventValidationError},
     metadata::{EventMetadataError, EventType, is_valid_session_id, parse_rfc3339_utc_timestamp},
@@ -386,6 +386,12 @@ impl EventEnvelope {
             if let Some(location) = non_nfc_location(value, field) {
                 return Err(EventValidationError::new(location, "must use NFC"));
             }
+        }
+        if let Some(location) = normalized_key_collision(&self.payload, "payload") {
+            return Err(EventValidationError::new(
+                location,
+                "must not repeat after NFC normalization",
+            ));
         }
 
         payload::validate_event_payload(self.event_type, &self.payload)

@@ -16,6 +16,9 @@
 //! /usr/bin/time -l target/release/examples/checkpoint_observe
 //! ```
 
+use std::fs::DirBuilder;
+use std::io::ErrorKind;
+use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
@@ -38,8 +41,7 @@ fn main() {
         write_project(Path::new(dir));
         return;
     }
-    let dir = std::env::temp_dir().join(format!("checkpoint-observe-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir = private_folder();
     let status = Command::new(std::env::current_exe().expect("this example"))
         .arg("--write")
         .arg(&dir)
@@ -52,6 +54,23 @@ fn main() {
         .expect("runtime starts")
         .block_on(observe(&dir));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A new folder in the temporary directory, created exclusively with owner-only permissions, so
+/// a link or folder another user put at its name makes the attempt fail rather than receive writes.
+fn private_folder() -> PathBuf {
+    for attempt in 0..8 {
+        let dir = std::env::temp_dir().join(format!(
+            "checkpoint-observe-{}-{attempt}",
+            std::process::id()
+        ));
+        match DirBuilder::new().mode(0o700).create(&dir) {
+            Ok(()) => return dir,
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
+            Err(error) => panic!("the observation folder: {error}"),
+        }
+    }
+    panic!("no free observation folder")
 }
 
 fn file(dir: &Path, index: usize) -> PathBuf {
@@ -81,6 +100,10 @@ fn write_project(dir: &Path) {
             ])
             .args(args)
             .current_dir(dir)
+            // No inherited variable, such as GIT_INDEX_FILE from a Git hook, may point these
+            // commands at another repository.
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .status()
             .expect("git runs");
@@ -154,6 +177,8 @@ async fn observe(dir: &Path) {
             ended: true,
             failure: None,
             changed: None,
+            stop_reason: None,
+            stop_error: None,
         });
         let started = Instant::now();
         let files = checkpoints

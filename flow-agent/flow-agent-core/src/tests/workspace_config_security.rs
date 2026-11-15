@@ -428,6 +428,36 @@ fn productive_model_validation_counts_unicode_scalars_and_rejects_controls() {
 }
 
 #[test]
+fn live_global_config_selects_the_openai_compatible_provider_without_an_endpoint() {
+    fs::write(
+        global_config_path(),
+        "model: gpt-fixture\nmodel_context_limit: 128000\noutput_reserve: 16384\nprovider: openai-compatible\nregistry_root: registry\n",
+    )
+    .expect("endpoint provider config written");
+    let config = load_global_config().expect("endpoint provider config parses");
+    assert_eq!(
+        require_execution_backend(&config).expect("endpoint provider backend resolves"),
+        ExecutionBackend::OpenAiCompatible {
+            model: "gpt-fixture".to_owned(),
+            model_profile: ContextModelProfile {
+                context_limit: 128000,
+                id: OPERATOR_MODEL_PROFILE_ID,
+                output_reserve: 16384,
+                safety_margin: CONTEXT_SAFETY_MARGIN,
+            },
+        }
+    );
+
+    // The base URL is kept with the key in the protected credential record, never in configuration.
+    fs::write(
+        global_config_path(),
+        "model: gpt-fixture\nmodel_context_limit: 128000\noutput_reserve: 16384\nprovider: openai-compatible\nbase_url: https://models.example.test/v1\nregistry_root: registry\n",
+    )
+    .expect("endpoint config with a base URL written");
+    assert!(load_global_config().is_err());
+}
+
+#[test]
 fn non_fixture_global_config_fails_closed_before_runtime_side_effects() {
     let workspace = workspace_copy("hello-flow");
     fs::write(global_config_path(), "registry_root: registry\n").expect("global config written");

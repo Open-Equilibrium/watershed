@@ -70,6 +70,7 @@ impl Drop for Repo {
 }
 
 pub(super) fn run<F: std::future::Future>(test: F) -> F::Output {
+    crate::checkout::isolate_user_home();
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -96,7 +97,7 @@ pub(super) fn at(turn: &str, phase: Phase) -> Checkpoint {
 }
 
 /// Takes turn `turn`'s start checkpoint, lets `work` change the project and takes its end.
-async fn turn(checkpoints: &Checkpoints, turn: &str, work: impl FnOnce()) {
+pub(super) async fn turn(checkpoints: &Checkpoints, turn: &str, work: impl FnOnce()) {
     checkpoints
         .capture(&at(turn, Phase::Start))
         .await
@@ -653,6 +654,166 @@ fn outside_git_no_session_is_deleted_while_an_agent_runs_in_the_folder() {
 }
 
 #[test]
+fn outside_git_no_session_is_deleted_while_a_window_shows_it() {
+    run(async {
+        let dir = std::env::temp_dir().join(format!(
+            "watershed-checkpoint-no-git-shown-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("directory");
+        let file = dir.join("s1.jsonl");
+        std::fs::write(&file, "{}\n").expect("session file");
+        let window = Checkpoints::new(&dir);
+        let mine = Checkpoints::new(&dir);
+        window.show_session(Some("s1")).await.expect("shown");
+        assert!(matches!(
+            mine.delete_session("s1", &file).await,
+            Err(DiffError::SessionShown)
+        ));
+        assert!(file.exists(), "kept");
+        window.show_session(None).await.expect("no longer shown");
+        mine.delete_session("s1", &file).await.expect("deleted");
+        assert!(!file.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    });
+}
+
+#[test]
+fn a_session_shown_before_git_was_initialized_is_not_deleted() {
+    run(async {
+        let dir = std::env::temp_dir().join(format!(
+            "watershed-checkpoint-shown-before-git-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("directory");
+        let file = dir.join("s1.jsonl");
+        std::fs::write(&file, "{}\n").expect("session file");
+        let window = Checkpoints::new(&dir);
+        window.show_session(Some("s1")).await.expect("shown");
+        // Bound, since a dropped `Repo` removes its folder.
+        let repo = Repo(dir.clone());
+        repo.git(&["init", "-q"]);
+        let mine = Checkpoints::new(&dir);
+        assert!(matches!(
+            mine.delete_session("s1", &file).await,
+            Err(DiffError::SessionShown)
+        ));
+        assert!(file.exists(), "kept");
+        window.show_session(None).await.expect("no longer shown");
+        mine.delete_session("s1", &file).await.expect("deleted");
+        assert!(!file.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    });
+}
+
+#[test]
+fn a_session_is_not_marked_while_a_deletion_holds_the_folder() {
+    run(async {
+        let dir = std::env::temp_dir().join(format!(
+            "watershed-checkpoint-mark-waits-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("directory");
+        let deletion = crate::checkout::Checkout::folder(&dir)
+            .expect("folder")
+            .alone()
+            .await
+            .expect("deletion holds the folder");
+        // The window stays alive: its mark ends with it.
+        let window = std::sync::Arc::new(Checkpoints::new(&dir));
+        let marking = {
+            let window = window.clone();
+            tokio::spawn(async move { window.show_session(Some("s1")).await })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            crate::checkout::Checkout::folder(&dir)
+                .expect("folder")
+                .shown()
+                .is_empty(),
+            "the mark waits for the deletion"
+        );
+        drop(deletion);
+        marking.await.expect("marking ends").expect("marked");
+        assert_eq!(
+            crate::checkout::Checkout::folder(&dir)
+                .expect("folder")
+                .shown(),
+            ["s1"]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    });
+}
+
+#[test]
+fn a_window_closed_while_its_mark_waits_marks_nothing() {
+    run(async {
+        let repo = Repo::new("mark-closed");
+        let window = std::sync::Arc::new(Checkpoints::new(repo.path()));
+        // Opened first, so the mark waits on the folder itself rather than on Git's start-up.
+        assert!(matches!(window.in_repository().await, Ok(true)));
+        let deletion = crate::checkout::Checkout::folder(repo.path())
+            .expect("folder")
+            .alone()
+            .await
+            .expect("deletion holds the folder");
+        let marking = {
+            let window = window.clone();
+            tokio::spawn(async move { window.show_session(Some("s1")).await })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        window.close().await;
+        drop(deletion);
+        let marked = marking.await.expect("marking ends");
+        assert!(matches!(marked, Err(DiffError::Closed)), "{marked:?}");
+        assert!(
+            crate::checkout::Checkout::new(
+                repo.path().join(".git/watershed"),
+                repo.path().join(".git/watershed"),
+            )
+            .shown()
+            .is_empty(),
+            "a closed window leaves no mark behind"
+        );
+    });
+}
+
+#[test]
+fn a_session_shown_in_another_worktree_is_not_deleted() {
+    run(async {
+        let repo = Repo::new("delete-shown");
+        let linked = repo.path().with_file_name(format!(
+            "watershed-checkpoint-delete-shown-linked-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&linked);
+        repo.git(&["worktree", "add", "-q", &linked.display().to_string()]);
+        let file = repo.path().join(".git/s1.jsonl");
+        std::fs::write(&file, "{}\n").expect("session file");
+        // The window runs a turn of the session, which shows it after the turn too.
+        let window = Checkpoints::new(&linked);
+        window
+            .capture(&at("t1", Phase::Start))
+            .await
+            .expect("started");
+        window.capture(&at("t1", Phase::End)).await.expect("ended");
+        let mine = Checkpoints::new(repo.path());
+        assert!(matches!(
+            mine.delete_session("s1", &file).await,
+            Err(DiffError::SessionShown)
+        ));
+        assert!(file.exists(), "kept");
+        window.show_session(None).await.expect("no longer shown");
+        mine.delete_session("s1", &file).await.expect("deleted");
+        assert!(!file.exists());
+        let _ = std::fs::remove_dir_all(&linked);
+    });
+}
+
+#[test]
 fn a_linked_marker_folder_never_removes_a_file_elsewhere() {
     run(async {
         let repo = Repo::new("linked-running");
@@ -698,6 +859,38 @@ fn a_git_that_cannot_read_the_project_is_reported_instead_of_outside_git() {
 }
 
 #[test]
+fn a_configuration_error_quoting_the_discovery_message_is_not_outside_git() {
+    run(async {
+        let repo = Repo::new("config-quoting-discovery");
+        repo.git(&["config", "core.abbrev", "not a git repository"]);
+        let checkpoints = Checkpoints::new(repo.path());
+        let opened = checkpoints.in_repository().await;
+        assert!(
+            matches!(&opened, Err(error) if error.to_string().contains("core.abbrev")),
+            "{opened:?}"
+        );
+        let started = checkpoints.capture(&at("t1", Phase::Start)).await;
+        assert!(
+            started.is_err(),
+            "a start falls back to the folder guard only outside Git: {started:?}"
+        );
+    });
+}
+
+#[test]
+fn a_configuration_error_quoting_the_discovery_line_is_not_outside_git() {
+    run(async {
+        let repo = Repo::new("config-quoting-discovery-line");
+        repo.git(&["config", "core.abbrev", "x\nfatal: not a git repository"]);
+        let opened = Checkpoints::new(repo.path()).in_repository().await;
+        assert!(
+            matches!(&opened, Err(error) if error.to_string().contains("core.abbrev")),
+            "{opened:?}"
+        );
+    });
+}
+
+#[test]
 fn a_project_that_could_not_be_captured_is_reported_instead_of_unchanged() {
     use std::os::unix::fs::PermissionsExt;
     run(async {
@@ -721,13 +914,14 @@ fn a_stalled_git_gives_up_and_leaves_later_captures_working() {
     run(async {
         let repo = Repo::new("stalled");
         // A clean filter runs during `git add`; this one takes far longer than the limit.
-        repo.git(&["config", "filter.slow.clean", "sleep 5; cat"]);
+        repo.git(&["config", "filter.slow.clean", "sleep 30; cat"]);
         repo.write(".gitattributes", "*.txt filter=slow\n");
-        let checkpoints = Checkpoints::with_timeout(repo.path(), Duration::from_millis(300));
+        // The limit leaves the later captures room on a loaded machine; the filter outlasts it.
+        let checkpoints = Checkpoints::with_timeout(repo.path(), Duration::from_secs(3));
         repo.write("a.txt", "new\n");
 
         let capture = tokio::time::timeout(
-            Duration::from_secs(4),
+            Duration::from_secs(20),
             checkpoints.capture(&at("t0", Phase::Start)),
         )
         .await
@@ -1018,6 +1212,36 @@ fn a_revert_changes_only_files_below_the_working_folder() {
 }
 
 #[test]
+fn a_cancelled_end_capture_releases_its_running_mark() {
+    run(async {
+        let repo = Repo::new("end-cancelled");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .capture(&at("t1", Phase::Start))
+            .await
+            .expect("started");
+        // The end checkpoint waits for the capture in progress, and dropping it cancels that wait.
+        let held = checkpoints.hold().await;
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(100),
+                checkpoints.capture(&at("t1", Phase::End)),
+            )
+            .await
+            .is_err(),
+            "the end checkpoint waits"
+        );
+        drop(held);
+        // The settled turn no longer runs in the checkout, so nothing refuses a revert for it.
+        let plan = checkpoints
+            .revert_plan(&at("t1", Phase::Start), None)
+            .await
+            .expect("planned");
+        assert!(plan.running.is_empty(), "{:?}", plan.running);
+    });
+}
+
+#[test]
 fn a_revert_is_refused_while_an_agent_runs_in_the_checkout() {
     run(async {
         let repo = Repo::new("revert-running");
@@ -1209,6 +1433,68 @@ fn a_revert_that_git_could_not_finish_names_the_files_left() {
         assert_eq!(
             std::fs::read_to_string(repo.path().join("a.txt")).expect("a"),
             "old\n"
+        );
+    });
+}
+
+#[test]
+fn a_plan_asks_again_when_fresh_ignored_contents_are_too_large_to_confirm() {
+    run(async {
+        let repo = Repo::new("revert-racy-large");
+        repo.write("f", "returns\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "files"]);
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || repo.write("a.txt", "new\n")).await;
+        // The tracked file is now an ignored file in the way of its return, written just now.
+        repo.git(&["rm", "-q", "--cached", "f"]);
+        repo.write(".git/info/exclude", "/f\n");
+        std::fs::remove_file(repo.path().join("f")).expect("removed");
+        std::fs::File::create(repo.path().join("f"))
+            .expect("file")
+            .set_len(64 * 1024 * 1024 + 1)
+            .expect("sized");
+        let plan = checkpoints.revert_plan(&at("t1", Phase::Start), None).await;
+        assert!(matches!(plan, Err(DiffError::Git(_))), "{plan:?}");
+    });
+}
+
+#[test]
+fn a_revert_in_a_folder_below_a_recorded_repository_leaves_it_alone() {
+    run(async {
+        let repo = Repo::new("revert-below-repository");
+        // The project records a nested repository at `module`, and the working folder is below it.
+        let nested = Repo::at(repo.path().join("module"));
+        let head = nested.git(&["rev-parse", "HEAD"]).trim().to_owned();
+        repo.git(&[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{head},module"),
+        ]);
+        repo.git(&["commit", "-q", "-m", "record module"]);
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .capture(&at("t1", Phase::Start))
+            .await
+            .expect("started");
+        // Ordinary files now stand where the repository was, below the working folder.
+        repo.git(&["rm", "-q", "--cached", "module"]);
+        std::fs::remove_dir_all(repo.path().join("module")).expect("removed");
+        std::fs::create_dir_all(repo.path().join("module/work")).expect("folder");
+        repo.write("module/work/file.txt", "file\n");
+
+        let plan = Checkpoints::new(&repo.path().join("module/work"))
+            .revert_plan(&at("t1", Phase::Start), None)
+            .await
+            .expect("plan");
+
+        assert!(
+            plan.files
+                .iter()
+                .any(|file| file.path == "module/work/file.txt" && file.kept),
+            "{:?}",
+            plan.files
         );
     });
 }
@@ -1857,6 +2143,58 @@ fn a_revert_leaves_bare_repositories_alone_as_git_finds_them() {
 }
 
 #[test]
+fn a_revert_leaves_bare_repositories_with_linked_storage_alone() {
+    use std::os::unix::fs::symlink;
+    run(async {
+        let repo = Repo::new("revert-bare-linked");
+        repo.write(".gitignore", "clone\n");
+        repo.write("clone", "a file\n");
+        repo.git(&["add", ".gitignore"]);
+        repo.git(&["add", "-f", "clone"]);
+        repo.git(&["commit", "-q", "-m", "files"]);
+        let source = Repo::new("revert-bare-linked-source");
+        let storage = Repo::new("revert-bare-linked-storage");
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || {
+            std::fs::remove_file(repo.path().join("clone")).expect("removed");
+            git_at(
+                repo.path(),
+                &[
+                    "clone",
+                    "-q",
+                    "--bare",
+                    &source.path().display().to_string(),
+                    "clone",
+                ],
+            );
+            // Git follows links to a bare repository's storage, so its folders may live elsewhere.
+            std::fs::create_dir_all(storage.path().join("outside")).expect("folder");
+            for member in ["objects", "refs"] {
+                let moved = storage.path().join("outside").join(member);
+                std::fs::rename(repo.path().join("clone").join(member), &moved).expect("moved");
+                symlink(&moved, repo.path().join("clone").join(member)).expect("linked");
+            }
+            repo.write("a.txt", "new\n");
+        })
+        .await;
+        let plan = checkpoints
+            .revert_plan(&at("t1", Phase::Start), None)
+            .await
+            .expect("plan");
+        let (reverted, kept) = split(&plan);
+        assert_eq!(reverted, ["a.txt"], "{plan:?}");
+        assert_eq!(kept, ["clone"], "{plan:?}");
+        checkpoints
+            .revert(&at("t1", Phase::Start), &plan.confirmation)
+            .await
+            .expect("reverted");
+        assert!(repo.path().join("clone/HEAD").exists(), "its history stays");
+        drop(source);
+        drop(storage);
+    });
+}
+
+#[test]
 fn a_turns_end_releases_only_its_own_turn() {
     run(async {
         let repo = Repo::new("revert-overlap");
@@ -1938,6 +2276,8 @@ fn checkpoints_are_listed_and_removed_by_session_or_all() {
             .capture(&theirs("u2", Phase::End))
             .await
             .expect("ended");
+        // The window moved on to another session before deleting this one.
+        mine.show_session(None).await.expect("moved on");
         mine.delete_session("s1", &file).await.expect("deleted");
         assert!(!file.exists());
         assert_eq!(
@@ -1967,6 +2307,8 @@ fn deleting_waits_for_this_windows_turn_until_its_end_is_taken() {
             .capture(&at("t1", Phase::Start))
             .await
             .expect("started");
+        // The window moved on before deleting its session, as Liquid does.
+        checkpoints.show_session(None).await.expect("moved on");
         let file = repo.path().join(".git/s1.jsonl");
         std::fs::write(&file, "{}\n").expect("session file");
         // The stopped turn's end checkpoint takes longer than a moment.
@@ -2041,6 +2383,7 @@ fn a_delete_waiting_for_its_end_leaves_other_windows_turn_starts_free() {
             .capture(&at("t1", Phase::Start))
             .await
             .expect("started");
+        checkpoints.show_session(None).await.expect("moved on");
         let file = repo.path().join(".git/s1.jsonl");
         std::fs::write(&file, "{}\n").expect("session file");
         let theirs = |turn: &str, phase| Checkpoint {

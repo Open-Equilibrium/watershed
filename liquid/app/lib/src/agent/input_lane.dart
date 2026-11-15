@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../controls.dart';
 import '../theme/theme.dart';
@@ -113,31 +112,4 @@ class InputScope extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => child;
-}
-
-/// A tab's own keys, as [CallbackShortcuts] binds them, except while the keyboard is in the
-/// floating input area: there its keys type, and app-wide keys above still work.
-class ViewShortcuts extends StatelessWidget {
-  const ViewShortcuts({super.key, required this.bindings, required this.child});
-
-  final Map<ShortcutActivator, VoidCallback> bindings;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) => Focus(
-    canRequestFocus: false,
-    skipTraversal: true,
-    onKeyEvent: (node, event) {
-      if (InputScope.hasFocus()) return KeyEventResult.ignored;
-      for (final MapEntry(key: activator, value: callback)
-          in bindings.entries) {
-        if (activator.accepts(event, HardwareKeyboard.instance)) {
-          callback();
-          return KeyEventResult.handled;
-        }
-      }
-      return KeyEventResult.ignored;
-    },
-    child: child,
-  );
 }

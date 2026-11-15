@@ -21,6 +21,7 @@ class ActionArea extends StatefulWidget {
     required this.state,
     required this.composer,
     required this.project,
+    required this.onSent,
     this.composerFocus,
   });
 
@@ -30,6 +31,9 @@ class ActionArea extends StatefulWidget {
 
   /// The project's name, as a new session's chips show it.
   final String project;
+
+  /// Runs when the composer's text is sent, which clears it.
+  final VoidCallback onSent;
 
   @override
   State<ActionArea> createState() => _ActionAreaState();
@@ -80,6 +84,7 @@ class _ActionAreaState extends State<ActionArea> {
                 controller: widget.composer,
                 focusNode: widget.composerFocus,
                 project: widget.project,
+                onSent: widget.onSent,
               ),
       ),
     );
@@ -95,6 +100,7 @@ class Composer extends StatelessWidget {
     required this.state,
     required this.controller,
     required this.project,
+    required this.onSent,
     this.focusNode,
   });
 
@@ -102,11 +108,12 @@ class Composer extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode? focusNode;
   final String project;
+  final VoidCallback onSent;
 
   void _send({required bool followUp}) {
     final text = controller.text.trim();
     if (text.isEmpty) return;
-    controller.clear();
+    onSent();
     state.send(text, followUp: followUp);
   }
 
@@ -153,18 +160,21 @@ class Composer extends StatelessWidget {
                                 )
                         ? KeyEventResult.handled
                         : KeyEventResult.ignored,
-                    child: TextField(
-                      key: const Key('composer'),
-                      controller: controller,
-                      focusNode: focusNode,
-                      maxLines: null,
-                      expands: true,
-                      style: Theme.of(context).textTheme.bodyLarge,
-                      decoration: InputDecoration.collapsed(
-                        hintText: starting
-                            ? 'Describe the task…'
-                            : 'Steer the agent or queue a follow-up…',
-                        hintStyle: TextStyle(color: ws.textFaint),
+                    child: composingField(
+                      controller,
+                      TextField(
+                        key: const Key('composer'),
+                        controller: controller,
+                        focusNode: focusNode,
+                        maxLines: null,
+                        expands: true,
+                        style: Theme.of(context).textTheme.bodyLarge,
+                        decoration: InputDecoration.collapsed(
+                          hintText: starting
+                              ? 'Describe the task…'
+                              : 'Steer the agent or queue a follow-up…',
+                          hintStyle: TextStyle(color: ws.textFaint),
+                        ),
                       ),
                     ),
                   ),
@@ -264,8 +274,11 @@ class _QueueChips extends StatelessWidget {
                           child: InkWell(
                             key: Key('unqueue $index'),
                             canRequestFocus: false,
-                            onTap: () =>
-                                state.unqueue(text, followUp: followUp),
+                            onTap: () => state.unqueue(
+                              text,
+                              followUp: followUp,
+                              occurrence: _earlierEqual(waiting, index),
+                            ),
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: WsMetrics.space2,
@@ -288,4 +301,13 @@ class _QueueChips extends StatelessWidget {
       },
     );
   }
+}
+
+/// How many equal messages wait before the one at `index` in the same queue.
+int _earlierEqual(List<(String, String, bool)> waiting, int index) {
+  final (_, text, followUp) = waiting[index];
+  return waiting
+      .take(index)
+      .where((entry) => entry.$2 == text && entry.$3 == followUp)
+      .length;
 }

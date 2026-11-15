@@ -1,13 +1,18 @@
 use crate::script::model::{
-    FlowValue, InstructionBlock, MAX_FLOW_VALUE_DEPTH, MAX_FLOW_VALUE_KEY_CHARS,
-    MAX_FLOW_VALUE_MEMBERS, ValueContract, ValuePathSegment, ValuePredicate,
+    FlowValue, InstructionBlock, MAX_FLOW_VALUE_BYTES, MAX_FLOW_VALUE_DEPTH,
+    MAX_FLOW_VALUE_KEY_CHARS, MAX_FLOW_VALUE_MEMBERS, MAX_FLOW_VALUE_NODES, ValueContract,
+    ValuePathSegment, ValuePredicate,
 };
 
 /// Matches a Tool parameter pattern against one complete value.
 ///
 /// Patterns use the finite Rust `regex` syntax. Flow Agent implicitly anchors both ends,
-/// so an authored pattern cannot match only a substring.
+/// so an authored pattern cannot match only a substring. A pattern that turns on the verbose
+/// flag is refused, since a trailing comment would swallow the anchors.
 pub fn parameter_pattern_matches(pattern: &str, value: &str) -> Result<bool, String> {
+    if uses_verbose_flag(pattern) {
+        return Err("the verbose flag is not supported".to_owned());
+    }
     regex::RegexBuilder::new(pattern)
         .size_limit(super::model::MAX_REGISTRY_FILE_BYTES as usize)
         .build()
@@ -19,8 +24,18 @@ pub fn parameter_pattern_matches(pattern: &str, value: &str) -> Result<bool, Str
         .map(|compiled| compiled.is_match(value))
         .map_err(|error| error.to_string())
 }
+
+/// Whether a `(?` flag group names the verbose flag `x`, as `(?x)`, `(?ix:` or `(?i-x)` do. An
+/// escaped or bracketed look-alike counts too: over-refusing fails closed.
+fn uses_verbose_flag(pattern: &str) -> bool {
+    pattern.match_indices("(?").any(|(start, _)| {
+        pattern[start + 2..]
+            .chars()
+            .take_while(|character| character.is_ascii_alphabetic() || *character == '-')
+            .any(|character| character == 'x')
+    })
+}
 use std::{collections::BTreeMap, fmt};
-use unicode_normalization::UnicodeNormalization;
 
 /// Failure to validate, compare, or render an M1.1 runtime value.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -72,34 +87,76 @@ pub fn build_session_object_uri(digest: &str) -> Result<String, FlowValueError> 
 
 /// Validates the finite shape, canonical forms, and global bounds of one runtime value.
 pub fn validate_flow_value(value: &FlowValue) -> Result<(), FlowValueError> {
-    guard_flow_value_serialization_depth(value, 1)?;
+    guard_flow_value_budget(value, 1, &mut FlowValueBudget::default())?;
     let json_value = serde_json::to_value(value)
         .map_err(|error| FlowValueError::new(format!("$ cannot be serialized: {error}")))?;
     proto::validate_flow_value_v0(&json_value)
         .map_err(|error| FlowValueError::new(error.to_string()))
 }
 
-// This guard only bounds recursive serde before the canonical proto validator runs.
-fn guard_flow_value_serialization_depth(
+#[derive(Default)]
+struct FlowValueBudget {
+    nodes: usize,
+    text_bytes: usize,
+}
+
+// Bounds the value before serde copies it. Text bytes are a lower bound of the canonical JSON size,
+// so every rejection here is also one the canonical proto validator would make.
+fn guard_flow_value_budget(
     value: &FlowValue,
     depth: usize,
+    budget: &mut FlowValueBudget,
 ) -> Result<(), FlowValueError> {
     if depth > MAX_FLOW_VALUE_DEPTH {
         return Err(FlowValueError::new(format!(
             "$ depth {depth} exceeds max {MAX_FLOW_VALUE_DEPTH}"
         )));
     }
-    match value {
-        FlowValue::List(values) => values
-            .iter()
-            .try_for_each(|value| guard_flow_value_serialization_depth(value, depth + 1)),
-        FlowValue::Map(values) => values
-            .values()
-            .try_for_each(|value| guard_flow_value_serialization_depth(value, depth + 1)),
-        FlowValue::Boolean(_)
-        | FlowValue::Integer(_)
-        | FlowValue::String(_)
-        | FlowValue::SessionObject(_) => Ok(()),
+    budget.nodes += 1;
+    if budget.nodes > MAX_FLOW_VALUE_NODES {
+        return Err(FlowValueError::new(format!(
+            "$ node count exceeds max {MAX_FLOW_VALUE_NODES}"
+        )));
+    }
+    let text = match value {
+        FlowValue::Boolean(_) => return Ok(()),
+        FlowValue::List(values) => {
+            check_flow_value_members(values.len())?;
+            return values
+                .iter()
+                .try_for_each(|value| guard_flow_value_budget(value, depth + 1, budget));
+        }
+        FlowValue::Map(values) => {
+            check_flow_value_members(values.len())?;
+            for (key, value) in values {
+                budget.add_text(key)?;
+                guard_flow_value_budget(value, depth + 1, budget)?;
+            }
+            return Ok(());
+        }
+        FlowValue::Integer(text) | FlowValue::String(text) | FlowValue::SessionObject(text) => text,
+    };
+    budget.add_text(text)
+}
+
+fn check_flow_value_members(count: usize) -> Result<(), FlowValueError> {
+    if count > MAX_FLOW_VALUE_MEMBERS {
+        return Err(FlowValueError::new(format!(
+            "$ member count exceeds max {MAX_FLOW_VALUE_MEMBERS}"
+        )));
+    }
+    Ok(())
+}
+
+impl FlowValueBudget {
+    fn add_text(&mut self, text: &str) -> Result<(), FlowValueError> {
+        self.text_bytes = self.text_bytes.saturating_add(text.len());
+        if self.text_bytes > MAX_FLOW_VALUE_BYTES {
+            return Err(FlowValueError::new(format!(
+                "$ canonical JSON exceeds max {MAX_FLOW_VALUE_BYTES} bytes"
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -307,7 +364,9 @@ fn validate_value_contract_at(
         )));
     }
     match contract {
-        ValueContract::Boolean | ValueContract::SessionObject | ValueContract::String { .. } => {}
+        ValueContract::Boolean {}
+        | ValueContract::SessionObject {}
+        | ValueContract::String { .. } => {}
         ValueContract::Integer { min, max } => {
             if matches!((min, max), (Some(min), Some(max)) if min > max) {
                 return Err(FlowValueError::new(format!(
@@ -355,8 +414,8 @@ fn validate_against_contract_at(
     path: &str,
 ) -> Result<(), FlowValueError> {
     match (value, contract) {
-        (FlowValue::Boolean(_), ValueContract::Boolean)
-        | (FlowValue::SessionObject(_), ValueContract::SessionObject) => Ok(()),
+        (FlowValue::Boolean(_), ValueContract::Boolean {})
+        | (FlowValue::SessionObject(_), ValueContract::SessionObject {}) => Ok(()),
         (FlowValue::Integer(value), ValueContract::Integer { min, max }) => {
             let value = proto::parse_canonical_i64(value).map_err(|error| {
                 let message = match error {
@@ -439,7 +498,7 @@ fn validate_key(value: &str, path: &str) -> Result<(), FlowValueError> {
 }
 
 fn validate_nfc(value: &str, path: &str) -> Result<(), FlowValueError> {
-    if value.nfc().ne(value.chars()) {
+    if !proto::is_nfc(value) {
         return Err(FlowValueError::new(format!("{path} must use NFC text")));
     }
     Ok(())

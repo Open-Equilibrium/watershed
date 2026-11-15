@@ -86,3 +86,57 @@ fn invocation_contract_rejects_each_legacy_tool_requirement() {
         );
     }
 }
+
+fn rejects_unknown_field<T: serde::de::DeserializeOwned + std::fmt::Debug>(
+    name: &str,
+    value: serde_json::Value,
+) {
+    let message = serde_json::from_value::<T>(value)
+        .expect_err(name)
+        .to_string();
+    assert!(message.contains("unknown field"), "{name}: {message}");
+}
+
+#[test]
+fn public_closed_definitions_reject_unknown_fields() {
+    use serde_json::json;
+    let boolean = json!({"type": "boolean"});
+    let predicate = json!({"path": [], "equals": {"type": "boolean", "value": true}});
+    for value_contract in [
+        json!({"type": "string", "max_lenght": 3}),
+        json!({"type": "boolean", "extra": 1}),
+        json!({"type": "session-object", "extra": 1}),
+    ] {
+        rejects_unknown_field::<core_script::ValueContract>("ValueContract", value_contract);
+    }
+    rejects_unknown_field::<core_script::ValueFieldContract>(
+        "ValueFieldContract",
+        json!({"name": "ok", "required": true, "value_contract": boolean.clone(), "extra": 1}),
+    );
+    rejects_unknown_field::<core_script::InstructionParameter>(
+        "InstructionParameter",
+        json!({"name": "ok", "value_contract": boolean.clone(), "extra": 1}),
+    );
+    // An untagged segment names no field, only that no closed form matches.
+    serde_json::from_value::<core_script::ValuePathSegment>(json!({"field": "ok", "index": 0}))
+        .expect_err("a path segment with both a field and an index is refused");
+    rejects_unknown_field::<core_script::ValuePredicate>(
+        "ValuePredicate",
+        json!({"path": [], "equals": {"type": "boolean", "value": true}, "extra": 1}),
+    );
+    rejects_unknown_field::<core_script::PhaseLoop>(
+        "PhaseLoop",
+        json!({"max_iterations": 2, "until": predicate.clone(), "extra": 1}),
+    );
+    rejects_unknown_field::<core_script::PhaseTransition>(
+        "PhaseTransition",
+        json!({"from_phase_ref": "a", "to_phase_ref": "b", "when": predicate, "extra": 1}),
+    );
+    assert!(
+        serde_json::from_value::<ToolCommand>(
+            json!({"command_id": "agent-echo", "argv": [], "network": "deny"})
+        )
+        .is_err(),
+        "a Predefined command rejects unsupported requirements"
+    );
+}

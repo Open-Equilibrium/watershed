@@ -29,12 +29,18 @@ var plain: EventHotKeyRef?
 var shifted: EventHotKeyRef?
 var press: Press?
 var shiftedDown = false
-/// Whether this user's session is in front; the remapping holds for every user's keyboards.
-var sessionActive = true
+/// Whether this user's session is in front; the remapping holds for every user's keyboards. A
+/// helper started in a background session waits until its session comes to the front.
+var sessionActive = false
+/// Whether this helper set the remapping, which only it gives back.
+var mapped = false
 
 /// Sets the remapping while this session is in front.
 func remap() {
-    if sessionActive { Mapping.apply(on: true) }
+    if sessionActive {
+        Mapping.apply(on: true)
+        mapped = true
+    }
 }
 
 /// Sets the remapping again later for what may have undone it: a keyboard's HID service
@@ -46,9 +52,33 @@ func remapLater() {
     }
 }
 
-/// Gives the remapping back if this session set it; another user's helper may hold it now.
+/// The periodic check while this session is in front. A departing session's helper may give the
+/// remapping back after the last retry above, and nothing else tells this helper. Five seconds
+/// matches that last retry; a check reads each keyboard's mappings and writes only one that lost
+/// the Liquid key.
+var recheck: Timer?
+
+func startRecheck() {
+    stopRecheck()
+    recheck = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
+        Mapping.reapply(active: sessionActive)
+    }
+}
+
+func stopRecheck() {
+    recheck?.invalidate()
+    recheck = nil
+}
+
+/// Gives the remapping back if this helper set it in this session; another user's helper may
+/// hold it now, and a helper that failed before setting it must not take that one away. Giving it
+/// back is the helper's last act, so the periodic check stops first.
 func unmap() {
-    if sessionActive { Mapping.apply(on: false) }
+    stopRecheck()
+    if Mapping.givesBack(mapped: mapped, active: sessionActive) {
+        Mapping.apply(on: false)
+        mapped = false
+    }
 }
 
 /// Without its hotkeys the key would be dead, so Caps Lock comes back and the helper ends.
@@ -168,30 +198,46 @@ registered.wait()
 signal(SIGTERM, SIG_IGN)
 
 register(shiftKey, shiftedID, &shifted)
+/// Hears the apps in front, the session's changes and the quit of Liquid.
+func observeChanges() {
+    let workspace = NSWorkspace.shared.notificationCenter
+    workspace.addObserver(
+        forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+    ) { note in
+        follow(note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)
+    }
+    workspace.addObserver(
+        forName: NSWorkspace.sessionDidResignActiveNotification, object: nil, queue: .main
+    ) { _ in
+        sessionActive = false
+        stopRecheck()
+        Mapping.apply(on: false)
+    }
+    workspace.addObserver(
+        forName: NSWorkspace.sessionDidBecomeActiveNotification, object: nil, queue: .main
+    ) { _ in
+        sessionActive = true
+        remap()
+        remapLater()
+        startRecheck()
+    }
+    NotificationCenter.default.addObserver(
+        forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+    ) { _ in unmap() }
+}
+// The session is read after the observers are registered, so a session that resigns during the
+// start is heard or read; only a session in front gets the first remapping.
+Mapping.start(
+    readSession: { CGSessionCopyCurrentDictionary() as? [String: Any] },
+    observe: observeChanges,
+    remap: {
+        sessionActive = true
+        remap()
+    })
 follow(NSWorkspace.shared.frontmostApplication)
-remap()
-let workspace = NSWorkspace.shared.notificationCenter
-workspace.addObserver(
-    forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
-) { note in
-    follow(note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)
-}
-workspace.addObserver(
-    forName: NSWorkspace.sessionDidResignActiveNotification, object: nil, queue: .main
-) { _ in
-    sessionActive = false
-    Mapping.apply(on: false)
-}
-workspace.addObserver(
-    forName: NSWorkspace.sessionDidBecomeActiveNotification, object: nil, queue: .main
-) { _ in
-    sessionActive = true
-    remap()
-    remapLater()
-}
-NotificationCenter.default.addObserver(
-    forName: NSApplication.willTerminateNotification, object: nil, queue: .main
-) { _ in unmap() }
+// Keyboards attached before the start may get their HID service later too.
+remapLater()
+startRecheck()
 
 NSApplication.shared.setActivationPolicy(.prohibited)
 NSApplication.shared.run()

@@ -159,3 +159,34 @@ fn semantic_validation_compiles_tool_parameter_patterns() {
             if message.contains("min must be <= max")
     ));
 }
+
+#[test]
+fn tool_parameter_pattern_with_verbose_flag_is_refused() {
+    // The anchors wrap the pattern; a comment under the verbose flag would swallow them.
+    for pattern in ["(?x)safe # c", "(?ix:safe)"] {
+        let error = parameter_pattern_matches(pattern, "safe").expect_err("verbose flag");
+        assert!(
+            error.contains("verbose flag is not supported"),
+            "{pattern}: {error}"
+        );
+    }
+    assert!(parameter_pattern_matches("safe|evil", "evil").expect("ordinary pattern"));
+
+    let mut tool = own_script_tool("verbose-tool", "script:verbose-tool");
+    tool.allowed_parameters.push(AllowedParameter {
+        name: "--label".to_owned(),
+        value_type: ParameterValueType::String,
+        required: true,
+        allowed_values: Vec::new(),
+        value_pattern: Some("(?x)safe # c".to_owned()),
+        max_length: Some(32),
+        min: None,
+        max: None,
+    });
+    let error = validate_tool_semantics(&tool).expect_err("verbose flag is refused");
+    assert!(matches!(
+        error,
+        SemanticValidationError::InvalidToolDefinition { message, .. }
+            if message.contains("verbose flag is not supported")
+    ));
+}

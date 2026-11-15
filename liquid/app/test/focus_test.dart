@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/action_area.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
+import 'package:liquid/src/diff/diff_model.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/session/session_state.dart';
@@ -16,7 +17,7 @@ import 'focus_kit.dart';
 
 const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
 
-/// Keys in the whole shell, where the shell's own focus is taken first: dialogs, the Diff tab
+/// Keys in the whole shell, where the shell's own focus is taken first: dialogs, the Diff panel
 /// and the input area take the keys without a click, and only keys meant for them.
 void main() {
   late FakeBackend backend;
@@ -51,7 +52,11 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: liquidTheme(Brightness.light),
-        home: AgentShell(state: SessionState(backend), info: info),
+        home: AgentShell(
+          state: SessionState(backend),
+          info: info,
+          parseDiff: parsePatch,
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -150,10 +155,10 @@ void main() {
     expect(focused(tester, const Key('answer')), isTrue);
   });
 
-  testWidgets('the Diff tab takes ↑↓ at once', (tester) async {
+  testWidgets('the Diff panel takes ↑↓ at once', (tester) async {
     await show(tester);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
     expect(
@@ -376,6 +381,42 @@ void main() {
       find.byType(SettingsPage),
       paintsAbove(context.ws.selected, theme.hoverColor),
       reason: 'the hover is painted above the chosen section',
+    );
+  });
+
+  /// Sets the field's text as an input method leaves it while composing.
+  void compose(WidgetTester tester, Finder field, String text) {
+    tester.widget<TextField>(field).controller!.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+      composing: TextRange(start: 0, end: text.length),
+    );
+  }
+
+  testWidgets('Enter that ends a composition answers nothing', (tester) async {
+    await show(tester);
+    await emit(tester, question(BridgeQuestionKind.input));
+    await read(tester);
+    compose(tester, find.byKey(const Key('answer')), 'nihon');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(
+      backend.calls.where((call) => call.startsWith('answer')),
+      isEmpty,
+      reason: 'the Enter commits the input method\'s text first',
+    );
+  });
+
+  testWidgets('Enter that ends a composition sends nothing', (tester) async {
+    await show(tester);
+    await tester.tap(find.byKey(const Key('composer')));
+    compose(tester, find.byKey(const Key('composer')), 'nihon');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(
+      backend.calls.where((call) => call.startsWith('send')),
+      isEmpty,
+      reason: 'the Enter commits the input method\'s text first',
     );
   });
 

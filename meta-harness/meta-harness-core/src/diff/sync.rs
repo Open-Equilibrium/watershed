@@ -1,7 +1,7 @@
 //! Explicit push and fast-forward pull through the host's Git and synchronous hooks.
 
 use super::branches::without_credentials;
-use super::process::{git_config, git_ref_output, no_prompts, user_git};
+use super::process::{git_config, git_negotiating, git_ref_output, no_prompts, user_git};
 use super::stash::listed_files;
 use super::*;
 
@@ -126,7 +126,9 @@ impl WorkingTree {
         let upstream = status.upstream.clone().unwrap_or_else(|| {
             format!(
                 "{remote}/{}",
-                reference.strip_prefix("refs/heads/").unwrap()
+                reference
+                    .strip_prefix("refs/heads/")
+                    .expect("the reference was checked to start with refs/heads/")
             )
         });
         let confirmation = PushConfirmation {
@@ -159,26 +161,35 @@ impl WorkingTree {
         }
         transfer.confirmation.repository = self.check_push_destination(&transfer).await?;
         self.fetch_transfer(&transfer).await?;
-        let advertised = self.transfer_counts(&mut transfer).await?;
+        let (advertised, v2) = self.transfer_counts(&mut transfer).await?;
         if transfer.behind > 0 {
             return Err(DiffError::Diverged(Box::new(transfer), String::new()));
         }
         // A symbolic destination updates the branch it names, so that branch is checked.
         let reference = &transfer.confirmation.reference;
-        let reference = advertised
+        let symbolic = advertised.lines().find_map(|line| {
+            line.strip_prefix("ref: ")?
+                .strip_suffix(&format!("\t{reference}"))
+        });
+        // Only protocol v2 reports every symbolic target. Under an older protocol, a destination at
+        // HEAD's commit whose target is not reported may be the default branch under another name.
+        let head = advertised
             .lines()
-            .find_map(|line| {
-                line.strip_prefix("ref: ")?
-                    .strip_suffix(&format!("\t{reference}"))
-            })
-            .unwrap_or(reference);
+            .filter(|line| !line.starts_with("ref: "))
+            .find_map(|line| line.strip_suffix("\tHEAD"));
+        let at_head = !v2
+            && symbolic.is_none()
+            && head.is_some()
+            && advertised_commit(&advertised, &transfer)? == head;
+        let reference = symbolic.unwrap_or(reference);
         let default = status
             .default_branch
             .as_ref()
             .is_some_and(|branch| reference == format!("refs/heads/{branch}"))
             || advertised
                 .lines()
-                .any(|line| line == format!("ref: {reference}\tHEAD"));
+                .any(|line| line == format!("ref: {reference}\tHEAD"))
+            || at_head;
         // A stale approval always asks again, even if the new destination is not a default.
         if (default && confirmed != Some(&transfer.confirmation))
             || confirmed.is_some_and(|confirmed| *confirmed != transfer.confirmation)
@@ -190,6 +201,11 @@ impl WorkingTree {
 
     /// Pushes the captured commit, never a branch ref that could move after confirmation.
     pub(crate) async fn push(&self, transfer: GitTransfer) -> Result<GitTransfer, DiffError> {
+        // Git resolves the remote's name again, so the repository checked before must still be
+        // the one it pushes to.
+        if self.check_push_destination(&transfer).await? != transfer.confirmation.repository {
+            return Err(DiffError::PushDestinations);
+        }
         let spec = format!(
             "{}:{}",
             transfer.confirmation.commit, transfer.confirmation.reference
@@ -313,8 +329,12 @@ impl WorkingTree {
         Ok(())
     }
 
-    async fn advertised_destination(&self, transfer: &GitTransfer) -> Result<String, DiffError> {
-        git(
+    /// The destination's listing, and whether Git negotiated protocol v2 to read it.
+    async fn advertised_destination(
+        &self,
+        transfer: &GitTransfer,
+    ) -> Result<(String, bool), DiffError> {
+        git_negotiating(
             &self.root,
             &no_prompts(),
             &[
@@ -330,12 +350,13 @@ impl WorkingTree {
         .map_err(|error| fetch_error(transfer, error))
     }
 
-    /// Counts against the advertised destination and returns its listing for default detection.
+    /// Counts against the advertised destination and returns its listing for default detection,
+    /// with whether Git negotiated protocol v2 to read it.
     pub(crate) async fn transfer_counts(
         &self,
         transfer: &mut GitTransfer,
-    ) -> Result<String, DiffError> {
-        let advertised = self.advertised_destination(transfer).await?;
+    ) -> Result<(String, bool), DiffError> {
+        let (advertised, v2) = self.advertised_destination(transfer).await?;
         let upstream = advertised_commit(&advertised, transfer)?;
         let Some(upstream) = upstream else {
             // Only a true first publication counts all history when no destination exists.
@@ -352,7 +373,7 @@ impl WorkingTree {
                 0
             };
             transfer.behind = 0;
-            return Ok(advertised);
+            return Ok((advertised, v2));
         };
         if self
             .resolve(&format!("{upstream}^{{commit}}"))
@@ -374,14 +395,27 @@ impl WorkingTree {
             |_| DiffError::Git("Git returned invalid ahead and behind counts.".to_owned());
         transfer.ahead = counts.next().unwrap_or("0").parse().map_err(invalid)?;
         transfer.behind = counts.next().unwrap_or("0").parse().map_err(invalid)?;
-        Ok(advertised)
+        Ok((advertised, v2))
+    }
+
+    /// Whether `git merge` may autostash on `branch`: `merge.autoStash`, or any merge options of
+    /// the branch. Git accepts `--autostash` in many spellings there, such as abbreviations and
+    /// quoted words, so any option counts as possible.
+    async fn may_autostash(&self, branch: &str) -> Result<bool, DiffError> {
+        let default = git_config(&self.root, &["--bool", "--get", "merge.autoStash"]).await?;
+        let options = git_config(
+            &self.root,
+            &["--get-all", &format!("branch.{branch}.mergeOptions")],
+        )
+        .await?;
+        Ok(default.trim() == "true" || !options.is_empty())
     }
 
     pub(crate) async fn prepare_pull(&self) -> Result<GitTransfer, DiffError> {
         let (transfer, status) = self.destination().await?;
         check_pull_status(&status)?;
         self.fetch_transfer(&transfer).await?;
-        let advertised = self.advertised_destination(&transfer).await?;
+        let (advertised, _) = self.advertised_destination(&transfer).await?;
         let upstream = advertised_commit(&advertised, &transfer)?;
         if upstream.is_none() || self.resolve("@{upstream}").await?.as_deref() != upstream {
             return Err(DiffError::Git(
@@ -428,6 +462,18 @@ impl WorkingTree {
             let ignored = self.ignored_in_the_way(&changes, &[]).await?;
             if !ignored.is_empty() {
                 return Err(DiffError::WouldOverwrite(ignored.into_iter().collect()));
+            }
+        }
+        // An autostashing merge resets the checkout to HEAD first, so refuse what that reset
+        // would overwrite, as a stash does.
+        if self.may_autostash(&transfer.branch).await? {
+            let blocked = {
+                let _busy = self.busy.lock().await;
+                let index = self.copy_index().await?;
+                self.reset_in_the_way(&index).await?
+            };
+            if !blocked.is_empty() {
+                return Err(DiffError::WouldOverwrite(blocked.into_iter().collect()));
             }
         }
         match user_git(

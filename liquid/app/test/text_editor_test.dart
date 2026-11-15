@@ -5,11 +5,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
+import 'package:liquid/src/shortcuts/keymap.dart';
+import 'package:liquid/src/shortcuts/shortcut_store.dart';
 import 'package:liquid/src/theme/theme.dart';
 import 'package:liquid/src/workspace/text_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'fake_workspace.dart';
+import 'focus_kit.dart';
 
 void main() {
   late FakeWorkspace fake;
@@ -21,6 +24,7 @@ void main() {
     WidgetTester tester, [
     List<String> texts = const [],
     BridgeTextStyle style = BridgeTextStyle.paragraph,
+    ShortcutSettings? settings,
   ]) async {
     await tester.binding.setSurfaceSize(const Size(1400, 900));
     fake = FakeWorkspace();
@@ -45,7 +49,10 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: liquidTheme(Brightness.light),
-        home: AgentShell(workspace: workspace),
+        home: AgentShell(
+          workspace: workspace,
+          shortcuts: ShortcutController.memory(settings),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -74,11 +81,15 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// ⌘Z, as the macOS keyboard sends it.
-  Future<void> undo(WidgetTester tester) async {
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+  /// Presses `key` while `modifier` is held, as the macOS keyboard sends it.
+  Future<void> chord(
+    WidgetTester tester,
+    LogicalKeyboardKey modifier,
+    LogicalKeyboardKey key,
+  ) async {
+    await tester.sendKeyDownEvent(modifier, platform: 'macos');
+    await tester.sendKeyEvent(key, platform: 'macos');
+    await tester.sendKeyUpEvent(modifier, platform: 'macos');
     await tester.pumpAndSettle();
   }
 
@@ -115,6 +126,17 @@ void main() {
 
   BridgeTextStyle styleOf(int index) =>
       fake.styles[fake.views[page]![index].block]!;
+
+  /// The styles written to the Text Block at `index`, in order.
+  List<BridgeTextStyle> written(int index) {
+    final block = fake.views[page]![index].block;
+    return [
+      for (final change in fake.applied)
+        if (change.kind == BridgeMutationKind.setTextStyle &&
+            change.block == block)
+          change.style,
+    ];
+  }
 
   testWidgets('typing on an empty Page creates its first Text Block', (
     tester,
@@ -224,6 +246,31 @@ void main() {
     expect(fake.textsOf(page), ['Hello world']);
   }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
+  testWidgets('typing before the next frame after a shortcut keeps what is typed', (
+    tester,
+  ) async {
+    await show(tester, ['']);
+    await caret(tester, 0, 0);
+    // The shortcut takes its marker out, which is a write Liquid makes; the next keys follow it
+    // before any frame is drawn.
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: '- ',
+        selection: TextSelection.collapsed(offset: 2),
+      ),
+    );
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'P',
+        selection: TextSelection.collapsed(offset: 1),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(styleOf(0), BridgeTextStyle.bullet);
+    expect(fake.textsOf(page), ['P']);
+    expect(field(tester, 0).controller!.text, 'P');
+  });
+
   testWidgets('⌘Z still undoes typing with no replacement in between', (
     tester,
   ) async {
@@ -285,6 +332,41 @@ void main() {
     await tester.tap(find.byKey(const Key('to-do')));
     await tester.pumpAndSettle();
     expect(styleOf(2), BridgeTextStyle.done);
+  });
+
+  testWidgets('⌘⏎ ticks the to-do the caret is in, and unticks it again', (
+    tester,
+  ) async {
+    await show(tester, ['Pack', 'Fly']);
+    await caret(tester, 0, 0);
+    await type(tester, 0, '[] ');
+    expect(styleOf(0), BridgeTextStyle.todo);
+
+    await chord(tester, LogicalKeyboardKey.metaLeft, LogicalKeyboardKey.enter);
+    expect(styleOf(0), BridgeTextStyle.done);
+    expect(fake.textsOf(page), ['Pack', 'Fly'], reason: 'nothing is split');
+
+    await chord(tester, LogicalKeyboardKey.metaLeft, LogicalKeyboardKey.enter);
+    expect(styleOf(0), BridgeTextStyle.todo);
+    expect(written(0), [
+      BridgeTextStyle.todo,
+      BridgeTextStyle.done,
+      BridgeTextStyle.todo,
+    ], reason: 'each tick is written');
+  });
+
+  testWidgets('⇪⏎ ticks a to-do without splitting it', (tester) async {
+    await show(
+      tester,
+      ['Pack'],
+      BridgeTextStyle.todo,
+      ShortcutSettings.liquidKey(),
+    );
+    await caret(tester, 0, 4);
+
+    await chord(tester, liquidKey, LogicalKeyboardKey.enter);
+    expect(styleOf(0), BridgeTextStyle.done);
+    expect(fake.textsOf(page), ['Pack']);
   });
 
   testWidgets('--- starts a Section below a divider, and ⌫ there removes it', (

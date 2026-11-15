@@ -108,6 +108,7 @@ fn validate_run_creation_shape(
     unpublished_productive_run: bool,
     expected_identity_marker: Option<&str>,
     allow_empty_without_marker: bool,
+    allow_empty_run_log: bool,
 ) -> Result<(BTreeSet<String>, Vec<String>), RuntimeError> {
     let actual = run_creation_entries(run)?;
     let marker = run_creation_identity_marker_name(run.identity()?);
@@ -150,6 +151,11 @@ fn validate_run_creation_shape(
     if actual.contains(RUN_LOG_LEAF) {
         let file = run.file(RUN_LOG_LEAF);
         let (opened, metadata) = open_anchored_file_for_read(&file)?;
+        // WHY: an empty run-log is a definition cut off before its write, known partial inventory
+        // that only a removal reclaims (PROTOCOL.md).
+        if metadata.len() == 0 && allow_empty_run_log {
+            return Ok((actual, construction));
+        }
         if metadata.len() == 0 || metadata.len() > MAX_CONVERSATION_RECORD_BYTES as u64 + 1 {
             return Err(protocol("run-creation definition is incomplete"));
         }
@@ -178,6 +184,7 @@ fn validate_complete_created_run(
         expected_run_log_sha256,
         unpublished_productive_run,
         Some(expected_identity_marker),
+        false,
         false,
     )?;
     if actual != construction.into_iter().collect() {
@@ -225,6 +232,7 @@ pub(in crate::runtime::conversations) fn remove_recoverable_run_creation_stage(
         unpublished_productive_run,
         expected_identity_marker,
         allow_empty_without_marker,
+        true,
     )?;
     let marker = run_creation_identity_marker_name(expected_identity);
     for leaf in actual.iter().rev() {

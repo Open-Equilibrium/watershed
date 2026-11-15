@@ -15,8 +15,8 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::pi::queue;
 use crate::{
-    AgentEvent, Answer, Checkpoint, Checkpoints, Delivery, History, Phase, PiAdapter, Queue,
-    RequestId, Whitespace,
+    AgentEvent, Answer, Checkpoint, Checkpoints, Context, Delivery, History, Phase, PiAdapter,
+    Queue, RequestId, Whitespace,
 };
 use supervisor::{Supervisor, read_end};
 
@@ -28,6 +28,8 @@ pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
 const EVENT_BUFFER: usize = 256;
 /// Records buffered for the agent's input.
 const WRITE_BUFFER: usize = 64;
+/// Attempts at reading the history while the session keeps changing before a read gives up.
+const HISTORY_READS: usize = 3;
 
 /// Checkpoint requests waiting for their capture; pi waits for each, so few ever wait.
 const CAPTURE_BUFFER: usize = 8;
@@ -111,6 +113,8 @@ pub enum CommandError {
     TooLarge,
     /// Watershed's pi extension is not loaded, so a turn would run without its checkpoints.
     ExtensionMissing,
+    /// The session kept changing while its history was read, so no read matched one session.
+    SessionChanged,
 }
 
 type Reply = oneshot::Sender<Result<Value, CommandError>>;
@@ -151,6 +155,17 @@ fn switched(data: &Value) -> bool {
     data.get("cancelled").and_then(Value::as_bool) != Some(true)
 }
 
+/// The model `get_state` names, as `provider/id`.
+fn model_of(state: &Value) -> Option<String> {
+    state.get("model").and_then(|model| {
+        Some(format!(
+            "{}/{}",
+            model.get("provider")?.as_str()?,
+            model.get("id")?.as_str()?
+        ))
+    })
+}
+
 /// A model the agent can use.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Model {
@@ -171,6 +186,8 @@ pub struct SessionState {
     pub session_file: Option<PathBuf>,
     /// The selected model as `provider/id`.
     pub model: Option<String>,
+    /// pi's id of the session, which tells sessions apart even when they share entry ids.
+    pub session_id: Option<String>,
 }
 
 enum Write {
@@ -197,6 +214,12 @@ struct Shared {
     /// Whether an abort waits for the turn to settle; questions arriving meanwhile are dismissed,
     /// since the agent stops only once they are answered.
     stopping: bool,
+    /// The question whose request the supervisor is reporting. An abort leaves it to the
+    /// supervisor, which answers it once reported, so its resolution never precedes its request.
+    reporting: Option<RequestId>,
+    /// Test-only: pauses the supervisor after it records a question, until the test resumes it.
+    #[cfg(test)]
+    pause_after_insert: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
 }
 
 impl Shared {
@@ -272,8 +295,17 @@ impl Responder {
     pub async fn abort(&self) -> Result<Pending, CommandError> {
         let stopping = |shared: &mut Shared, _| shared.stopping = true;
         let pending = self.submit_as(json!({ "type": "abort" }), stopping).await?;
-        let questions: Vec<_> = self.state.lock().questions.iter().cloned().collect();
-        // One the user answered meanwhile is already resolved.
+        // One being reported is answered by its supervisor once reported; one the user answered
+        // meanwhile is already resolved.
+        let questions: Vec<_> = {
+            let shared = self.state.lock();
+            shared
+                .questions
+                .iter()
+                .filter(|request| shared.reporting.as_ref() != Some(*request))
+                .cloned()
+                .collect()
+        };
         for request in questions {
             let _ = self.answer(&request, Answer::Cancelled).await;
         }
@@ -301,10 +333,13 @@ impl Responder {
             Answer::Cancelled => json!({ "cancelled": true }),
         };
         room.send(ui_response(request, reply));
-        self.resolved(AgentEvent::UserInputResolved {
+        // Reported by a task of its own, so a caller that stops waiting for room still leaves the
+        // resolution reported; the caller still waits for it, so the order stays the same.
+        let responder = self.clone();
+        let resolution = AgentEvent::UserInputResolved {
             request: request.clone(),
-        })
-        .await;
+        };
+        let _ = tokio::spawn(async move { responder.resolved(resolution).await }).await;
         Ok(())
     }
 
@@ -354,6 +389,8 @@ pub struct Session {
     stopper: Option<Stopper>,
     /// The stored entries read so far; later reads continue after the last one.
     history: History,
+    /// The session the entries in `history` belong to.
+    history_session: Option<String>,
     /// The directory the agent works in; a relative path it reports starts there.
     cwd: PathBuf,
     /// The extension file pi was told to load.
@@ -442,6 +479,7 @@ impl Session {
                 exited,
             }),
             history: History::default(),
+            history_session: None,
             cwd: command.cwd.clone(),
             extension: by_name(&command.extension),
             checkpoints,
@@ -449,7 +487,7 @@ impl Session {
         Ok((session, receiver))
     }
 
-    /// The project's checkpoints, which the Diff tab compares; reading them never holds the
+    /// The project's checkpoints, which the Diff panel compares; reading them never holds the
     /// session.
     pub fn checkpoints(&self) -> Arc<Checkpoints> {
         self.checkpoints.clone()
@@ -570,30 +608,75 @@ impl Session {
     pub async fn state(&mut self) -> Result<SessionState, CommandError> {
         let data = self.command(json!({ "type": "get_state" })).await?;
         let text = |field| data.get(field).and_then(Value::as_str);
-        let model = data.get("model").and_then(|model| {
-            Some(format!(
-                "{}/{}",
-                model.get("provider")?.as_str()?,
-                model.get("id")?.as_str()?
-            ))
-        });
         Ok(SessionState {
             session_file: text("sessionFile").map(|file| self.cwd.join(file)),
-            model,
+            model: model_of(&data),
+            session_id: text("sessionId").map(str::to_owned),
         })
+    }
+
+    /// The context window the next request fills and when pi compacts it. `None` when the agent
+    /// reports no window, such as with no model (ADR-0279).
+    pub async fn context(&mut self) -> Result<Option<Context>, CommandError> {
+        let stats = self.command(json!({ "type": "get_session_stats" })).await?;
+        let Some(usage) = stats.get("contextUsage") else {
+            return Ok(None);
+        };
+        let Some(window) = usage.get("contextWindow").and_then(Value::as_u64) else {
+            return Ok(None);
+        };
+        let state = self.command(json!({ "type": "get_state" })).await?;
+        // Only an agent that reports auto compaction off has no threshold; pi's default is on.
+        let compacts_at = if state.get("autoCompactionEnabled") == Some(&json!(false)) {
+            None
+        } else {
+            let model = model_of(&state);
+            let project = self.cwd.clone();
+            tokio::task::spawn_blocking(move || {
+                let global = crate::pi::settings::agent_dir()?;
+                crate::pi::settings::compacts_at(&global, &project, model.as_deref(), window)
+            })
+            .await
+            .ok()
+            .flatten()
+        };
+        Ok(Some(Context {
+            tokens: usage.get("tokens").and_then(Value::as_u64),
+            window,
+            compacts_at,
+        }))
     }
 
     /// Reads the session's stored entries, including abandoned branches. The first read takes
     /// them from pi's session file line by line, so no single answer has to hold the whole
     /// session; later reads ask the agent only for entries added since. When the agent no
-    /// longer knows the last one, everything is read again. The entries stay with the session,
-    /// so callers read them while they hold it.
+    /// longer knows the last one, everything is read again. A read starts over unless the
+    /// session is the same before and after it: sessions can share entry ids, and a switch can
+    /// land during a read. The entries stay with the session, so callers read them while they
+    /// hold it.
     pub async fn history(&mut self) -> Result<&History, CommandError> {
         if std::mem::take(&mut self.responder.state.lock().switched) {
             self.history = History::default();
         }
+        for _ in 0..HISTORY_READS {
+            let before = self.state().await?;
+            if before.session_id != self.history_session {
+                self.history = History::default();
+                self.history_session = before.session_id.clone();
+            }
+            self.read_entries(before.session_file.as_deref()).await?;
+            if self.state().await?.session_id == before.session_id {
+                return Ok(&self.history);
+            }
+            self.history = History::default();
+        }
+        Err(CommandError::SessionChanged)
+    }
+
+    /// Adds the entries stored since the last one read, from `file` when nothing was read yet.
+    async fn read_entries(&mut self, file: Option<&Path>) -> Result<(), CommandError> {
         if self.history.last_id().is_none() {
-            self.read_stored().await?;
+            self.read_stored(file).await;
         }
         match self.read_newer().await {
             // The agent no longer knows the last entry read, or what it added since does not fit
@@ -602,26 +685,24 @@ impl Session {
                 if self.history.last_id().is_some() =>
             {
                 self.history = History::default();
-                self.read_stored().await?;
-                self.read_newer().await?;
+                self.read_stored(file).await;
+                self.read_newer().await
             }
-            result => result?,
+            result => result,
         }
-        Ok(&self.history)
     }
 
     /// Reads the entries pi stored in its session file; without a file yet, the agent's answer
     /// holds them all.
-    async fn read_stored(&mut self) -> Result<(), CommandError> {
-        let Some(file) = self.state().await?.session_file else {
-            return Ok(());
+    async fn read_stored(&mut self, file: Option<&Path>) {
+        let Some(file) = file.map(Path::to_owned) else {
+            return;
         };
         let stored =
             tokio::task::spawn_blocking(move || History::from_file(&file, MAX_RECORD_BYTES)).await;
         if let Ok(Ok(stored)) = stored {
             self.history = stored;
         }
-        Ok(())
     }
 
     /// Asks the agent for the entries after the last one read and for its current leaf.
@@ -854,5 +935,61 @@ mod tests {
         let shared = responder.state.lock();
         assert!(shared.replies.as_ref().is_some_and(HashMap::is_empty));
         assert!(!shared.stopping);
+    }
+
+    #[test]
+    fn an_answered_or_expired_question_keeps_no_timer() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("test runtime starts");
+        runtime.block_on(async {
+            let state = State(Arc::new(Mutex::new(Shared {
+                replies: Some(HashMap::new()),
+                ..Shared::default()
+            })));
+            let (events, mut received) = mpsc::channel(4);
+            let supervisor = Supervisor {
+                events,
+                ended: Arc::default(),
+                writer: mpsc::channel(1).0,
+                state: state.clone(),
+                adapter: crate::PiAdapter::new(),
+                killed: None,
+                kill_requested: false,
+                error_output: Arc::default(),
+                error_reader: tokio::spawn(async {}),
+                input_writer: tokio::spawn(async {}),
+                captures: mpsc::channel(1).0,
+                checkpoints: Arc::new(Checkpoints::new(Path::new("."))),
+            };
+            // A question the user answered before its timer started keeps no timer.
+            let answered = RequestId("answered".to_owned());
+            supervisor.expire(
+                answered,
+                tokio::time::Instant::now() + Duration::from_secs(60),
+            );
+            assert!(
+                state.lock().expiries.is_empty(),
+                "an answered question keeps no timer"
+            );
+            // A question whose time is up is resolved, and its timer ends with nothing kept.
+            let late = RequestId("late".to_owned());
+            state.lock().questions.insert(late.clone());
+            supervisor.expire(late.clone(), tokio::time::Instant::now());
+            let resolved = tokio::time::timeout(Duration::from_secs(10), received.recv())
+                .await
+                .expect("the timer resolves the question")
+                .expect("the session is open");
+            assert_eq!(
+                resolved,
+                SessionEvent::Agent(AgentEvent::UserInputResolved { request: late })
+            );
+            assert!(
+                state.lock().expiries.is_empty(),
+                "an expired question keeps no timer"
+            );
+        });
     }
 }

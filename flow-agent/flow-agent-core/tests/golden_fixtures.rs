@@ -228,8 +228,8 @@ fn hello_flow_source_tools_cover_m0_contract() {
 }
 
 #[test]
-fn sandbox_negative_streams_fail_without_completion_events() {
-    let expected_dir = fixture_root().join("sandbox-negative/expected");
+fn negative_streams_fail_without_completion_events() {
+    let expected_dir = fixture_root().join("negative/expected");
     let stream_paths = expected_streams()
         .into_iter()
         .filter(|path| path.parent() == Some(expected_dir.as_path()))
@@ -279,7 +279,7 @@ fn sandbox_negative_streams_fail_without_completion_events() {
             "{} must end with error, flow.failed and session.failed",
             stream_path.display()
         );
-        if sandbox_negative_attempts_tool_launch(&stream_path) {
+        if negative_attempts_tool_launch(&stream_path) {
             assert!(
                 stream.iter().any(|event| {
                     event.event_type == EventType::ToolFailed
@@ -319,21 +319,18 @@ fn sandbox_negative_streams_fail_without_completion_events() {
     }
 }
 
-fn sandbox_negative_attempts_tool_launch(path: &Path) -> bool {
+fn negative_attempts_tool_launch(path: &Path) -> bool {
     match path.file_stem().and_then(|name| name.to_str()) {
         Some(
-            "sandbox-negative-environment"
-            | "sandbox-negative-interpreter"
-            | "sandbox-negative-network"
-            | "sandbox-negative-symlink"
-            | "sandbox-negative-write",
+            "negative-environment"
+            | "negative-interpreter"
+            | "negative-network"
+            | "negative-symlink"
+            | "negative-write",
         ) => true,
-        Some("sandbox-negative-tool-out-of-phase") => false,
-        Some(name) => panic!("{name}: sandbox-negative launch stage must be registered"),
-        None => panic!(
-            "{}: sandbox-negative stream name is not UTF-8",
-            path.display()
-        ),
+        Some("negative-tool-out-of-phase") => false,
+        Some(name) => panic!("{name}: negative launch stage must be registered"),
+        None => panic!("{}: negative stream name is not UTF-8", path.display()),
     }
 }
 

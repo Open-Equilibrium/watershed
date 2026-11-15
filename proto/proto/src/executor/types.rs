@@ -124,16 +124,16 @@ pub struct EnforcementReceiptV0 {
     /// Digest of the canonical resolved policy applied by the Executor; must equal the request's
     /// `policy_digest`.
     pub applied_policy_digest: String,
-    /// Native protection backend identity.
+    /// Flow-owned write protection backend identity.
     pub backend: String,
-    /// Native protection backend version.
+    /// Flow-owned write protection backend version.
     pub backend_version: String,
     /// Executor identity.
     pub executor: String,
     /// Executor version.
     pub executor_version: String,
     /// Whether the requested Flow Agent objects were protected from Tool writes.
-    pub self_protection_active: bool,
+    pub flow_owned_write_protection_active: bool,
     /// Exact supported platform tuple.
     pub platform: String,
 }
@@ -154,8 +154,8 @@ pub enum ExecutorErrorCodeV0 {
     /// The Executor cannot enforce the requested canonical policy.
     #[serde(rename = "executor_policy_unsupported")]
     PolicyUnsupported,
-    /// Native protection setup failed before a proven Tool launch.
-    SandboxSetupFailed,
+    /// Flow-owned write protection setup failed before a proven Tool launch.
+    FlowOwnedWriteProtectionSetupFailed,
 }
 
 /// Terminal status reported for the Tool root process and bounded output collection.
@@ -216,7 +216,7 @@ pub struct ExecutorToolResultV0 {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ExecutorResponseV0 {
-    /// Self-protection was active and the Executor produced a terminal Tool result.
+    /// Flow-owned write protection was active and the Executor produced a terminal Tool result.
     Completed {
         /// Minimal enforcement evidence.
         enforcement: EnforcementReceiptV0,
@@ -244,9 +244,9 @@ pub enum ExecutorResponseV0 {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutorProbeV0 {
-    /// Native protection backend identity.
+    /// Flow-owned write protection backend identity.
     pub backend: String,
-    /// Native protection backend version.
+    /// Flow-owned write protection backend version.
     pub backend_version: String,
     /// Executor identity.
     pub executor: String,

@@ -50,7 +50,11 @@ fn read_form_body(stream: &mut TcpStream) -> String {
     let mut form_content_type = false;
     loop {
         line.clear();
-        reader.read_line(&mut line).expect("request header reads");
+        assert_ne!(
+            reader.read_line(&mut line).expect("request header reads"),
+            0,
+            "headers end before blank line"
+        );
         if line == "\r\n" {
             break;
         }
@@ -257,7 +261,7 @@ fn oauth_refresh_body_budget() {
         let result = refresh_credential_with_transport(
             "https://auth.openai.com/oauth/token",
             &prior,
-            0,
+            || Ok(0),
             |endpoint, fields, maximum| {
                 assert_eq!(endpoint, "https://auth.openai.com/oauth/token");
                 assert_eq!(
@@ -337,8 +341,8 @@ fn oauth_form_transport_exchanges_and_refreshes_tokens_over_loopback() {
     assert_eq!(initial.account_id, "account");
     assert!(initial.expires > 0);
 
-    let refreshed =
-        refresh_credential_at(&endpoint, &initial, 1_000, deadlines).expect("credential refreshes");
+    let refreshed = refresh_credential_at(&endpoint, &initial, || Ok(1_000), deadlines)
+        .expect("credential refreshes");
     server.join().expect("fake OAuth server completes");
     assert_eq!(refreshed.access, "refreshed-access");
     assert_eq!(refreshed.refresh, "refresh-final");
@@ -362,7 +366,7 @@ fn oauth_refresh_requires_a_replacement_access_token() {
             refresh_credential_with_transport(
                 "https://auth.openai.com/oauth/token",
                 &prior,
-                0,
+                || Ok(0),
                 |_, _, _| Ok(body.to_vec()),
             )
             .is_err()
@@ -391,7 +395,7 @@ fn oauth_refresh_uses_returned_access_expiry_and_id_token_routing() {
     let refreshed = refresh_credential_with_transport(
         "https://auth.openai.com/oauth/token",
         &prior,
-        1_000,
+        || Ok(1_000),
         |_, _, _| Ok(body),
     )
     .expect("returned refresh fields replace prior values");
@@ -402,6 +406,7 @@ fn oauth_refresh_uses_returned_access_expiry_and_id_token_routing() {
     assert!(refreshed.is_fedramp);
 
     let changed_account = serde_json::to_vec(&serde_json::json!({
+        "access_token": access,
         "id_token": super::jwt_with_account("other-account")
     }))
     .expect("changed-account JSON");
@@ -409,7 +414,7 @@ fn oauth_refresh_uses_returned_access_expiry_and_id_token_routing() {
         refresh_credential_with_transport(
             "https://auth.openai.com/oauth/token",
             &prior,
-            1_000,
+            || Ok(1_000),
             |_, _, _| Ok(changed_account),
         )
         .is_err()
@@ -436,12 +441,59 @@ fn oauth_refresh_access_expiry_fallback_obeys_the_one_day_budget() {
         let refreshed = refresh_credential_with_transport(
             "https://auth.openai.com/oauth/token",
             &prior,
-            1_000,
+            || Ok(1_000),
             |_, _, _| Ok(body.clone()),
         );
 
         assert_eq!(refreshed.is_ok(), accepted, "expiry {expiry_seconds}");
     }
+}
+
+#[test]
+fn oauth_refresh_expiry_uses_the_response_time_clock() {
+    let prior = CredentialRecord {
+        credential_type: "oauth".to_owned(),
+        access: "prior-access".to_owned(),
+        refresh: "prior-refresh".to_owned(),
+        expires: 1,
+        account_id: "account".to_owned(),
+        is_fedramp: false,
+    };
+    let clock = Cell::new(1_000);
+    let body = serde_json::to_vec(&serde_json::json!({
+        "access_token": "refreshed-access",
+        "expires_in": 1,
+    }))
+    .expect("refresh JSON");
+
+    // The response is received at 3 s, after the request started at 1 s.
+    let refreshed = refresh_credential_with_transport(
+        "https://auth.openai.com/oauth/token",
+        &prior,
+        || Ok(clock.get()),
+        |_, _, _| {
+            clock.set(3_000);
+            Ok(body)
+        },
+    )
+    .expect("refresh succeeds");
+    assert_eq!(refreshed.expires, 4_000);
+
+    // A fallback access token that expired at 2 s, before the response arrived, is rejected.
+    let clock = Cell::new(1_000);
+    let access = format!("e30.{}.x", base64url_encode(br#"{"exp":2}"#));
+    let body =
+        serde_json::to_vec(&serde_json::json!({"access_token": access})).expect("refresh JSON");
+    let result = refresh_credential_with_transport(
+        "https://auth.openai.com/oauth/token",
+        &prior,
+        || Ok(clock.get()),
+        |_, _, _| {
+            clock.set(3_000);
+            Ok(body)
+        },
+    );
+    assert!(result.is_err());
 }
 
 fn fake_auth_post<T>(

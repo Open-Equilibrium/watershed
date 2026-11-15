@@ -6,7 +6,7 @@ use crate::{
         context::{ContextHistory, ContextModelProfile},
         fs_guards::AnchoredWorkspace,
         oauth_credential::CredentialRecord,
-        productive::ProductiveExecution,
+        productive::{ProductiveExecution, ProviderCredential},
         types::EventClock,
     },
     tests::test_support::{TempWorkspace, workspace_copy},
@@ -26,13 +26,13 @@ fn fixture_credential() -> CredentialRecord {
 
 pub(in crate::tests) struct ProductiveExecutionFixture {
     pub(in crate::tests) anchored: AnchoredWorkspace,
-    credential: CredentialRecord,
+    credential: ProviderCredential,
     pub(in crate::tests) policy: core_policy::PolicyArtifact,
     pub(in crate::tests) registry: core_script::ResolvedRegistry,
 }
 
 impl ProductiveExecutionFixture {
-    pub(in crate::tests) fn credential(&self) -> &CredentialRecord {
+    pub(in crate::tests) fn credential(&self) -> &ProviderCredential {
         &self.credential
     }
 
@@ -109,6 +109,18 @@ pub(in crate::tests) fn load_productive_execution_fixture_with_credential(
     workspace: &Path,
     flow_id: &str,
     credential: CredentialRecord,
+) -> ProductiveExecutionFixture {
+    load_productive_execution_fixture_with_provider_credential(
+        workspace,
+        flow_id,
+        ProviderCredential::OpenAiCodex(credential),
+    )
+}
+
+pub(in crate::tests) fn load_productive_execution_fixture_with_provider_credential(
+    workspace: &Path,
+    flow_id: &str,
+    credential: ProviderCredential,
 ) -> ProductiveExecutionFixture {
     let registry = load_test_registry(workspace, flow_id);
     let policy = core_policy::compile_policy_artifact(&registry, flow_id).expect("policy");

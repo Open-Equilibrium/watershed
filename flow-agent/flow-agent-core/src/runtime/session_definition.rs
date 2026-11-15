@@ -13,6 +13,8 @@ pub struct SessionDefinitionMetadata {
     pub(crate) flow_definition_id: String,
     pub(crate) registry_hash: String,
     pub(crate) flow_definition_hash: String,
+    /// Whether the Run started with a root input; the Fixture bundle stores the input itself nowhere.
+    pub(crate) root_input: bool,
 }
 
 #[derive(Default, Debug, Eq, PartialEq)]
@@ -20,6 +22,7 @@ pub struct SessionLogMetadata {
     pub(crate) flow_definition_id: Option<String>,
     pub(crate) registry_hash: Option<String>,
     pub(crate) flow_definition_hash: Option<String>,
+    pub(crate) root_input: bool,
     pub(crate) model: Option<String>,
     pub(crate) model_profile_id: Option<String>,
     pub(crate) model_context_limit: Option<usize>,
@@ -59,6 +62,7 @@ pub fn session_definition_metadata(
         flow_definition_id: flow_block.identity.id.clone(),
         registry_hash: prefixed_sha256_hex(registry_json.as_bytes()),
         flow_definition_hash: prefixed_sha256_hex(flow_json.as_bytes()),
+        root_input: false,
     })
 }
 
@@ -175,6 +179,13 @@ fn parse_session_log_metadata(text: &str) -> Result<SessionLogMetadata, RuntimeE
             "flow_definition_id" => metadata.flow_definition_id = Some(value.to_owned()),
             "registry_hash" => metadata.registry_hash = Some(value.to_owned()),
             "flow_definition_hash" => metadata.flow_definition_hash = Some(value.to_owned()),
+            "root_input" if value == "present" => metadata.root_input = true,
+            "root_input" => {
+                return Err(RuntimeError::Protocol(format!(
+                    "session metadata line {} has an invalid root_input marker",
+                    line_number + 1
+                )));
+            }
             _ => {}
         }
     }

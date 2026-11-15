@@ -316,3 +316,30 @@ fn conversation_history_event_pointer_preserves_message_roles() {
 
     read_conversation_history(&workspace, "review").expect("message prefix validates");
 }
+
+#[test]
+fn early_pointer_validation_stops_at_the_referenced_event() {
+    let workspace = empty_workspace("conversation-history-early-pointer-stop");
+    let events = create_hello_flow_run(&workspace);
+    assert!(
+        events.lines().count() > 2,
+        "the golden stream has a long suffix after its first event"
+    );
+    fs::write(
+        crate::tests::helpers::workspace_session_dir(&workspace)
+            .join("review/runs/hello-flow/events.jsonl"),
+        events,
+    )
+    .expect("golden event stream writes");
+    write_history_records(&workspace, "review", [entry("root", None, "hello-flow", 1)]);
+
+    let history = read_conversation_history(&workspace, "review")
+        .expect("pointer to the first event validates");
+    assert_eq!(history[0].event_sequence, 1);
+    let metrics = take_history_index_metrics_for_test().expect("index metrics are recorded");
+    assert_eq!(
+        metrics.event_lines_visited, 4,
+        "three identifier passes and one validation pass each read only the referenced line"
+    );
+    assert_history_validation_scratch_is_empty(&workspace);
+}

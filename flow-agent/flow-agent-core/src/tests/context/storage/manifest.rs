@@ -13,7 +13,7 @@ use crate::runtime::{
 };
 use std::{
     fs,
-    io::{self, Read, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     path::Path,
 };
 
@@ -161,6 +161,50 @@ fn context_manifest_replay_rejects_an_in_place_length_change() {
         .expect_err("the replay sync must fail closed");
 
     assert!(err.to_string().contains("changed outside"), "{err}");
+    drop(writer);
+    reservation.release_lock().expect("reservation rolls back");
+}
+
+fn overwrite_estimator_id_in_place(path: &Path, line: &str) {
+    let marker = "\"estimator_id\":\"";
+    let offset = line.find(marker).expect("manifest records its estimator") + marker.len();
+    let byte = line.as_bytes()[offset];
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .expect("context manifest opens for external mutation");
+    file.seek(SeekFrom::Start(offset as u64))
+        .expect("estimator byte is addressable");
+    file.write_all(&[if byte == b'x' { b'y' } else { b'x' }])
+        .expect("earlier context manifest changes in place");
+}
+
+#[test]
+fn persisting_after_same_length_edit_fails_at_finish() {
+    let workspace = empty_workspace("context-manifest-finish-rescan");
+    let reservation =
+        reserve_session_log(&workspace, "manifestfinish001").expect("session reserved");
+    let manifests = [1, 2, 3].map(|turn| compiled_context_checkpoint(&turn.to_string(), turn));
+    let mut writer = ContextManifestWriter::open(&reservation.context_path)
+        .expect("context manifest writer opens");
+    for manifest in &manifests[..2] {
+        writer
+            .persist(&reservation.context_path, manifest)
+            .expect("manifest persists");
+    }
+    overwrite_estimator_id_in_place(
+        reservation.context_path.diagnostic_path(),
+        &manifests[0].manifest.line,
+    );
+    writer
+        .persist(&reservation.context_path, &manifests[2])
+        .expect("an intact last record persists without rescanning earlier records");
+
+    let error = writer
+        .finish(&reservation.context_path)
+        .expect_err("finishing the Run rescans the stream and fails closed");
+
+    assert!(error.to_string().contains("changed outside"), "{error}");
     drop(writer);
     reservation.release_lock().expect("reservation rolls back");
 }

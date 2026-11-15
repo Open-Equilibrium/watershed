@@ -3,7 +3,8 @@ use crate::runtime::{
     fs_guards::{
         AnchoredDir, DirectoryErrorMode, anchored_file_identity,
         ensure_anchored_new_leaf_available, path_io_error, read_anchored_to_string_with_limit,
-        sync_anchored_directory, verify_owned_anchored_file, with_anchored_replacement_temp,
+        sync_anchored_directory, sync_durable, verify_owned_anchored_file,
+        with_anchored_replacement_temp, write_durable,
     },
     types::RuntimeError,
     workspace_text::{normal_components, read_workspace_text_file},
@@ -11,7 +12,7 @@ use crate::runtime::{
 use core_script::MAX_REGISTRY_DEFINITION_BYTES;
 #[cfg(test)]
 use std::cell::Cell;
-use std::{io::Write, path::Path};
+use std::path::Path;
 
 #[cfg(test)]
 std::thread_local! {
@@ -115,8 +116,7 @@ pub(super) fn write_new_file(
     kind: &str,
 ) -> Result<(), RuntimeError> {
     write_new_file_with(target, bytes, kind, |opened, bytes| {
-        opened
-            .write_all(bytes)
+        write_durable(opened, target.diagnostic_path(), bytes)
             .map_err(|source| path_io_error(target.diagnostic_path(), source))
     })
 }
@@ -130,8 +130,7 @@ fn write_new_file_with(
     with_anchored_replacement_temp(target, None, |temporary, mut opened| {
         let identity = anchored_file_identity(temporary.diagnostic_path(), &opened)?;
         write(&mut opened, bytes)?;
-        opened
-            .sync_all()
+        sync_durable(&opened, temporary.diagnostic_path())
             .map_err(|source| path_io_error(temporary.diagnostic_path(), source))?;
         verify_owned_anchored_file(temporary, &opened, kind)?;
         let current = anchored_file_identity(temporary.diagnostic_path(), &opened)?;

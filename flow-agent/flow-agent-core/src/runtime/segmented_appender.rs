@@ -7,8 +7,9 @@ use crate::runtime::{
         AnchoredDir, AnchoredFile, AnchoredFileIdentity, anchored_file_identity,
         open_anchored_file_for_read, open_anchored_session_log_append_file, path_io_error,
         reserve_new_anchored_file, segmented_jsonl_files, segmented_jsonl_path,
-        sync_anchored_directory, validate_open_session_log_append_file, verify_owned_anchored_file,
-        verify_segmented_jsonl_inventory,
+        sync_anchored_directory, sync_durable, truncate_durable,
+        validate_open_session_log_append_file, verify_owned_anchored_file,
+        verify_segmented_jsonl_inventory, write_durable,
     },
     types::{EVENT_STREAM_LIMITS, MAX_SESSION_SEGMENT_BYTES, RuntimeError, SessionStreamLimits},
 };
@@ -17,13 +18,14 @@ use rustix::{
     fd::OwnedFd,
     fs::inotify::{self, CreateFlags, ReadFlags, WatchFlags},
 };
-#[cfg(test)]
-use std::{collections::BTreeMap, path::PathBuf, sync::Mutex};
 use std::{
+    cell::Cell,
     fs,
-    io::{self, Read, Seek, SeekFrom, Write},
+    io::{self, Read, Seek, SeekFrom},
     path::Path,
 };
+#[cfg(test)]
+use std::{collections::BTreeMap, path::PathBuf, sync::Mutex};
 #[cfg(target_os = "linux")]
 use std::{mem::MaybeUninit, os::fd::AsRawFd as _};
 
@@ -86,12 +88,18 @@ fn sync_session_stream_parent(parent: &AnchoredDir) -> Result<(), RuntimeError> 
 struct SegmentInventoryWatch {
     #[cfg(target_os = "linux")]
     inner: Option<LinuxSegmentInventoryWatch>,
+    // Set once the watch reports that it is gone; a lost watch is never trusted again.
+    #[cfg(target_os = "linux")]
+    invalidated: Cell<bool>,
 }
 
 #[cfg(target_os = "linux")]
 struct LinuxSegmentInventoryWatch {
     fd: OwnedFd,
     folded_stem: String,
+    // Only the test hook reads it, to remove the watch.
+    #[cfg_attr(not(test), allow(dead_code))]
+    descriptor: i32,
 }
 
 impl SegmentInventoryWatch {
@@ -100,6 +108,7 @@ impl SegmentInventoryWatch {
         {
             Self {
                 inner: Self::open_linux(base),
+                invalidated: Cell::new(false),
             }
         }
         #[cfg(not(target_os = "linux"))]
@@ -121,7 +130,7 @@ impl SegmentInventoryWatch {
         }
         let fd = inotify::init(CreateFlags::CLOEXEC | CreateFlags::NONBLOCK).ok()?;
         let parent_path = format!("/proc/self/fd/{}", base.parent.dir.as_raw_fd());
-        inotify::add_watch(
+        let descriptor = inotify::add_watch(
             &fd,
             parent_path,
             WatchFlags::CREATE
@@ -136,13 +145,14 @@ impl SegmentInventoryWatch {
         Some(LinuxSegmentInventoryWatch {
             fd,
             folded_stem: stem.to_ascii_lowercase(),
+            descriptor,
         })
     }
 
     fn is_active(&self) -> bool {
         #[cfg(target_os = "linux")]
         {
-            self.inner.is_some()
+            self.inner.is_some() && !self.invalidated.get()
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -166,6 +176,7 @@ impl SegmentInventoryWatch {
                             .events()
                             .intersects(ReadFlags::IGNORED | ReadFlags::UNMOUNT) =>
                     {
+                        self.invalidated.set(true);
                         return Err(RuntimeError::Protocol(format!(
                             "{} segment inventory watch was invalidated",
                             base.diagnostic_path().display()
@@ -175,6 +186,7 @@ impl SegmentInventoryWatch {
                     Err(rustix::io::Errno::AGAIN) => return Ok(changed),
                     Err(rustix::io::Errno::INTR) => {}
                     Err(source) => {
+                        self.invalidated.set(true);
                         return Err(path_io_error(
                             &base.parent.path,
                             io::Error::from_raw_os_error(source.raw_os_error()),
@@ -372,6 +384,8 @@ pub struct SessionLogAppender {
     pub(crate) current_ordinal: u64,
     pub(crate) file: fs::File,
     inventory_watch: SegmentInventoryWatch,
+    // Set by any watch change or failed drain, and cleared only by a successful inventory scan.
+    inventory_dirty: Cell<bool>,
     pub(crate) limits: SessionStreamLimits,
     sealed_segments: Vec<SealedSessionStreamSegment>,
     pub(crate) total_bytes: u64,
@@ -410,6 +424,7 @@ impl SessionLogAppender {
             current_ordinal: inventory.current_ordinal,
             file,
             inventory_watch: inventory.inventory_watch,
+            inventory_dirty: Cell::new(false),
             limits,
             sealed_segments: inventory.sealed_segments,
             total_bytes: inventory.total_bytes,
@@ -431,19 +446,61 @@ impl SessionLogAppender {
         Self::open_inventory(path, EVENT_STREAM_LIMITS, inventory)
     }
 
+    /// Removes the kernel watch, so the next check finds it invalidated.
+    #[cfg(all(test, target_os = "linux"))]
+    pub(crate) fn remove_inventory_watch_for_test(&self) {
+        if let Some(watch) = &self.inventory_watch.inner {
+            inotify::remove_watch(&watch.fd, watch.descriptor).expect("inventory watch removes");
+        }
+    }
+
     pub(crate) fn len(&self, _path: &Path) -> Result<u64, RuntimeError> {
         self.verify_current_segment()?;
         Ok(self.total_bytes)
+    }
+
+    /// Reads the final `len` bytes of the stream. A record never spans segments, so these bytes
+    /// hold the last record when the writer appended it last.
+    pub(crate) fn read_last_bytes(&self, len: u64) -> Result<Vec<u8>, RuntimeError> {
+        let (path, end) = match self.sealed_segments.last() {
+            Some(segment) if self.current_bytes == 0 => (segment.path.clone(), segment.bytes),
+            _ => (self.current_path()?, self.current_bytes),
+        };
+        let start = end.checked_sub(len).ok_or_else(|| {
+            RuntimeError::Protocol(format!(
+                "{} is shorter than its last record",
+                path.diagnostic_path().display()
+            ))
+        })?;
+        let (mut file, _) = open_anchored_file_for_read(&path)?;
+        file.seek(SeekFrom::Start(start))
+            .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
+        let mut bytes = vec![0; usize::try_from(len).unwrap_or(usize::MAX)];
+        file.read_exact(&mut bytes)
+            .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
+        Ok(bytes)
     }
 
     pub(crate) fn current_path(&self) -> Result<AnchoredFile, RuntimeError> {
         segmented_jsonl_path(&self.base_path, self.current_ordinal)
     }
 
+    /// Drains the inventory watch. A failed drain marks the inventory dirty too: the events read
+    /// before the failure are lost, so the next check must scan.
+    fn drain_inventory_watch(&self) -> Result<bool, RuntimeError> {
+        self.inventory_watch
+            .changed(&self.base_path)
+            .inspect_err(|_| self.inventory_dirty.set(true))
+    }
+
     fn verify_current_segment(&self) -> Result<AnchoredFile, RuntimeError> {
         let expected_segment_count = usize::try_from(self.current_ordinal).unwrap_or(usize::MAX);
         let watch_active = self.inventory_watch.is_active();
-        let mut scan_inventory = !watch_active || self.inventory_watch.changed(&self.base_path)?;
+        // `changed` drains the watch, so its result is recorded before any scan can fail.
+        if !watch_active || self.drain_inventory_watch()? {
+            self.inventory_dirty.set(true);
+        }
+        let mut scan_inventory = self.inventory_dirty.get();
         loop {
             if scan_inventory {
                 verify_segmented_jsonl_inventory(
@@ -451,6 +508,7 @@ impl SessionLogAppender {
                     self.limits,
                     expected_segment_count,
                 )?;
+                self.inventory_dirty.set(false);
             }
             for segment in &self.sealed_segments {
                 verify_owned_anchored_file(&segment.path, &segment.file, "session log segment")?;
@@ -483,9 +541,10 @@ impl SessionLogAppender {
                     actual.len()
                 )));
             }
-            if !watch_active || !self.inventory_watch.changed(&self.base_path)? {
+            if !watch_active || !self.drain_inventory_watch()? {
                 return Ok(current);
             }
+            self.inventory_dirty.set(true);
             if !scan_inventory {
                 scan_inventory = true;
                 continue;
@@ -529,9 +588,11 @@ impl SessionLogAppender {
         )? {
             return Ok(current_path);
         }
-        self.file.sync_all().map_err(|source| RuntimeError::Io {
-            path: current_path.diagnostic_path().to_owned(),
-            source,
+        sync_durable(&self.file, current_path.diagnostic_path()).map_err(|source| {
+            RuntimeError::Io {
+                path: current_path.diagnostic_path().to_owned(),
+                source,
+            }
         })?;
         self.verify_current_segment()?;
         let next_ordinal = self.current_ordinal.saturating_add(1);
@@ -598,7 +659,30 @@ impl SessionLogAppender {
     }
 }
 
-fn append_native_event_batch_with<F, C>(
+#[cfg(test)]
+static NATIVE_BATCH_LENGTH_ERROR: Mutex<Option<io::ErrorKind>> = Mutex::new(None);
+
+/// Makes the next length read after a failed native batch write fail with `kind`.
+#[cfg(test)]
+pub(crate) fn set_native_batch_length_error_for_test(kind: io::ErrorKind) {
+    *NATIVE_BATCH_LENGTH_ERROR
+        .lock()
+        .expect("native batch length seam is not poisoned") = Some(kind);
+}
+
+fn native_batch_len(file: &fs::File) -> io::Result<u64> {
+    #[cfg(test)]
+    if let Some(kind) = NATIVE_BATCH_LENGTH_ERROR
+        .lock()
+        .expect("native batch length seam is not poisoned")
+        .take()
+    {
+        return Err(io::Error::from(kind));
+    }
+    file.metadata().map(|metadata| metadata.len())
+}
+
+pub(crate) fn append_native_event_batch_with<F, C>(
     file: &mut fs::File,
     path: &Path,
     original_len: u64,
@@ -624,10 +708,14 @@ where
         complete_prefixes.push(bytes.len());
     }
     if let Err(source) = write(file, &bytes) {
-        let current_len = file
-            .metadata()
-            .map(|metadata| metadata.len())
-            .unwrap_or(original_len);
+        // Without the length the committed prefix is unknown, so nothing is truncated.
+        let current_len = native_batch_len(file).map_err(|length_error| BatchAppendFailure {
+            committed_events: None,
+            error: RuntimeError::Protocol(format!(
+                "{} append failed ({source}) and its length could not be read ({length_error})",
+                path.display()
+            )),
+        })?;
         let written =
             usize::try_from(current_len.saturating_sub(original_len)).unwrap_or(usize::MAX);
         let committed_events = complete_prefixes.partition_point(|end| *end <= written);
@@ -694,11 +782,12 @@ impl EventLogAppender for SessionLogAppender {
 
             debug_assert!(batch_end > committed_events);
             let batch = &events[committed_events..batch_end];
+            let path = current_path.diagnostic_path();
             if let Err(failure) = self.append_native_batch_to_current_with(
                 &current_path,
                 batch,
-                |file, bytes| file.write_all(bytes),
-                cleanup_incomplete_suffix,
+                |file, bytes| write_durable(file, path, bytes),
+                |file, retained_len| cleanup_incomplete_suffix(file, path, retained_len),
             ) {
                 let Some(batch_committed_events) = failure.committed_events else {
                     return Err(failure);
@@ -724,7 +813,7 @@ impl EventLogAppender for SessionLogAppender {
     fn sync(&mut self, _path: &Path) -> Result<(), RuntimeError> {
         let current = self.verify_current_segment()?;
         let path = current.diagnostic_path();
-        self.file.sync_all().map_err(|source| RuntimeError::Io {
+        sync_durable(&self.file, path).map_err(|source| RuntimeError::Io {
             path: path.to_owned(),
             source,
         })?;
@@ -734,7 +823,11 @@ impl EventLogAppender for SessionLogAppender {
     }
 }
 
-pub fn cleanup_incomplete_suffix(file: &mut fs::File, retained_len: u64) -> io::Result<()> {
-    file.set_len(retained_len)?;
-    file.sync_all()
+pub fn cleanup_incomplete_suffix(
+    file: &mut fs::File,
+    path: &Path,
+    retained_len: u64,
+) -> io::Result<()> {
+    truncate_durable(file, path, retained_len)?;
+    sync_durable(file, path)
 }

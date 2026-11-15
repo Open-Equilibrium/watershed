@@ -1,15 +1,15 @@
-//! A session's stored entries in the compact form the tree and Trajectory read. pi's JSON is
-//! parsed once per entry and then dropped, so a long session costs little to keep.
+//! A session's stored entries in the compact form the tree, chat, turns and usage read. pi's JSON
+//! is parsed once per entry and then dropped, so a long session costs little to keep.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde_json::Value;
 
 use super::ChangeCount;
-use super::outcome::{exit_code, patch_lines, test_counts};
-use crate::pi::{PATH_ARGUMENTS, content_text, item_kind, usage, written_lines};
+use super::outcome::patch_lines;
+use crate::pi::{call_target, content_text, cost_by_kind, usage, written_lines};
 use crate::visible::visible_name;
-use crate::{ItemKind, Phase, ToolOutcome, Usage};
+use crate::{ChangedLines, CostByKind, Phase, Usage};
 
 /// Longest text kept per prompt or response, in characters.
 const TEXT_CHARS: usize = 64 * 1024;
@@ -27,7 +27,20 @@ pub(crate) struct Entry {
     pub parent: Option<String>,
     /// Unix milliseconds when it was stored.
     pub at_ms: Option<u64>,
+    /// What it spent, when it reports usage.
+    pub spend: Option<Box<Spend>>,
     pub body: Body,
+}
+
+/// What a stored entry spent and which model produced it.
+#[derive(Debug, Clone)]
+pub(crate) struct Spend {
+    /// `provider/id` of the model; empty for an entry no model produced, such as a summary.
+    pub model: String,
+    pub usage: Usage,
+    pub cost_by_kind: CostByKind,
+    /// Whether pi recorded a cost above zero; decided before the cost is rounded to micro-dollars.
+    pub priced: bool,
 }
 
 /// What an entry holds.
@@ -35,41 +48,30 @@ pub(crate) struct Entry {
 pub(crate) enum Body {
     User {
         text: String,
-        chars: usize,
     },
     Assistant {
         text: String,
         /// Whether the response began with reasoning.
         thinking: bool,
         calls: Vec<Call>,
-        model: String,
         stop_reason: String,
-        usage: Usage,
-        /// Characters of its text and tool calls, as later requests send it.
-        chars: usize,
+        /// The message pi stored for a response that failed.
+        error: Option<String>,
     },
     ToolResult {
         call: String,
-        tool: String,
         failed: bool,
-        chars: usize,
-        outcome: ToolOutcome,
+        /// The lines a file change added and removed, from the patch pi stored.
+        lines: Option<ChangedLines>,
     },
-    /// A system message that changes prompt sections or tools.
-    System(SystemChange),
-    /// A message of another role, such as a shell command the user ran.
-    Message {
-        role: String,
-        /// Whether pi keeps it out of the model's context.
-        excluded: bool,
-        chars: usize,
-    },
-    RequestTiming {
-        first_token_ms: Option<u64>,
-        duration_ms: Option<u64>,
-    },
+    /// A system message; pi's prompt sections and tools are not read.
+    System,
     ToolTiming {
         call: String,
+        duration_ms: Option<u64>,
+    },
+    /// How long a model request took; pi stores it just before the response it produced.
+    RequestTiming {
         duration_ms: Option<u64>,
     },
     /// A checkpoint Watershed's extension recorded at a turn's start or end, or why it could not
@@ -84,31 +86,9 @@ pub(crate) enum Body {
     },
     /// Another extension's custom entry.
     Custom,
-    /// A message an extension added to the model's context.
-    CustomMessage {
-        kind: String,
-        chars: usize,
-    },
-    BranchSummary {
-        chars: usize,
-    },
-    Compaction {
-        first_kept: Option<String>,
-        system: Option<SystemChange>,
-        /// Characters of the summary.
-        chars: usize,
-    },
-    ContextEdit {
-        target: Option<String>,
-        /// The length of the content that replaces the target's; `None` takes the target out of
-        /// the context.
-        replacement: Option<usize>,
-    },
-    Label {
-        target: Option<String>,
-        label: Option<String>,
-    },
-    /// Any other entry, such as a model change.
+    /// A label entry, which drops out of the parent chain.
+    Label,
+    /// Any other entry, such as a model change, a compaction or a message of another role.
     Other,
 }
 
@@ -117,8 +97,8 @@ pub(crate) enum Body {
 pub(crate) struct Call {
     pub id: String,
     pub name: String,
-    /// The arguments as JSON text, shortened when long.
-    pub arguments: String,
+    /// What the call works on, as the transcript shows it; the arguments themselves are not kept.
+    pub target: String,
     /// Lines a `write` call writes.
     pub written_lines: Option<u32>,
 }
@@ -150,14 +130,6 @@ impl<'a, T> OpenCalls<'a, T> {
         self.open.get_mut(id)?.pop_front()
     }
 
-    /// Opens the call the latest answer returned again, for another branch from before it.
-    pub fn reopen(&mut self, place: usize, call: &'a Call) {
-        self.open
-            .entry(call.id.as_str())
-            .or_default()
-            .push_front((place, call));
-    }
-
     /// Keeps the timing entry of a call with `id` that ended, until its result.
     pub fn ended(&mut self, id: &'a str, timing: T) {
         self.timing.entry(id).or_default().push(timing);
@@ -178,15 +150,25 @@ impl<'a, T> OpenCalls<'a, T> {
     }
 }
 
-/// Changes of the system prompt's sections and tools.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct SystemChange {
-    /// Section lengths in characters; `None` removes a section.
-    pub sections: Vec<(String, Option<usize>)>,
-    pub appended_chars: usize,
-    /// Added tools with the characters of their declaration.
-    pub tools_added: Vec<(String, usize)>,
-    pub tools_removed: Vec<String>,
+/// The entries from the root to `leaf`.
+pub(super) fn path<'a>(entries: &'a [Entry], leaf: Option<&str>) -> Vec<&'a Entry> {
+    let by_id: HashMap<&str, &Entry> = entries
+        .iter()
+        .map(|entry| (entry.id.as_str(), entry))
+        .collect();
+    let mut path = Vec::new();
+    let mut seen = HashSet::new();
+    let mut next = leaf;
+    while let Some(entry) = next.and_then(|id| by_id.get(id)) {
+        // A stored cycle ends the branch instead of the reader.
+        if !seen.insert(entry.id.as_str()) {
+            break;
+        }
+        path.push(*entry);
+        next = entry.parent.as_deref();
+    }
+    path.reverse();
+    path
 }
 
 impl Entry {
@@ -195,7 +177,13 @@ impl Entry {
     /// them after their data.
     pub fn skipped(start: &[u8], end: &[u8]) -> Option<Self> {
         let start = String::from_utf8_lossy(start);
-        let custom = start.starts_with(r#"{"type":"custom"#);
+        let custom = start.starts_with(r#"{"type":"custom","#);
+        // pi writes a label's type first, so a skipped label still hides from the tree.
+        let body = if start.starts_with(r#"{"type":"label","#) {
+            Body::Label
+        } else {
+            Body::Other
+        };
         let fields = if custom {
             String::from_utf8_lossy(end)
         } else {
@@ -219,7 +207,8 @@ impl Entry {
             id: field("id")??,
             parent: field("parentId")?,
             at_ms: None,
-            body: Body::Other,
+            spend: None,
+            body,
         })
     }
 
@@ -227,38 +216,10 @@ impl Entry {
     pub fn parse(entry: &Value) -> Self {
         let text = |field| entry.get(field).and_then(Value::as_str).map(str::to_owned);
         let kind = text("type").unwrap_or_default();
-        let chars = |field| {
-            entry
-                .get(field)
-                .and_then(Value::as_str)
-                .map_or(0, |text| text.chars().count())
-        };
         let body = match kind.as_str() {
             "message" => message(entry.get("message")),
             "custom" => custom(text("customType").unwrap_or_default(), entry.get("data")),
-            "custom_message" => Body::CustomMessage {
-                kind: text("customType").unwrap_or_default(),
-                chars: content_text(entry.get("content")).chars().count(),
-            },
-            "branch_summary" => Body::BranchSummary {
-                chars: chars("summary"),
-            },
-            "compaction" => Body::Compaction {
-                first_kept: text("firstKeptEntryId"),
-                system: entry.get("systemMessage").map(system),
-                chars: chars("summary"),
-            },
-            "context_edit" => Body::ContextEdit {
-                target: text("targetId"),
-                replacement: entry
-                    .get("replacement")
-                    .filter(|replacement| !replacement.is_null())
-                    .map(|replacement| content_text(replacement.get("content")).chars().count()),
-            },
-            "label" => Body::Label {
-                target: text("targetId"),
-                label: text("label"),
-            },
+            "label" => Body::Label,
             _ => Body::Other,
         };
         Self {
@@ -268,19 +229,46 @@ impl Entry {
                 .get("timestamp")
                 .and_then(Value::as_str)
                 .and_then(iso_millis),
+            spend: spend(entry),
             body,
         }
     }
 
-    /// What producing a stored entry cost: a response, a summary, cache warming or a tool's own
+    /// What producing the entry cost: a response, a summary, cache warming or a tool's own
     /// requests. The history sums it as it reads, so entries stay small.
-    pub fn spent(entry: &Value) -> Usage {
-        usage(
-            entry
-                .get("usage")
-                .or_else(|| entry.pointer("/message/usage")),
-        )
+    pub fn spent(&self) -> Usage {
+        self.spend
+            .as_deref()
+            .map_or_else(Usage::default, |spend| spend.usage)
     }
+}
+
+/// What an entry spent and the model that produced it, when it reports usage.
+fn spend(entry: &Value) -> Option<Box<Spend>> {
+    let report = entry
+        .get("usage")
+        .or_else(|| entry.pointer("/message/usage"))?;
+    let message = entry.get("message");
+    let field = |name| {
+        message
+            .and_then(|message| message.get(name))
+            .and_then(Value::as_str)
+    };
+    let model = match (field("provider"), field("model")) {
+        (Some(provider), Some(id)) => format!("{provider}/{id}"),
+        (None, Some(id)) => id.to_owned(),
+        _ => String::new(),
+    };
+    let priced = report
+        .pointer("/cost/total")
+        .and_then(Value::as_f64)
+        .is_some_and(|total| total > 0.0);
+    Some(Box::new(Spend {
+        model: visible_name(&model),
+        usage: usage(Some(report)),
+        cost_by_kind: cost_by_kind(Some(report)),
+        priced,
+    }))
 }
 
 fn message(message: Option<&Value>) -> Body {
@@ -295,11 +283,9 @@ fn message(message: Option<&Value>) -> Body {
             .to_owned()
     };
     let content = content_text(message.get("content"));
-    let chars = content.chars().count();
     match message.get("role").and_then(Value::as_str) {
         Some("user") => Body::User {
             text: bounded(content, TEXT_CHARS),
-            chars,
         },
         Some("assistant") => {
             let blocks = message
@@ -308,11 +294,9 @@ fn message(message: Option<&Value>) -> Body {
                 .into_iter()
                 .flatten()
                 .filter(|block| block.get("type").and_then(Value::as_str) == Some("toolCall"));
-            let mut call_chars = 0;
             let calls = blocks
                 .map(|call| {
                     let full = call.get("arguments").cloned().unwrap_or(Value::Null);
-                    call_chars += full.to_string().chars().count();
                     Call {
                         id: call
                             .get("id")
@@ -322,7 +306,7 @@ fn message(message: Option<&Value>) -> Body {
                         name: visible_name(
                             call.get("name").and_then(Value::as_str).unwrap_or_default(),
                         ),
-                        arguments: arguments(&full),
+                        target: call_target(&arguments(&full)),
                         written_lines: written_lines(
                             call.get("name").and_then(Value::as_str).unwrap_or_default(),
                             &full,
@@ -340,43 +324,29 @@ fn message(message: Option<&Value>) -> Body {
                 text: bounded(content, TEXT_CHARS),
                 thinking,
                 calls,
-                model: field("model"),
                 stop_reason: field("stopReason"),
-                usage: usage(message.get("usage")),
-                chars: chars + call_chars,
+                error: message
+                    .get("errorMessage")
+                    .and_then(Value::as_str)
+                    .map(|error| bounded(error.to_owned(), ERROR_CHARS)),
             }
         }
         Some("toolResult") => {
-            let tool = visible_name(&field("toolName"));
             let failed = message.get("isError").and_then(Value::as_bool) == Some(true);
             let patch = message
                 .get("details")
                 .and_then(|details| details.get("patch"))
                 .and_then(Value::as_str);
-            let (added, removed) = patch.map(patch_lines).unzip();
-            let shell = item_kind(&tool) == ItemKind::CommandExecution;
             Body::ToolResult {
                 call: field("toolCallId"),
-                outcome: ToolOutcome {
-                    added,
-                    removed,
-                    // A successful command's output may quote an exit code of something else.
-                    exit_code: shell
-                        .then(|| if failed { exit_code(&content) } else { Some(0) })
-                        .flatten(),
-                    tests: shell.then(|| test_counts(&content)).flatten(),
-                },
-                tool,
+                lines: patch
+                    .map(patch_lines)
+                    .map(|(added, removed)| ChangedLines { added, removed }),
                 failed,
-                chars,
             }
         }
-        Some("system") => Body::System(system(message)),
-        role => Body::Message {
-            role: role.unwrap_or_default().to_owned(),
-            excluded: message.get("excludeFromContext").and_then(Value::as_bool) == Some(true),
-            chars,
-        },
+        Some("system") => Body::System,
+        _ => Body::Other,
     }
 }
 
@@ -390,12 +360,11 @@ fn custom(kind: String, data: Option<&Value>) -> Body {
     };
     match kind.as_str() {
         "watershed.timing" => match data.and_then(|d| d.get("kind")).and_then(Value::as_str) {
-            Some("request") => Body::RequestTiming {
-                first_token_ms: millis("firstTokenMs"),
-                duration_ms: millis("durationMs"),
-            },
             Some("tool") => Body::ToolTiming {
                 call: text("toolCallId"),
+                duration_ms: millis("durationMs"),
+            },
+            Some("request") => Body::RequestTiming {
                 duration_ms: millis("durationMs"),
             },
             _ => Body::Custom,
@@ -427,43 +396,7 @@ fn custom(kind: String, data: Option<&Value>) -> Body {
     }
 }
 
-/// Reads a system message's prompt sections and tool changes.
-fn system(message: &Value) -> SystemChange {
-    let tools = || {
-        message
-            .get("toolsAdded")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-    };
-    SystemChange {
-        sections: message
-            .get("sections")
-            .and_then(Value::as_object)
-            .into_iter()
-            .flatten()
-            .map(|(name, text)| (name.clone(), text.as_str().map(|text| text.chars().count())))
-            .collect(),
-        appended_chars: content_text(message.get("content")).chars().count(),
-        tools_added: tools()
-            .filter_map(|tool| {
-                let name = visible_name(tool.get("name")?.as_str()?);
-                Some((name, tool.to_string().chars().count()))
-            })
-            .collect(),
-        tools_removed: message
-            .get("toolsRemoved")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|tool| tool.get("name").and_then(Value::as_str))
-            .map(visible_name)
-            .collect(),
-    }
-}
-
-/// Tool arguments as JSON text; when too long, every string in them is shortened instead, but
-/// for the path of the file a call changes, which the Trajectory reports whole.
+/// Tool arguments as JSON text; when too long, every string in them is shortened instead.
 fn arguments(value: &Value) -> String {
     let text = value.to_string();
     if text.len() <= ARGUMENT_BYTES {
@@ -482,13 +415,7 @@ fn arguments(value: &Value) -> String {
             other => other.clone(),
         }
     }
-    let mut short = shorten(value);
-    for name in PATH_ARGUMENTS {
-        if let (Some(path), Some(kept)) = (value.get(name), short.get_mut(name)) {
-            kept.clone_from(path);
-        }
-    }
-    short.to_string()
+    shorten(value).to_string()
 }
 
 /// `text` cut to `chars` characters, with an ellipsis when cut.
@@ -542,4 +469,38 @@ pub(crate) fn first_line(text: &str, chars: usize) -> String {
         .find(|line| !line.is_empty())
         .unwrap_or_default();
     line.chars().take(chars).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::History;
+    use crate::pi::TARGET_CHARS;
+
+    #[test]
+    fn a_long_call_keeps_only_a_bounded_text_and_its_transcript_target() {
+        let arguments = json!({"v": (0..100_000).collect::<Vec<u32>>()});
+        let response = json!({"role": "assistant", "content": [{
+            "type": "toolCall", "id": "c1", "name": "bash", "arguments": arguments,
+        }]});
+        let Body::Assistant { calls, .. } = message(Some(&response)) else {
+            panic!("an assistant message");
+        };
+        let [call] = calls.as_slice() else {
+            panic!("one call");
+        };
+        assert!(call.target.chars().count() <= TARGET_CHARS);
+
+        let session = json!({"entries": [
+            {"type": "message", "id": "a1", "parentId": null, "message": response},
+        ], "leafId": "a1"});
+        let shown = History::from_entries(&session).transcript(None, 10).items;
+        let target: String = arguments.to_string().chars().take(TARGET_CHARS).collect();
+        assert_eq!(
+            shown.iter().find_map(|item| item.target.clone()),
+            Some(target)
+        );
+    }
 }

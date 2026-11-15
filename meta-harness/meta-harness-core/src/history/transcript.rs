@@ -2,10 +2,9 @@
 
 use std::collections::HashMap;
 
-use super::entry::{Body, Entry, OpenCalls};
-use super::trajectory::path;
+use super::entry::{Body, Entry, OpenCalls, path};
 use super::{Transcript, TranscriptItem};
-use crate::pi::{call_target, item_kind};
+use crate::pi::item_kind;
 use crate::{ChangedLines, ItemKind};
 
 /// Whether a tool call failed, how long it ran and the lines it changed.
@@ -19,14 +18,33 @@ pub(super) fn transcript(
     limit: usize,
 ) -> Transcript {
     let path = path(entries, leaf);
-    // How each tool call ended, by its response and place there, from anywhere on the branch,
-    // so every page shows it.
+    let end = before
+        .and_then(|before| path.iter().position(|entry| entry.id == before))
+        .unwrap_or(path.len());
+    let start = end.saturating_sub(limit);
+    // How each tool call on the page ended, by its response and place there. A result follows its
+    // call, so the scan from the page's start stops once every call on the page has one.
+    let mut waiting: usize = path[start..end]
+        .iter()
+        .map(|entry| match &entry.body {
+            Body::Assistant { calls, .. } => calls.len(),
+            _ => 0,
+        })
+        .sum();
     let mut ended: HashMap<(&str, usize), Ended> = HashMap::new();
     let mut open = OpenCalls::default();
     let mut response = "";
-    for entry in &path {
+    for (index, entry) in path.iter().enumerate().skip(start) {
+        if waiting == 0 {
+            break;
+        }
         match &entry.body {
             Body::Assistant { calls, .. } => {
+                // A response starts over the open calls, so none of the page's calls can be
+                // answered from its start on, even when some never got a result.
+                if index >= end {
+                    break;
+                }
                 open.respond(calls);
                 response = &entry.id;
             }
@@ -34,25 +52,19 @@ pub(super) fn transcript(
             Body::ToolResult {
                 call,
                 failed,
-                outcome,
+                lines,
                 ..
             } => {
-                let lines = outcome
-                    .added
-                    .zip(outcome.removed)
-                    .map(|(added, removed)| ChangedLines { added, removed });
                 let duration_ms = open.timing(call).flatten();
+                // The open calls belong to the latest response, which is on the page.
                 if let Some((place, _)) = open.answer(call) {
-                    ended.insert((response, place), (*failed, duration_ms, lines));
+                    waiting = waiting.saturating_sub(1);
+                    ended.insert((response, place), (*failed, duration_ms, *lines));
                 }
             }
             _ => {}
         }
     }
-    let end = before
-        .and_then(|before| path.iter().position(|entry| entry.id == before))
-        .unwrap_or(path.len());
-    let start = end.saturating_sub(limit);
     let mut items = Vec::new();
     for entry in &path[start..end] {
         let item = |kind, text: &str| TranscriptItem {
@@ -92,7 +104,7 @@ pub(super) fn transcript(
                         .map(|added| ChangedLines { added, removed: 0 });
                     items.push(TranscriptItem {
                         tool: Some(call.name.clone()),
-                        target: Some(call_target(&call.arguments)),
+                        target: Some(call.target.clone()),
                         failed,
                         duration_ms,
                         lines: lines.or(written),

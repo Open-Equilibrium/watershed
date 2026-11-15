@@ -11,11 +11,14 @@ if (!executable) {
 } else {
   const root = mkdtempSync(join(tmpdir(), "watershed-rust-test-"));
   const home = join(root, "home");
+  // The per-user folders of Watershed's locks live in this home, never in the real one.
+  const userHome = join(root, "user-home");
   if (process.platform !== "win32") {
     mkdirSync(home, { mode: 0o700 });
+    mkdirSync(userHome, { mode: 0o700 });
   }
   const child = spawn(executable, args, {
-    env: { ...process.env, FLOW_AGENT_HOME: home },
+    env: { ...process.env, FLOW_AGENT_HOME: home, WATERSHED_TEST_USER_HOME: userHome },
     stdio: "inherit",
   });
   const forwardedSignals = ["SIGINT", "SIGTERM"];

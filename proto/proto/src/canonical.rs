@@ -100,7 +100,8 @@ pub fn parse_unique_json(source: &str) -> Result<Value, serde_json::Error> {
     serde_json::from_str::<UniqueJsonValue>(source).map(UniqueJsonValue::into_json)
 }
 
-pub(crate) fn is_nfc(value: &str) -> bool {
+/// Whether `value` is already in Unicode NFC form.
+pub fn is_nfc(value: &str) -> bool {
     value.nfc().eq(value.chars())
 }
 
@@ -115,6 +116,26 @@ pub(crate) fn nfc_string(value: String) -> String {
 pub(crate) fn nfc_json_string_values(mut value: Value) -> Value {
     nfc_json_string_values_in_place(&mut value);
     value
+}
+
+/// Location of the first object key that repeats after NFC normalization, at any depth.
+pub(crate) fn normalized_key_collision(value: &Value, location: &str) -> Option<String> {
+    match value {
+        Value::Object(values) => {
+            let mut normalized = HashSet::new();
+            values.iter().find_map(|(key, value)| {
+                let location = format!("{location}.{key}");
+                if !normalized.insert(key.nfc().collect::<String>()) {
+                    return Some(location);
+                }
+                normalized_key_collision(value, &location)
+            })
+        }
+        Value::Array(values) => values.iter().enumerate().find_map(|(index, value)| {
+            normalized_key_collision(value, &format!("{location}[{index}]"))
+        }),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => None,
+    }
 }
 
 fn nfc_json_string_values_in_place(value: &mut Value) {

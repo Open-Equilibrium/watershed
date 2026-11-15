@@ -8,10 +8,11 @@ use crate::runtime::{
     openai_codex::ProviderTurn,
     productive::{
         execute_productive_flow_with_recovery,
-        execute_productive_flow_with_tool_executor_and_recovery,
+        execute_productive_flow_with_tool_executor_and_recovery, tool_result_value,
     },
     responses::MAX_RESPONSES_DECODED_STREAM_BYTES,
     run_attempts::{RunAttemptKind, RunAttemptOutcome, RunAttemptResult},
+    tool_runner::{ToolExecutionOutcome, ToolTerminalClassification},
     types::{CANCELLED_REASON, MAX_PROVIDER_ERROR_MESSAGE_CHARS, RuntimeError},
 };
 use proto::EventType;
@@ -259,6 +260,49 @@ fn productive_recovery_reports_a_committed_provider_failure_without_redispatch()
 }
 
 #[test]
+fn productive_recovery_reports_a_committed_reply_invalid_without_redispatch() {
+    let (_workspace, fixture) = disabled_smoke_productive_execution_fixture();
+    let flow = fixture.smoke_flow();
+    let mut provider = FakeProvider::default();
+    let mut attempts = MemoryAttempts::default();
+    let mut sink = MemorySink::default();
+    let message =
+        "Flow Agent rejected the provider reply: response repeated function call id call-1";
+    let mut recovery = InjectedAttemptRecovery::ProviderResult(RunAttemptResult {
+        attempt_id: "provider-000001".to_owned(),
+        attempt_kind: RunAttemptKind::Provider,
+        outcome: RunAttemptOutcome::Failed,
+        classification: Some("provider_reply_invalid".to_owned()),
+        exit_code: None,
+        timestamp: "2026-07-30T12:00:00Z".to_owned(),
+        durable_output: Some(serde_json::json!({
+            "message": message,
+            "schema": "flow-provider-reply-invalid-v0",
+        })),
+    });
+
+    let execution = execute_productive_flow_with_recovery(
+        fixture.execution(flow, "productive-reply-invalid-recovery"),
+        &mut provider,
+        &mut attempts,
+        &mut sink,
+        &mut recovery,
+    )
+    .expect("recovered reply failure closes the session");
+
+    assert!(execution.failed);
+    assert_eq!(
+        execution
+            .terminal_error
+            .expect("reply failure remains reportable")
+            .to_string(),
+        format!("provider_reply_invalid: {message}")
+    );
+    assert!(provider.bodies.is_empty(), "provider must not rerun");
+    assert!(attempts.intents.is_empty(), "no new attempt is recorded");
+}
+
+#[test]
 fn productive_recovery_resumes_a_cancelled_provider_attempt() {
     let (_workspace, fixture) = disabled_smoke_productive_execution_fixture();
     let flow = fixture.smoke_flow();
@@ -292,6 +336,115 @@ fn productive_recovery_resumes_a_cancelled_provider_attempt() {
     assert!(provider.bodies.is_empty());
     assert!(attempts.intents.is_empty());
     assert_controlled_cancellation_lifecycle(&sink.0);
+}
+
+/// A completed Tool record whose Executor left its cleanup unknown, with `schema` and `mark`.
+fn cleanup_unknown_tool_output(schema: &str, mark: Option<bool>) -> serde_json::Value {
+    let mut output = fake_tool_attempt_output(serde_json::json!({
+        "type": "map",
+        "value": {
+            "schema": {"type": "string", "value": "flow-tool-result-v0"},
+            "status": {"type": "string", "value": "completed"},
+            "exit_code": {"type": "integer", "value": "0"},
+            "stdout": {"type": "string", "value": "stdout"},
+            "stderr": {"type": "string", "value": ""}
+        }
+    }));
+    output["schema"] = serde_json::json!(schema);
+    if let Some(mark) = mark {
+        output["process_cleanup_unknown"] = serde_json::json!(mark);
+    }
+    output
+}
+
+#[test]
+fn productive_recovery_stops_the_run_on_a_recorded_cleanup_unknown() {
+    let (_workspace, fixture) = smoke_productive_execution_fixture();
+    let flow = fixture.smoke_flow();
+    let mut provider = ScriptedProvider {
+        bodies: Vec::new(),
+        turns: VecDeque::from([single_tool_provider_turn("response-tool", "call-1")]),
+    };
+    let mut attempts = MemoryAttempts::default();
+    let mut sink = MemorySink::default();
+    let mut tools = FakeToolExecutor::default();
+    let mut recovery = InjectedAttemptRecovery::ToolResult(RunAttemptResult {
+        attempt_id: "tool-000001".to_owned(),
+        attempt_kind: RunAttemptKind::Tool,
+        outcome: RunAttemptOutcome::Completed,
+        classification: None,
+        exit_code: Some(0),
+        timestamp: "2026-07-30T12:00:00Z".to_owned(),
+        durable_output: Some(cleanup_unknown_tool_output(
+            "flow-tool-attempt-output-v2",
+            Some(true),
+        )),
+    });
+
+    let execution = execute_productive_flow_with_tool_executor_and_recovery(
+        fixture.execution(flow, "productive-cleanup-unknown-recovery"),
+        &mut provider,
+        &mut attempts,
+        &mut sink,
+        &mut tools,
+        &mut recovery,
+    )
+    .expect("a recorded cleanup-unknown Tool closes the Run on recovery");
+
+    assert!(execution.failed);
+    assert!(matches!(
+        execution.terminal_error,
+        Some(RuntimeError::ProcessCleanupUnknown)
+    ));
+    assert!(tools.invocations.is_empty(), "recovery must not redispatch");
+    assert_eq!(
+        provider.bodies.len(),
+        1,
+        "the Run stops before another turn"
+    );
+}
+
+#[test]
+fn productive_recovery_rejects_a_cleanup_mark_that_contradicts_its_schema() {
+    let (_workspace, fixture) = smoke_productive_execution_fixture();
+    let flow = fixture.smoke_flow();
+    for (name, schema, mark) in [
+        ("v1-with-mark", "flow-tool-attempt-output-v1", Some(true)),
+        ("v2-without-mark", "flow-tool-attempt-output-v2", None),
+    ] {
+        let mut provider = ScriptedProvider {
+            bodies: Vec::new(),
+            turns: VecDeque::from([single_tool_provider_turn("response-tool", "call-1")]),
+        };
+        let mut attempts = MemoryAttempts::default();
+        let mut sink = MemorySink::default();
+        let mut tools = FakeToolExecutor::default();
+        let mut recovery = InjectedAttemptRecovery::ToolResult(RunAttemptResult {
+            attempt_id: "tool-000001".to_owned(),
+            attempt_kind: RunAttemptKind::Tool,
+            outcome: RunAttemptOutcome::Completed,
+            classification: None,
+            exit_code: Some(0),
+            timestamp: "2026-07-30T12:00:00Z".to_owned(),
+            durable_output: Some(cleanup_unknown_tool_output(schema, mark)),
+        });
+
+        let error = execute_productive_flow_with_tool_executor_and_recovery(
+            fixture.execution(flow, &format!("productive-cleanup-mark-{name}")),
+            &mut provider,
+            &mut attempts,
+            &mut sink,
+            &mut tools,
+            &mut recovery,
+        )
+        .expect_err("a cleanup mark must match its schema");
+
+        assert!(
+            matches!(error, RuntimeError::Protocol(_)),
+            "{name}: {error}"
+        );
+        assert!(tools.invocations.is_empty(), "{name}");
+    }
 }
 
 #[test]
@@ -334,6 +487,131 @@ fn productive_recovery_resumes_a_cancelled_tool_attempt_without_redispatch() {
     assert!(tools.invocations.is_empty(), "the Tool must not redispatch");
     assert_eq!(attempts.intents.len(), 1, "only the Provider intent is new");
     assert_controlled_cancellation_lifecycle(&sink.0);
+}
+
+#[test]
+fn productive_recovery_replays_tool_started_only_for_a_started_cancellation() {
+    for (stage, expect_tool_started) in [("preflight", false), ("started", true)] {
+        let (_workspace, fixture) = smoke_productive_execution_fixture();
+        let flow = fixture.smoke_flow();
+        let mut provider = ScriptedProvider {
+            bodies: Vec::new(),
+            turns: VecDeque::from([single_tool_provider_turn("response-tool", "call-1")]),
+        };
+        let mut attempts = MemoryAttempts::default();
+        let mut sink = MemorySink::default();
+        let mut tools = FakeToolExecutor::default();
+        let mut recovery = InjectedAttemptRecovery::ToolResult(RunAttemptResult {
+            attempt_id: "tool-000001".to_owned(),
+            attempt_kind: RunAttemptKind::Tool,
+            outcome: RunAttemptOutcome::Cancelled,
+            classification: Some(CANCELLED_REASON.to_owned()),
+            exit_code: None,
+            timestamp: "2026-07-30T12:00:00Z".to_owned(),
+            durable_output: Some(serde_json::json!({
+                "schema": "flow-attempt-cancelled-v1",
+                "stage": stage,
+            })),
+        });
+
+        let execution = execute_productive_flow_with_tool_executor_and_recovery(
+            fixture.execution(flow, "productive-cancelled-tool-stage"),
+            &mut provider,
+            &mut attempts,
+            &mut sink,
+            &mut tools,
+            &mut recovery,
+        )
+        .expect("recovered Tool cancellation closes the enclosing lifecycle");
+
+        assert!(
+            matches!(execution.terminal_error, Some(RuntimeError::Cancelled)),
+            "{stage}"
+        );
+        assert!(tools.invocations.is_empty(), "{stage}: no redispatch");
+        assert_eq!(
+            sink.0
+                .iter()
+                .any(|event| event.event_type == EventType::ToolStarted),
+            expect_tool_started,
+            "{stage}: tool.started replays only for a started cancellation"
+        );
+    }
+}
+
+#[test]
+fn productive_recovery_closes_a_cancelled_tool_with_a_full_output_envelope() {
+    let durable = tool_result_value(&ToolExecutionOutcome {
+        status: RunAttemptOutcome::Cancelled,
+        classification: Some(ToolTerminalClassification::Cancelled),
+        exit_code: None,
+        stdout: b"stdout".to_vec(),
+        stderr: b"stderr".to_vec(),
+    })
+    .expect("cancelled Tool result becomes durable");
+    for (name, wrong_request_hash) in [("valid", false), ("mismatched-request", true)] {
+        let (_workspace, fixture) = smoke_productive_execution_fixture();
+        let flow = fixture.smoke_flow();
+        let mut provider = ScriptedProvider {
+            bodies: Vec::new(),
+            turns: VecDeque::from([single_tool_provider_turn("response-tool", "call-1")]),
+        };
+        let mut attempts = MemoryAttempts::default();
+        let mut sink = MemorySink::default();
+        let mut tools = FakeToolExecutor::default();
+        let mut output = fake_tool_attempt_output(
+            serde_json::to_value(&durable.value).expect("Tool value serializes"),
+        );
+        if wrong_request_hash {
+            output["request_hash"] = serde_json::json!("sha256:wrong");
+        }
+        let mut recovery = InjectedAttemptRecovery::ToolResult(RunAttemptResult {
+            attempt_id: "tool-000001".to_owned(),
+            attempt_kind: RunAttemptKind::Tool,
+            outcome: RunAttemptOutcome::Cancelled,
+            classification: Some(CANCELLED_REASON.to_owned()),
+            exit_code: None,
+            timestamp: "2026-07-30T12:00:00Z".to_owned(),
+            durable_output: Some(output),
+        });
+
+        let result = execute_productive_flow_with_tool_executor_and_recovery(
+            fixture.execution(flow, "productive-cancelled-tool-envelope"),
+            &mut provider,
+            &mut attempts,
+            &mut sink,
+            &mut tools,
+            &mut recovery,
+        );
+        assert!(tools.invocations.is_empty(), "{name}: no redispatch");
+        if wrong_request_hash {
+            let error = result.expect_err(name);
+            assert!(
+                matches!(error, RuntimeError::Protocol(_))
+                    && error.to_string().contains("request hash"),
+                "{name}: {error}"
+            );
+            continue;
+        }
+        let execution = result.expect("a cancelled Tool with a full output envelope recovers");
+        assert!(
+            matches!(execution.terminal_error, Some(RuntimeError::Cancelled)),
+            "{name}"
+        );
+        let tool_events: Vec<EventType> = sink
+            .0
+            .iter()
+            .map(|event| event.event_type)
+            .filter(|event_type| {
+                matches!(event_type, EventType::ToolStarted | EventType::ToolFailed)
+            })
+            .collect();
+        assert_eq!(
+            tool_events,
+            [EventType::ToolStarted, EventType::ToolFailed],
+            "{name}"
+        );
+    }
 }
 
 #[test]
@@ -394,8 +672,8 @@ fn productive_recovery_rejects_tampered_tool_bindings_before_redispatch() {
             "enforcement receipt does not match",
         ),
         (
-            "inactive-self-protection",
-            |output| output["enforcement"]["self_protection_active"] = false.into(),
+            "inactive-flow-owned-write-protection",
+            |output| output["enforcement"]["flow_owned_write_protection_active"] = false.into(),
             "enforcement receipt does not match",
         ),
     ];

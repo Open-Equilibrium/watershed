@@ -228,18 +228,18 @@ mod tests {
             return;
         }
 
-        let workspace = test_support::workspace_copy("sandbox-negative");
+        let workspace = test_support::workspace_copy("negative");
         flow_agent_core::conversation_status(&workspace, None, EmitMode::Jsonl)
             .expect("session store initializes");
         let session_dir = test_support::workspace_session_dir(&workspace);
         std::fs::create_dir_all(&session_dir).expect("session directory created");
         std::fs::write(
-            session_dir.join("sandbox-negative-write.jsonl"),
-            test_support::expected_stream("sandbox-negative", "sandbox-negative-write.jsonl"),
+            session_dir.join("negative-write.jsonl"),
+            test_support::expected_stream("negative", "negative-write.jsonl"),
         )
         .expect("failed session fixture copied");
-        let mut reader = SessionEventReader::open(&workspace, "sandbox-negative-write")
-            .expect("failed session opens");
+        let mut reader =
+            SessionEventReader::open(&workspace, "negative-write").expect("failed session opens");
         let mut cursor = 0;
         let mut observation = TailObservation::default();
 

@@ -8,7 +8,7 @@ use crate::runtime::{
     types::RuntimeError,
 };
 use std::{
-    cell::Cell,
+    cell::{Cell, OnceCell},
     fs, io,
     path::{Path, PathBuf},
 };
@@ -45,7 +45,10 @@ pub struct SessionOwnershipLease {
 
 #[derive(Debug)]
 pub(crate) struct SessionOwnershipObserver {
-    path: Option<AnchoredFile>,
+    path: OnceCell<AnchoredFile>,
+    // WHY: an authority directory that does not exist yet is looked up again on later polls.
+    workspace: PathBuf,
+    key: String,
 }
 
 impl SessionOwnershipObserver {
@@ -59,14 +62,28 @@ impl SessionOwnershipObserver {
         workspace: &AnchoredWorkspace,
         session_id: &str,
     ) -> Result<Self, RuntimeError> {
+        let path = match session_ownership_authority_path(workspace, session_id, false)? {
+            Some(path) => OnceCell::from(path),
+            None => OnceCell::new(),
+        };
         Ok(Self {
-            path: session_ownership_authority_path(workspace, session_id, false)?,
+            path,
+            workspace: workspace.canonical_path().to_owned(),
+            key: session_id.to_owned(),
         })
     }
 
     pub(crate) fn is_active(&self) -> Result<bool, RuntimeError> {
-        let Some(path) = self.path.as_ref() else {
-            return Ok(false);
+        let path = match self.path.get() {
+            Some(path) => path,
+            None => {
+                let workspace = open_session_ownership_workspace(&self.workspace)?;
+                let Some(found) = session_ownership_authority_path(&workspace, &self.key, false)?
+                else {
+                    return Ok(false);
+                };
+                self.path.get_or_init(|| found)
+            }
         };
         let file = match open_existing_authority_file(path) {
             Ok(file) => file,

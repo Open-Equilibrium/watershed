@@ -223,15 +223,15 @@ async function checkDocument(browser, doc, viewport) {
 
     if (doc.relativePath === "docs/decisions/open-decisions.html") {
       await assertDecisionPage(page);
-      await page.goto(`${pathToFileURL(doc.absolutePath).href}#d-074`, { waitUntil: "load" });
-      await page.locator("#d-074").getByRole("link", { name: "D-021", exact: true }).press("Enter");
+      await page.goto(`${pathToFileURL(doc.absolutePath).href}#d-107`, { waitUntil: "load" });
+      await page.locator("#d-107").getByRole("link", { name: "D-106", exact: true }).press("Enter");
       await page.keyboard.press("Tab");
-      if (await page.locator("#d-021 a:focus").count() !== 1) {
+      if (await page.locator("#d-106 a:focus").count() !== 1) {
         throw new Error(`${label}: Tab after a decision link must continue inside its destination`);
       }
       await page.keyboard.press("Shift+Tab");
       await page.keyboard.press("Enter");
-      if (await page.locator("#d-021 p").first().isVisible()) {
+      if (await page.locator("#d-106 p").first().isVisible()) {
         throw new Error(`${label}: keyboard navigation must return to the destination collapse control`);
       }
     }

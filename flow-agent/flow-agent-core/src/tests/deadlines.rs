@@ -154,10 +154,16 @@ fn elapsed_deadline_cancels_the_in_flight_future_once() {
 
     let cancelled = Arc::new(AtomicBool::new(false));
     let observed = Arc::clone(&cancelled);
+    let probe = Arc::clone(&cancelled);
     let result = block_on_network(async move {
-        let guard = PendingGuard(observed);
-        let _ = &guard;
-        await_deadline(Duration::from_millis(1), std::future::pending::<()>()).await
+        let result = await_deadline(Duration::from_millis(1), async move {
+            let _guard = PendingGuard(observed);
+            std::future::pending::<()>().await
+        })
+        .await;
+        // The timed-out future must be dropped by the time the deadline returns.
+        assert!(probe.load(Ordering::SeqCst));
+        result
     });
 
     assert!(matches!(result, Ok(Err(DeadlineElapsed))));
@@ -398,6 +404,18 @@ fn system_dns_capacity_is_shared_and_reclaimed_only_after_lookup_completion() {
             ..lookup_deadlines()
         },
     );
+    // Uncancelled, the request waits for a lookup slot that the held lookups keep.
+    assert!(
+        matches!(
+            waiting.recv_timeout(Duration::from_millis(250)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ),
+        "the request returned before it was cancelled"
+    );
+    assert!(matches!(
+        held.started.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
     cancelled.store(true, Ordering::Release);
     assert_lookup_command_error(waiting, false, true);
     assert!(matches!(

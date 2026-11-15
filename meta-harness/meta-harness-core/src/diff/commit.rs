@@ -1,7 +1,9 @@
 //! Whole-file commits and the checkout compared with its last commit. Explicit writes use
 //! the user's Git and hooks; snapshots keep the user's index intact.
 
-use super::process::{paths as nul_paths, sparse_checkout_enabled, user_git, user_git_input};
+use super::process::{
+    paths as nul_paths, project_bool, sparse_checkout_enabled, user_git, user_git_input,
+};
 use super::*;
 use std::collections::BTreeMap;
 
@@ -10,6 +12,9 @@ use std::collections::BTreeMap;
 pub struct Commit {
     /// The branch committed on.
     pub branch: String,
+    /// The branch the new branch was created from, or none when HEAD was detached or no
+    /// branch was created.
+    pub created_from: Option<String>,
     /// The committed first line after hooks, when it could be read.
     pub subject: Option<String>,
     /// A failed read after Git confirmed the commit; the write still succeeded.
@@ -175,21 +180,10 @@ impl WorkingTree {
         message: &str,
         branch: Option<&str>,
     ) -> Result<Commit, DiffError> {
-        if paths.is_empty() || message.trim().is_empty() {
-            return Err(DiffError::Git(
-                "Select files and write a commit message.".to_owned(),
-            ));
-        }
-        let status = self.status().await?;
-        if status.merging {
-            return Err(DiffError::MergeInProgress);
-        }
-        if status.branch.is_none() && branch.is_none() {
-            return Err(DiffError::NoBranch);
-        }
+        self.check_commit_request(paths, message, branch).await?;
         // Validate exact file identities against the displayed whole-file list. Literal
         // pathspecs below also keep names such as '*' from selecting other files.
-        let (_, before, files) = self.uncommitted_paths(Whitespace::Shown).await?;
+        let (from, before, files) = self.uncommitted_paths(Whitespace::Shown).await?;
         let changes: BTreeMap<String, ChangeStatus> = files
             .into_iter()
             .map(|file| (file.path, file.status))
@@ -209,24 +203,7 @@ impl WorkingTree {
             .iter()
             .filter_map(|entry| entry.split_once(' ').map(|(_, path)| path))
             .collect();
-        if changes
-            .keys()
-            .map(String::as_str)
-            .chain(tracked.iter().copied())
-            .any(|other| {
-                if selected.contains(other) {
-                    return false;
-                }
-                let prefix = format!("{other}/");
-                selected
-                    .range(prefix.as_str()..)
-                    .next()
-                    .is_some_and(|path| path.starts_with(&prefix))
-                    || other
-                        .match_indices('/')
-                        .any(|(end, _)| selected.contains(&other[..end]))
-            })
-        {
+        if partly_replaced(&changes, &tracked, &selected) {
             return Err(DiffError::Git(
                 "Select both sides of a file and directory replacement; resolve conflicting excluded staging in Git first.".to_owned(),
             ));
@@ -242,157 +219,304 @@ impl WorkingTree {
         {
             return Err(stale());
         }
-        if let Some(branch) = branch
-            && let Err(error) = self.create(branch).await
+        // Git's commit leaves a mode-only change out when core.fileMode is false, and would
+        // succeed without it, so the selection is refused before anything is written.
+        if !self
+            .skipped_mode_changes(&from, &before, &selected)
+            .await?
+            .is_empty()
         {
-            return Err(if matches!(error, DiffError::HookFailed(_)) {
-                DiffError::CommitOnBranchFailed {
-                    branch: branch.to_owned(),
-                    error: Box::new(error),
+            return Err(DiffError::Git(
+                "Git would skip the mode change of a selected file because core.fileMode is false. \
+                 Set core.fileMode to true, or commit that mode change in Git, first."
+                    .to_owned(),
+            ));
+        }
+        let created_from = match branch {
+            Some(branch) => match self.create(branch).await {
+                Ok(from) => from,
+                Err(DiffError::CreatedBranchHookFailed { from, error }) => {
+                    return Err(DiffError::CommitOnBranchFailed {
+                        branch: branch.to_owned(),
+                        from,
+                        error,
+                    });
                 }
-            } else {
-                error
+                Err(error) => return Err(error),
+            },
+            None => None,
+        };
+        let committed = self
+            .commit_selected(&selected, &changes, &entries, &tracked, message)
+            .await
+            .map_err(|error| match branch {
+                Some(branch) => DiffError::CommitOnBranchFailed {
+                    branch: branch.to_owned(),
+                    from: created_from.clone(),
+                    error: Box::new(error),
+                },
+                None => error,
+            })?;
+        Ok(self.inspect_commit(committed, created_from, &before).await)
+    }
+
+    /// The selected files whose mode changed, which Git's commit leaves out while the user's
+    /// `core.fileMode` is false, also when their contents change too; Liquid reads modes
+    /// regardless of that setting.
+    async fn skipped_mode_changes(
+        &self,
+        from: &Snapshot,
+        to: &Snapshot,
+        selected: &BTreeSet<&str>,
+    ) -> Result<Vec<String>, DiffError> {
+        if project_bool(&self.root, "core.fileMode").await? != Some(false) {
+            return Ok(Vec::new());
+        }
+        let raw = process::git_path_output(
+            &self.root,
+            &[],
+            &[
+                "diff-tree",
+                "-r",
+                "--raw",
+                "--no-abbrev",
+                "-z",
+                "--no-renames",
+                &from.0,
+                &to.0,
+            ],
+        )
+        .await?;
+        // Each record is `:<old mode> <new mode> <old object> <new object> <status>`, then its path.
+        let mut records = raw.split('\0');
+        let mut skipped = Vec::new();
+        while let (Some(header), Some(path)) = (records.next(), records.next()) {
+            let mut fields = header.trim_start_matches(':').split(' ');
+            let (old_mode, new_mode) = (fields.next(), fields.next());
+            // Only an executable-bit flip depends on core.fileMode; an added or deleted file
+            // (mode 000000) or a type change is committed either way.
+            let flips = matches!(
+                (old_mode, new_mode),
+                (Some("100644"), Some("100755")) | (Some("100755"), Some("100644"))
+            );
+            if flips && selected.contains(path) {
+                skipped.push(path.to_owned());
+            }
+        }
+        Ok(skipped)
+    }
+
+    /// Refuses a commit with no files or no message, during a merge, or with no branch to
+    /// commit on.
+    async fn check_commit_request(
+        &self,
+        paths: &[String],
+        message: &str,
+        branch: Option<&str>,
+    ) -> Result<(), DiffError> {
+        if paths.is_empty() || message.trim().is_empty() {
+            return Err(DiffError::Git(
+                "Select files and write a commit message.".to_owned(),
+            ));
+        }
+        let status = self.status().await?;
+        if status.merging {
+            return Err(DiffError::MergeInProgress);
+        }
+        if status.branch.is_none() && branch.is_none() {
+            return Err(DiffError::NoBranch);
+        }
+        Ok(())
+    }
+
+    /// Commits the selected files alone with Git's --only, so the index entries of the other
+    /// files stay as they are. Returns the branch committed on.
+    async fn commit_selected(
+        &self,
+        selected: &BTreeSet<&str>,
+        changes: &BTreeMap<String, ChangeStatus>,
+        entries: &[String],
+        tracked: &HashSet<&str>,
+        message: &str,
+    ) -> Result<String, DiffError> {
+        let branch = self.branch().await?.ok_or(DiffError::NoBranch)?;
+        let path_file = self.store.0.join("commit-paths");
+        let message_file = self.store.0.join("commit-message");
+        let path_arg = format!("--pathspec-from-file={}", path_file.display());
+        self.clear_skip_marks(entries, selected).await?;
+        // An untracked file must first be known to Git for --only. Intent-to-add leaves its
+        // content unstaged, also if the user's hook refuses the commit.
+        let new: Vec<&str> = selected
+            .iter()
+            .copied()
+            .filter(|path| !tracked.contains(*path) && changes[*path] != ChangeStatus::Deleted)
+            .collect();
+        if !new.is_empty() {
+            write_pathspec(&path_file, new)?;
+            user_git(
+                &self.root,
+                &["add", "--intent-to-add", &path_arg, "--pathspec-file-nul"],
+            )
+            .await?;
+        }
+        // Staged deletions are absent from the index too; --only records them without adding a
+        // missing path.
+        write_pathspec(&path_file, only_paths(&self.root, selected))?;
+        std::fs::write(&message_file, message).map_err(DiffError::Io)?;
+        let message_arg = format!("--file={}", message_file.display());
+        if let Err(error) = user_git(
+            &self.root,
+            &[
+                "commit",
+                "--only",
+                &message_arg,
+                &path_arg,
+                "--pathspec-file-nul",
+            ],
+        )
+        .await
+        {
+            return Err(match error {
+                DiffError::Git(output) => DiffError::CommitFailed(output),
+                error => error,
             });
         }
-        let mut did_commit = false;
-        let committed = async {
-            let branch = self.branch().await?.ok_or(DiffError::NoBranch)?;
-            let path_file = self.store.0.join("commit-paths");
-            let message_file = self.store.0.join("commit-message");
-            let write_paths = |paths: Vec<&str>| -> Result<(), DiffError> {
-                let mut input = Vec::new();
-                for path in paths {
-                    input.extend_from_slice(format!(":(top,literal){path}").as_bytes());
-                    input.push(0);
-                }
-                std::fs::write(&path_file, input).map_err(DiffError::Io)
-            };
-            let path_arg = format!("--pathspec-from-file={}", path_file.display());
-            // An untracked file must first be known to Git for --only. Intent-to-add leaves its
-            // content unstaged, also if the user's hook refuses the commit. Staged deletions
-            // are absent from the index too; --only records them without adding a missing path.
-            let sparse = sparse_checkout_enabled(&self.root).await?;
-            let mut marked = Vec::new();
-            let mut present = Vec::new();
-            for entry in &entries {
-                if let [tag, b' ', path @ ..] = entry.as_bytes()
-                    && (tag.is_ascii_lowercase() || *tag == b'S')
-                    && selected.contains(std::str::from_utf8(path).expect("decoded pathname"))
-                {
-                    marked.extend_from_slice(path);
-                    marked.push(0);
-                    // A skip mark on a file that sparse checkout leaves out of the work stays:
-                    // such a file holds no edit.
-                    if !left_out_by_sparse(&self.root, path, sparse) {
-                        present.extend_from_slice(path);
-                        present.push(0);
-                    }
-                }
-            }
-            // The dialog includes hidden edits; --only would silently skip marked files.
-            // Clear only selected marks, leaving excluded index entries and flags intact.
-            for (mark, paths) in [
-                ("--no-assume-unchanged", &marked),
-                ("--no-skip-worktree", &present),
-            ] {
-                if !paths.is_empty() {
-                    user_git_input(&self.root, &["update-index", mark, "-z", "--stdin"], paths)
-                        .await?;
-                }
-            }
-            let new: Vec<&str> = selected
-                .iter()
-                .copied()
-                .filter(|path| !tracked.contains(*path) && changes[*path] != ChangeStatus::Deleted)
-                .collect();
-            if !new.is_empty() {
-                write_paths(new)?;
-                user_git(
-                    &self.root,
-                    &["add", "--intent-to-add", &path_arg, "--pathspec-file-nul"],
-                )
-                .await?;
-            }
-            // A selected deleted file whose place is now a directory must not be handed to
-            // --only: Git would try to add that directory as a gitlink. Adding its selected
-            // descendants removes the conflicting old index entry and records the deletion.
-            write_paths(
-                selected
-                    .iter()
-                    .copied()
-                    .filter(|path| {
-                        if !std::fs::symlink_metadata(self.root.join(path))
-                            .is_ok_and(|meta| meta.is_dir())
-                        {
-                            return true;
-                        }
-                        let prefix = format!("{path}/");
-                        !selected
-                            .range(prefix.as_str()..)
-                            .next()
-                            .is_some_and(|other| other.starts_with(&prefix))
-                    })
-                    .collect(),
-            )?;
-            std::fs::write(&message_file, message).map_err(DiffError::Io)?;
-            let message_arg = format!("--file={}", message_file.display());
-            if let Err(error) = user_git(
-                &self.root,
-                &[
-                    "commit",
-                    "--only",
-                    &message_arg,
-                    &path_arg,
-                    "--pathspec-file-nul",
-                ],
-            )
-            .await
+        Ok(branch)
+    }
+
+    /// Clears the skip marks of the selected files, which hide their edits from --only. The
+    /// marks of excluded files and every other index flag stay.
+    async fn clear_skip_marks(
+        &self,
+        entries: &[String],
+        selected: &BTreeSet<&str>,
+    ) -> Result<(), DiffError> {
+        let sparse = sparse_checkout_enabled(&self.root).await?;
+        let mut marked = Vec::new();
+        let mut present = Vec::new();
+        for entry in entries {
+            if let [tag, b' ', path @ ..] = entry.as_bytes()
+                && (tag.is_ascii_lowercase() || *tag == b'S')
+                && selected.contains(std::str::from_utf8(path).expect("decoded pathname"))
             {
-                return Err(match error {
-                    DiffError::Git(output) => DiffError::CommitFailed(output),
-                    error => error,
-                });
+                marked.extend_from_slice(path);
+                marked.push(0);
+                // A skip mark on a file that sparse checkout leaves out of the work stays:
+                // such a file holds no edit.
+                if !left_out_by_sparse(&self.root, path, sparse) {
+                    present.extend_from_slice(path);
+                    present.push(0);
+                }
             }
-            did_commit = true;
-            let mut subject = None;
-            let inspected: Result<Vec<String>, DiffError> = async {
-                subject = Some(
-                    git(&self.root, &[], &["log", "-1", "--format=%s"])
-                        .await?
-                        .trim_end_matches('\n')
-                        .to_owned(),
-                );
-                let (_, after, uncommitted) = self.uncommitted_paths(Whitespace::Shown).await?;
-                let uncommitted: HashSet<_> =
-                    uncommitted.into_iter().map(|file| file.path).collect();
-                let hook_changed = self
-                    .changes(&before, &after, Whitespace::Shown)
+        }
+        // The dialog includes hidden edits; --only would silently skip marked files.
+        // Clear only selected marks, leaving excluded index entries and flags intact.
+        for (mark, paths) in [
+            ("--no-assume-unchanged", &marked),
+            ("--no-skip-worktree", &present),
+        ] {
+            if !paths.is_empty() {
+                user_git_input(&self.root, &["update-index", mark, "-z", "--stdin"], paths).await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Reads the committed subject and the hook changes once the commit has succeeded. A failure
+    /// here is reported in the Commit, not returned, as the write still succeeded.
+    async fn inspect_commit(
+        &self,
+        branch: String,
+        created_from: Option<String>,
+        before: &Snapshot,
+    ) -> Commit {
+        let mut subject = None;
+        let inspected: Result<Vec<String>, DiffError> = async {
+            subject = Some(
+                git(&self.root, &[], &["log", "-1", "--format=%s"])
                     .await?
-                    .into_iter()
-                    .map(|file| file.path)
-                    .filter(|path| uncommitted.contains(path))
-                    .collect::<Vec<_>>();
-                Ok(hook_changed)
-            }
-            .await;
-            let (hook_changed, inspection_error) = match inspected {
-                Ok(paths) => (paths, None),
-                Err(error) => (Vec::new(), Some(error.to_string())),
-            };
-            Ok(Commit {
-                branch,
-                subject,
-                inspection_error,
-                hook_changed,
-            })
+                    .trim_end_matches('\n')
+                    .to_owned(),
+            );
+            let (_, after, uncommitted) = self.uncommitted_paths(Whitespace::Shown).await?;
+            let uncommitted: HashSet<_> = uncommitted.into_iter().map(|file| file.path).collect();
+            let hook_changed = self
+                .changes(before, &after, Whitespace::Shown)
+                .await?
+                .into_iter()
+                .map(|file| file.path)
+                .filter(|path| uncommitted.contains(path))
+                .collect::<Vec<_>>();
+            Ok(hook_changed)
         }
         .await;
-        committed.map_err(|error| match branch {
-            Some(branch) if !did_commit => DiffError::CommitOnBranchFailed {
-                branch: branch.to_owned(),
-                error: Box::new(error),
-            },
-            _ => error,
-        })
+        let (hook_changed, inspection_error) = match inspected {
+            Ok(paths) => (paths, None),
+            Err(error) => (Vec::new(), Some(error.to_string())),
+        };
+        Commit {
+            branch,
+            created_from,
+            subject,
+            inspection_error,
+            hook_changed,
+        }
     }
+}
+
+/// Whether an unselected path in the checkout or index is a parent or child of a selected
+/// path, so the commit would take only part of a file and directory replacement.
+fn partly_replaced(
+    changes: &BTreeMap<String, ChangeStatus>,
+    tracked: &HashSet<&str>,
+    selected: &BTreeSet<&str>,
+) -> bool {
+    changes
+        .keys()
+        .map(String::as_str)
+        .chain(tracked.iter().copied())
+        .any(|other| {
+            if selected.contains(other) {
+                return false;
+            }
+            let prefix = format!("{other}/");
+            selected
+                .range(prefix.as_str()..)
+                .next()
+                .is_some_and(|path| path.starts_with(&prefix))
+                || other
+                    .match_indices('/')
+                    .any(|(end, _)| selected.contains(&other[..end]))
+        })
+}
+
+/// The selected paths for --only. A selected deleted file whose place is now a directory is
+/// left out, as Git would add that directory as a gitlink; its selected descendants remove the
+/// conflicting old index entry and record the deletion.
+fn only_paths<'a>(root: &Path, selected: &BTreeSet<&'a str>) -> Vec<&'a str> {
+    selected
+        .iter()
+        .copied()
+        .filter(|path| {
+            if !std::fs::symlink_metadata(root.join(path)).is_ok_and(|meta| meta.is_dir()) {
+                return true;
+            }
+            let prefix = format!("{path}/");
+            !selected
+                .range(prefix.as_str()..)
+                .next()
+                .is_some_and(|other| other.starts_with(&prefix))
+        })
+        .collect()
+}
+
+/// Writes `paths` to `file` as the literal, NUL-separated pathspecs that `--pathspec-from-file`
+/// reads.
+fn write_pathspec(file: &Path, paths: Vec<&str>) -> Result<(), DiffError> {
+    let mut input = Vec::new();
+    for path in paths {
+        input.extend_from_slice(format!(":(top,literal){path}").as_bytes());
+        input.push(0);
+    }
+    std::fs::write(file, input).map_err(DiffError::Io)
 }

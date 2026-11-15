@@ -13,6 +13,7 @@ mod context;
 mod conversations;
 mod credential_store;
 mod deadlines;
+mod endpoint_credential;
 mod event_data_capacity;
 mod event_writer;
 mod executor;

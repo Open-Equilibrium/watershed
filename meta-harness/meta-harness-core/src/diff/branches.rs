@@ -5,6 +5,20 @@ use super::process::{git_bytes, git_config, git_ref_output, ref_text, timestamp_
 use super::stash::listed_files;
 use super::*;
 
+/// Runs before the next branch creation in the checkout at a root, after its base is read, as
+/// another Git moving HEAD would.
+#[cfg(test)]
+static BEFORE_CREATE: std::sync::Mutex<Vec<super::stash::Hook>> = std::sync::Mutex::new(Vec::new());
+
+/// Runs `hook` once before the next branch creation in the checkout at `root`.
+#[cfg(test)]
+pub(crate) fn before_create_base(root: &Path, hook: impl FnOnce() + Send + 'static) {
+    BEFORE_CREATE
+        .lock()
+        .expect("hooks")
+        .push((std::fs::canonicalize(root).expect("root"), Box::new(hook)));
+}
+
 /// The checkout's branch and how it stands against its upstream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitStatus {
@@ -228,10 +242,16 @@ impl WorkingTree {
             .map(|line| line.split('\0').collect())
             .filter(|row: &Vec<&str>| row.len() == 5)
             .collect();
-        let tracked: HashSet<&str> = rows
-            .iter()
-            .filter(|row| row[0].starts_with("refs/heads/"))
-            .map(|row| row[2])
+        // Every local branch counts, also one the cap leaves out, so no tracked remote is listed.
+        let upstreams = git_bytes(
+            &self.root,
+            &[],
+            &["for-each-ref", "--format=%(upstream)", "refs/heads"],
+        )
+        .await?;
+        let tracked: HashSet<&str> = upstreams
+            .split(|byte| *byte == b'\n')
+            .filter_map(|line| std::str::from_utf8(line).ok())
             .collect();
         let mut branches: Vec<Branch> = rows
             .iter()
@@ -328,19 +348,40 @@ impl WorkingTree {
     }
 
     /// Creates the branch `name` at the current commit and switches to it, unless Git refuses
-    /// the name.
-    pub async fn create(&self, name: &str) -> Result<(), DiffError> {
+    /// the name. Returns the branch it was created from, or none when HEAD was detached.
+    pub async fn create(&self, name: &str) -> Result<Option<String>, DiffError> {
         let name = branch_name(name)?;
         git(&self.root, &[], &["check-ref-format", "--branch", name])
             .await
             .map_err(|_| DiffError::InvalidBranch(name.to_owned()))?;
         let start = self.head().await?;
-        self.switching(
-            &["switch", "-c", name],
-            &start,
-            &BranchTarget::Local(name.to_owned()),
-        )
-        .await
+        let from = start.0.strip_prefix("refs/heads/").map(str::to_owned);
+        #[cfg(test)]
+        super::stash::run_hook(&BEFORE_CREATE, &self.root);
+        // Git starts the branch where the base it reports is: its branch, or else the commit HEAD
+        // names when detached. Git's own HEAD may have moved since the read above.
+        let base = start.1.as_ref().map(|commit| {
+            if from.is_some() {
+                start.0.as_str()
+            } else {
+                commit.as_str()
+            }
+        });
+        let args: Vec<&str> = ["switch", "--no-overwrite-ignore", "-c", name]
+            .into_iter()
+            .chain(base)
+            .collect();
+        match self
+            .switching(&args, &start, &BranchTarget::Local(name.to_owned()))
+            .await
+        {
+            Ok(()) => Ok(from),
+            Err(error @ DiffError::HookFailed(_)) => Err(DiffError::CreatedBranchHookFailed {
+                from,
+                error: Box::new(error),
+            }),
+            Err(error) => Err(error),
+        }
     }
 
     /// Runs the switch `args` from HEAD `start`. Git exits with a failing `post-checkout` hook's
@@ -392,15 +433,16 @@ impl WorkingTree {
         Ok((name, self.resolve("HEAD").await?))
     }
 
-    /// Fetches the upstream remote, origin or the sole remote, through checked destinations.
-    pub async fn fetch(&self) -> Result<bool, DiffError> {
+    /// Fetches the upstream remote, origin or the sole remote, through checked destinations;
+    /// returns the remote fetched, or none when there is no remote to fetch.
+    pub async fn fetch(&self) -> Result<Option<String>, DiffError> {
         let branch = self.branch().await?;
         let (remote, _) = self.remote(branch.as_deref()).await?;
         let Some(remote) = remote.filter(|remote| remote != ".") else {
-            return Ok(false);
+            return Ok(None);
         };
         self.fetch_remote(&remote).await?;
-        Ok(true)
+        Ok(Some(remote))
     }
 
     /// Fetches this named remote through the same destination checks for all callers.

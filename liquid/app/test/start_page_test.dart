@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid/src/agent/session_menus.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/agent/start_page.dart';
@@ -19,6 +21,17 @@ const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
 void main() {
   late FakeBackend backend;
   late SessionState state;
+  // The targets the system's opener was asked to show, instead of starting Finder.
+  final opened = <String>[];
+
+  setUp(() {
+    opened.clear();
+    runOpener = (program, arguments) async {
+      opened.add(arguments.single);
+      return ProcessResult(0, 0, '', '');
+    };
+  });
+  tearDown(() => runOpener = Process.run);
 
   Future<void> show(
     WidgetTester tester, {
@@ -270,6 +283,77 @@ void main() {
     );
   });
 
+  testWidgets(
+    'exports a recent session’s record into Downloads and shows it in Finder',
+    (tester) async {
+      await show(
+        tester,
+        setUp: () => backend.storedSessions = [
+          BridgeStoredSession(
+            path: '/sessions/a.jsonl',
+            title: 'Rate limit for /login',
+            modifiedMs: DateTime.now().millisecondsSinceEpoch,
+          ),
+        ],
+      );
+      await rightClick(tester, find.text('Rate limit for /login'));
+      await tester.tap(find.text('Export record'));
+      await tester.pumpAndSettle();
+      expect(backend.calls, contains('export /sessions/a.jsonl'));
+      expect(opened, [backend.exportFolder], reason: 'the new folder is shown');
+      expect(
+        (state.notice.value?.level, state.notice.value?.text),
+        (
+          BridgeLevel.info,
+          'Exported the record of “Rate limit for /login” to Downloads.',
+        ),
+      );
+      await tester.pump(const Duration(seconds: 7));
+    },
+  );
+
+  testWidgets('says that nothing was exported when the export fails', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      setUp: () => backend
+        ..storedSessions = [
+          BridgeStoredSession(
+            path: '/sessions/a.jsonl',
+            title: 'Rate limit for /login',
+            modifiedMs: DateTime.now().millisecondsSinceEpoch,
+          ),
+        ]
+        ..exportError = 'disk full',
+    );
+    await rightClick(tester, find.text('Rate limit for /login'));
+    await tester.tap(find.text('Export record'));
+    await tester.pumpAndSettle();
+    expect(
+      (state.notice.value?.level, state.notice.value?.text),
+      (BridgeLevel.error, 'Nothing was exported: disk full'),
+    );
+    expect(opened, isEmpty, reason: 'no folder is shown');
+  });
+
+  testWidgets('exports the open session from its menu', (tester) async {
+    await show(tester);
+    state.sessionTitle.value = 'Fix flaky sync test';
+    await tester.pumpAndSettle();
+    await rightClick(
+      tester,
+      find.descendant(
+        of: find.byType(Sidebar),
+        matching: find.text('Fix flaky sync test'),
+      ),
+    );
+    await tester.tap(find.text('Export record'));
+    await tester.pumpAndSettle();
+    expect(backend.calls, contains('export /sessions/open.jsonl'));
+    await tester.pump(const Duration(seconds: 7));
+  });
+
   testWidgets('asks about no other session than the one it deletes', (
     tester,
   ) async {
@@ -295,6 +379,82 @@ void main() {
     expect(find.text('Delete “Session B”?'), findsNothing);
     expect(backend.calls.where((call) => call.startsWith('delete')), isEmpty);
   });
+
+  testWidgets(
+    'a question that arrives while a deletion is prepared keeps the keys',
+    (tester) async {
+      await show(
+        tester,
+        setUp: () => backend
+          ..storedSessions = [
+            BridgeStoredSession(
+              path: '/sessions/a.jsonl',
+              title: 'Rate limit for /login',
+              modifiedMs: DateTime.now().millisecondsSinceEpoch,
+            ),
+          ]
+          ..storedTurnsGate = Completer(),
+      );
+      await rightClick(tester, find.text('Rate limit for /login'));
+      await tester.tap(find.text('Delete session…'));
+      await tester.pump();
+      backend.controller.add(
+        event(
+          BridgeEventKind.userInputRequested,
+          request: BridgeRequest(
+            id: 'q1',
+            question: BridgeQuestion(
+              kind: BridgeQuestionKind.confirm,
+              title: 'Deploy now?',
+              detail: '',
+              options: const [],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      backend.storedTurnsGate!.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('Delete “Rate limit for /login”?'), findsNothing);
+      expect(backend.calls.where((call) => call.startsWith('delete')), isEmpty);
+    },
+  );
+
+  testWidgets(
+    'a question that arrives while checkpoints are read keeps the keys',
+    (tester) async {
+      await show(
+        tester,
+        setUp: () => backend
+          ..checkpointed = const [
+            BridgeCheckpointSession(title: 'Rate limit for /login', turns: 3),
+          ]
+          ..checkpointGate = Completer(),
+      );
+      await rightClick(tester, find.text('acme-api').first);
+      await tester.tap(find.text('Remove all checkpoints…'));
+      await tester.pump();
+      backend.controller.add(
+        event(
+          BridgeEventKind.userInputRequested,
+          request: BridgeRequest(
+            id: 'q1',
+            question: BridgeQuestion(
+              kind: BridgeQuestionKind.confirm,
+              title: 'Deploy now?',
+              detail: '',
+              options: const [],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      backend.checkpointGate!.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('Remove all checkpoints of acme-api?'), findsNothing);
+      expect(backend.calls, isNot(contains('remove all checkpoints')));
+    },
+  );
 
   testWidgets('removes all checkpoints of the project from its menu', (
     tester,

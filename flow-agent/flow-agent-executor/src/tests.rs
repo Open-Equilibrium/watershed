@@ -100,7 +100,7 @@ fn protocol_probe_is_one_canonical_document() {
     assert_eq!(
         probe.supported_policy_features,
         if probe.ready {
-            vec![proto::EXECUTOR_FEATURE_SELF_PROTECTION_V0.to_owned()]
+            vec![proto::EXECUTOR_FEATURE_FLOW_OWNED_WRITE_PROTECTION_V0.to_owned()]
         } else {
             Vec::new()
         }
@@ -223,7 +223,7 @@ fn one_exact_start_dispatches_once_and_flushes_the_bound_receipt() {
             executor: proto::EXECUTOR_NAME_V0.to_owned(),
             executor_version: env!("CARGO_PKG_VERSION").to_owned(),
             platform: crate::backend::PLATFORM.to_owned(),
-            self_protection_active: true,
+            flow_owned_write_protection_active: true,
         },
         request_id: request.request_id.clone(),
         schema: proto::EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),

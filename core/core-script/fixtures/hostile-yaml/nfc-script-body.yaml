@@ -1,0 +1,9 @@
+tool:
+  id: write-summary
+  name: WriteSummary
+  tool_kind: own-script
+  command: script:write-summary
+  script_runtime: posix-sh
+  script_body: |
+    printf "%s" "café" > out/summary.txt
+  allowed_parameters: []

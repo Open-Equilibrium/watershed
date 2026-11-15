@@ -1,5 +1,6 @@
 use crate::runtime::{
     context::{CONTEXT_SAFETY_MARGIN, ContextModelProfile, OPERATOR_MODEL_PROFILE_ID},
+    endpoint_credential::OPENAI_COMPATIBLE_PROVIDER_ID,
     fs_guards::{AnchoredDir, read_anchored_to_string_with_limit},
     openai_codex::OPENAI_CODEX_PROVIDER_ID,
     session_store::{flow_agent_home_path, open_flow_agent_home_at},
@@ -118,6 +119,10 @@ pub enum ExecutionBackend {
         model: String,
         model_profile: ContextModelProfile,
     },
+    OpenAiCompatible {
+        model: String,
+        model_profile: ContextModelProfile,
+    },
 }
 
 pub fn require_execution_backend(config: &GlobalConfig) -> Result<ExecutionBackend, RuntimeError> {
@@ -135,17 +140,17 @@ pub fn require_execution_backend(config: &GlobalConfig) -> Result<ExecutionBacke
     }
     let provider = config.provider.as_deref().ok_or_else(|| {
         RuntimeError::Usage(format!(
-            "{GLOBAL_CONFIG_PATH} requires provider: {OPENAI_CODEX_PROVIDER_ID} for productive execution"
+            "{GLOBAL_CONFIG_PATH} requires provider: {OPENAI_CODEX_PROVIDER_ID} or {OPENAI_COMPATIBLE_PROVIDER_ID} for productive execution"
         ))
     })?;
-    if provider != OPENAI_CODEX_PROVIDER_ID {
+    if provider != OPENAI_CODEX_PROVIDER_ID && provider != OPENAI_COMPATIBLE_PROVIDER_ID {
         return Err(RuntimeError::Usage(format!(
             "unsupported {GLOBAL_CONFIG_PATH} provider {provider:?}"
         )));
     }
     let model = config.model.as_deref().ok_or_else(|| {
         RuntimeError::Usage(format!(
-            "{GLOBAL_CONFIG_PATH} provider {OPENAI_CODEX_PROVIDER_ID} requires model"
+            "{GLOBAL_CONFIG_PATH} provider {provider} requires model"
         ))
     })?;
     let model_scalars = model.chars().count();
@@ -166,12 +171,12 @@ pub fn require_execution_backend(config: &GlobalConfig) -> Result<ExecutionBacke
     }
     let model_context_limit = config.model_context_limit.ok_or_else(|| {
         RuntimeError::Usage(format!(
-            "{GLOBAL_CONFIG_PATH} provider {OPENAI_CODEX_PROVIDER_ID} requires model_context_limit"
+            "{GLOBAL_CONFIG_PATH} provider {provider} requires model_context_limit"
         ))
     })?;
     let output_reserve = config.output_reserve.ok_or_else(|| {
         RuntimeError::Usage(format!(
-            "{GLOBAL_CONFIG_PATH} provider {OPENAI_CODEX_PROVIDER_ID} requires output_reserve"
+            "{GLOBAL_CONFIG_PATH} provider {provider} requires output_reserve"
         ))
     })?;
     let context_limit = usize::try_from(model_context_limit).map_err(|_| {
@@ -195,16 +200,26 @@ pub fn require_execution_backend(config: &GlobalConfig) -> Result<ExecutionBacke
             "{GLOBAL_CONFIG_PATH} model_context_limit must leave a positive input budget after output_reserve and the Flow safety margin"
         )));
     }
-    Ok(ExecutionBackend::OpenAiCodex {
-        model: model.to_owned(),
-        model_profile,
+    let model = model.to_owned();
+    Ok(if provider == OPENAI_COMPATIBLE_PROVIDER_ID {
+        ExecutionBackend::OpenAiCompatible {
+            model,
+            model_profile,
+        }
+    } else {
+        ExecutionBackend::OpenAiCodex {
+            model,
+            model_profile,
+        }
     })
 }
 
 pub fn require_fixture_execution_backend(config: &GlobalConfig) -> Result<(), RuntimeError> {
     match require_execution_backend(config)? {
         ExecutionBackend::Fixture => Ok(()),
-        ExecutionBackend::OpenAiCodex { .. } => Err(RuntimeError::ExecutionBackendUnavailable),
+        ExecutionBackend::OpenAiCodex { .. } | ExecutionBackend::OpenAiCompatible { .. } => {
+            Err(RuntimeError::ExecutionBackendUnavailable)
+        }
     }
 }
 

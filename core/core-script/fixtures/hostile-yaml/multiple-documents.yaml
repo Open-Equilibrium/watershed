@@ -1,0 +1,9 @@
+instruction:
+  id: inspect
+  name: Inspect
+  prompt: Inspect input
+---
+instruction:
+  id: inspect
+  name: Inspect
+  prompt: Inspect input

@@ -11,7 +11,9 @@ pub(crate) use client::{
     PreparedExecutorWaiting,
 };
 #[cfg(test)]
-pub(crate) use config::{EXECUTOR_CONFIG_MAX_BYTES, ExecutorConfigStore};
+pub(crate) use config::{
+    EXECUTOR_CONFIG_MAX_BYTES, ExecutorConfigStore, set_configure_lock_observer,
+};
 #[cfg(test)]
 pub(crate) use selection::default_executor_path;
 pub use selection::{

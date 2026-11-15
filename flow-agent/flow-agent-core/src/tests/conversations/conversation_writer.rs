@@ -18,8 +18,9 @@ use crate::runtime::{
     digest::sha256_hex,
     event_writer::RuntimeEventSink,
     fs_guards::{
+        PowerLoss, apply_power_loss, finish_durable_trace,
         set_directory_sync_error_for_path_for_test, start_directory_sync_trace_for_test,
-        take_directory_sync_trace_for_test,
+        start_power_loss_trace, take_directory_sync_trace_for_test,
     },
     productive_capacity::ProductiveDispatchReservation,
     session_reading::SessionEventReader,
@@ -254,6 +255,51 @@ fn conversation_writer_finish_preserves_an_all_committed_batch_failure_and_final
     );
     let events = fs::read_to_string(events_path).expect("committed event stream reads");
     assert!(events.ends_with(&format!("{first_canonical}{second_canonical}")));
+}
+
+#[test]
+fn shutdown_syncs_events_even_when_context_sync_fails() {
+    let workspace = empty_workspace("conversation-writer-context-sync-failure");
+    create_review_run(&workspace);
+    let session = crate::tests::helpers::workspace_session_dir(&workspace);
+    let run = session.join("review/runs/review-1");
+    let mut writer = ConversationEventWriter::open(&workspace, "review", "review-1", false)
+        .expect("conversation writer opens");
+    start_power_loss_trace(&session, None);
+    for event in message_prefix_events() {
+        let canonical = event.canonical_jsonl().expect("prefix event canonicalizes");
+        writer
+            .commit(&event, &canonical, None)
+            .expect("prefix event commits");
+    }
+    let [(first, first_canonical), (second, second_canonical)] = message_delta_batch();
+    writer
+        .commit(&first, &first_canonical, None)
+        .expect("first delta enqueues");
+    writer
+        .commit(&second, &second_canonical, None)
+        .expect("second delta enqueues");
+    set_conversation_file_sync_error_for_path_for_test(
+        &run.join("contexts.jsonl"),
+        io::ErrorKind::Other,
+    );
+
+    let error = writer
+        .finish()
+        .expect_err("the context sync failure remains visible");
+    assert!(
+        error
+            .to_string()
+            .contains("injected conversation file synchronization failure"),
+        "{error}"
+    );
+    apply_power_loss(&session, PowerLoss::Drop);
+    finish_durable_trace(&session);
+    let events = fs::read_to_string(run.join("events.jsonl")).expect("events stream reads");
+    assert!(
+        events.ends_with(&format!("{first_canonical}{second_canonical}")),
+        "acknowledged events survive a power loss after shutdown"
+    );
 }
 
 #[test]

@@ -54,6 +54,43 @@ fn exact_recovery_verifies_and_suppresses_the_committed_event_prefix() {
 }
 
 #[test]
+fn exact_recovery_drops_an_incomplete_final_line_of_each_prefix_stream() {
+    let workspace = empty_workspace("conversation-prefix-cut-off-line");
+    create_review_run(&workspace);
+    let event = review_session_started_event();
+    let canonical = event.canonical_jsonl().expect("event canonicalizes");
+    let mut initial = ConversationEventWriter::open(&workspace, "review", "review-1", false)
+        .expect("initial writer opens");
+    initial
+        .commit(&event, &canonical, None)
+        .expect("initial event commits");
+    initial.finish().expect("initial writer finishes");
+    let run = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
+    for stream in ["events.jsonl", "contexts.jsonl"] {
+        let mut bytes = fs::read(run.join(stream)).unwrap_or_default();
+        bytes.extend_from_slice(b"{\"event_id\":");
+        fs::write(run.join(stream), bytes).expect("cut-off line writes");
+    }
+
+    let mut resumed =
+        ConversationEventWriter::open_for_recovery(&workspace, "review", "review-1", true, None)
+            .expect("exact recovery drops the uncommitted cut-off lines");
+    resumed
+        .commit(&event, &canonical, None)
+        .expect("committed event replays");
+    resumed.finish().expect("recovery writer finishes");
+
+    assert_eq!(
+        fs::read_to_string(run.join("events.jsonl")).expect("event stream reads"),
+        canonical
+    );
+    assert_eq!(
+        fs::read_to_string(run.join("contexts.jsonl")).expect("context stream reads"),
+        ""
+    );
+}
+
+#[test]
 fn exact_recovery_rejects_a_replaced_event_prefix_after_preflight() {
     let workspace = empty_workspace("conversation-replaced-event-prefix-recovery");
     create_review_run(&workspace);

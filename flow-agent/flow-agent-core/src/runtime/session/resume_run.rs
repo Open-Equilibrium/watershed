@@ -4,7 +4,7 @@ use super::{
     prepare_recorded_productive_preflight, reconcile_productive_preflight,
 };
 use crate::runtime::{
-    auth::resolve_openai_codex_credential,
+    auth::resolve_provider_credential,
     config_io::{ExecutionBackend, load_global_config_authority, require_execution_backend},
     conversations::{read_conversation_recovery_definition, reserve_conversation_run_recovery},
     fs_guards::AnchoredWorkspace,
@@ -33,7 +33,7 @@ pub fn resume_conversation_run(
         |_| Ok(()),
         ensure_productive_execution_platform,
         &mut provider,
-        resolve_openai_codex_credential,
+        resolve_provider_credential,
     )
 }
 
@@ -54,7 +54,7 @@ pub fn resume_conversation_run_with_live_events(
         |_| Ok(()),
         ensure_productive_execution_platform,
         &mut provider,
-        resolve_openai_codex_credential,
+        resolve_provider_credential,
     )?;
     output.stdout.clear();
     Ok(output)
@@ -80,7 +80,7 @@ pub fn resume_conversation_run_with_execution_activation<G>(
         activate,
         ensure_productive_execution_platform,
         &mut provider,
-        resolve_openai_codex_credential,
+        resolve_provider_credential,
     )?;
     if live {
         output.stdout.clear();
@@ -102,7 +102,9 @@ fn resume_conversation_run_internal<P, C, A, G>(
 ) -> Result<RunOutput, RuntimeError>
 where
     P: ProductiveProvider,
-    C: FnOnce() -> Result<crate::runtime::oauth_credential::CredentialRecord, RuntimeError>,
+    C: FnOnce(
+        &ExecutionBackend,
+    ) -> Result<crate::runtime::productive::ProviderCredential, RuntimeError>,
     A: FnOnce(bool) -> Result<G, RuntimeError>,
 {
     if !proto::is_valid_session_id(conversation_id) || !proto::is_valid_session_id(run_session_id) {
@@ -115,8 +117,11 @@ where
     let authority = reconcile_productive_preflight(load_global_config_authority())?;
     let config = &authority.config;
     let backend = reconcile_productive_preflight(require_execution_backend(config))?;
-    let _activation = activate(matches!(&backend, ExecutionBackend::OpenAiCodex { .. }))?;
-    let (model, model_profile) = match backend {
+    let _activation = activate(matches!(
+        &backend,
+        ExecutionBackend::OpenAiCodex { .. } | ExecutionBackend::OpenAiCompatible { .. }
+    ))?;
+    let (model, model_profile) = match &backend {
         ExecutionBackend::Fixture => {
             if conversation_id != run_session_id {
                 return Err(RuntimeError::Usage(
@@ -133,7 +138,11 @@ where
         ExecutionBackend::OpenAiCodex {
             model,
             model_profile,
-        } => (model, model_profile),
+        }
+        | ExecutionBackend::OpenAiCompatible {
+            model,
+            model_profile,
+        } => (model.clone(), *model_profile),
     };
     reconcile_productive_preflight(platform_preflight())?;
     let recorded_definition = reconcile_productive_preflight(
@@ -154,7 +163,7 @@ where
         model_profile,
     )?;
     let mut tool_executor = prepare_productive_tool_executor(&policy)?;
-    let credential = reconcile_productive_preflight(resolve_credential())?;
+    let credential = reconcile_productive_preflight(resolve_credential(&backend))?;
     let reservation = reconcile_productive_preflight(reserve_conversation_run_recovery(
         workspace,
         conversation_id,
@@ -201,7 +210,7 @@ pub(crate) fn resume_conversation_run_with_provider<P, C>(
 ) -> Result<RunOutput, RuntimeError>
 where
     P: ProductiveProvider,
-    C: FnOnce() -> Result<crate::runtime::oauth_credential::CredentialRecord, RuntimeError>,
+    C: FnOnce() -> Result<crate::runtime::productive::ProviderCredential, RuntimeError>,
 {
     resume_conversation_run_internal(
         workspace,
@@ -212,7 +221,7 @@ where
         |_| Ok(()),
         || Ok(()),
         provider,
-        resolve_credential,
+        |_| resolve_credential(),
     )
 }
 
@@ -234,7 +243,7 @@ pub(crate) fn resume_conversation_run_with_provider_and_preflight<P: ProductiveP
         },
         platform_preflight,
         provider,
-        || {
+        |_| {
             Err(RuntimeError::Protocol(
                 "credential lookup must not run".to_owned(),
             ))
@@ -247,7 +256,7 @@ pub(crate) fn resume_conversation_run_with_provider_and_live_events<P: Productiv
     workspace: impl AsRef<Path>,
     conversation_id: &str,
     run_session_id: &str,
-    credential: &crate::runtime::oauth_credential::CredentialRecord,
+    credential: &crate::runtime::productive::ProviderCredential,
     provider: &mut P,
     notifier: LiveEventNotifier,
 ) -> Result<RunOutput, RuntimeError> {
@@ -260,7 +269,7 @@ pub(crate) fn resume_conversation_run_with_provider_and_live_events<P: Productiv
         |_| Ok(()),
         || Ok(()),
         provider,
-        || Ok(credential.clone()),
+        |_| Ok(credential.clone()),
     )?;
     output.stdout.clear();
     Ok(output)

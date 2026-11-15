@@ -66,7 +66,7 @@ fn custom_m11_flow_composes_parameters_loops_transitions_types_and_subflows() {
   output:
     type: string
   loop:
-    max_iterations: 2
+    max_iterations: 3
     until:
       path: []
       equals:

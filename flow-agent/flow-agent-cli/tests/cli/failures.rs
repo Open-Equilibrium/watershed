@@ -5,11 +5,11 @@ use super::{
 use std::ffi::OsString;
 
 #[test]
-fn sandbox_negative_cli_fails_without_side_effects() {
-    let workspace = workspace_copy("sandbox-negative");
+fn negative_cli_fails_without_side_effects() {
+    let workspace = workspace_copy("negative");
     let output = flow_command()
         .current_dir(&workspace)
-        .args(["run", "sandbox-negative-write", "--emit", "jsonl"])
+        .args(["run", "negative-write", "--emit", "jsonl"])
         .output()
         .expect("flow binary should run");
 
@@ -17,17 +17,17 @@ fn sandbox_negative_cli_fails_without_side_effects() {
     assert!(output.stderr.is_empty());
     assert_eq!(
         String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
-        expected_stream("sandbox-negative", "sandbox-negative-write.jsonl")
+        expected_stream("negative", "negative-write.jsonl")
     );
     assert!(!workspace.join("out/forbidden.txt").exists());
 }
 
 #[test]
 fn replay_and_tail_failed_sessions_exit_with_failed_status() {
-    let workspace = workspace_copy("sandbox-negative");
+    let workspace = workspace_copy("negative");
     let run_output = flow_command()
         .current_dir(&workspace)
-        .args(["run", "sandbox-negative-write", "--emit", "jsonl"])
+        .args(["run", "negative-write", "--emit", "jsonl"])
         .output()
         .expect("flow binary should run");
     assert_eq!(run_output.status.code(), Some(65));
@@ -38,8 +38,8 @@ fn replay_and_tail_failed_sessions_exit_with_failed_status() {
             .current_dir(&workspace)
             .args([
                 command,
-                "sandbox-negative-write",
-                "sandbox-negative-write",
+                "negative-write",
+                "negative-write",
                 "--emit",
                 "jsonl",
             ])
@@ -58,10 +58,10 @@ fn replay_and_tail_failed_sessions_exit_with_failed_status() {
 
 #[test]
 fn failed_human_commands_report_the_terminal_reason() {
-    let workspace = workspace_copy("sandbox-negative");
+    let workspace = workspace_copy("negative");
     let output = flow_command()
         .current_dir(&workspace)
-        .args(["run", "sandbox-negative-write"])
+        .args(["run", "negative-write"])
         .output()
         .expect("flow binary should run");
 
@@ -70,7 +70,7 @@ fn failed_human_commands_report_the_terminal_reason() {
     let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
     assert_eq!(
         stdout,
-        "flow sandbox-negative-write (session sandbox-negative-write) failed (write_denied): write outside declared roots denied\n"
+        "flow negative-write (session negative-write) failed (write_denied): write outside declared roots denied\n"
     );
     assert!(!stdout.contains("completed"));
     assert!(
@@ -81,16 +81,16 @@ fn failed_human_commands_report_the_terminal_reason() {
     for (command, expected) in [
         (
             "replay",
-            "run sandbox-negative-write replayed: failed (write_denied): write outside declared roots denied\n",
+            "run negative-write replayed: failed (write_denied): write outside declared roots denied\n",
         ),
         (
             "tail",
-            "run sandbox-negative-write tailed: failed (write_denied): write outside declared roots denied\n",
+            "run negative-write tailed: failed (write_denied): write outside declared roots denied\n",
         ),
     ] {
         let output = flow_command()
             .current_dir(&workspace)
-            .args([command, "sandbox-negative-write", "sandbox-negative-write"])
+            .args([command, "negative-write", "negative-write"])
             .output()
             .expect("flow binary should run");
 

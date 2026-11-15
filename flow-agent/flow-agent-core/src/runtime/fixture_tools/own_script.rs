@@ -104,9 +104,20 @@ pub fn unquote_script_path(value: &str) -> Result<String, RuntimeError> {
                 "own-script redirection target must be one literal path".to_owned(),
             ));
         }
-        return Ok(value[1..value.len() - 1].to_owned());
+        let path = &value[1..value.len() - 1];
+        // WHY: a quote, backtick, dollar or backslash inside the quotes would end, nest or expand it in sh.
+        if path.contains(['\'', '"', '`', '$', '\\']) {
+            return Err(RuntimeError::Protocol(
+                "own-script redirection target must be one literal path".to_owned(),
+            ));
+        }
+        return Ok(path.to_owned());
     }
-    if value.contains('"') || value.contains('\'') || value.split_whitespace().count() != 1 {
+    // WHY: an unquoted target may contain only plain path characters; any other character is an operator or expansion in sh.
+    if value
+        .chars()
+        .any(|ch| !(ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-' | '/')))
+    {
         return Err(RuntimeError::Protocol(
             "own-script redirection target must be one literal path".to_owned(),
         ));
@@ -223,11 +234,33 @@ pub fn unquote_script_argument(value: &str) -> Result<String, RuntimeError> {
     } else {
         value
     };
-    if unquoted.chars().any(|ch| matches!(ch, '$' | '`' | '\\')) {
+    if unquoted.chars().any(|ch| matches!(ch, '$' | '`' | '\\'))
+        || has_unquoted_shell_operator(value)
+    {
         Err(RuntimeError::Protocol(format!(
             "unsupported own-script argument {value:?}"
         )))
     } else {
         Ok(unquoted.to_owned())
     }
+}
+
+/// Echo text is literal: an operator outside quotes would be a command list in POSIX sh.
+fn has_unquoted_shell_operator(value: &str) -> bool {
+    let mut quote = None;
+    value.chars().any(|ch| match quote {
+        Some(active) if ch == active => {
+            quote = None;
+            false
+        }
+        Some(_) => false,
+        None if matches!(ch, '\'' | '"') => {
+            quote = Some(ch);
+            false
+        }
+        None => matches!(
+            ch,
+            ';' | '|' | '&' | '<' | '>' | '(' | ')' | '{' | '}' | '\n' | '\r'
+        ),
+    })
 }

@@ -19,7 +19,7 @@ Duration fetchWait(int failures) => failures == 0
     ? fetchEvery
     : Duration(seconds: math.min(30 << math.min(failures - 1, 5), 15 * 60));
 
-/// The checkout's Git state for the session header, the sidebar and the Diff tab, read again
+/// The checkout's Git state for the session header, the sidebar and the Diff panel, read again
 /// after each fetch, turn and Git write.
 class GitState {
   GitState(this._backend, {required this.notify, BranchBases? bases})
@@ -64,8 +64,7 @@ class GitState {
   String? _fetchedRemote;
   DateTime? get fetched =>
       _fetchedRemote == status.value?.remote ? _fetched : null;
-  Future<void>? _fetching;
-  String? _fetchRemote;
+  Future<String?>? _fetching;
   bool _fetchRequested = false;
 
   /// Reads of the state left until the next fetch; the state is read every [fetchEvery]
@@ -107,62 +106,60 @@ class GitState {
         progress.value == null &&
         upstream != null &&
         --_untilFetch <= 0) {
-      unawaited(_fetch(watch, status.value!.remote!));
+      unawaited(_fetch(watch));
     }
     await refresh();
     if (watch == _watches) _next = Timer(fetchEvery, () => _tick(watch));
   }
 
-  /// Shares a fetch for the same remote; a changed destination waits its turn.
-  Future<void> _fetch(
-    int watch,
-    String remote, {
-    bool requested = false,
-  }) async {
+  /// Shares the fetch in flight; when Git fetched another remote than the checkout names after
+  /// it, the request waits its turn. Only Git's answer names the remote it fetched.
+  Future<void> _fetch(int watch, {bool requested = false}) async {
     final pending = _fetching;
-    if (pending != null) {
-      if (_fetchRemote == remote) {
-        _fetchRequested |= requested;
-        return pending;
-      }
-      await pending;
-      if (watch != _watches) return;
-      final current = status.value?.remote;
-      if (current != null) await _fetch(watch, current, requested: requested);
+    if (pending == null) {
+      _fetchRequested = requested;
+      await (_fetching = _runFetch(watch));
       return;
     }
-    _fetchRemote = remote;
-    _fetchRequested = requested;
-    await (_fetching = _runFetch(watch, remote));
+    _fetchRequested |= requested;
+    final fetched = await pending;
+    if (watch != _watches || fetched == null) return;
+    final current = status.value?.remote;
+    if (current != null && current != fetched) {
+      await _fetch(watch, requested: requested);
+    }
   }
 
-  Future<void> _runFetch(int watch, String remote) async {
+  /// Fetches, answering the remote Git fetched, or null when the fetch failed or was dropped.
+  Future<String?> _runFetch(int watch) async {
     try {
       final fetched = await _backend.fetch();
-      if (watch != _watches) return;
+      if (watch != _watches) return null;
       _failures = 0;
-      if (fetched) {
+      // Freshness belongs to the remote Git fetched, which the checkout may no longer name.
+      if (fetched != null) {
         _fetched = DateTime.now();
-        _fetchedRemote = remote;
+        _fetchedRemote = fetched;
       }
       await refresh();
+      return fetched;
     } on Object catch (error) {
-      if (watch != _watches) return;
+      if (watch != _watches) return null;
       // A streak of failures tells once.
       if (_failures++ == 0 || _fetchRequested) {
-        final since = switch (_fetchedRemote == remote ? _fetched : null) {
+        final since = switch (fetched) {
           final at? =>
             ' The ahead and behind counts are from ${formatClockMs(at.millisecondsSinceEpoch)}.',
           null => '',
         };
         notify(
           _fetchRequested ? BridgeLevel.error : BridgeLevel.warning,
-          '${fetchFailure(remote, '$error')}.$since',
+          '${fetchFailure(null, '$error')}.$since',
         );
       }
+      return null;
     } finally {
       _fetching = null;
-      _fetchRemote = null;
       _fetchRequested = false;
       if (watch == _watches) {
         _untilFetch = fetchWait(_failures).inSeconds ~/ fetchEvery.inSeconds;
@@ -172,9 +169,8 @@ class GitState {
 
   /// A click bypasses the background retry wait, without overlapping another fetch.
   Future<void> fetchNow() async {
-    final remote = status.value?.remote;
-    if (remote == null) return;
-    await _fetch(_watches, remote, requested: true);
+    if (status.value?.remote == null) return;
+    await _fetch(_watches, requested: true);
   }
 
   Future<BridgeGitOutcome?> push({
@@ -212,6 +208,9 @@ class GitState {
   Future<void> refresh() => _latestRefresh = _refresh(++_reads);
 
   Future<void> _refresh(int read) async {
+    // The first read and a read outside Git have no status to compare with; a loaded detached
+    // status has none for its branch, but it is still the checkout to compare with.
+    final compared = status.value != null;
     final before = status.value?.branch;
     try {
       final now = await _backend.gitStatus();
@@ -221,14 +220,14 @@ class GitState {
       problem.value = null;
       if (!_sameStatus(status.value, now)) status.value = now;
       loaded.value = true;
-      // The same stash on the same tree keeps its value, so the Diff tab keeps its place.
+      // The same stash on the same tree keeps its value, so the Diff panel keeps its place.
       if (stashed?.id != stash.value?.id ||
           stashed?.current != stash.value?.current) {
         stash.value = stashed;
       }
       refreshed.value++;
       final after = now?.branch;
-      if (before == null || after == null || after == before) return;
+      if (!compared || after == null || after == before) return;
       if (!_writing) {
         notify(
           BridgeLevel.info,
@@ -238,7 +237,7 @@ class GitState {
       if (stashed != null) {
         final text =
             '$after has stashed changes from ${formatClockMs(stashed.createdMs)}; the Diff '
-            'tab shows them.';
+            'panel shows them.';
         // A switch of this window tells first that it switched.
         if (_writing) {
           _arrived = text;
@@ -251,8 +250,9 @@ class GitState {
     }
   }
 
-  /// Waits until the most recent read has published before settling a write.
-  Future<void> _refreshAfterWrite() async {
+  /// Reads again and waits until the most recent read has published, which a poll started
+  /// meanwhile can overtake; a write settles on it, and a choice reads what it decides on.
+  Future<void> refreshSettled() async {
     var pending = refresh();
     while (true) {
       await pending;
@@ -295,32 +295,34 @@ class GitState {
 
   /// Creates the branch `name` at the current commit and switches to it.
   Future<BridgeGitOutcome?> create(String name) async {
-    // Read when the write starts, after the writes queued before it.
-    BridgeGitStatus? from;
-    final outcome = await _write('create the branch', () {
-      from = status.value;
-      return _backend.createBranch(name);
-    }, done: (_, _) => 'Created and switched to $name.');
+    final outcome = await _write(
+      'create the branch',
+      () => _backend.createBranch(name),
+      done: (_, _) => 'Created and switched to $name.',
+    );
     // Git created the branch, also when a hook failed after.
     if ({
       BridgeGitOutcomeKind.done,
       BridgeGitOutcomeKind.hookFailed,
     }.contains(outcome?.kind)) {
-      await _recordBase(from, name);
+      await _recordBase(status.value?.repository, outcome!.createdFrom, name);
     }
     return outcome;
   }
 
-  /// Remembers the branch `from` was on as the base of the new branch `name`.
-  Future<void> _recordBase(BridgeGitStatus? from, String name) async {
-    final base = from?.rawBranch;
-    if (from == null || base == null) return;
+  /// Remembers that the new branch `name` of `repository` was created from `base`.
+  Future<void> _recordBase(
+    String? repository,
+    String? base,
+    String name,
+  ) async {
+    if (repository == null || base == null) return;
     try {
-      await _bases.record(from.repository, name, base);
+      await _bases.record(repository, name, base);
     } on Object catch (error) {
       notify(
         BridgeLevel.warning,
-        'Could not remember that $name was created from ${from.branch}: $error',
+        'Could not remember where $name was created from: $error',
       );
     }
   }
@@ -363,13 +365,9 @@ class GitState {
     required String snapshot,
     String? branch,
   }) async {
-    BridgeGitStatus? from;
     final outcome = await _write(
       'commit',
-      () {
-        from = status.value;
-        return _backend.commitFiles(snapshot, paths, message, branch);
-      },
+      () => _backend.commitFiles(snapshot, paths, message, branch),
       done: (now, outcome) {
         final commit = outcome.commit!;
         final text =
@@ -384,7 +382,7 @@ class GitState {
           BridgeGitOutcomeKind.hookChanged,
           BridgeGitOutcomeKind.commitBranchFailed,
         }.contains(outcome?.kind)) {
-      await _recordBase(from, branch);
+      await _recordBase(status.value?.repository, outcome!.createdFrom, branch);
     }
     return outcome;
   }
@@ -465,7 +463,7 @@ class GitState {
           'Could not $action: $error${nothingTransferred(action)}',
         );
         // Git may have changed something before it failed.
-        await _refreshAfterWrite();
+        await refreshSettled();
         return null;
       }
       if (outcome.transfer case final transfer?
@@ -479,7 +477,7 @@ class GitState {
         _fetched = DateTime.now();
         _fetchedRemote = transfer.remote;
       }
-      await _refreshAfterWrite();
+      await refreshSettled();
       final now = problem.value == null ? status.value : null;
       final files = outcome.files.join(', ');
       switch (outcome.kind) {
@@ -598,6 +596,18 @@ class GitState {
             BridgeLevel.error,
             'Could not pull: Git would overwrite your uncommitted changes in $files. Commit them first. Nothing was pulled.',
           );
+        case BridgeGitOutcomeKind.wouldOverwrite
+            when action == 'create the branch':
+          notify(
+            BridgeLevel.error,
+            'Could not create the branch: Git would overwrite your uncommitted changes in $files. Nothing was created.',
+          );
+        // Only a commit that creates its branch switches, so only it can refuse here.
+        case BridgeGitOutcomeKind.wouldOverwrite when action == 'commit':
+          notify(
+            BridgeLevel.error,
+            'Could not commit on a new branch: Git would overwrite your uncommitted changes in $files. No branch was created and nothing was committed.',
+          );
         case BridgeGitOutcomeKind.wouldOverwrite:
       }
       if (_arrived case final arrived?) notify(BridgeLevel.info, arrived);
@@ -703,8 +713,9 @@ const noRemoteHint =
 const noUpstreamRemoteHint = 'No upstream: set one in Git to push this branch.';
 const noUpstreamHint = 'This branch has no upstream. Push it first.';
 
-String fetchFailure(String remote, String detail) =>
-    'Could not fetch from $remote: “$detail”';
+/// A failed fetch names its remote only when the failure attributes one.
+String fetchFailure(String? remote, String detail) =>
+    'Could not fetch${remote == null ? '' : ' from $remote'}: “$detail”';
 
 String behindHint(String branch, String upstream, int behind) =>
     '$upstream has ${plural(behind, 'commit')} that $branch lacks. Pull them, then push.';

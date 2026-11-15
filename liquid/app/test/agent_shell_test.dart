@@ -6,24 +6,28 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/diff/diff_view.dart';
-import 'package:liquid/src/trajectory/tree_view.dart';
-import 'package:liquid/src/trajectory/trajectory_view.dart';
 import 'package:liquid/src/agent/action_area.dart';
 import 'package:liquid/src/agent/chat_view.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
+import 'package:liquid/src/agent/status_bar.dart';
+import 'package:liquid/src/diff/diff_model.dart';
 import 'package:liquid/src/diff/diff_settings.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/rust/api/worktrees.dart';
 import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/session/session_state.dart';
+import 'package:liquid/src/shortcuts/keymap.dart';
+import 'package:liquid/src/shortcuts/shortcut_store.dart';
 import 'package:liquid/src/theme/icons.dart';
 import 'package:liquid/src/theme/logo.dart';
 import 'package:liquid/src/theme/theme.dart';
 import 'package:liquid/src/theme/tokens.g.dart';
 
 import 'fake_backend.dart';
+import 'fake_host.dart';
+import 'focus_kit.dart';
 
 const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
 
@@ -57,6 +61,14 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// Presses ⌘ with `key`, as the shortcuts do, and lets the shell answer.
+  Future<void> press(WidgetTester tester, LogicalKeyboardKey key) async {
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(key);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+  }
+
   BridgeEvent confirm(String id) => event(
     BridgeEventKind.userInputRequested,
     request: BridgeRequest(
@@ -75,16 +87,9 @@ void main() {
   ) async {
     await show(tester);
     BridgeTreeNode node(String id, String? parent, BridgeEntryKind kind) =>
-        BridgeTreeNode(
-          failed: false,
-          id: id,
-          parent: parent,
-          kind: kind,
-          preview: id,
-        );
+        BridgeTreeNode(id: id, parent: parent, kind: kind);
     backend
       ..stored = historyOf(
-        [],
         tree: [
           node('c1', null, BridgeEntryKind.custom),
           node('u1', 'c1', BridgeEntryKind.user),
@@ -123,8 +128,118 @@ void main() {
     expect(backend.calls, contains('revert T1'));
   });
 
+  testWidgets('Open diff for another turn switches the open Diff panel to it', (
+    tester,
+  ) async {
+    await show(tester);
+    BridgeTreeNode node(String id, String? parent, BridgeEntryKind kind) =>
+        BridgeTreeNode(id: id, parent: parent, kind: kind);
+    backend
+      ..stored = historyOf(
+        tree: [
+          node('c1', null, BridgeEntryKind.custom),
+          node('u1', 'c1', BridgeEntryKind.user),
+          node('a1', 'u1', BridgeEntryKind.assistant),
+          node('c2', 'a1', BridgeEntryKind.custom),
+          node('u2', 'c2', BridgeEntryKind.user),
+          node('a2', 'u2', BridgeEntryKind.assistant),
+          node('c3', 'a2', BridgeEntryKind.custom),
+        ],
+        leaf: 'c3',
+      )
+      ..transcripts[''] = BridgeTranscript(
+        items: [
+          chatItem('u1', BridgeItemKind.userMessage, text: 'First'),
+          chatItem('a1', BridgeItemKind.assistantMessage, text: 'One'),
+          chatItem('u2', BridgeItemKind.userMessage, text: 'Second'),
+          chatItem('a2', BridgeItemKind.assistantMessage, text: 'Two'),
+        ],
+        more: false,
+      )
+      ..turnList = [
+        turnOf(
+          'T1',
+          number: 1,
+          startEntry: 'c1',
+          endEntry: 'c2',
+          added: 2,
+          removed: 1,
+        ),
+        turnOf(
+          'T2',
+          number: 2,
+          startEntry: 'c2',
+          endEntry: 'c3',
+          added: 1,
+          removed: 0,
+        ),
+      ];
+    await state.loadChat();
+    await tester.pumpAndSettle();
+    Finder openDiffOf(String turn) => find.descendant(
+      of: find.byWidgetPredicate((w) => w is TurnChanges && w.turn.id == turn),
+      matching: find.text('Open diff'),
+    );
+    await tester.tap(openDiffOf('T1'));
+    await tester.pumpAndSettle();
+    expect(backend.compared.last, 'T1..T1');
+    await tester.tap(openDiffOf('T2'));
+    await tester.pumpAndSettle();
+    expect(backend.compared.last, 'T2..T2', reason: 'the open panel reads T2');
+    expect(find.text('Turn 2'), findsWidgets, reason: 'the panel shows T2');
+  });
+
   testWidgets(
-    'the input area floats at the bottom of each tab\'s main column',
+    'a question that arrives while a revert is prepared keeps the keys',
+    (tester) async {
+      await show(tester);
+      BridgeTreeNode node(String id, String? parent, BridgeEntryKind kind) =>
+          BridgeTreeNode(id: id, parent: parent, kind: kind);
+      backend
+        ..stored = historyOf(
+          tree: [
+            node('c1', null, BridgeEntryKind.custom),
+            node('u1', 'c1', BridgeEntryKind.user),
+            node('a1', 'u1', BridgeEntryKind.assistant),
+            node('c2', 'a1', BridgeEntryKind.custom),
+          ],
+          leaf: 'c2',
+        )
+        ..transcripts[''] = BridgeTranscript(
+          items: [
+            chatItem('u1', BridgeItemKind.userMessage, text: 'Go'),
+            chatItem('a1', BridgeItemKind.assistantMessage, text: 'Done'),
+          ],
+          more: false,
+        )
+        ..turnList = [
+          turnOf(
+            'T1',
+            number: 1,
+            startEntry: 'c1',
+            endEntry: 'c2',
+            added: 2,
+            removed: 1,
+          ),
+        ]
+        ..revertPlanned = revertPlanOf(
+          files: [revertedFile('a.txt', BridgeChangeStatus.modified)],
+        )
+        ..revertPlanGate = Completer();
+      await state.loadChat();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Revert files to before this turn…'));
+      await tester.pump();
+      await emit(tester, confirm('q1'));
+      backend.revertPlanGate!.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('Revert to before turn 1?'), findsNothing);
+      expect(backend.calls, isNot(contains('revert T1')));
+    },
+  );
+
+  testWidgets(
+    'the input area floats at the bottom of the Chat and stays with it',
     (tester) async {
       await show(tester);
       await tester.pumpAndSettle();
@@ -150,23 +265,17 @@ void main() {
         reason: 'the content runs on under the input area',
       );
 
-      await openTab(LogicalKeyboardKey.digit2);
-      final trajectory = tester.getRect(find.byType(TrajectoryView));
-      final tree = tester.getRect(find.byType(SessionTreeView));
+      await openTab(LogicalKeyboardKey.keyD);
       expect(
-        center(area),
-        closeTo((trajectory.left + tree.left) / 2, 1),
-        reason: 'over the column left of the session tree',
+        tester.getRect(area).right,
+        lessThanOrEqualTo(tester.getRect(find.byType(DiffView)).left),
+        reason: 'the input area stays with the Chat beside the Diff panel',
       );
-      expect(trajectory.bottom, greaterThan(tester.getRect(area).bottom));
       expect(
         tester.widget<TextField>(composer).controller?.text,
         'draft',
-        reason: 'the input area moves with the tab and keeps its text',
+        reason: 'and keeps its text',
       );
-
-      await openTab(LogicalKeyboardKey.digit3);
-      expect(center(area), closeTo(center(find.byType(DiffView)), 1));
     },
   );
 
@@ -226,14 +335,11 @@ void main() {
     );
   });
 
-  testWidgets('the Diff tab counts the files the shown turn changed', (
+  testWidgets('the Diff panel counts the files the shown turn changed', (
     tester,
   ) async {
     await show(tester);
     await tester.pumpAndSettle();
-    final count = find.byKey(const Key('changed-files'));
-    expect(count, findsNothing, reason: 'no run yet');
-
     backend.changed = [
       for (final path in ['a.txt', 'b.txt'])
         BridgeFileChange(
@@ -246,15 +352,8 @@ void main() {
     ];
     await emit(tester, event(BridgeEventKind.turnStarted));
     await emit(tester, event(BridgeEventKind.turnCompleted));
-    expect(
-      find.descendant(of: count, matching: find.text('2')),
-      findsOneWidget,
-    );
-
-    backend.changed = const [];
-    await state.newSession();
-    await tester.pumpAndSettle();
-    expect(count, findsNothing, reason: 'a new session has no run yet');
+    await press(tester, LogicalKeyboardKey.keyD);
+    expect(find.text('2 files · +2 −2'), findsOneWidget);
   });
 
   testWidgets(
@@ -279,26 +378,16 @@ void main() {
         ..changedWithoutWhitespace = [change('code.ts')];
       await emit(tester, event(BridgeEventKind.turnStarted));
       await emit(tester, event(BridgeEventKind.turnCompleted));
+      await press(tester, LogicalKeyboardKey.keyD);
       expect(
-        find.descendant(
-          of: find.byKey(const Key('changed-files')),
-          matching: find.text('1'),
-        ),
+        find.text('1 file · +1 −1'),
         findsOneWidget,
-        reason: 'the kept choice counts before the Diff tab opens',
+        reason: 'the kept choice counts before the Diff opens',
       );
-
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-      await tester.pumpAndSettle();
       await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
       await tester.pumpAndSettle();
       expect(
-        find.descendant(
-          of: find.byKey(const Key('changed-files')),
-          matching: find.text('2'),
-        ),
+        find.text('2 files · +2 −2'),
         findsOneWidget,
         reason: 'W shows whitespace changes again',
       );
@@ -360,7 +449,7 @@ void main() {
   testWidgets('focuses the input area with ⌘L from any tab', (tester) async {
     await show(tester);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
     // The tab opens and takes the keys before the next key arrives.
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
@@ -370,6 +459,32 @@ void main() {
       find.byKey(const Key('composer')),
     );
     expect(composer.focusNode?.hasFocus, isTrue);
+  });
+
+  testWidgets('Focus Input from Settings focuses the composer in each tab', (
+    tester,
+  ) async {
+    await show(tester);
+    Future<void> press(LogicalKeyboardKey key) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(key);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+    }
+
+    for (final tab in [LogicalKeyboardKey.digit1, LogicalKeyboardKey.keyD]) {
+      await press(tab);
+      await press(LogicalKeyboardKey.comma);
+      await press(LogicalKeyboardKey.keyL);
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('composer')))
+            .focusNode
+            ?.hasFocus,
+        isTrue,
+        reason: 'the tab that opens again does not take the keys back',
+      );
+    }
   });
 
   testWidgets('keeps what the user typed when a message comes back', (
@@ -393,6 +508,49 @@ void main() {
     );
   });
 
+  testWidgets('keeps the indentation and line ends typed while a send fails', (
+    tester,
+  ) async {
+    await show(tester);
+    backend
+      ..sendGate = Completer()
+      ..sendError = 'busy';
+    final composer = find.byKey(const Key('composer'));
+    await tester.enterText(composer, 'first');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await tester.enterText(composer, '    nested_call()\n');
+    backend.sendGate!.complete();
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextField>(composer).controller?.text,
+      'first\n\n    nested_call()\n',
+      reason: 'the typed text comes back exactly as it was typed',
+    );
+  });
+
+  testWidgets(
+    'keeps the formatting of the same text typed again while it was sent',
+    (tester) async {
+      await show(tester);
+      backend
+        ..sendGate = Completer()
+        ..sendError = 'busy';
+      final composer = find.byKey(const Key('composer'));
+      await tester.enterText(composer, 'nested_call()');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      await tester.enterText(composer, '    nested_call()\n');
+      backend.sendGate!.complete();
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(composer).controller?.text,
+        '    nested_call()\n',
+        reason: 'the message is not doubled, and its retyped form keeps its whitespace',
+      );
+    },
+  );
+
   testWidgets('takes the same handed-back text again after it was sent', (
     tester,
   ) async {
@@ -409,39 +567,102 @@ void main() {
     }
   });
 
+  testWidgets('⌘Z after a sent message does not bring the message back', (
+    tester,
+  ) async {
+    await show(tester);
+    final composer = find.byKey(const Key('composer'));
+    await tester.enterText(composer, 'Say hi');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.tap(composer);
+    await undo(tester);
+    expect(tester.widget<TextField>(composer).controller?.text, '');
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+  testWidgets(
+    '⌘Z after text handed back to the composer does not bring back what it replaced',
+    (tester) async {
+      await show(tester);
+      final composer = find.byKey(const Key('composer'));
+      await tester.enterText(composer, 'Plan');
+      await tester.pump(const Duration(milliseconds: 600));
+      await emit(tester, event(BridgeEventKind.inputTextSet, text: 'Retry'));
+      expect(
+        tester.widget<TextField>(composer).controller?.text,
+        'Retry\n\nPlan',
+      );
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.tap(composer);
+      await undo(tester);
+      expect(
+        tester.widget<TextField>(composer).controller?.text,
+        'Retry\n\nPlan',
+      );
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+  );
+
+  testWidgets(
+    'typing before the next frame after text is handed back keeps the typed text',
+    (tester) async {
+      await show(tester);
+      final composer = find.byKey(const Key('composer'));
+      await tester.enterText(composer, 'Plan');
+      await tester.tap(composer);
+      state.draft.value = 'Retry';
+      tester.testTextInput.updateEditingValue(
+        const TextEditingValue(
+          text: 'Retry\n\nPlanx',
+          selection: TextSelection.collapsed(offset: 12),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(composer).controller?.text,
+        'Retry\n\nPlanx',
+      );
+    },
+  );
+
+  testWidgets('a hand-back that changes no text keeps the undo history', (
+    tester,
+  ) async {
+    await show(tester);
+    final composer = find.byKey(const Key('composer'));
+    await tester.enterText(composer, 'Hello');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.enterText(composer, 'Hello there');
+    await tester.pump(const Duration(milliseconds: 600));
+    state.draft.value = 'Hello there';
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.tap(composer);
+    await undo(tester);
+    expect(tester.widget<TextField>(composer).controller?.text, 'Hello');
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
   testWidgets('marks the branch in the rebuilt chat and reads earlier items', (
     tester,
   ) async {
     await show(tester);
     backend.stored = historyOf(
-      [],
       tree: [
+        const BridgeTreeNode(id: 'u1', kind: BridgeEntryKind.user),
         const BridgeTreeNode(
-          failed: false,
-          id: 'u1',
-          kind: BridgeEntryKind.user,
-          preview: 'Go',
-        ),
-        const BridgeTreeNode(
-          failed: false,
           id: 'a1',
           parent: 'u1',
           kind: BridgeEntryKind.assistant,
-          preview: 'Looked',
         ),
         const BridgeTreeNode(
-          failed: false,
           id: 'a2',
           parent: 'a1',
           kind: BridgeEntryKind.assistant,
-          preview: 'Done',
         ),
         const BridgeTreeNode(
-          failed: false,
           id: 'b1',
           parent: 'a1',
           kind: BridgeEntryKind.user,
-          preview: 'Instead',
         ),
       ],
       leaf: 'b1',
@@ -472,6 +693,85 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(backend.calls, contains('transcript u1'));
+  });
+
+  testWidgets('a short newest page reads earlier messages without scrolling', (
+    tester,
+  ) async {
+    await show(tester);
+    backend.transcripts[''] = BridgeTranscript(
+      items: [chatItem('u2', BridgeItemKind.userMessage, text: 'Later')],
+      more: true,
+      start: 'u2',
+    );
+    backend.transcripts['u2'] = BridgeTranscript(
+      items: [chatItem('u1', BridgeItemKind.userMessage, text: 'First')],
+      more: false,
+      start: 'u1',
+    );
+    await state.loadChat();
+    await tester.pumpAndSettle();
+    expect(
+      find.text('First'),
+      findsOneWidget,
+      reason: 'the newest page fits the viewport, so nothing can scroll',
+    );
+  });
+
+  testWidgets('a streamed reply at the newest messages reads no earlier page', (
+    tester,
+  ) async {
+    await show(tester);
+    backend.transcripts[''] = BridgeTranscript(
+      items: [
+        for (var index = 0; index < 40; index++)
+          chatItem(
+            'm$index',
+            BridgeItemKind.userMessage,
+            text: 'Message $index',
+          ),
+      ],
+      more: true,
+      start: 'm0',
+    );
+    backend.transcripts['m0'] = BridgeTranscript(
+      items: [chatItem('e0', BridgeItemKind.userMessage, text: 'Earliest')],
+      more: false,
+      start: 'e0',
+    );
+    await state.loadChat();
+    await tester.pumpAndSettle();
+    backend.calls.clear();
+
+    await emit(tester, event(BridgeEventKind.turnStarted));
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.itemStarted,
+        item: item(1, kind: BridgeItemKind.assistantMessage),
+      ),
+    );
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.contentDelta,
+        item: item(1),
+        text: 'Streamed reply',
+      ),
+    );
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.contentDelta,
+        item: item(1),
+        text: ' keeps growing.',
+      ),
+    );
+    expect(
+      backend.calls,
+      isNot(contains('transcript m0')),
+      reason: 'the reply\'s own selectable text does not scroll the chat',
+    );
   });
 
   testWidgets('shows notifications in the status bar', (tester) async {
@@ -605,6 +905,16 @@ void main() {
       // The card is built and laid out now, but its frame, slow to lay out, ends 20 s later.
       tester.binding.buildOwner!.buildScope(tester.binding.rootElement!);
       tester.binding.rootPipelineOwner.flushLayout();
+      // Layout builders create their children in layout, so build and layout alternate until
+      // the question is in the tree; no frame ends, so no read delay starts yet.
+      for (
+        var pass = 0;
+        pass < 10 && find.text('Yes', skipOffstage: false).evaluate().isEmpty;
+        pass++
+      ) {
+        tester.binding.buildOwner!.buildScope(tester.binding.rootElement!);
+        tester.binding.rootPipelineOwner.flushLayout();
+      }
       expect(find.text('Yes', skipOffstage: false), findsOneWidget);
       await tester.pump(const Duration(seconds: 20));
       await tester.tap(find.text('Yes'));
@@ -668,25 +978,7 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    await openTab(LogicalKeyboardKey.digit2);
-    await tester.tap(composer);
-    await tester.pump();
-    for (final key in [
-      LogicalKeyboardKey.keyC,
-      LogicalKeyboardKey.keyB,
-      LogicalKeyboardKey.space,
-    ]) {
-      await tester.sendKeyEvent(key);
-    }
-    await tester.pumpAndSettle();
-    expect(state.notice.value, isNull, reason: 'c did not compare');
-    expect(
-      backend.calls.where((call) => call.startsWith('branch')),
-      isEmpty,
-      reason: 'b did not branch',
-    );
-
-    await openTab(LogicalKeyboardKey.digit3);
+    await openTab(LogicalKeyboardKey.keyD);
     expect(find.byType(DiffView), findsOneWidget);
     await tester.tap(composer);
     await tester.pump();
@@ -719,7 +1011,7 @@ void main() {
   });
 
   testWidgets(
-    'the PR chip sits between the branch chip and the Git action and refreshes on focus',
+    'the PR row sits in the card between the branch and the Git action, and refreshes on focus',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1600, 900));
       backend = FakeBackend()
@@ -736,21 +1028,21 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      double left(Finder finder) => tester
+      double top(Finder finder) => tester
           .getTopLeft(
             find.descendant(
-              of: find.byKey(const Key('session-header')),
+              of: find.byKey(const Key('session-card-frame')),
               matching: finder,
             ),
           )
-          .dx;
+          .dy;
       expect(
-        left(find.byKey(const Key('branch-chip'))),
-        lessThan(left(find.byKey(const Key('pull-request-chip')))),
+        top(find.byKey(const Key('branch-row'))),
+        lessThan(top(find.byKey(const Key('pull-request-chip')))),
       );
       expect(
-        left(find.byKey(const Key('pull-request-chip'))),
-        lessThan(left(find.byKey(const Key('git-next')))),
+        top(find.byKey(const Key('pull-request-chip'))),
+        lessThan(top(find.byKey(const Key('git-next')))),
       );
       int reads() => backend.pullRequestReads;
       final before = reads();
@@ -836,6 +1128,25 @@ void main() {
     expect(backend.calls.last, 'abort');
   });
 
+  testWidgets('removing a repeated queued message keeps the others in order', (
+    tester,
+  ) async {
+    await show(tester);
+    const queue = BridgeQueue(
+      steering: [],
+      followUp: ['build', 'test', 'build'],
+    );
+    backend.queued = queue;
+    await emit(tester, event(BridgeEventKind.queueChanged, queue: queue));
+    await tester.tap(find.byKey(const Key('unqueue 2')));
+    await tester.pumpAndSettle();
+    expect(backend.calls, [
+      'clear queue',
+      'follow-up build',
+      'follow-up test',
+    ], reason: 'the last build leaves; the first one keeps its place');
+  });
+
   testWidgets(
     'shows streamed text, tool rows, widgets and the waiting status',
     (tester) async {
@@ -916,7 +1227,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: liquidTheme(Brightness.light),
-        home: AgentShell(state: state, info: info),
+        home: AgentShell(state: state, info: info, parseDiff: parsePatch),
       ),
     );
     await tester.pumpAndSettle();
@@ -924,7 +1235,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Create pull request…'), findsOneWidget);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
 
@@ -933,7 +1244,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       tester.getBottomLeft(find.text('line 200', findRichText: true)).dy,
-      lessThanOrEqualTo(tester.getTopLeft(find.byType(WidgetStrip)).dy),
+      lessThanOrEqualTo(tester.getTopLeft(find.byType(StatusBar)).dy),
+      reason: 'the last line scrolls into the panel above the status bar',
     );
     await tester.pump(const Duration(seconds: 7));
     state.git.stop();
@@ -1083,6 +1395,48 @@ void main() {
     expect(backend.calls.last, 'answer q1 Fixed');
   });
 
+  testWidgets('a question open at the first frame comes before the profile', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    backend = FakeBackend();
+    state = SessionState(backend);
+    backend.controller.add(confirm('q1'));
+    await tester.pump();
+    expect(
+      state.asking,
+      isTrue,
+      reason: 'the question is open before the shell',
+    );
+
+    final store = MemoryStore();
+    final shortcuts = await ShortcutController.load(store, FakeHost());
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: AgentShell(state: state, info: info, shortcuts: shortcuts),
+      ),
+    );
+    await tester.pumpAndSettle();
+    const asks = 'How do you want to use the keyboard?';
+    expect(find.text(asks), findsNothing, reason: 'the question goes first');
+    expect(store.saved, isNull, reason: 'nobody chose a profile');
+
+    backend.controller.add(
+      event(
+        BridgeEventKind.userInputResolved,
+        request: BridgeRequest(id: 'q1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text(asks), findsOneWidget);
+
+    await tester.tap(find.text('Use Liquid key'));
+    await tester.pumpAndSettle();
+    expect(find.text(asks), findsNothing, reason: 'asked once');
+    expect(store.saved, ShortcutSettings.liquidKey());
+  });
+
   testWidgets('keeps a long question and its answers in the input area', (
     tester,
   ) async {
@@ -1205,6 +1559,43 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     expect(backend.calls.last, 'answer q1 production-us');
+  });
+
+  testWidgets('filtering after scrolling shows the option Enter picks', (
+    tester,
+  ) async {
+    await show(tester);
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.userInputRequested,
+        request: BridgeRequest(
+          id: 'q1',
+          question: BridgeQuestion(
+            kind: BridgeQuestionKind.select,
+            title: 'Pick an option',
+            detail: '',
+            options: [
+              for (var number = 0; number < 100; number++)
+                'Option ${number.toString().padLeft(2, '0')}',
+            ],
+          ),
+        ),
+      ),
+    );
+    for (var step = 0; step < 50; step++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    }
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('filter')), 'Option');
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Option 00').hitTestable(),
+      findsOneWidget,
+      reason: 'the highlighted first match is in view',
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(backend.calls.last, 'answer q1 Option 00');
   });
 
   testWidgets('edits a multi-line answer and sends it with ⌘Enter', (
@@ -1341,7 +1732,7 @@ void main() {
         ),
       ),
     );
-    expect(find.text('1m 24s'), findsOneWidget, reason: 'as the Trajectory');
+    expect(find.text('1m 24s'), findsOneWidget);
   });
 
   testWidgets('fits a tool with a 64-character name on its row', (
@@ -1415,12 +1806,21 @@ void main() {
     expect(find.text('⌘⏎'), findsNothing);
   });
 
-  testWidgets('the status bar names the Diff tab\'s keys while Cmd is held', (
+  testWidgets('the status bar counts tokens as the session card does', (
+    tester,
+  ) async {
+    await show(tester);
+    state.totals.value = const SessionTotals(input: 212000, output: 18300);
+    await tester.pumpAndSettle();
+    expect(find.text('212 k in · 18.3 k out'), findsOneWidget);
+  });
+
+  testWidgets('the status bar names the Diff panel\'s keys while Cmd is held', (
     tester,
   ) async {
     await show(tester);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
     expect(
@@ -1440,7 +1840,7 @@ void main() {
     await tester.pump();
   });
 
-  testWidgets('underlines only the open tab, in the accent', (tester) async {
+  testWidgets('underlines the Chat tab in the accent', (tester) async {
     await show(tester);
     await tester.pumpAndSettle();
     Color underline(String tab) =>
@@ -1459,7 +1859,6 @@ void main() {
             .bottom
             .color;
     expect(underline('Chat'), WsPalette.light.accent);
-    expect(underline('Trajectory'), Colors.transparent);
   });
 
   testWidgets('puts app-wide shortcuts into the macOS menu bar', (
@@ -1487,7 +1886,10 @@ void main() {
     await show(tester);
     await tester.pump();
     debugDefaultTargetPlatformOverride = null;
-    expect(labels, containsAll(['Chat', 'Trajectory', 'Diff', 'Focus Input']));
+    expect(
+      labels,
+      containsAll(['Chat', 'Diff', 'Session card', 'Focus Input']),
+    );
   });
 
   testWidgets('stops the agent before the app exits', (tester) async {

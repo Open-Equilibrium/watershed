@@ -45,7 +45,7 @@ struct Config {
 struct ChildMeasurement {
     schema: String,
     executor_elapsed_ns: u64,
-    self_protection_active: bool,
+    flow_owned_write_protection_active: bool,
 }
 
 impl ChildMeasurement {
@@ -53,9 +53,9 @@ impl ChildMeasurement {
         if self.schema != MEASUREMENT_CHILD_SCHEMA {
             return Err(io::Error::other("fresh measurement child schema did not match").into());
         }
-        if !self.self_protection_active {
+        if !self.flow_owned_write_protection_active {
             return Err(io::Error::other(
-                "fresh measurement child did not confirm active self-protection",
+                "fresh measurement child did not confirm active Flow-owned write protection",
             )
             .into());
         }
@@ -67,12 +67,12 @@ fn measure_once() -> Result<ChildMeasurement, DynError> {
     let workspace = TempRoot::create("flow-m12-startup")?;
     let M12ExecutorStartupMeasurement {
         executor_elapsed,
-        self_protection_active,
+        flow_owned_write_protection_active,
     } = run_m12_executor_startup(workspace.path()).map_err(io::Error::other)?;
     Ok(ChildMeasurement {
         schema: MEASUREMENT_CHILD_SCHEMA.to_owned(),
         executor_elapsed_ns: duration_ns(executor_elapsed),
-        self_protection_active,
+        flow_owned_write_protection_active,
     })
 }
 
@@ -174,6 +174,7 @@ mod tests {
         report::write_report_with_measurement,
     };
     use serde_json::Value;
+    use sha2::Digest as _;
     use std::{
         ffi::OsStr,
         io,
@@ -214,8 +215,23 @@ mod tests {
         assert!(!flow.exists() && !config.exists() && !home.exists());
     }
 
+    #[test]
+    fn measurement_child_output_over_its_bound_fails_the_workload() {
+        let session = TempRoot::create("flow-m12-output-bound").unwrap();
+        // One byte beyond the 64 KiB per-stream bound, then the child exits on its own.
+        let error = launch_measurement_child(
+            &session,
+            Path::new("/bin/sh"),
+            [OsStr::new("-c"), OsStr::new("head -c 65537 /dev/zero")],
+            ISOLATED_HOMES,
+        )
+        .expect_err("a stream beyond its bound fails the measurement");
+        assert!(error.to_string().contains("wrote more than"), "{error}");
+    }
+
+    // A real absolute image, because the report hashes the selected Executor's bytes.
     fn executor_path() -> PathBuf {
-        PathBuf::from("/flow-executor")
+        PathBuf::from("/bin/sh")
     }
 
     fn config(warmups: usize, samples: usize) -> Config {
@@ -230,9 +246,11 @@ mod tests {
         serde_json::from_value(serde_json::json!({
             "schema": MEASUREMENT_CHILD_SCHEMA,
             "executor_elapsed_ns": elapsed_ns,
-            "self_protection_active": true,
+            "flow_owned_write_protection_active": true,
         }))
-        .expect("child evidence binds the elapsed observation to active own-file protection")
+        .expect(
+            "child evidence binds the elapsed observation to active Flow-owned write protection",
+        )
     }
 
     #[test]
@@ -256,6 +274,24 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    #[test]
+    fn startup_report_metadata_identifies_the_selected_executor() {
+        let mut measure = || -> Result<ChildMeasurement, DynError> { Ok(measurement(1)) };
+        let mut writer = Vec::new();
+
+        assert!(write_report_with_measurement(&mut writer, config(1, 1), &mut measure).unwrap());
+
+        let text = String::from_utf8(writer).unwrap();
+        let metadata: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+        assert_eq!(metadata["executor_path"], "/bin/sh");
+        let image = std::fs::read("/bin/sh").unwrap();
+        let digest = sha2::Sha256::digest(image)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(metadata["executor_sha256"], digest);
     }
 
     #[test]
@@ -324,13 +360,13 @@ mod tests {
                 all(target_os = "macos", target_arch = "aarch64")
             ))
         );
-        assert_eq!(metadata["self_protection_required"], true);
+        assert_eq!(metadata["flow_owned_write_protection_required"], true);
         let sample = records
             .iter()
             .find(|record| record["kind"] == "sample")
             .unwrap();
         assert_eq!(sample["executor_elapsed_ns"], 1);
-        assert_eq!(sample["self_protection_active"], true);
+        assert_eq!(sample["flow_owned_write_protection_active"], true);
         let aggregate = records
             .iter()
             .find(|record| record["kind"] == "aggregate")
@@ -342,7 +378,10 @@ mod tests {
         assert_eq!(aggregate["inputs"]["tool"], "/bin/echo");
         assert_eq!(aggregate["inputs"]["tool_arguments"], Value::Array(vec![]));
         assert_eq!(aggregate["inputs"]["tool_environment"], "empty");
-        assert_eq!(aggregate["inputs"]["self_protection_required"], true);
+        assert_eq!(
+            aggregate["inputs"]["flow_owned_write_protection_required"],
+            true
+        );
         assert_eq!(aggregate["inputs"]["tool_executions_per_child"], 1);
     }
 
@@ -357,7 +396,7 @@ mod tests {
                         if invalid_schema {
                             value["schema"] = "wrong-schema".into();
                         } else {
-                            value["self_protection_active"] = false.into();
+                            value["flow_owned_write_protection_active"] = false.into();
                         }
                     }
                     calls += 1;
@@ -393,7 +432,7 @@ mod tests {
                         .contains(if invalid_schema {
                             "schema"
                         } else {
-                            "self-protection"
+                            "Flow-owned write protection"
                         })
                 );
                 assert_eq!(records.last().unwrap()["kind"], "summary");
@@ -410,7 +449,7 @@ mod tests {
         missing
             .as_object_mut()
             .unwrap()
-            .remove("self_protection_active");
+            .remove("flow_owned_write_protection_active");
         assert!(serde_json::from_value::<ChildMeasurement>(missing).is_err());
         for (field, value) in [
             ("max_concurrent_processes_and_threads", serde_json::json!(8)),

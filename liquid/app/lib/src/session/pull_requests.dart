@@ -152,6 +152,13 @@ class PullRequests {
   Future<BridgePullRequestOutcome> bases(String host, String target) =>
       _backend.pullRequestBases(host, target);
 
+  /// The target's branches whose names contain `query`, as GitHub finds them.
+  Future<BridgePullRequestOutcome> searchBases(
+    String host,
+    String target,
+    String query,
+  ) => _backend.pullRequestBaseSearch(host, target, query);
+
   /// The title and description the Chat's `model` writes for `plan`'s commits beyond its
   /// base; a later request or [stopWriting] stops it.
   Future<BridgePullRequestText> write(

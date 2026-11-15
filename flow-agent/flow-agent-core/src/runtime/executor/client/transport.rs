@@ -1,5 +1,7 @@
 use super::super::process::{
-    child_exited_without_reaping, configure_executor_child, terminate_child_or_fail_stop,
+    BoundedRead, ExecutorCleanup, child_exited_without_reaping, configure_executor_child,
+    duplicate_executor_descriptor, set_nonblocking, terminate_child_bounded,
+    terminate_child_or_fail_stop,
 };
 use super::{invalid_response, runtime_open_error};
 use crate::runtime::types::RuntimeError;
@@ -19,27 +21,6 @@ use std::{
 pub(super) enum ExecutorPreflightProcess {
     Ready(WaitingExecutor),
     Rejected(proto::ExecutorErrorCodeV0),
-}
-
-pub(super) fn duplicate_executor_descriptor(executable: &File) -> Result<OwnedFd, RuntimeError> {
-    let minimum = i32::try_from(
-        proto::EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0 as usize
-            + proto::MAX_EXECUTOR_PROTECTED_OBJECTS_V0
-            + 64,
-    )
-    .expect("protocol descriptor bounds fit i32");
-    rustix::io::fcntl_dupfd_cloexec(executable, minimum).map_err(|_| {
-        RuntimeError::executor(
-            proto::ExecutorErrorCodeV0::Unavailable,
-            "validated Executor descriptor could not be moved outside the protected descriptor range",
-        )
-    })
-}
-
-fn set_nonblocking(descriptor: &impl std::os::fd::AsFd) -> Result<(), RuntimeError> {
-    let flags = rustix::fs::fcntl_getfl(descriptor).map_err(runtime_open_error)?;
-    rustix::fs::fcntl_setfl(descriptor, flags | rustix::fs::OFlags::NONBLOCK)
-        .map_err(runtime_open_error)
 }
 
 fn retain_remap_destination(target: i32, minimum: i32) -> std::io::Result<Option<OwnedFd>> {
@@ -249,9 +230,9 @@ pub(super) fn preflight_one_shot_with_deadline(
         .stderr
         .take()
         .ok_or_else(|| invalid_response("Executor stderr is unavailable"))?;
-    set_nonblocking(&stdin)?;
-    set_nonblocking(&stdout)?;
-    set_nonblocking(&stderr)?;
+    set_nonblocking(&stdin).map_err(runtime_open_error)?;
+    set_nonblocking(&stdout).map_err(runtime_open_error)?;
+    set_nonblocking(&stderr).map_err(runtime_open_error)?;
     let mut request_offset = 0_usize;
     let mut after_request = Some(after_request);
     #[cfg(test)]
@@ -400,9 +381,13 @@ pub(super) fn preflight_one_shot_with_deadline(
     }
 }
 
-pub(super) fn start_one_shot(
-    waiting: WaitingExecutor,
-) -> Result<proto::ExecutorResponseV0, RuntimeError> {
+/// A terminal Executor answer and whether cleanup of its process group was left unknown.
+pub(super) struct StartedExecutor {
+    pub(super) response: proto::ExecutorResponseV0,
+    pub(super) cleanup_unknown: bool,
+}
+
+pub(super) fn start_one_shot(waiting: WaitingExecutor) -> Result<StartedExecutor, RuntimeError> {
     let timeout_ms = waiting.timeout_ms;
     let now = Instant::now;
     start_one_shot_with_deadlines(
@@ -414,10 +399,44 @@ pub(super) fn start_one_shot(
 }
 
 fn start_one_shot_with_deadlines(
+    waiting: WaitingExecutor,
+    start_deadline: impl FnOnce() -> Result<Instant, RuntimeError>,
+    terminal_deadline_after_start: impl FnMut(&mut Child) -> Result<Instant, RuntimeError>,
+    now: &impl Fn() -> Instant,
+) -> Result<StartedExecutor, RuntimeError> {
+    let mut cleanup_unknown = false;
+    let result = start_one_shot_inner(
+        waiting,
+        start_deadline,
+        terminal_deadline_after_start,
+        now,
+        &mut cleanup_unknown,
+    );
+    match result {
+        // A surviving group keeps only a Completed answer; any other outcome fails stop as before.
+        Ok(response) if cleanup_unknown => match response {
+            proto::ExecutorResponseV0::Completed { .. } => Ok(StartedExecutor {
+                response,
+                cleanup_unknown,
+            }),
+            _ => std::process::abort(),
+        },
+        Ok(response) => Ok(StartedExecutor {
+            response,
+            cleanup_unknown: false,
+        }),
+        // Without a valid answer to keep, a survivor still fails stop.
+        Err(_) if cleanup_unknown => std::process::abort(),
+        Err(error) => Err(error),
+    }
+}
+
+fn start_one_shot_inner(
     mut waiting: WaitingExecutor,
     start_deadline: impl FnOnce() -> Result<Instant, RuntimeError>,
     mut terminal_deadline_after_start: impl FnMut(&mut Child) -> Result<Instant, RuntimeError>,
     now: &impl Fn() -> Instant,
+    cleanup_unknown: &mut bool,
 ) -> Result<proto::ExecutorResponseV0, RuntimeError> {
     if crate::runtime::cancellation::productive_cancellation()
         .load(std::sync::atomic::Ordering::Acquire)
@@ -481,7 +500,11 @@ fn start_one_shot_with_deadlines(
             match child_exited_without_reaping(waiting.child.child_mut()) {
                 Ok(true) => {
                     let mut completed_child = waiting.child.take();
-                    terminate_child_or_fail_stop(&mut completed_child);
+                    match terminate_child_bounded(&mut completed_child) {
+                        ExecutorCleanup::Complete => {}
+                        ExecutorCleanup::Survived => *cleanup_unknown = true,
+                        ExecutorCleanup::Unobservable => std::process::abort(),
+                    }
                     let status = completed_child
                         .try_wait()
                         .map_err(|_| invalid_response("Executor process could not be reaped"))?
@@ -597,29 +620,13 @@ pub(super) fn start_one_shot_at_deadlines(
     start_deadline: Instant,
     terminal_deadline_after_start: impl FnMut(&mut Child) -> Result<Instant, RuntimeError>,
     now: impl Fn() -> Instant,
-) -> Result<proto::ExecutorResponseV0, RuntimeError> {
+) -> Result<StartedExecutor, RuntimeError> {
     start_one_shot_with_deadlines(
         waiting,
         || Ok(start_deadline),
         terminal_deadline_after_start,
         &now,
     )
-}
-
-struct BoundedRead {
-    bytes: Vec<u8>,
-    limit: usize,
-    overflowed: bool,
-}
-
-impl BoundedRead {
-    fn new(limit: usize) -> Self {
-        Self {
-            bytes: Vec::with_capacity(limit.min(8 * 1024)),
-            limit,
-            overflowed: false,
-        }
-    }
 }
 
 fn read_available(reader: &mut impl Read, output: &mut BoundedRead) -> std::io::Result<bool> {

@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 // Checks the helper's pure decisions; `test.sh` runs it on the macOS CI host.
@@ -62,6 +63,28 @@ check(
     turnOff(refusing: nil) && keyboards.allSatisfy(\.isEmpty),
     "turning it off succeeds once every keyboard took it")
 
+// Another session's helper may give the remapping back after this one set it. Only an active
+// helper sets it again, and only on a keyboard that lost it.
+var lost = [[entry(control, command)], [entry(Mapping.capsLock, Mapping.f18)]]
+var writes = 0
+func recheck(active: Bool) {
+    Mapping.reapply(active: active, to: Array(lost.indices), read: { lost[$0] }) {
+        keyboard, mappings in
+        writes += 1
+        lost[keyboard] = mappings
+        return true
+    }
+}
+recheck(active: false)
+check(
+    writes == 0 && pairs(lost[0]) == pairs([entry(control, command)]),
+    "an inactive helper does not re-apply the Liquid key")
+recheck(active: true)
+check(
+    writes == 1
+        && pairs(lost[0]) == pairs([entry(control, command), entry(Mapping.capsLock, Mapping.f18)]),
+    "an active helper re-applies a mapping another session removed and keeps the others")
+
 /// A Liquid key press at 10 s with its own `repeats`, each with the latest key press of any key
 /// then, released at `released`.
 func tap(
@@ -81,6 +104,40 @@ check(
 check(
     !tap([(10.5, 10.2)], released: 10.55, lastKeyDown: 10.501),
     "another key before the key's own repeat makes it no tap")
+
+check(
+    !Mapping.givesBack(mapped: false, active: true),
+    "a helper that never mapped gives nothing back")
+check(
+    Mapping.givesBack(mapped: true, active: true),
+    "a helper that mapped gives its remapping back while its session is in front")
+check(
+    !Mapping.givesBack(mapped: true, active: false),
+    "a helper whose session left gives nothing back")
+
+// A helper started in a session that is not in front leaves the keyboards to the session in front.
+check(
+    !Mapping.initiallyActive(session: nil),
+    "a helper without a session dictionary starts inactive")
+check(
+    !Mapping.initiallyActive(session: [kCGSessionOnConsoleKey as String: false]),
+    "a helper in a background session starts inactive")
+check(
+    Mapping.initiallyActive(session: [kCGSessionOnConsoleKey as String: true]),
+    "a helper in the session in front starts active")
+
+// The helper reads the session after registering its observers, so a session that resigns during
+// the start is no longer in front when it is read: it ends with no remapping applied.
+var remapped = 0
+var session: [String: Any] = [kCGSessionOnConsoleKey as String: true]
+Mapping.start(
+    readSession: { session }, observe: { session[kCGSessionOnConsoleKey as String] = false },
+    remap: { remapped += 1 })
+check(remapped == 0, "a session that resigns during the start ends with no remapping applied")
+Mapping.start(
+    readSession: { [kCGSessionOnConsoleKey as String: true] }, observe: {},
+    remap: { remapped += 1 })
+check(remapped == 1, "a session in front at the start is remapped")
 
 if failures > 0 { exit(1) }
 print("Liquid key helper checks passed")

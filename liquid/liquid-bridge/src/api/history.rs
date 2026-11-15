@@ -1,16 +1,14 @@
-//! A session's stored history for the Trajectory tab: its branch tree and Trajectories.
+//! A session's stored history: its branch tree, its chat and its turns.
 
 use crate::api::events::{BridgeItemKind, BridgeUsage};
 
-/// The session's branch tree and the requested Trajectories.
+/// The session's branch tree and what its stored responses used.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeHistory {
     /// Every entry; parents precede their children.
     pub tree: Vec<BridgeTreeNode>,
     /// The entry the next prompt continues from.
     pub leaf: Option<String>,
-    /// One Trajectory per requested branch, in request order.
-    pub trajectories: Vec<BridgeTrajectory>,
     /// What every stored response used, on every branch.
     pub usage: BridgeUsage,
 }
@@ -24,14 +22,6 @@ pub struct BridgeTreeNode {
     pub parent: Option<String>,
     /// What the entry holds.
     pub kind: BridgeEntryKind,
-    /// A one-line preview of its text or tool.
-    pub preview: String,
-    /// The label set on this entry.
-    pub label: Option<String>,
-    /// Unix milliseconds when the entry was stored, if known.
-    pub at_ms: Option<i64>,
-    /// Whether a tool call or model response failed.
-    pub failed: bool,
 }
 
 /// What a tree entry holds.
@@ -49,134 +39,6 @@ pub enum BridgeEntryKind {
     Custom,
     /// Anything else.
     Other,
-}
-
-/// One branch from its first entry to its leaf.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BridgeTrajectory {
-    /// The rows in order.
-    pub records: Vec<BridgeRecord>,
-    /// Milliseconds from the first to the last entry.
-    pub duration_ms: i64,
-}
-
-/// One Trajectory row.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BridgeRecord {
-    /// The entry id, used to branch.
-    pub entry: String,
-    /// The turn on this branch, counted from 1.
-    pub turn: i64,
-    /// What the row shows.
-    pub kind: BridgeRecordKind,
-    /// The prompt, the response's first line or the tool name.
-    pub label: String,
-    /// Tool arguments as JSON text.
-    pub detail: String,
-    /// What a tool call works on, such as a command or a path, on one line.
-    pub target: String,
-    /// The file a successful file change changed.
-    pub changed_file: Option<String>,
-    /// Milliseconds from the branch's first entry to the start.
-    pub start_ms: i64,
-    /// How long it took, when measured.
-    pub duration_ms: Option<i64>,
-    /// Milliseconds until a response's first streamed content.
-    pub first_token_ms: Option<i64>,
-    /// The model of a response.
-    pub model: String,
-    /// Tokens and cost of a response.
-    pub usage: Option<BridgeUsage>,
-    /// Why a response ended.
-    pub stop_reason: String,
-    /// Whether a tool call or response failed.
-    pub failed: bool,
-    /// What the model saw for a response.
-    pub context: Option<BridgeStepContext>,
-    /// What a tool call did.
-    pub outcome: BridgeToolOutcome,
-    /// Characters the step adds to the model's context: its prompt, response or tool result.
-    pub added_chars: i64,
-}
-
-/// What a tool call did, as far as its stored result shows.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct BridgeToolOutcome {
-    /// Lines an edit added or a write wrote.
-    pub added: Option<i64>,
-    /// Lines an edit removed.
-    pub removed: Option<i64>,
-    /// A shell command's exit code.
-    pub exit_code: Option<i32>,
-    /// Tests that passed, from a common test runner's output.
-    pub tests_passed: Option<i64>,
-    /// Tests that failed.
-    pub tests_failed: Option<i64>,
-}
-
-/// What a Trajectory row shows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BridgeRecordKind {
-    /// A user prompt.
-    User,
-    /// A model request and its response.
-    Message,
-    /// A tool call and its result.
-    Tool,
-}
-
-/// What the agent sent to the model for one request.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BridgeStepContext {
-    /// Characters of the system prompt.
-    pub prompt_chars: i64,
-    /// The system prompt's named sections, such as `preamble` or `project_context`.
-    pub sections: Vec<String>,
-    /// The tools the model could call.
-    pub tools: Vec<String>,
-    /// Characters of the tools' declarations.
-    pub tool_chars: i64,
-    /// Messages in the conversation before the request.
-    pub messages: i64,
-    /// Characters of those messages.
-    pub message_chars: i64,
-    /// What changed since the previous request.
-    pub new_since_previous: Vec<String>,
-}
-
-/// Everything the model saw for one request, in parts with their length in characters.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BridgeContextDetail {
-    /// Sections of the system prompt.
-    pub sections: Vec<BridgeContextPart>,
-    /// Declared tools.
-    pub tools: Vec<BridgeContextPart>,
-    /// Messages on the branch up to the request.
-    pub messages: Vec<BridgeContextMessage>,
-}
-
-/// A named part of the model's context.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BridgeContextPart {
-    /// Its name.
-    pub name: String,
-    /// Its length in characters.
-    pub chars: i64,
-}
-
-/// A message on the branch up to a request.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BridgeContextMessage {
-    /// The entry id.
-    pub entry: String,
-    /// What it is, such as `result of bash · npm test`.
-    pub label: String,
-    /// Its length in characters.
-    pub chars: i64,
-    /// Whether the model saw it; a compaction or edit can take it out.
-    pub in_context: bool,
-    /// Whether it arrived since the previous request.
-    pub fresh: bool,
 }
 
 /// A page of the chat of the session's current branch.
@@ -214,7 +76,7 @@ pub struct BridgeTranscriptItem {
     pub removed: Option<i64>,
 }
 
-/// A turn of the current branch, as the Diff tab lists it (ADR-0234).
+/// A turn of the current branch, as the Diff panel lists it (ADR-0234).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeTurn {
     /// The turn's checkpoint id.
@@ -224,7 +86,7 @@ pub struct BridgeTurn {
     pub start_entry: String,
     /// The entry that recorded its end checkpoint, once it ended.
     pub end_entry: Option<String>,
-    /// The Trajectory's turn of its first prompt; 0 before a prompt was stored.
+    /// The turn of its first prompt on the branch, counted from 1; 0 before a prompt was stored.
     pub number: i64,
     /// The entry of its first prompt, before which a revert continues the session.
     pub prompt_entry: Option<String>,
@@ -322,4 +184,97 @@ pub struct BridgeRunningAgent {
     pub own: bool,
     /// Its session's title, when its session file is found.
     pub title: Option<String>,
+}
+
+/// What a session's stored entries count to, on every branch (ADR-0279).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeStatistics {
+    /// What each model used over the whole session, sorted by cost and then tokens.
+    pub models: Vec<BridgeModelUsage>,
+    /// The calls of each tool over the whole session, largest total first.
+    pub tools: Vec<BridgeToolCalls>,
+    /// The turns, oldest first.
+    pub turns: Vec<BridgeTurnStatistics>,
+    /// When the session's first entry was stored, in Unix milliseconds.
+    pub started_ms: Option<i64>,
+    /// When its last entry was stored.
+    pub ended_ms: Option<i64>,
+}
+
+/// What each kind of a model's tokens cost, in millionths of a US dollar.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BridgeCostByKind {
+    /// Input tokens.
+    pub input: i64,
+    /// Output tokens.
+    pub output: i64,
+    /// Input tokens read from the provider's cache.
+    pub cache_read: i64,
+    /// Input tokens written to the provider's cache.
+    pub cache_write: i64,
+}
+
+/// What one model used.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeModelUsage {
+    /// The model as `provider/id`; empty for usage no model produced, such as a compaction summary.
+    pub model: String,
+    /// Tokens and cost.
+    pub usage: BridgeUsage,
+    /// What each kind of its tokens cost.
+    pub cost_by_kind: BridgeCostByKind,
+    /// Responses that reported usage.
+    pub responses: i64,
+    /// Responses that reported tokens but no cost.
+    pub unpriced: i64,
+}
+
+/// The calls of one tool, by outcome.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeToolCalls {
+    /// The tool's name as Watershed shows it.
+    pub name: String,
+    /// Calls whose result succeeded.
+    pub succeeded: i64,
+    /// Calls whose result failed.
+    pub failed: i64,
+    /// Calls without a result, whose turn ended or was followed by a later turn.
+    pub cancelled: i64,
+    /// Calls without a result in the session's last turn, which may still be running.
+    pub open: i64,
+    /// Time its calls took; `None` when none of its calls has a timing entry.
+    pub duration_ms: Option<i64>,
+}
+
+/// One turn and what it counted to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeTurnStatistics {
+    /// The entry of its first prompt, or of its start checkpoint when no prompt was stored yet.
+    pub entry: String,
+    /// The first line of its first prompt.
+    pub prompt: String,
+    /// When its first entry was stored, in Unix milliseconds.
+    pub started_ms: Option<i64>,
+    /// When its last entry was stored.
+    pub ended_ms: Option<i64>,
+    /// What each model used, sorted as the session's models are.
+    pub models: Vec<BridgeModelUsage>,
+    /// Time its requests took; `None` when the turn has no timing entries.
+    pub model_ms: Option<i64>,
+    /// Time its tools took; `None` when the turn has no timing entries.
+    pub tool_ms: Option<i64>,
+    /// Tool calls whose result failed.
+    pub failed: i64,
+}
+
+/// The context window the next request fills, and when pi compacts it (ADR-0279).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BridgeContext {
+    /// Tokens the window holds now, when pi knows them; `None` right after a compaction.
+    pub tokens: Option<i64>,
+    /// Tokens the model's context window holds.
+    pub window: i64,
+    /// Tokens at which pi starts compacting; `None` when auto compaction is off or pi's settings
+    /// cannot be read.
+    pub compacts_at: Option<i64>,
 }

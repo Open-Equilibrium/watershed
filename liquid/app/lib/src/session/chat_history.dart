@@ -2,9 +2,9 @@ import 'package:flutter/foundation.dart';
 
 import '../rust/api/events.dart';
 import '../rust/api/history.dart';
-import '../trajectory/trajectory_model.dart';
 import 'backend.dart';
 import 'chat_items.dart';
+import 'session_graph.dart';
 
 /// A session's chat as it stores it: the current branch, read back page by page from the
 /// newest, with a mark where the branch leaves the others.
@@ -32,7 +32,9 @@ class ChatHistory {
 
   /// The earliest stored entry the chat covers; the next page ends before it.
   String? _start;
-  bool _readingEarlier = false;
+
+  /// The version whose earlier page is being read; a reset or restore reads for its own.
+  int? _readingVersion;
 
   /// Rebuilt items count down from -1, so they never meet live item ids.
   int _nextId = -1;
@@ -68,26 +70,27 @@ class ChatHistory {
     final List<BridgeTurn> turns;
     try {
       page = await _backend.transcript(null);
-      history = await _backend.history(const []);
+      history = await _backend.history();
       turns = await _backend.turns();
     } on Object catch (error) {
       notify(BridgeLevel.error, 'Could not restore the chat: $error');
       return;
     }
     if (version != _version) return;
+    // Earlier pages started during this restore read the cursor it replaces, so they are dropped.
+    _version++;
     // What the stored responses used; live requests add to it.
     totals.value = const SessionTotals().add(history.usage);
     final rebuilt = _stored(page.items);
     _pendingMark = null;
     _path = _pathIndex(history.tree, history.leaf);
     _turns = turns;
-    // Turns that ended before the restore get their rows from it, not from a live end; one
-    // a later turn follows never ends.
+    // Turns whose end the restore read get their rows from it, not from a later end event.
     _ended
       ..clear()
       ..addAll([
-        for (final (index, turn) in turns.indexed)
-          if (turn.endEntry != null || index < turns.length - 1) turn.id,
+        for (final turn in turns)
+          if (turn.endEntry != null) turn.id,
       ]);
     _forget();
     if (branchMarker(history.tree, history.leaf) case final marker?) {
@@ -115,6 +118,9 @@ class ChatHistory {
 
   /// The branch mark until the chat shows where the branch leaves the others.
   _Mark? _pendingMark;
+
+  /// Whether `entry` is on the branch the chat shows, as the last restore read the tree.
+  bool onBranch(String entry) => _path.containsKey(entry);
 
   /// Each entry's position on the current branch, and the branch's turns, as last restored.
   Map<String, int> _path = const {};
@@ -145,69 +151,72 @@ class ChatHistory {
     return views;
   }
 
-  /// Turns whose end the chat placed or passed over, so none is placed twice.
+  /// Turns whose row was placed, live or by a restore, so a later end event places none twice.
   final _ended = <String>{};
 
-  /// Where the chat stood when each turn ended live, oldest first, until the turn is read.
-  final _boundaries = <int>[];
+  /// Where the chat stood when each turn with a checkpoint ended live, until its row is placed
+  /// or a read that began after its end shows no such turn.
+  final _boundaries = <_Boundary>[];
 
-  /// How many turns ended live, and how many of their places were used or given up.
+  /// How many turns have ended live; never reset, so each turn end has its own number.
   int _completed = 0;
-  int _settled = 0;
 
   /// Gives up the places of the turns that ended live so far.
-  void _forget() {
-    _boundaries.clear();
-    _settled = _completed;
-  }
+  void _forget() => _boundaries.clear();
 
   /// A turn ended live: its row goes here, after its items and before any of the next turn.
+  /// `checkpoint` is the turn's checkpoint id, absent when it took none, so it has no place.
   /// Returns how many turns ended live so far, for [endTurns].
-  int turnCompleted() {
-    _boundaries.add(items.value.length);
-    return ++_completed;
+  int turnCompleted(String? checkpoint) {
+    final ordinal = ++_completed;
+    if (checkpoint != null && !_ended.contains(checkpoint)) {
+      _boundaries.add((
+        ordinal: ordinal,
+        turn: checkpoint,
+        at: items.value.length,
+      ));
+    }
+    return ordinal;
   }
 
-  /// Places the rows of turns that ended live, oldest first, each where its turn ended.
-  /// `turns` were read after `read` turns had ended live; 0 if that read failed.
+  /// Places the rows of turns that ended live, each where its turn ended. `turns` were read
+  /// after `read` turns had ended live; 0 if that read failed.
   void endTurns(List<BridgeTurn> turns, int read) {
     final views = [...items.value];
     var inserted = 0;
-    // Whether a turn may still get its row from a later read.
-    var open = false;
-    for (final (index, turn) in turns.indexed) {
+    for (final turn in turns) {
       if (_ended.contains(turn.id)) continue;
-      // The last turn may still record its end; one a later turn follows never does, so its
-      // place is given up. A turn whose end event has not arrived waits for it.
-      if (turn.endEntry == null
-          ? index == turns.length - 1
-          : _boundaries.isEmpty) {
-        open = true;
-        break;
-      }
+      // A turn whose end is not recorded yet keeps its place for a later read.
+      final index = _boundaries.indexWhere(
+        (boundary) => boundary.turn == turn.id,
+      );
+      if (index < 0 || turn.endEntry == null) continue;
+      final at = _boundaries.removeAt(index).at;
       _ended.add(turn.id);
-      if (_boundaries.isEmpty) continue;
-      final at = _boundaries.removeAt(0);
-      _settled++;
-      if (turn.endEntry == null || !_changedFiles(turn)) continue;
+      if (!_changedFiles(turn)) continue;
       views.insert(at.clamp(0, views.length), _turnEnd(turn));
       inserted++;
       // The row moved the remaining places.
       _shift(1);
     }
-    // A turn that ended before the read and is not among its turns took no checkpoint, as
-    // outside Git: its place would otherwise go to a later turn.
-    while (!open && _settled < read && _boundaries.isNotEmpty) {
-      _boundaries.removeAt(0);
-      _settled++;
-    }
+    // A turn that ended before the read and is not among its turns took no checkpoint, or its
+    // checkpoint failed: its place would otherwise go to a later turn.
+    final shown = {for (final turn in turns) turn.id};
+    _boundaries.removeWhere(
+      (boundary) => boundary.ordinal <= read && !shown.contains(boundary.turn),
+    );
     if (inserted > 0) items.value = views;
   }
 
   /// Moves the places of live turns' rows after `count` items were added before them.
   void _shift(int count) {
     for (var index = 0; index < _boundaries.length; index++) {
-      _boundaries[index] += count;
+      final boundary = _boundaries[index];
+      _boundaries[index] = (
+        ordinal: boundary.ordinal,
+        turn: boundary.turn,
+        at: boundary.at + count,
+      );
     }
   }
 
@@ -243,12 +252,27 @@ class ChatHistory {
     return true;
   }
 
+  /// The read of earlier entries in progress, which a call made meanwhile waits for.
+  Future<void>? _earlier;
+
   /// Reads the stored entries before the earliest one the chat covers, passing over pages the
   /// chat shows nothing of, such as tool results only.
-  Future<void> loadEarlier() async {
-    if (_readingEarlier) return;
-    _readingEarlier = true;
+  Future<void> loadEarlier() {
+    if (_readingVersion == _version) return _earlier!;
     final version = _version;
+    _readingVersion = version;
+    final read = _readEarlier(version);
+    _earlier = read;
+    return read.whenComplete(() {
+      // A newer chat may have started its own reading meanwhile; that one stays.
+      if (_readingVersion == version) {
+        _readingVersion = null;
+        _earlier = null;
+      }
+    });
+  }
+
+  Future<void> _readEarlier(int version) async {
     try {
       while (more.value && _start != null) {
         final before = _start;
@@ -283,8 +307,6 @@ class ChatHistory {
       }
     } on Object catch (error) {
       reportRead('earlier messages', 'Could not read earlier messages: $error');
-    } finally {
-      _readingEarlier = false;
     }
   }
 
@@ -305,11 +327,13 @@ class ChatHistory {
         ),
   ];
 
-  /// Each entry's position on the path from the root to `leaf`.
+  /// Each entry's position on the path from the root to `leaf`. Stored parents may loop, so the
+  /// walk ends at the first entry it meets again.
   static Map<String, int> _pathIndex(List<BridgeTreeNode> tree, String? leaf) {
     final parents = {for (final node in tree) node.id: node.parent};
     final path = <String>[];
-    for (String? id = leaf; id != null; id = parents[id]) {
+    final seen = <String>{};
+    for (String? id = leaf; id != null && seen.add(id); id = parents[id]) {
       path.add(id);
     }
     return {for (final (index, id) in path.reversed.indexed) id: index};
@@ -319,3 +343,7 @@ class ChatHistory {
 /// Where a branch leaves the others: its mark, each entry's position on the path to the leaf,
 /// and the fork's position.
 typedef _Mark = ({BranchMarker marker, Map<String, int> path, int fork});
+
+/// Where a turn with a checkpoint ended live: which turn end it was, its checkpoint id and the
+/// number of items before its row.
+typedef _Boundary = ({int ordinal, String turn, int at});

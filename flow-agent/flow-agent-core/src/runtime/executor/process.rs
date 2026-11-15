@@ -14,6 +14,25 @@ pub(super) fn configure_executor_child(
         .map_err(|error| std::io::Error::from_raw_os_error(error.raw_os_error()))
 }
 
+/// Moves a validated Executor image above the protected descriptor range, so that launching it
+/// by descriptor path cannot resolve to a standard stream that the child remaps.
+pub(super) fn duplicate_executor_descriptor(
+    executable: &std::fs::File,
+) -> Result<std::os::fd::OwnedFd, crate::runtime::types::RuntimeError> {
+    let minimum = i32::try_from(
+        proto::EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0 as usize
+            + proto::MAX_EXECUTOR_PROTECTED_OBJECTS_V0
+            + 64,
+    )
+    .expect("protocol descriptor bounds fit i32");
+    rustix::io::fcntl_dupfd_cloexec(executable, minimum).map_err(|_| {
+        crate::runtime::types::RuntimeError::executor(
+            proto::ExecutorErrorCodeV0::Unavailable,
+            "validated Executor descriptor could not be moved outside the protected descriptor range",
+        )
+    })
+}
+
 #[cfg(test)]
 thread_local! {
     static PROCESS_GROUP_CLEANUP_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -29,6 +48,17 @@ pub(super) fn process_group_cleanup_calls_for_test() -> usize {
     PROCESS_GROUP_CLEANUP_CALLS.get()
 }
 
+#[cfg(test)]
+thread_local! {
+    static FORCE_CLEANUP_SURVIVOR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Makes the next completed-Executor cleanup report a group that survived its wait.
+#[cfg(all(test, target_os = "macos"))]
+pub(super) fn force_cleanup_survivor_for_test() {
+    FORCE_CLEANUP_SURVIVOR.set(true);
+}
+
 pub(super) fn child_exited_without_reaping(
     child: &std::process::Child,
 ) -> rustix::io::Result<bool> {
@@ -42,7 +72,33 @@ pub(super) fn child_exited_without_reaping(
     .map(|status| status.is_some())
 }
 
-fn terminate_child_bounded(child: &mut std::process::Child) -> bool {
+/// How the cleanup of an Executor's process group ended.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ExecutorCleanup {
+    /// The leader was reaped and no process of its group remained.
+    Complete,
+    /// A process of the group outlived the cleanup wait.
+    Survived,
+    /// The leader could not be observed, so the cleanup cannot be judged.
+    Unobservable,
+}
+
+pub(super) fn terminate_child_bounded(child: &mut std::process::Child) -> ExecutorCleanup {
+    #[cfg(test)]
+    {
+        if FORCE_CLEANUP_SURVIVOR.replace(false) {
+            // Ends the real group first, so the injected survivor leaks no process.
+            if let Some(process_group) = rustix::process::Pid::from_raw(child.id() as i32) {
+                let _ = rustix::process::kill_process_group(
+                    process_group,
+                    rustix::process::Signal::KILL,
+                );
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            return ExecutorCleanup::Survived;
+        }
+    }
     let process_group = rustix::process::Pid::from_raw(child.id() as i32);
     // Signal the group before reaping its leader. The unreaped leader retains
     // the numeric PID/PGID, so this signal cannot race with identifier reuse.
@@ -57,7 +113,7 @@ fn terminate_child_bounded(child: &mut std::process::Child) -> bool {
         let leader_reaped = match child.try_wait() {
             Ok(Some(_)) => true,
             Ok(None) => false,
-            Err(_) => return false,
+            Err(_) => return ExecutorCleanup::Unobservable,
         };
         let group_gone =
             process_group.is_none_or(
@@ -68,15 +124,15 @@ fn terminate_child_bounded(child: &mut std::process::Child) -> bool {
                 },
             );
         if leader_reaped && group_gone {
-            return true;
+            return ExecutorCleanup::Complete;
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    false
+    ExecutorCleanup::Survived
 }
 
 pub(super) fn terminate_child_or_fail_stop(child: &mut std::process::Child) {
-    if !terminate_child_bounded(child) {
+    if terminate_child_bounded(child) != ExecutorCleanup::Complete {
         std::process::abort();
     }
 }
@@ -95,9 +151,32 @@ pub(super) fn executor_image_path(
     }
 }
 
+pub(super) struct BoundedRead {
+    pub(super) bytes: Vec<u8>,
+    pub(super) limit: usize,
+    pub(super) overflowed: bool,
+}
+
+impl BoundedRead {
+    pub(super) fn new(limit: usize) -> Self {
+        Self {
+            bytes: Vec::with_capacity(limit.min(8 * 1024)),
+            limit,
+            overflowed: false,
+        }
+    }
+}
+
+pub(super) fn set_nonblocking(
+    descriptor: &impl std::os::fd::AsFd,
+) -> Result<(), rustix::io::Errno> {
+    let flags = rustix::fs::fcntl_getfl(descriptor)?;
+    rustix::fs::fcntl_setfl(descriptor, flags | rustix::fs::OFlags::NONBLOCK)
+}
+
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod tests {
-    use super::{configure_executor_child, terminate_child_bounded};
+    use super::{ExecutorCleanup, configure_executor_child, terminate_child_bounded};
     use std::{
         fs,
         os::unix::process::CommandExt as _,
@@ -185,7 +264,10 @@ mod tests {
         let process_group = rustix::process::Pid::from_raw(child.id() as i32)
             .expect("child process group id is valid");
         let started = Instant::now();
-        assert!(terminate_child_bounded(&mut child));
+        assert_eq!(
+            terminate_child_bounded(&mut child),
+            ExecutorCleanup::Complete
+        );
         assert!(started.elapsed() < Duration::from_secs(2));
         assert!(matches!(child.try_wait(), Ok(Some(_))));
         assert_eq!(

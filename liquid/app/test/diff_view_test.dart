@@ -1,10 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid/src/diff/diff_lines.dart';
+import 'package:liquid/src/diff/diff_model.dart';
 import 'package:liquid/src/diff/diff_settings.dart';
 import 'package:liquid/src/diff/diff_view.dart';
+import 'package:liquid/src/diff/turn_header.dart';
 import 'package:liquid/src/diff/turn_scope.dart';
 import 'package:liquid/src/format.dart';
 import 'package:liquid/src/rust/api/events.dart';
@@ -12,16 +16,18 @@ import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
+import 'package:liquid/src/theme/tokens.g.dart';
 
 import 'fake_backend.dart';
 
 void main() {
-  /// Shows the Diff tab of a session on [backend].
+  /// Shows the Diff panel of a session on [backend].
   Future<SessionState> show(
     WidgetTester tester,
     FakeBackend backend, {
     Size size = const Size(1600, 900),
     DiffSettingsController? settings,
+    TextScaler textScaler = TextScaler.noScaling,
   }) async {
     await tester.binding.setSurfaceSize(size);
     final kept = settings ??= DiffSettingsController();
@@ -33,8 +39,12 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: liquidTheme(Brightness.light),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaler: textScaler),
+          child: child!,
+        ),
         home: Material(
-          child: DiffView(state: state, settings: settings),
+          child: DiffView(state: state, settings: settings, parse: parsePatch),
         ),
       ),
     );
@@ -93,6 +103,69 @@ void main() {
       hasLength(reads + 1),
     );
     expect(scroll.offset, 400);
+  });
+
+  /// Shows `patch` as the uncommitted change of a.txt at `textScaler`.
+  Future<void> showPatch(
+    WidgetTester tester,
+    String patch, {
+    required TextScaler textScaler,
+  }) async {
+    final backend = FakeBackend()
+      ..git = gitStatusOf(changed: 1)
+      ..changed = [
+        const BridgeFileChange(
+          path: 'a.txt',
+          shown: 'a.txt',
+          status: BridgeChangeStatus.added,
+          added: 2,
+          removed: 0,
+        ),
+      ]
+      ..patches = {'a.txt': patch};
+    final state = await show(tester, backend, textScaler: textScaler);
+    await state.showTurns(const UncommittedChanges());
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('a long line keeps its end when the text is scaled', (
+    tester,
+  ) async {
+    final words = List.filled(40, 'word').join(' ');
+    await showPatch(
+      tester,
+      '@@ -0,0 +1 @@\n+$words END\n',
+      textScaler: const TextScaler.linear(2),
+    );
+    final end = find.textContaining('END');
+    final natural = tester
+        .renderObject<RenderParagraph>(end)
+        .getMaxIntrinsicWidth(double.infinity);
+    expect(
+      tester.getSize(end).width,
+      greaterThanOrEqualTo(natural),
+      reason: 'the scaled line is cut off before its end',
+    );
+  });
+
+  testWidgets('rows grow with the text so no line is drawn over another', (
+    tester,
+  ) async {
+    await showPatch(
+      tester,
+      '@@ -0,0 +1,2 @@\n+first line\n+second line\n',
+      textScaler: const TextScaler.linear(2),
+    );
+    final text = find.textContaining('first line');
+    final natural = tester
+        .renderObject<RenderParagraph>(text)
+        .getMaxIntrinsicHeight(double.infinity);
+    final row = find.ancestor(of: text, matching: find.byType(UnifiedLineRow));
+    expect(
+      tester.getSize(row).height,
+      greaterThanOrEqualTo(natural),
+      reason: 'the scaled line is taller than its row',
+    );
   });
 
   testWidgets('an edited uncommitted revision replaces a pending older patch', (
@@ -571,6 +644,48 @@ void main() {
     expect(tester.getTopLeft(line).dx, lessThan(before - 1000));
   });
 
+  testWidgets('scrolling fully right reaches the end of the longest line', (
+    tester,
+  ) async {
+    // Eight Cyrillic lines score wider per character than the 600-character line.
+    final cyrillic = List.generate(8, (_) => '+${'я' * 400}');
+    final ascii = '+${'z' * 597}END';
+    final backend = FakeBackend()
+      ..changed = [
+        BridgeFileChange(
+          path: 'wide.ts',
+          shown: 'wide.ts',
+          status: BridgeChangeStatus.modified,
+          added: 9,
+          removed: 0,
+        ),
+      ]
+      ..patches = {
+        'wide.ts': '@@ -0,0 +1,9 @@\n${[...cyrillic, ascii].join('\n')}\n',
+      };
+    await show(tester, backend, size: const Size(1200, 900));
+    final start = find.textContaining('zzz', findRichText: true);
+    await tester.dragFrom(
+      tester.getTopLeft(start) + const Offset(20, 5),
+      const Offset(-20000, 0),
+    );
+    await tester.pumpAndSettle();
+    // The text box ends with its row, so the end of the text is where its last character is.
+    final paragraph = tester.renderObject<RenderParagraph>(
+      find.textContaining('END', findRichText: true),
+    );
+    final tail = paragraph.localToGlobal(
+      paragraph.getOffsetForCaret(
+        TextPosition(offset: paragraph.text.toPlainText().length),
+        Rect.zero,
+      ),
+    );
+    expect(
+      tail.dx,
+      lessThanOrEqualTo(tester.getTopRight(find.byType(DiffView)).dx),
+    );
+  });
+
   testWidgets('keeps every arrow press while a patch loads and reads only '
       'the last', (tester) async {
     BridgeFileChange file(String path) => BridgeFileChange(
@@ -920,6 +1035,28 @@ void main() {
     expect(find.text('@@ -1,201 +1,201 @@'), findsNothing);
     await alt(LogicalKeyboardKey.arrowUp);
     expect(find.text('@@ -1,201 +1,201 @@'), findsOneWidget);
+  });
+
+  testWidgets('a wide panel keeps the switches beside the turn header', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..changed = [modified('code.ts', 2, 1)]
+      ..patches = {'code.ts': '@@ -1 +1,2 @@\n keep\n+added\n'};
+    await show(tester, backend);
+
+    final header = tester.getRect(find.byType(TurnHeader));
+    final toggle = tester.getRect(find.text('Hide whitespace'));
+    expect(
+      toggle.top,
+      lessThan(header.bottom),
+      reason: 'the switches share the header line, not a line of their own',
+    );
+    expect(
+      header.right,
+      greaterThan(toggle.left - WsMetrics.space6),
+      reason: 'the header fills the line up to the switches',
+    );
   });
 
   testWidgets('hides whitespace changes with W and from the control', (
@@ -1422,6 +1559,41 @@ void main() {
       );
     },
   );
+
+  testWidgets('the header with stashed changes fits the narrowest panel', (
+    tester,
+  ) async {
+    final left = DateTime(2026, 11, 1, 10, 41).millisecondsSinceEpoch;
+    final backend = FakeBackend()
+      ..stashed = BridgeStash(
+        current: true,
+        id: 's1',
+        createdMs: left,
+        files: [
+          BridgeFileChange(
+            path: 'notes/todo.md',
+            shown: 'notes/todo.md',
+            status: BridgeChangeStatus.added,
+            added: 1,
+            removed: 0,
+          ),
+        ],
+      )
+      ..patches = {'notes/todo.md': '@@ -0,0 +1 @@\n+Ship it\n'};
+    // T3 Code's right panel minimum: every header action must lay out inside it.
+    final state = await show(tester, backend, size: const Size(360, 900));
+    await state.git.refresh();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Turn 1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Stashed changes'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Restore'), findsOneWidget);
+    expect(find.text('Discard…'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('shows the branch’s stashed changes with Restore and Discard', (
     tester,

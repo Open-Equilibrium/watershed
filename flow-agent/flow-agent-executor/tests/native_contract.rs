@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 mod native_support;
 
 use native_support::{Fixture, limits};
@@ -114,7 +116,7 @@ fn a_tool_that_cannot_launch_is_a_setup_failure_not_an_uncertain_attempt() {
         matches!(
             response,
             ExecutorResponseV0::Error {
-                code: proto::ExecutorErrorCodeV0::SandboxSetupFailed,
+                code: proto::ExecutorErrorCodeV0::FlowOwnedWriteProtectionSetupFailed,
                 ..
             }
         ),
@@ -258,7 +260,7 @@ fn timeout_and_cancellation_reap_the_tool_root_after_term_grace() {
         let script = if cooperative {
             "trap 'printf stopped > term-marker; exit 0' TERM; printf ready > root-ready; while :; do sleep 0.02; done"
         } else {
-            "trap '' TERM; printf ready > root-ready; while :; do printf . >> heartbeat; sleep 0.02; done"
+            "printf . > heartbeat; trap '' TERM; printf ready > root-ready; while :; do printf . >> heartbeat; sleep 0.02; done"
         };
         let request = fixture.request(script, limits(1024, 1024, if cancel { 5000 } else { 1500 }));
         let mut running = fixture.spawn(&request);

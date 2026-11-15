@@ -4,7 +4,8 @@ use crate::evidence_support::{
 };
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::{error::Error, io::Write};
+use sha2::{Digest as _, Sha256};
+use std::{error::Error, io::Write, path::Path};
 
 const REPORT_SCHEMA: &str = "flow-m12-executor-startup-v0";
 const REPORT_SUITE: &str = "Flow Agent M1.2 Executor startup evidence";
@@ -18,7 +19,9 @@ struct Metadata {
     warmup_samples: usize,
     measured_samples: usize,
     tool_executions_per_fresh_child: usize,
-    self_protection_required: bool,
+    flow_owned_write_protection_required: bool,
+    executor_path: String,
+    executor_sha256: String,
     environment: Environment,
 }
 
@@ -29,7 +32,7 @@ struct RawSample {
     benchmark: &'static str,
     sample: usize,
     executor_elapsed_ns: u64,
-    self_protection_active: bool,
+    flow_owned_write_protection_active: bool,
 }
 
 #[derive(Serialize)]
@@ -69,10 +72,10 @@ fn inputs() -> Value {
         "tool": "/bin/echo",
         "tool_arguments": [],
         "tool_environment": "empty",
-        "self_protection_required": true,
+        "flow_owned_write_protection_required": true,
         "executor_interval": [
             "selected Executor preparation and readiness",
-            "canonical invocation and own-file protection preparation",
+            "canonical invocation and Flow-owned write protection preparation",
             "one-shot Executor and Tool lifecycle",
             "validated terminal Tool result and enforcement receipt"
         ],
@@ -108,11 +111,20 @@ pub(super) fn write_report(writer: &mut impl Write, config: Config) -> Result<bo
     write_report_with_measurement(writer, config, &mut || fresh_child_measurement(&executor))
 }
 
+/// Hashes the selected Executor image before any measured interval starts.
+fn executor_sha256(path: &Path) -> Result<String, DynError> {
+    Ok(Sha256::digest(std::fs::read(path)?)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
 pub(super) fn write_report_with_measurement(
     writer: &mut impl Write,
     config: Config,
     measure: &mut impl FnMut() -> Result<ChildMeasurement, DynError>,
 ) -> Result<bool, DynError> {
+    let executor_sha256 = executor_sha256(&config.executor)?;
     write_jsonl(
         writer,
         &Metadata {
@@ -122,7 +134,9 @@ pub(super) fn write_report_with_measurement(
             warmup_samples: config.warmups,
             measured_samples: config.samples,
             tool_executions_per_fresh_child: 1,
-            self_protection_required: true,
+            flow_owned_write_protection_required: true,
+            executor_path: config.executor.to_string_lossy().into_owned(),
+            executor_sha256,
             environment: current_environment(),
         },
     )?;
@@ -169,7 +183,7 @@ pub(super) fn write_report_with_measurement(
                 benchmark: BENCHMARK,
                 sample,
                 executor_elapsed_ns: measurement.executor_elapsed_ns,
-                self_protection_active: measurement.self_protection_active,
+                flow_owned_write_protection_active: measurement.flow_owned_write_protection_active,
             },
         )?;
         executor_samples.push(measurement.executor_elapsed_ns);

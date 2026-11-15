@@ -37,6 +37,10 @@ class Keys {
   /// Like [activator], and also while the key is held, as for moving through a list.
   ShortcutActivator get repeating => _KeysActivator(this, repeats: true);
 
+  /// These keys without the Liquid key, as the macOS menu bar takes them.
+  Keys get withoutLiquid =>
+      Keys(key, meta: meta, alt: alt, shift: shift, control: control);
+
   /// These keys as the macOS menu bar shows them; none with the Liquid key.
   SingleActivator? get menuShortcut => liquid
       ? null
@@ -52,7 +56,31 @@ class Keys {
   /// ⌃ character, which moves the cursor, or a cursor or delete key with any modifier.
   bool get types =>
       !liquid &&
-      (_editing.contains(key) || (!meta && key.keyLabel.runes.length == 1));
+      (_editing.contains(key) ||
+          (!meta && (key.keyLabel.runes.length == 1 || _numpad.contains(key))));
+
+  /// Numpad keys that type a character; their labels name them, as in "Numpad 1".
+  static final _numpad = {
+    LogicalKeyboardKey.numpad0,
+    LogicalKeyboardKey.numpad1,
+    LogicalKeyboardKey.numpad2,
+    LogicalKeyboardKey.numpad3,
+    LogicalKeyboardKey.numpad4,
+    LogicalKeyboardKey.numpad5,
+    LogicalKeyboardKey.numpad6,
+    LogicalKeyboardKey.numpad7,
+    LogicalKeyboardKey.numpad8,
+    LogicalKeyboardKey.numpad9,
+    LogicalKeyboardKey.numpadDecimal,
+    LogicalKeyboardKey.numpadAdd,
+    LogicalKeyboardKey.numpadSubtract,
+    LogicalKeyboardKey.numpadMultiply,
+    LogicalKeyboardKey.numpadDivide,
+    LogicalKeyboardKey.numpadEqual,
+    LogicalKeyboardKey.numpadComma,
+    LogicalKeyboardKey.numpadParenLeft,
+    LogicalKeyboardKey.numpadParenRight,
+  };
 
   static final _editing = {
     LogicalKeyboardKey.arrowLeft,
@@ -175,8 +203,9 @@ class _KeysActivator extends ShortcutActivator {
   String debugDescribeKeys() => keys.label;
 }
 
-/// Where a command's keys work; keys conflict only within one area.
-enum Area { app, input, question, trajectory, diff }
+/// Where a command's keys work. Keys conflict within one area, and the ⌘ keys of the app area,
+/// which the menu bar runs, in every area.
+enum Area { app, input, question, diff, page }
 
 /// Keys that never change, as Settings → Shortcuts lists them per area; no command may take
 /// them there.
@@ -184,21 +213,13 @@ enum Fixed {
   newLine('New line', Area.input, '⇧⏎', [
     Keys(LogicalKeyboardKey.enter, shift: true),
   ]),
+  newBlockOrLine('New block or line', Area.page, '⏎ ⇧⏎', [
+    Keys(LogicalKeyboardKey.enter),
+    Keys(LogicalKeyboardKey.enter, shift: true),
+  ]),
   moveThroughOptions('Move through options', Area.question, '↑↓', [
     Keys(LogicalKeyboardKey.arrowUp),
     Keys(LogicalKeyboardKey.arrowDown),
-  ]),
-  previousOrNextStep('Previous or next step', Area.trajectory, '↑↓', [
-    Keys(LogicalKeyboardKey.arrowUp),
-    Keys(LogicalKeyboardKey.arrowDown),
-  ]),
-  foldTurn('Collapse or expand the turn', Area.trajectory, '←→', [
-    Keys(LogicalKeyboardKey.arrowLeft),
-    Keys(LogicalKeyboardKey.arrowRight),
-  ]),
-  moveInTree('Move in the session tree', Area.trajectory, '⌥↑↓', [
-    Keys(LogicalKeyboardKey.arrowUp, alt: true),
-    Keys(LogicalKeyboardKey.arrowDown, alt: true),
   ]),
   previousOrNextFile('Previous or next file', Area.diff, '↑↓', [
     Keys(LogicalKeyboardKey.arrowUp),
@@ -270,16 +291,23 @@ enum Command {
     Keys(LogicalKeyboardKey.digit1, meta: true),
     liquid: true,
   ),
-  trajectory(
-    'Trajectory',
-    Area.app,
-    Keys(LogicalKeyboardKey.digit2, meta: true),
-    liquid: true,
-  ),
   diff(
     'Diff',
     Area.app,
-    Keys(LogicalKeyboardKey.digit3, meta: true),
+    Keys(LogicalKeyboardKey.keyD, meta: true),
+    liquid: true,
+  ),
+  // Stored by enum name in shortcuts.json, so the name stays while the label says Session card.
+  sessionDetails(
+    'Session card',
+    Area.app,
+    Keys(LogicalKeyboardKey.keyB, meta: true, alt: true),
+    liquid: true,
+  ),
+  statistics(
+    'Statistics',
+    Area.app,
+    Keys(LogicalKeyboardKey.keyU, meta: true),
     liquid: true,
   ),
   focusInput(
@@ -303,6 +331,12 @@ enum Command {
     Area.input,
     Keys(LogicalKeyboardKey.enter, alt: true),
   ),
+  toggleToDo(
+    'Tick or untick a to-do',
+    Area.page,
+    Keys(LogicalKeyboardKey.enter, meta: true),
+    liquid: true,
+  ),
   stop('Stop the run', Area.input, Keys(LogicalKeyboardKey.escape)),
   answer('Answer, or confirm', Area.question, Keys(LogicalKeyboardKey.enter)),
   answerEditor(
@@ -311,34 +345,7 @@ enum Command {
     Keys(LogicalKeyboardKey.enter, meta: true),
     liquid: true,
   ),
-  dismissQuestion('Dismiss', Area.question, Keys(LogicalKeyboardKey.escape)),
-  foldAll(
-    'Collapse all turns',
-    Area.trajectory,
-    Keys(LogicalKeyboardKey.arrowLeft, alt: true),
-  ),
-  openStep('Open the step', Area.trajectory, Keys(LogicalKeyboardKey.enter)),
-  filterSteps(
-    'Filter steps',
-    Area.trajectory,
-    Keys(LogicalKeyboardKey.keyF, meta: true),
-  ),
-  closeStep('Close the step', Area.trajectory, Keys(LogicalKeyboardKey.escape)),
-  branch(
-    'Branch from the step',
-    Area.trajectory,
-    Keys(LogicalKeyboardKey.keyB),
-  ),
-  compare(
-    'Compare session branches',
-    Area.trajectory,
-    Keys(LogicalKeyboardKey.keyC),
-  ),
-  selectBranch(
-    'Select a session branch to compare',
-    Area.trajectory,
-    Keys(LogicalKeyboardKey.space),
-  );
+  dismissQuestion('Dismiss', Area.question, Keys(LogicalKeyboardKey.escape));
 
   const Command(this.label, this.area, this.keys, {this.liquid = false});
 
@@ -368,13 +375,7 @@ enum Profile {
 /// command works; null when the keys are free.
 String? reserved(Command command, Keys keys) {
   // The menu bar ignores the Liquid key, so ⇪⌘Q still quits.
-  final menu = Keys(
-    keys.key,
-    meta: keys.meta,
-    alt: keys.alt,
-    shift: keys.shift,
-    control: keys.control,
-  );
+  final menu = keys.withoutLiquid;
   for (final (area, reserved, use) in _reserved) {
     if (area == null
         ? reserved == menu
@@ -382,7 +383,15 @@ String? reserved(Command command, Keys keys) {
       return use;
     }
   }
-  final typing = {Area.app, Area.input, Area.question}.contains(command.area);
+  // With Shift pressed first, macOS takes Caps Lock as its capitals toggle, so the Liquid key
+  // never arrives.
+  if (keys.liquid && keys.shift) return 'capitals';
+  final typing = {
+    Area.app,
+    Area.input,
+    Area.question,
+    Area.page,
+  }.contains(command.area);
   return typing && keys.types ? 'typing' : null;
 }
 
@@ -466,17 +475,22 @@ class ShortcutSettings {
   /// Every changed command's keys in the active profile.
   Map<Command, List<Keys>> get changes => _active?.changes ?? const {};
 
-  List<Keys> _defaults(Command command) => [
-    if (command.liquid && liquidKey)
-      Keys(
-        command.keys.key,
-        liquid: true,
-        alt: command.keys.alt,
-        shift: command.keys.shift,
-        control: command.keys.control,
-      ),
-    command.keys,
-  ];
+  List<Keys> _defaults(Command command) =>
+      _defaultKeys(command, liquidKey: liquidKey);
+
+  /// What `command` runs by default, with its Liquid key combination while `liquidKey` is on.
+  static List<Keys> _defaultKeys(Command command, {required bool liquidKey}) =>
+      [
+        if (command.liquid && liquidKey)
+          Keys(
+            command.keys.key,
+            liquid: true,
+            alt: command.keys.alt,
+            shift: command.keys.shift,
+            control: command.keys.control,
+          ),
+        command.keys,
+      ];
 
   /// Every key combination that runs `command`; Liquid key combinations only while it is on.
   List<Keys> bindings(Command command) => [
@@ -510,15 +524,29 @@ class ShortcutSettings {
   /// What `command` shows when unchanged.
   String defaultLabel(Command command) => _defaults(command).first.label;
 
-  /// The other command in `command`'s area that `keys` already runs.
-  Command? conflict(Command command, Keys keys) => Command.values
-      .where(
-        (other) =>
-            other != command &&
-            other.area == command.area &&
-            bindings(other).contains(keys),
-      )
-      .firstOrNull;
+  /// Whether `bound`, a combination of `other`, runs `keys` of `command` too: the same keys in
+  /// one area. When either is in the app area, also the same ⌘ keys, which the menu bar runs
+  /// with or without the Liquid key.
+  static bool _runsSame(
+    Command command,
+    Keys keys,
+    Command other,
+    Keys bound,
+  ) =>
+      (command.area == other.area && bound == keys) ||
+      ((command.area == Area.app || other.area == Area.app) &&
+          bound.meta &&
+          bound.withoutLiquid == keys.withoutLiquid);
+
+  /// The other commands that `keys` already run for `command`: in their area, or across areas
+  /// for the app area's ⌘ keys.
+  List<Command> conflicts(Command command, Keys keys) => [
+    for (final other in Command.values)
+      if (other != command &&
+          bindings(other)
+              .any((bound) => _runsSame(command, keys, other, bound)))
+        other,
+  ];
 
   /// The kept Custom profile a change here would replace, when it holds anything its base
   /// does not.
@@ -538,7 +566,11 @@ class ShortcutSettings {
   /// Gives `command` new first keys, or none, keeping the ⌘ keys beside the Liquid key;
   /// `clear` gives up the same keys. Changing a profile other than Custom starts a new Custom
   /// profile from it.
-  ShortcutSettings change(Command command, Keys? keys, {Command? clear}) {
+  ShortcutSettings change(
+    Command command,
+    Keys? keys, {
+    Iterable<Command> clear = const [],
+  }) {
     final custom = _editable;
     final from = ShortcutSettings._(Profile.custom, custom);
     final next = {...custom.changes};
@@ -550,10 +582,21 @@ class ShortcutSettings {
       }
     }
 
-    final rest = from.bindings(command).skip(1).where((other) => other != keys);
+    // The first key shown gives way; Liquid key combinations stay while the key is off.
+    final on = from.withLiquidKey(true);
+    final shown = from.bindings(command).firstOrNull;
+    final rest = on
+        .bindings(command)
+        .where((other) => other != shown && other != keys);
     put(command, [?keys, ...rest]);
-    if (clear != null && keys != null) {
-      put(clear, [...from.bindings(clear).where((other) => other != keys)]);
+    if (keys != null) {
+      for (final owner in clear) {
+        put(owner, [
+          ...on
+              .bindings(owner)
+              .where((bound) => !_runsSame(command, keys, owner, bound)),
+        ]);
+      }
     }
     return ShortcutSettings._(
       Profile.custom,
@@ -572,6 +615,37 @@ class ShortcutSettings {
     ),
     null => this,
   };
+
+  /// Restores `command`'s default keys and takes them from the other commands that run them now,
+  /// Liquid key combinations included while that key is off: they come back with it.
+  ShortcutSettings resetTaking(Command command) {
+    final custom = _active;
+    if (custom == null) return this;
+    final on = withLiquidKey(true);
+    final defaults = on._defaults(command);
+    final changes = {...custom.changes}..remove(command);
+    for (final other in Command.values) {
+      if (other == command) continue;
+      final bound = on.bindings(other);
+      final kept = [
+        for (final keys in bound)
+          if (!defaults.any(
+            (restored) => _runsSame(command, restored, other, keys),
+          ))
+            keys,
+      ];
+      if (kept.length == bound.length) continue;
+      if (listEquals(kept, on._defaults(other))) {
+        changes.remove(other);
+      } else {
+        changes[other] = kept;
+      }
+    }
+    return ShortcutSettings._(
+      Profile.custom,
+      CustomProfile(custom.base, custom.liquidKey, changes),
+    );
+  }
 
   /// Drops every change; a Custom profile that then matches its base becomes that profile, so
   /// resetting never turns the Liquid key on or off.
@@ -650,7 +724,33 @@ class ShortcutSettings {
         changes[command] = keys.nonNulls.toSet().toList();
       }
     }
-    return CustomProfile(base, liquidKey, changes);
+    return CustomProfile(base, liquidKey, _leaveTakenDefaultsUnbound(changes));
+  }
+
+  /// Leaves a default unbound when a binding of the user's own takes its keys: the user's binding
+  /// wins, and Settings shows the command unbound with its default to restore. The Liquid key
+  /// counts as on, so its combinations are checked as well.
+  static Map<Command, List<Keys>> _leaveTakenDefaultsUnbound(
+    Map<Command, List<Keys>> changes,
+  ) {
+    final own = [
+      for (final MapEntry(key: owner, value: bound) in changes.entries)
+        for (final keys in bound) (owner, keys),
+    ];
+    bool taken(Command command, Keys keys) =>
+        own.any((it) => _runsSame(command, keys, it.$1, it.$2));
+    final result = {...changes};
+    for (final command in Command.values) {
+      if (changes.containsKey(command)) continue;
+      final defaults = _defaultKeys(command, liquidKey: true);
+      if (defaults.any((keys) => taken(command, keys))) {
+        result[command] = [
+          for (final keys in defaults)
+            if (!taken(command, keys)) keys,
+        ];
+      }
+    }
+    return result;
   }
 
   @override

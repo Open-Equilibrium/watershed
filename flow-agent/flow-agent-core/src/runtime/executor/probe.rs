@@ -1,7 +1,8 @@
 use super::ExecutorSelection;
 use super::ExecutorSelectionSource;
 use super::process::{
-    child_exited_without_reaping, configure_executor_child, terminate_child_or_fail_stop,
+    BoundedRead, child_exited_without_reaping, configure_executor_child,
+    duplicate_executor_descriptor, set_nonblocking, terminate_child_or_fail_stop,
 };
 use crate::runtime::fs_guards::AnchoredDir;
 use crate::runtime::types::RuntimeError;
@@ -84,6 +85,9 @@ pub(super) fn probe_executor(
     let programs = open_validated_executable(selection, installation_flow)?;
     programs.verify_aliases(protected_directories)?;
     let (image, path) = programs.selected.launch_target()?;
+    // WHY: with closed parent standard streams the image can occupy descriptor 0-2, which the
+    // child remaps before it resolves the descriptor path.
+    let image = duplicate_executor_descriptor(image)?;
     let inherited_path = super::process::executor_image_path(image.as_raw_fd(), path);
     let mut command = Command::new(inherited_path);
     command
@@ -260,7 +264,7 @@ fn validate_probe(
     if !probe
         .supported_policy_features
         .iter()
-        .any(|feature| feature == proto::EXECUTOR_FEATURE_SELF_PROTECTION_V0)
+        .any(|feature| feature == proto::EXECUTOR_FEATURE_FLOW_OWNED_WRITE_PROTECTION_V0)
     {
         return Err(executor_unavailable(
             "Executor does not support mandatory Flow-owned write protection",
@@ -287,29 +291,6 @@ fn host_identity() -> (&'static str, &'static str) {
     {
         ("macos-27-aarch64", "seatbelt")
     }
-}
-
-struct BoundedRead {
-    bytes: Vec<u8>,
-    limit: usize,
-    overflowed: bool,
-}
-
-impl BoundedRead {
-    fn new(limit: usize) -> Self {
-        Self {
-            bytes: Vec::with_capacity(limit.min(8 * 1024)),
-            limit,
-            overflowed: false,
-        }
-    }
-}
-
-fn set_nonblocking(descriptor: &impl std::os::fd::AsFd) -> io::Result<()> {
-    let flags = rustix::fs::fcntl_getfl(descriptor)
-        .map_err(|error| io::Error::from_raw_os_error(error.raw_os_error()))?;
-    rustix::fs::fcntl_setfl(descriptor, flags | rustix::fs::OFlags::NONBLOCK)
-        .map_err(|error| io::Error::from_raw_os_error(error.raw_os_error()))
 }
 
 fn read_bounded_available(
@@ -506,7 +487,9 @@ mod diagnostic_tests {
             protocol_versions: vec![proto::EXECUTOR_PROTOCOL_VERSION_V0.to_owned()],
             ready: true,
             schema: proto::EXECUTOR_PROBE_SCHEMA_V0.to_owned(),
-            supported_policy_features: vec![proto::EXECUTOR_FEATURE_SELF_PROTECTION_V0.to_owned()],
+            supported_policy_features: vec![
+                proto::EXECUTOR_FEATURE_FLOW_OWNED_WRITE_PROTECTION_V0.to_owned(),
+            ],
         }
     }
 

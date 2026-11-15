@@ -26,7 +26,7 @@ This file owns the integrated platform model. Per-product internals live in the 
 
 Each product works without the layers above it. Together they add normalized sessions, permissioned agent actions, cross-device workspace access and reversible human/agent collaboration.
 
-Flow Agent builds on deterministic orchestration and practical provider/Tool execution. It trusts Tool implementations while requiring native protection of this installation's Flow-owned files; it does not promise containment of arbitrary hostile Tools. The [execution/security architecture](docs/concept/flow-agent-executor-architecture.md) explains configuration authority, manual administration and delegated effects. [PLAN.md](PLAN.md#m12--flow-agent-os-isolation) owns implementation and verification status.
+Flow Agent builds on deterministic orchestration and practical provider/Tool execution. It trusts Tool implementations while requiring Flow-owned write protection of this installation's Flow-owned files; it does not promise containment of arbitrary hostile Tools. The [execution/security architecture](docs/concept/flow-agent-executor-architecture.md) explains configuration authority, manual administration and delegated effects. [PLAN.md](PLAN.md#m12--flow-owned-write-protection) owns implementation and verification status.
 
 Watershed is AGPL/free software: users can inspect, run, self-host, fork and verify its behavior. This is a public-good and community-trust posture, not an open-core monetization model.
 
@@ -58,11 +58,11 @@ flowchart TD
   subgraph FLOW["Flow Agent-owned execution boundary"]
     FA["Flow Agent process on the same host"] <--> PROVIDER["Provider or local model endpoint"]
     FA --> EXECUTOR["Configured Executor"]
-    EXECUTOR --> TOOL["Tool under native Flow-file protection"]
+    EXECUTOR --> TOOL["Tool under Flow-owned write protection"]
   end
 ```
 
-The Sync Server and a headless replica are separate logical roles, though one hosted deployment may co-locate them. In the M3 MVP, user devices sync each authorized Workspace in full. Resource-scoped Roles govern Liquid surfaces but do not hide replicated bytes from the authorized device owner. Stable resource identity and versioned sync keep selective replication possible in a later protocol. A headless replica receives a Workspace only after workspace-level opt-in because it adds a separate execution boundary.
+The Sync Server and a headless replica are separate logical roles, though one hosted deployment may co-locate them. In the M3 MVP, each authorized device holds the whole Workspace, so Roles do not hide content from its owner ([Liquid V-Spec](docs/concept/V-Spec_Liquid.html#sync)). Stable resource identity and versioned sync keep selective replication possible in a later protocol. A headless replica receives a Workspace only after workspace-level opt-in because it adds a separate execution boundary.
 
 Workspace sync and live agent control are separate planes. Offline replicas keep working locally. Cached agent state is visibly stale and cannot imply that a live command succeeded. Meta-Harness may start or observe Flow Agent but does not select or manage its Executor or Tool protection.
 

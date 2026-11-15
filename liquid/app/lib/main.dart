@@ -8,6 +8,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_io.dart'
 import 'src/app.dart';
 import 'src/appearance.dart';
 import 'src/diff/diff_settings.dart';
+import 'src/agent/session_card_settings.dart';
 import 'src/launch.dart';
 import 'src/rust/frb_generated.dart';
 import 'src/session/branch_bases.dart';
@@ -33,9 +34,16 @@ Future<void> main() async {
     Platform.environment,
     defaultTargetPlatform,
   );
+  final computer = computerDirectory(
+    Platform.environment,
+    defaultTargetPlatform,
+  );
   final launch = await launchFromEnvironment(
     Platform.environment,
-    bases: BranchBases(file: SettingsFile(File('$settings/git-bases.json'))),
+    bases: BranchBases(
+      file: SettingsFile(File('$settings/git-bases.json')),
+      deviceFile: SettingsFile(File('$computer/device.json')),
+    ),
   );
   // Without a session the Workspace still opens; the reason stays in the terminal.
   if (launch.problem case final problem?) stderr.writeln('Liquid: $problem');
@@ -55,6 +63,9 @@ Future<void> main() async {
       ),
       diffSettings: await DiffSettingsController.load(
         SettingsFile(File('$settings/diff.json')),
+      ),
+      cardSettings: await SessionCardSettingsController.load(
+        SettingsFile(File('$settings/session_card.json')),
       ),
       appearance: await AppearanceController.load(
         SettingsFile(File('$settings/appearance.json')),

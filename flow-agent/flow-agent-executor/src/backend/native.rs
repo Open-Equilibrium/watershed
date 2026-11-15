@@ -111,7 +111,7 @@ pub(super) fn execute(prepared: PreparedExecution) -> Result<ExecutorResponseV0,
             backend_version,
             executor: proto::EXECUTOR_NAME_V0.to_owned(),
             executor_version: env!("CARGO_PKG_VERSION").to_owned(),
-            self_protection_active: true,
+            flow_owned_write_protection_active: true,
             platform: super::PLATFORM.to_owned(),
         },
     })
@@ -127,9 +127,15 @@ pub(super) fn apply_inner_status(
         ));
     }
     let status: [u8; 4] = record.try_into().map_err(|_| {
-        BackendError::uncertain("native protection did not prove a reaped Tool root")
+        BackendError::uncertain("Flow-owned write protection did not prove a reaped Tool root")
     })?;
     let status = ExitStatus::from_raw(i32::from_ne_bytes(status));
+    // WHY: a stopped or continued root is neither exited nor signaled, so it proves no termination.
+    if status.code().is_none() && status.signal().is_none() {
+        return Err(BackendError::uncertain(
+            "Flow-owned write protection did not prove a reaped Tool root",
+        ));
+    }
     if matches!(
         outcome.classification,
         None | Some(
@@ -178,7 +184,10 @@ pub(crate) fn run_inner(status_descriptor: &str, input: impl Read) -> Result<(),
         while let Some((pid, status)) = rustix::process::wait(rustix::process::WaitOptions::NOHANG)
             .map_err(|error| format!("failed to reap Tool: {error}"))?
         {
-            if pid.as_raw_nonzero().get() as u32 == child.id() {
+            // WHY: a traced root reports its stops here too; only its exit or signal ends the Tool.
+            if pid.as_raw_nonzero().get() as u32 == child.id()
+                && (status.exited() || status.signaled())
+            {
                 return status_file
                     .write_all(&status.as_raw().to_ne_bytes())
                     .map_err(|error| format!("failed to record Tool status: {error}"));
@@ -258,7 +267,7 @@ pub(super) fn readiness() -> Result<String, BackendError> {
         supervision::run_bounded(command, 2_000, 1024, 1024, Vec::new(), inherited, None)?;
     if outcome.classification.is_some() {
         return Err(BackendError::unavailable(format!(
-            "native protection self-test failed: {}",
+            "Flow-owned write protection self-test failed: {}",
             String::from_utf8_lossy(&outcome.stderr)
         )));
     }

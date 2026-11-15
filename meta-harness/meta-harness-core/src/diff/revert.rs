@@ -6,6 +6,14 @@ use super::*;
 /// Most folder entries one preflight reads to find repositories in returning files' places.
 const MAX_SEARCHED_ENTRIES: usize = 100_000;
 
+/// Seconds around a plan's reading in which a file's timestamps may not tell its rewrite from
+/// the write before, as they share a timestamp tick; such a file's contents are read too.
+const RACY_SECONDS: i64 = 2;
+
+/// Most bytes of such files one plan reads; past it the plan asks to be made again once they are
+/// older.
+const MAX_RACY_BYTES: u64 = 64 * 1024 * 1024;
+
 /// The exact state a revert plan was read in: the checkpoint, the checkout's branch and files,
 /// and what the revert leaves alone or deletes of what Git ignores. A revert runs only while the
 /// project still matches it (ADR-0256). Return it unchanged; it is not for display.
@@ -44,21 +52,13 @@ pub struct Revertable {
 }
 
 impl WorkingTree {
-    /// Repositories a whole-checkout write could overwrite, or with `deletions` delete from.
-    /// Share the revert's bounded, link-aware search, without restricting it to the session's
-    /// working folder. A save leaves untracked repositories alone, which its reset lists as
-    /// deleted, so only a restore counts deletions.
-    pub(super) fn repositories_in_the_way(
-        &self,
-        changes: &[FileChange],
-        deletions: bool,
-    ) -> BTreeSet<String> {
+    /// Repositories a whole-checkout write could overwrite or delete from. Share the revert's
+    /// bounded, link-aware search, without restricting it to the session's working folder. The
+    /// caller decides which deletions the write makes.
+    pub(super) fn repositories_in_the_way(&self, changes: &[FileChange]) -> BTreeSet<String> {
         let mut kept = BTreeSet::new();
         let mut budget = MAX_SEARCHED_ENTRIES;
-        for change in changes
-            .iter()
-            .filter(|change| deletions || change.status != ChangeStatus::Deleted)
-        {
+        for change in changes {
             if let Some(path) = self.repository_near(&change.path, &kept, &mut budget) {
                 kept.insert(path);
             }
@@ -77,7 +77,13 @@ impl WorkingTree {
     ) -> Result<Revertable, DiffError> {
         let mut revertable = Revertable::default();
         let mut changes = Vec::new();
+        // A repository either state records counts wherever the working folder is, though only
+        // the changes below the folder are the revert's.
+        let mut recorded = BTreeSet::new();
         for (change, repository) in self.listed(from, to, Whitespace::Shown).await? {
+            if repository {
+                recorded.insert(change.path.clone());
+            }
             if !self.within(&change.path) {
                 continue;
             }
@@ -94,8 +100,9 @@ impl WorkingTree {
         changes.sort_by(|a, b| a.path.cmp(&b.path));
         let mut budget = MAX_SEARCHED_ENTRIES;
         for change in changes {
-            match self.repository_near(&change.path, &revertable.left_alone, &mut budget) {
+            match self.repository_near(&change.path, &recorded, &mut budget) {
                 Some(path) => {
+                    recorded.insert(path.clone());
                     revertable.left_alone.insert(path);
                     revertable.kept.push(change);
                 }
@@ -112,6 +119,17 @@ impl WorkingTree {
         from: &Snapshot,
         to: &Snapshot,
     ) -> Result<Revertable, DiffError> {
+        self.revert_planned_at(from, to, unix_seconds()).await
+    }
+
+    /// [`Self::revert_planned`] as read at `read_at`, in Unix seconds, which a confirmation's
+    /// digest records.
+    async fn revert_planned_at(
+        &self,
+        from: &Snapshot,
+        to: &Snapshot,
+        read_at: i64,
+    ) -> Result<Revertable, DiffError> {
         let mut planned = self.revertable(from, to).await?;
         (planned.replaced, planned.removed) = self.in_the_way(&planned.changes).await?;
         let mut kept: Vec<String> = planned
@@ -123,7 +141,7 @@ impl WorkingTree {
         let mut ignored: Vec<String> = planned.replaced.iter().cloned().collect();
         ignored.extend(planned.removed.iter().cloned());
         ignored.sort();
-        let ignored_state = ignored_state(&self.root, &ignored);
+        let ignored_state = ignored_state(&self.root, &ignored, read_at)?;
         planned.confirmation = RevertConfirmation {
             target: to.0.clone(),
             // Only the files below the working folder are reverted, so only they count.
@@ -175,7 +193,8 @@ impl WorkingTree {
     /// What Git ignores in the place of files `changes` restores, which a revert deletes or
     /// overwrites: the restored paths with something already there, and the folders holding
     /// ignored files where a file returns, ending in `/`, or files where a restored file's
-    /// folder goes.
+    /// folder goes. Links are not followed: the first part of a path that is not a folder on
+    /// disk is the one in the way, and nothing below it counts (see [`Self::repository_near`]).
     pub async fn in_the_way(
         &self,
         changes: &[FileChange],
@@ -188,6 +207,17 @@ impl WorkingTree {
             .iter()
             .filter(|change| change.status == ChangeStatus::Added)
         {
+            let blocker = change
+                .path
+                .match_indices('/')
+                .map(|(end, _)| &change.path[..end])
+                .find(|folder| matches!(is_dir(folder), Ok(false)));
+            if let Some(folder) = blocker {
+                if !listed.contains(folder) {
+                    removed.insert(folder.to_owned());
+                }
+                continue;
+            }
             match is_dir(&change.path) {
                 Ok(true) if self.ignores_below(&change.path).await? => {
                     removed.insert(format!("{}/", change.path));
@@ -197,13 +227,6 @@ impl WorkingTree {
                     replaced.insert(change.path.clone());
                 }
                 _ => {}
-            }
-            let mut folder = change.path.as_str();
-            while let Some((parent, _)) = folder.rsplit_once('/') {
-                folder = parent;
-                if matches!(is_dir(folder), Ok(false)) && !listed.contains(folder) {
-                    removed.insert(folder.to_owned());
-                }
             }
         }
         Ok((replaced, removed))
@@ -254,12 +277,18 @@ impl WorkingTree {
         // The private index then lists the current files, so `git restore` deletes those `to`
         // lacks, and a file that was untracked before the turn returns untracked.
         let now = Snapshot(self.capture(&[]).await?);
+        // The digest is read as the plan read it, so the same stamps count as racy here.
+        let read_at = confirmed
+            .ignored_state
+            .split_once(':')
+            .and_then(|(read_at, _)| read_at.parse().ok())
+            .ok_or(DiffError::PlanChanged)?;
         let Revertable {
             changes,
             left_alone,
             confirmation,
             ..
-        } = self.revert_planned(&now, to).await?;
+        } = self.revert_planned_at(&now, to, read_at).await?;
         if confirmation != *confirmed {
             return Err(DiffError::PlanChanged);
         }
@@ -311,14 +340,18 @@ impl WorkingTree {
     }
 }
 
-/// A digest of what is at the repository paths `paths` below `root`: each entry's path, type,
-/// size, inode and change and modification times, folders read recursively in name order, without
-/// following links. Past [`MAX_SEARCHED_ENTRIES`] entries the rest of a vast folder goes unread.
-fn ignored_state(root: &Path, paths: &[String]) -> String {
+/// A digest of what is at the repository paths `paths` below `root`, read at `read_at` (Unix
+/// seconds) and prefixed with it: each entry's path, type, size, inode and change and modification
+/// times, folders read recursively in name order, without following links. A regular file stamped
+/// within [`RACY_SECONDS`] of the reading also contributes its contents, since a rewrite in the
+/// same timestamp tick leaves its stamps unchanged. Past [`MAX_SEARCHED_ENTRIES`] entries the rest
+/// of a vast folder goes unread.
+fn ignored_state(root: &Path, paths: &[String], read_at: i64) -> Result<String, DiffError> {
     use std::hash::{DefaultHasher, Hash, Hasher};
     use std::os::unix::fs::MetadataExt;
     let mut digest = DefaultHasher::new();
     let mut budget = MAX_SEARCHED_ENTRIES;
+    let mut racy_bytes = 0;
     let mut entries: Vec<PathBuf> = paths
         .iter()
         .rev()
@@ -336,6 +369,11 @@ fn ignored_state(root: &Path, paths: &[String]) -> String {
             meta.ctime_nsec(),
         ];
         (meta.mode(), meta.ino(), meta.size(), times).hash(&mut digest);
+        let racy = |stamp: i64| stamp >= read_at - RACY_SECONDS;
+        if meta.is_file() && (racy(meta.mtime()) || racy(meta.ctime())) {
+            // Reads stop at the budget left, so a file that grew since its stamp cannot exceed it.
+            racy_bytes += hash_contents(&entry, &mut digest, MAX_RACY_BYTES - racy_bytes)?;
+        }
         if !meta.is_dir() {
             continue;
         }
@@ -352,19 +390,78 @@ fn ignored_state(root: &Path, paths: &[String]) -> String {
         below.sort_by(|a, b| b.cmp(a));
         entries.extend(below);
     }
-    format!("{:016x}", digest.finish())
+    Ok(format!("{read_at}:{:016x}", digest.finish()))
+}
+
+/// Hashes the contents of the regular file at `path` into `digest`, opened without following
+/// links or waiting for a writer, as `crate::stored::open` does: a FIFO or link put in the file's
+/// place is refused at once. Reads stop after `limit` bytes, and a file with more is refused, as
+/// a file that grew after it was stamped can be. Returns the bytes read. A file gone since it was
+/// listed has no contents to hash.
+pub(crate) fn hash_contents(
+    path: &Path,
+    digest: &mut std::hash::DefaultHasher,
+    limit: u64,
+) -> Result<u64, DiffError> {
+    use std::hash::Hasher;
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    let open = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
+        .open(path);
+    let file = match open {
+        Ok(file) => file,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(DiffError::Io(error)),
+    };
+    if !file.metadata().map_err(DiffError::Io)?.is_file() {
+        return Err(DiffError::Io(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            format!("{} is no plain file", path.display()),
+        )));
+    }
+    // One byte past the limit is the most read, which shows a file over it.
+    let mut capped = file.take(limit + 1);
+    let mut chunk = [0; 8192];
+    let mut read_total = 0;
+    loop {
+        match capped.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(read) => {
+                digest.write(&chunk[..read]);
+                read_total += read as u64;
+            }
+            Err(error) => return Err(DiffError::Io(error)),
+        }
+    }
+    if read_total > limit {
+        return Err(DiffError::Git(
+            "Liquid cannot confirm the ignored files written just now; plan the revert again in a moment."
+                .to_owned(),
+        ));
+    }
+    Ok(read_total)
+}
+
+/// The current time in Unix seconds, or zero before the epoch.
+fn unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| {
+            i64::try_from(since.as_secs()).unwrap_or(i64::MAX)
+        })
 }
 
 /// Whether the folder `folder` is a repository as Git finds one: it holds `.git`, a folder or
 /// a file pointing elsewhere, which a file system without capitals also finds as `.GIT`; or
 /// it is itself a repository's Git folder, as a bare clone is, with `HEAD`, `objects` and
-/// `refs`. Links are not followed.
+/// `refs`, where Git also accepts links to the storage. Links are not followed.
 fn is_repository(folder: &Path) -> bool {
     let entry = |name: &str| std::fs::symlink_metadata(folder.join(name));
-    entry(".git").is_ok()
-        || (entry("HEAD").is_ok()
-            && entry("objects").is_ok_and(|meta| meta.is_dir())
-            && entry("refs").is_ok_and(|meta| meta.is_dir()))
+    let storage =
+        |name: &str| entry(name).is_ok_and(|meta| meta.is_dir() || meta.file_type().is_symlink());
+    entry(".git").is_ok() || (entry("HEAD").is_ok() && storage("objects") && storage("refs"))
 }
 
 /// Whether a repository is at or below the folder at `dir`, found as Git finds one (see

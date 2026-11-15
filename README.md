@@ -6,7 +6,7 @@ Watershed is an **AGPL/free-software AI-native work platform** for reusable, mea
 
 Nothing is released yet; status is canonical in [PLAN.md](PLAN.md).
 
-- **Flow Agent:** [trusted Tools with native Flow-file protection](SECURITY.md#flow-agent-security-contract) are implemented on Linux x86_64 and macOS ARM64; native acceptance, installation and closeout remain ([M1.2](PLAN.md#m12--flow-agent-os-isolation)).
+- **Flow Agent:** [trusted Tools with Flow-owned write protection](SECURITY.md#flow-agent-security-contract) are implemented on Linux x86_64 and macOS ARM64; native acceptance, installation and closeout remain ([M1.2](PLAN.md#m12--flow-owned-write-protection)).
 - **Meta-Harness:** its core runs embedded in Liquid's macOS app (ADR-0184); the separate service and CLI follow with [M2](PLAN.md#m2--meta-harness-mvp).
 - **Liquid:** a macOS app in development with the agent surface for pi, its Git integration and the local Workspace with Pages and Tables ([M3a](PLAN.md#m3a--local-workspace-foundation)).
 
@@ -20,7 +20,7 @@ core/         core-script (building-block model/parser) and core-policy
 proto/        proto: event and Executor wire schemas/types (the integration seam)
 flow-agent/   flow-agent-core (engine/runtime/session), flow-agent-cli
               (human CLI, machine-readable run mode, tail/replay/resume), and
-              flow-agent-executor (one-shot native self-protection companion)
+              flow-agent-executor (one-shot companion for Flow-owned write protection)
 meta-harness/ host-scoped control plane for local CLI agents; today a core
               embedded in Liquid (ADR-0184), later a headless service
 liquid/       local-first Page/Block workspace and app-building product
@@ -94,9 +94,11 @@ Set `FLOW_AGENT_HOME` to an unused absolute path before exercising local authori
 
 For productive execution, initialize the Global Flow home with `flow init`, configure its provider and model through the V-Spec, inspect authoring grammar with `flow create <tool|instruction|phase|flow> --help`, authenticate through the commands in [PROTOCOL.md](PROTOCOL.md), then run the authored Flow. Engineers configure Tool commands and accepted parameters and trust their complete implementations, helpers and delegation chains. The [security contract](SECURITY.md#m12-tool-execution-trust-boundary) owns the productive boundary.
 
+Two logins exist, `openai-codex` (ChatGPT subscription) and `openai-compatible` (base URL and API key); [PROTOCOL.md](PROTOCOL.md#m11-openai-compatible-endpoint-provider) states what each relies on and which endpoints are listed as supported.
+
 The Global Flow home and its configuration authority are defined in [PROTOCOL.md](PROTOCOL.md#local-run-storage-and-m11-conversation-trees).
 
-The complete command, storage and Executor contract is in [`PROTOCOL.md`](PROTOCOL.md). Native self-protection is not general filesystem, network or hostile-Tool containment.
+The complete command, storage and Executor contract is in [`PROTOCOL.md`](PROTOCOL.md). Flow-owned write protection is not general filesystem, network or hostile-Tool containment.
 
 ## Product boundaries
 
@@ -112,7 +114,7 @@ Each topic's canonical home; other files link there.
 | Milestones and open work | [PLAN.md](PLAN.md) |
 | Terms | [GLOSSARY.md](GLOSSARY.md) |
 | Agent host and headless replica | [Liquid V-Spec: sync](docs/concept/V-Spec_Liquid.html#sync) |
-| Flow Executor and native self-protection | [SECURITY.md](SECURITY.md#flow-agent-security-contract); wire: [PROTOCOL.md](PROTOCOL.md#m12-executor-protocol) |
+| Flow Executor and Flow-owned write protection | [SECURITY.md](SECURITY.md#flow-agent-security-contract); wire: [PROTOCOL.md](PROTOCOL.md#m12-executor-protocol) |
 | Flow execution architecture | [Executor architecture](docs/concept/flow-agent-executor-architecture.md) |
 | Flow configuration authority | [PROTOCOL.md](PROTOCOL.md#local-run-storage-and-m11-conversation-trees) |
 | Portable continuation | [Flow Agent V-Spec](docs/concept/V-Spec_FlowAgent.html#accepted-target) |
@@ -120,7 +122,9 @@ Each topic's canonical home; other files link there.
 | Harness configurations | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#config) |
 | Orchestration of agents | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration) |
 | Durability | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#durability) |
+| Session record export | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#boundary) |
 | MVP VCS boundary, Git integration and checkpoints | [SECURITY.md](SECURITY.md#mvp-vcs-boundary); target: [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#git-integration) |
+| Adapter requirements for another agent harness | [meta-harness/README.md](meta-harness/README.md#adapter-requirements) |
 | Liquid sync, replicas and areas | [Liquid V-Spec](docs/concept/V-Spec_Liquid.html#sync) |
 | Roles and grants | [SECURITY.md](SECURITY.md#liquid-workspace-access--external-agent-edits); target: [Liquid V-Spec](docs/concept/V-Spec_Liquid.html#agent-grants) |
 | Liquid Pages, Blocks and Tables | [Liquid V-Spec](docs/concept/V-Spec_Liquid.html#model) |

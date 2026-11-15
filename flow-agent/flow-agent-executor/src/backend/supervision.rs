@@ -124,7 +124,9 @@ pub(super) fn run_bounded(
         |error| BackendError::setup(format!("failed to install cancel handler: {error}")),
     )?;
     let mut child = command.spawn().map_err(|error| {
-        BackendError::setup(format!("failed to launch native protection: {error}"))
+        BackendError::setup(format!(
+            "failed to launch Flow-owned write protection: {error}"
+        ))
     })?;
     drop(inherited);
     let mut stdin = child.stdin.take().expect("native command has piped input");

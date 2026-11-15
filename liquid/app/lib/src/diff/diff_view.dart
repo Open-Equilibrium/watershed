@@ -1,26 +1,25 @@
 import 'dart:async';
-import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../agent/input_lane.dart';
 import '../controls.dart';
 import '../format.dart';
 import '../rust/api/events.dart';
 import '../rust/api/git.dart';
-import '../rust/api/history.dart';
 import '../session/session_state.dart';
 import '../shortcuts/keymap.dart';
-import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'diff_model.dart';
+import 'diff_lines.dart';
 import 'diff_settings.dart';
+import 'file_tile.dart';
+import 'patch_pane.dart';
 import 'revert_dialog.dart';
+import 'turn_header.dart';
 import 'turn_scope.dart';
 
-/// Keys of the Diff tab, for the status bar.
+/// Keys of the Diff panel, for the status bar.
 String diffKeys() =>
     '${Fixed.turnMenu.display} turn · ${Fixed.previousOrNextFile.display} file · '
     '${Fixed.foldFolder.display} folder · ${Fixed.previousOrNextHunk.display} hunk · '
@@ -35,16 +34,15 @@ class DiffView extends StatefulWidget {
     super.key,
     required this.state,
     required this.settings,
-    this.input,
+    this.parse = parsePatchInBackground,
   });
 
   final SessionState state;
 
-  /// How the tab shows the changes, kept across restarts.
+  /// How the panel shows the changes, kept across restarts.
   final DiffSettingsController settings;
 
-  /// The input area, floating over the diff.
-  final Widget? input;
+  final PatchParser parse;
 
   @override
   State<DiffView> createState() => _DiffViewState();
@@ -91,7 +89,7 @@ class _DiffViewState extends State<DiffView> {
     unawaited(widget.state.git.refresh());
     widget.state.shownStash.addListener(_show);
     widget.state.git.stash.addListener(_rebuild);
-    // Opening the tab reads the turns again, so it shows the latest one.
+    // Opening the panel reads the turns again, so it shows the latest one.
     unawaited(widget.state.readChanges());
     // It also shows the last list at once and moves the keyboard to it.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -157,7 +155,7 @@ class _DiffViewState extends State<DiffView> {
         var lines = const <DiffLine>[];
         final what = 'the changes of ${wanted.path}';
         try {
-          lines = parsePatch(await widget.state.patch(wanted.path));
+          lines = await widget.parse(await widget.state.patch(wanted.path));
           widget.state.reportRead(what, null);
           if (lines.isEmpty) note = _textless;
         } on Object catch (error) {
@@ -279,7 +277,8 @@ class _DiffViewState extends State<DiffView> {
   void _jump(int step) {
     if (!_scroll.hasClients) return;
     final position = _scroll.position;
-    final offsets = [for (final row in _hunks) row * _LineRow.height];
+    final height = UnifiedLineRow.heightIn(MediaQuery.textScalerOf(context));
+    final offsets = [for (final row in _hunks) row * height];
     final now = position.pixels;
     final target = step > 0
         ? offsets.where((offset) => offset > now + 1).firstOrNull
@@ -311,7 +310,7 @@ class _DiffViewState extends State<DiffView> {
   );
 
   @override
-  Widget build(BuildContext context) => ViewShortcuts(
+  Widget build(BuildContext context) => CallbackShortcuts(
     bindings: {
       ...Fixed.previousOrNextFile.bind([() => _move(-1), () => _move(1)]),
       ...Fixed.foldFolder.bind([_fold, _unfold]),
@@ -349,7 +348,7 @@ class _DiffViewState extends State<DiffView> {
       return null;
     }
     final files = widget.state.changed.value;
-    return _TurnHeader(
+    return TurnHeader(
       menuKey: _turnMenu,
       turns: widget.state.turns.value,
       scope: scope,
@@ -407,53 +406,50 @@ class _DiffViewState extends State<DiffView> {
   /// Says why nothing is shown, below the turn menu when a turn ended.
   Widget _empty(BuildContext context, String title, String text) {
     final header = _header();
-    return InputLane(
-      input: widget.input,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (header != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                WsMetrics.space7,
-                WsMetrics.space5,
-                WsMetrics.space7,
-                0,
-              ),
-              child: header,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (header != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              WsMetrics.space7,
+              WsMetrics.space5,
+              WsMetrics.space7,
+              0,
             ),
-          Expanded(
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 420),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      style: Theme.of(context).textTheme.labelMedium
-                          ?.copyWith(fontWeight: WsMetrics.fwMedium),
-                    ),
-                    const SizedBox(height: WsMetrics.space2),
-                    Text(
-                      text,
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ),
+            child: header,
+          ),
+        Expanded(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: Theme.of(context).textTheme.labelMedium
+                        ?.copyWith(fontWeight: WsMetrics.fwMedium),
+                  ),
+                  const SizedBox(height: WsMetrics.space2),
+                  Text(
+                    text,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
               ),
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
   Widget _content(BuildContext context) {
     final ws = context.ws;
     if (!_loaded) {
-      return InputLane(input: widget.input, child: const SizedBox.expand());
+      return const SizedBox.expand();
     }
     if (_changes.isEmpty) {
       final scope = widget.state.shownScope.value;
@@ -478,15 +474,17 @@ class _DiffViewState extends State<DiffView> {
     }
     final added = _changes.fold(0, (sum, change) => sum + change.added);
     final removed = _changes.fold(0, (sum, change) => sum + change.removed);
-    return Row(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // The file list sits above the patch, across the Diff panel; a long list scrolls.
         Container(
-          width: 264,
+          constraints: const BoxConstraints(maxHeight: 200),
           decoration: BoxDecoration(
-            border: Border(right: BorderSide(color: ws.border)),
+            border: Border(bottom: BorderSide(color: ws.border)),
           ),
           child: ListView(
+            shrinkWrap: true,
             padding: const EdgeInsets.all(WsMetrics.space3),
             children: [
               Padding(
@@ -507,7 +505,7 @@ class _DiffViewState extends State<DiffView> {
               ),
               for (final row in _rows)
                 if (!_hidden(row))
-                  _FileTile(
+                  FileTile(
                     row: row,
                     selected: row.change?.path == _selected?.path,
                     folded: _folded.contains(row.folder),
@@ -518,737 +516,17 @@ class _DiffViewState extends State<DiffView> {
           ),
         ),
         Expanded(
-          child: InputLane(
-            input: widget.input,
-            child: _Patch(
-              header: _header(),
-              change: _selected,
-              lines: _lines,
-              widest: _widest,
-              note: _note,
-              settings: widget.settings.value,
-              scroll: _scroll,
-              bottom: widget.input == null ? 0 : inputClearance,
-              onLayout: _showLayout,
-              onWhitespace: _switchWhitespace,
-            ),
+          child: PatchPane(
+            header: _header(),
+            change: _selected,
+            lines: _lines,
+            widest: _widest,
+            note: _note,
+            settings: widget.settings.value,
+            scroll: _scroll,
+            onLayout: _showLayout,
+            onWhitespace: _switchWhitespace,
           ),
-        ),
-      ],
-    );
-  }
-}
-
-class _FileTile extends StatelessWidget {
-  const _FileTile({
-    required this.row,
-    required this.selected,
-    required this.folded,
-    required this.onTap,
-    required this.onFold,
-  });
-
-  final FileRow row;
-  final bool selected;
-
-  /// Whether this folder row is folded.
-  final bool folded;
-  final ValueChanged<BridgeFileChange> onTap;
-  final ValueChanged<String> onFold;
-
-  @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    final change = row.change;
-    Widget letter(String mark, Color color) => Text(
-      mark,
-      style: TextStyle(
-        color: color,
-        fontSize: WsMetrics.fsSmall,
-        fontWeight: WsMetrics.fwSemibold,
-      ),
-    );
-    final lead = switch (change?.status) {
-      BridgeChangeStatus.added => letter('A', ws.success),
-      BridgeChangeStatus.deleted => letter('D', ws.danger),
-      BridgeChangeStatus.modified => letter('M', ws.warning),
-      null => Icon(
-        folded ? LucideIcons.chevronRight : LucideIcons.chevronDown,
-        size: 14,
-        color: ws.textFaint,
-      ),
-    };
-    return InkWell(
-      canRequestFocus: false,
-      onTap: change == null ? () => onFold(row.folder) : () => onTap(change),
-      borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-      child: Container(
-        height: WsMetrics.rowNav,
-        padding: EdgeInsets.only(
-          left: WsMetrics.space3 + row.depth * 16,
-          right: WsMetrics.space3,
-        ),
-        decoration: BoxDecoration(
-          color: selected ? ws.selected : null,
-          borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-        ),
-        child: Row(
-          children: [
-            SizedBox(width: 16, child: lead),
-            if (change == null) ...[
-              const SizedBox(width: WsMetrics.space1),
-              Icon(LucideIcons.folder, size: 14, color: ws.textFaint),
-            ],
-            const SizedBox(width: WsMetrics.space2),
-            Expanded(
-              child: Text(
-                row.name,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: selected ? ws.text : ws.textMuted,
-                  fontSize: WsMetrics.fsCompact,
-                ),
-              ),
-            ),
-            if (change != null)
-              Text.rich(
-                TextSpan(
-                  children: [
-                    if (change.added > 0)
-                      TextSpan(
-                        text: '+${change.added} ',
-                        style: TextStyle(color: ws.success),
-                      ),
-                    if (change.removed > 0)
-                      TextSpan(
-                        text: '−${change.removed}',
-                        style: TextStyle(color: ws.danger),
-                      ),
-                  ],
-                ),
-                style: const TextStyle(fontSize: WsMetrics.fsSmall),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _Patch extends StatelessWidget {
-  const _Patch({
-    required this.header,
-    required this.change,
-    required this.lines,
-    required this.widest,
-    required this.note,
-    required this.settings,
-    required this.scroll,
-    required this.bottom,
-    required this.onLayout,
-    required this.onWhitespace,
-  });
-
-  /// The turn menu and what the shown turns are.
-  final Widget? header;
-  final BridgeFileChange? change;
-  final List<DiffLine> lines;
-
-  /// The shown lines likely widest.
-  final List<String> widest;
-
-  /// Why the file shows no lines.
-  final String? note;
-  final DiffSettings settings;
-  final ScrollController scroll;
-
-  /// Room below the last line for the floating input area.
-  final double bottom;
-  final ValueChanged<DiffLayout> onLayout;
-  final VoidCallback onWhitespace;
-
-  @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    final change = this.change;
-    final note = this.note;
-    if (change == null) return const SizedBox.shrink();
-    final split = settings.layout == DiffLayout.split;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        WsMetrics.space7,
-        WsMetrics.space5,
-        WsMetrics.space7,
-        0,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: header ?? const SizedBox.shrink()),
-              _Toggle(
-                label: 'Hide whitespace',
-                on: settings.hideWhitespace,
-                onTap: onWhitespace,
-              ),
-              const SizedBox(width: WsMetrics.space3),
-              Segments(
-                options: const [
-                  (DiffLayout.unified, 'Unified'),
-                  (DiffLayout.split, 'Split'),
-                ],
-                selected: settings.layout,
-                onSelect: onLayout,
-              ),
-            ],
-          ),
-          const SizedBox(height: WsMetrics.space4),
-          Container(
-            height: 36,
-            padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
-            decoration: BoxDecoration(
-              color: ws.subtle,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(WsMetrics.radiusLg),
-              ),
-            ),
-            alignment: Alignment.centerLeft,
-            child: Text(change.shown, style: monoStyle(context)),
-          ),
-          Expanded(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border.all(color: ws.border),
-                borderRadius: const BorderRadius.vertical(
-                  bottom: Radius.circular(WsMetrics.radiusLg),
-                ),
-              ),
-              // Long lines scroll sideways together, so no change is out of reach.
-              child: note != null
-                  ? Center(
-                      child: Text(
-                        note,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    )
-                  : LayoutBuilder(
-                      builder: (context, constraints) {
-                        final style = monoStyle(context);
-                        // Split shows each side as wide as the unified view's code.
-                        final code =
-                            widest.fold(
-                              0.0,
-                              (wide, text) => math.max(
-                                wide,
-                                measureText(text, style).width,
-                              ),
-                            ) +
-                            WsMetrics.space6;
-                        final rows = split
-                            ? splitRows(lines)
-                            : const <SplitRow>[];
-                        return SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: SizedBox(
-                            width: math.max(
-                              constraints.maxWidth,
-                              split
-                                  ? 2 * (_LineRow.side + code)
-                                  : _LineRow.gutter + code,
-                            ),
-                            height: constraints.maxHeight,
-                            child: ListView.builder(
-                              controller: scroll,
-                              padding: EdgeInsets.only(bottom: bottom),
-                              itemExtent: _LineRow.height,
-                              itemCount: split ? rows.length : lines.length,
-                              itemBuilder: (context, index) => split
-                                  ? _SplitLine(row: rows[index])
-                                  : _LineRow(line: lines[index]),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-            ),
-          ),
-          const SizedBox(height: WsMetrics.space4),
-        ],
-      ),
-    );
-  }
-}
-
-/// A switch shown as a button that stays pressed while on.
-class _Toggle extends StatelessWidget {
-  const _Toggle({required this.label, required this.on, required this.onTap});
-
-  final String label;
-  final bool on;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    // Its state is told to assistive technology, not only drawn.
-    return Semantics(
-      toggled: on,
-      child: Material(
-        type: MaterialType.transparency,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-          child: Ink(
-            height: 28,
-            padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
-            decoration: BoxDecoration(
-              color: on ? ws.accentSubtle : null,
-              border: on ? null : Border.all(color: ws.borderStrong),
-              borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-            ),
-            child: Center(
-              widthFactor: 1,
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontSize: WsMetrics.fsCompact,
-                  color: on ? ws.accent : ws.textMuted,
-                  fontWeight: on ? WsMetrics.fwMedium : WsMetrics.fwRegular,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// The colors, sign and number of one side of a line.
-({Color? background, Widget number, Widget sign}) _lineParts(
-  BuildContext context,
-  DiffLine line,
-  int? value,
-) {
-  final ws = context.ws;
-  final (background, gutter, sign) = switch (line.kind) {
-    DiffKind.added => (ws.diffAdd, ws.diffAddStrong, '+'),
-    DiffKind.removed => (ws.diffDel, ws.diffDelStrong, '−'),
-    DiffKind.hunk => (ws.subtle, ws.subtle, ''),
-    DiffKind.context => (null, null, ''),
-  };
-  return (
-    background: background,
-    number: Container(
-      width: 44,
-      color: gutter,
-      padding: const EdgeInsets.only(right: WsMetrics.space4),
-      alignment: Alignment.centerRight,
-      // Muted, as faint lacks contrast on the strong diff colors.
-      child: Text(
-        value?.toString() ?? '',
-        style: TextStyle(
-          color: ws.textMuted,
-          fontSize: WsMetrics.fsSmall,
-          fontFeatures: const [FontFeature.tabularFigures()],
-        ),
-      ),
-    ),
-    sign: SizedBox(
-      width: 20,
-      child: Text(
-        sign,
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          color: line.kind == DiffKind.added ? ws.success : ws.danger,
-        ),
-      ),
-    ),
-  );
-}
-
-/// A line's code, colored lightly, with a faint ␍ for a Windows line end and a faint … where
-/// a long line is cut; a hunk header in the faint small style.
-Widget _code(BuildContext context, DiffLine line) {
-  final faint = context.ws.textFaint;
-  final (:text, :cut) = shownText(line.text);
-  if (line.kind == DiffKind.hunk) {
-    return Text(
-      cut ? '$text…' : text,
-      style: monoStyle(
-        context,
-        color: faint,
-      ).copyWith(fontSize: WsMetrics.fsSmall),
-    );
-  }
-  final crlf = !cut && text.endsWith('\r');
-  final end = cut
-      ? '…'
-      : crlf
-      ? '␍'
-      : null;
-  final shown = highlight(
-    context,
-    crlf ? text.substring(0, text.length - 1) : text,
-  );
-  return Text.rich(
-    end == null
-        ? shown
-        : TextSpan(
-            style: shown.style,
-            children: [
-              ...?shown.children,
-              TextSpan(
-                text: end,
-                style: TextStyle(color: faint),
-              ),
-            ],
-          ),
-    maxLines: 1,
-    overflow: TextOverflow.clip,
-    softWrap: false,
-  );
-}
-
-class _LineRow extends StatelessWidget {
-  const _LineRow({required this.line});
-
-  static const height = 22.0;
-
-  /// Width of the two line numbers and the sign before the code.
-  static const gutter = 44.0 + 44.0 + 20.0;
-
-  /// Width of one side's line number and sign in the split view.
-  static const side = 44.0 + 20.0;
-
-  final DiffLine line;
-
-  @override
-  Widget build(BuildContext context) {
-    final old = _lineParts(context, line, line.oldNumber);
-    final now = _lineParts(context, line, line.newNumber);
-    return Container(
-      color: old.background,
-      child: Row(
-        children: [
-          old.number,
-          now.number,
-          old.sign,
-          Expanded(child: _code(context, line)),
-        ],
-      ),
-    );
-  }
-}
-
-/// One row of the split view: the line before the run on the left, after it on the right.
-class _SplitLine extends StatelessWidget {
-  const _SplitLine({required this.row});
-
-  final SplitRow row;
-
-  @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    if (row.hunk case final hunk?) {
-      return Container(
-        color: ws.subtle,
-        padding: const EdgeInsets.only(left: _LineRow.side),
-        alignment: Alignment.centerLeft,
-        child: _code(context, hunk),
-      );
-    }
-    Widget side(DiffLine? line, {required bool before}) {
-      // A side without a line, beside one only the other side has.
-      if (line == null) return Expanded(child: ColoredBox(color: ws.subtle));
-      final parts = _lineParts(
-        context,
-        line,
-        before ? line.oldNumber : line.newNumber,
-      );
-      return Expanded(
-        child: Container(
-          color: parts.background,
-          child: Row(
-            children: [
-              parts.number,
-              parts.sign,
-              Expanded(child: _code(context, line)),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        side(row.left, before: true),
-        VerticalDivider(width: 1, color: ws.border),
-        side(row.right, before: false),
-      ],
-    );
-  }
-}
-
-final _token = RegExp(
-  r'(//.*$)|("(?:[^"\\]|\\.)*"|'
-  r"'(?:[^'\\]|\\.)*')"
-  r'|\b(import|from|export|const|let|var|async|await|return|if|else|function|fn|pub|use|mut|impl|struct|enum|match|class|new)\b|\b(\d[\d_.]*)\b',
-);
-
-/// Light syntax colors for common languages; unknown text stays plain.
-TextSpan highlight(BuildContext context, String code) {
-  final ws = context.ws;
-  final base = monoStyle(context);
-  final spans = <TextSpan>[];
-  var start = 0;
-  for (final match in _token.allMatches(code)) {
-    if (match.start > start) {
-      spans.add(TextSpan(text: code.substring(start, match.start)));
-    }
-    final color = match.group(1) != null
-        ? ws.synCom
-        : match.group(2) != null
-        ? ws.synStr
-        : match.group(3) != null
-        ? ws.synKw
-        : ws.synNum;
-    spans.add(
-      TextSpan(
-        text: match.group(0),
-        style: TextStyle(color: color),
-      ),
-    );
-    start = match.end;
-  }
-  if (start < code.length) spans.add(TextSpan(text: code.substring(start)));
-  return TextSpan(style: base, children: spans);
-}
-
-/// The turn menu with what the shown turns are: their prompt, their time and what they are
-/// compared with, or the branch's stashed changes with Restore and Discard.
-class _TurnHeader extends StatelessWidget {
-  const _TurnHeader({
-    required this.menuKey,
-    required this.turns,
-    required this.scope,
-    required this.allLines,
-    required this.shown,
-    required this.stash,
-    required this.branch,
-    required this.git,
-    required this.onSelect,
-    required this.onRevert,
-    required this.onRestore,
-    required this.onDiscard,
-  });
-
-  final GlobalKey<PopupMenuButtonState<DiffScope>> menuKey;
-  final List<BridgeTurn> turns;
-  final DiffScope scope;
-
-  /// The lines all turns added and removed, once read.
-  final ({int added, int removed})? allLines;
-
-  /// The turns shown; none before a turn ended.
-  final Compared? shown;
-  final BridgeStash? stash;
-  final String? branch;
-
-  /// The checkout's Git state, whose uncommitted changes allow no restore.
-  final ValueListenable<BridgeGitStatus?> git;
-  final ValueChanged<DiffScope> onSelect;
-
-  /// Asks to revert the files to before the shown turn; none unless one turn is shown.
-  final VoidCallback? onRevert;
-  final VoidCallback onRestore;
-  final VoidCallback onDiscard;
-
-  @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    final shown = this.shown;
-    final stash = this.stash;
-    final stashed = scope is StashedChanges && stash != null;
-    final all = scope is AllTurns;
-    final ended = finished(turns);
-    final String about;
-    final String label;
-    if (scope is UncommittedChanges) {
-      label = 'Uncommitted changes';
-      about = 'Compared with the checkout’s last commit';
-    } else if (stashed) {
-      label = 'Stashed changes';
-      about =
-          'Left on $branch at ${formatClockMs(stash.createdMs)} · Restore moves the stashed '
-          'files back to your uncommitted changes';
-    } else if (shown != null) {
-      final turn = shown.to;
-      final started = shown.from.startedMs;
-      final since = started == null ? '' : formatClockMs(started);
-      final until = turn.endedMs == null ? '' : formatClockMs(turn.endedMs!);
-      label = all ? 'All turns' : turnName(turn);
-      about = all
-          ? 'All turns of this session branch · since $since · compared with the project '
-                'when the first turn started'
-          : '“${turn.prompt}” · $since–$until · compared with the project when the turn '
-                'started';
-    } else {
-      label = 'Choose changes';
-      about = stash == null
-          ? 'Compare uncommitted changes.'
-          : 'Compare uncommitted changes or the branch’s stashed changes.';
-    }
-    final small = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
-    String counts(BridgeTurn turn) => [
-      if (turn.endedMs case final at?) formatClockMs(at),
-      if (turn.failure != null)
-        'failed'
-      else if ((turn.added, turn.removed) case (final added?, final removed?))
-        '+$added −$removed',
-    ].join(' · ');
-    PopupMenuItem<DiffScope> item(
-      DiffScope value,
-      String name,
-      String detail,
-    ) => PopupMenuItem(
-      value: value,
-      height: 32,
-      child: Row(
-        children: [
-          Expanded(child: Text(name)),
-          const SizedBox(width: WsMetrics.space5),
-          Text(detail, style: small),
-        ],
-      ),
-    );
-    final menu = PopupMenuButton<DiffScope>(
-      key: menuKey,
-      tooltip: 'Choose the turn',
-      initialValue: scope,
-      onSelected: onSelect,
-      itemBuilder: (context) => [
-        if (ended.isNotEmpty) ...[
-          PopupMenuItem(
-            enabled: false,
-            height: 24,
-            child: Text('Turns of this session branch', style: small),
-          ),
-          item(
-            const LatestTurn(),
-            'Latest turn · ${turnName(ended.last)}',
-            counts(ended.last),
-          ),
-          for (final older in ended.reversed.skip(1))
-            item(OneTurn(older.id), turnName(older), counts(older)),
-          const PopupMenuDivider(),
-          item(
-            const AllTurns(),
-            'All turns',
-            [
-              if (turns.first.startedMs case final at?)
-                'since ${formatClockMs(at)}',
-              if (allLines case final lines?)
-                '+${lines.added} −${lines.removed}',
-            ].join(' · '),
-          ),
-        ],
-        if (ended.isNotEmpty && (git.value != null || stash != null))
-          const PopupMenuDivider(),
-        if (git.value != null) ...[
-          item(const UncommittedChanges(), 'Uncommitted changes', ''),
-        ],
-        if (stash != null) ...[
-          item(
-            const StashedChanges(),
-            'Stashed changes',
-            'left at ${formatClockMs(stash.createdMs)}',
-          ),
-        ],
-      ],
-      child: Container(
-        height: 28,
-        padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
-        decoration: BoxDecoration(
-          border: Border.all(color: ws.borderStrong),
-          borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              style: Theme.of(context).textTheme.labelMedium
-                  ?.copyWith(fontWeight: WsMetrics.fwSemibold),
-            ),
-            const SizedBox(width: WsMetrics.space2),
-            Icon(LucideIcons.chevronDown, size: 13, color: ws.textFaint),
-          ],
-        ),
-      ),
-    );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            menu,
-            // A narrow tab shortens the label rather than the menu.
-            if (stashed)
-              Expanded(
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  spacing: WsMetrics.space3,
-                  children: [
-                    // As GitHub Desktop, only into a checkout without changes, and only on
-                    // the tree the changes were left on, where Git applies them unmerged.
-                    ValueListenableBuilder(
-                      valueListenable: git,
-                      builder: (context, status, _) {
-                        final why = !stash.current
-                            ? 'The branch has new commits since these changes were left, so '
-                                  'Liquid cannot restore them. Restore them with Git.'
-                            : (status?.changed ?? 0) > 0
-                            ? 'Unable to restore stash when changes are present on your '
-                                  'branch.'
-                            : null;
-                        final button = PrimaryButton(
-                          label: 'Restore',
-                          onPressed: why == null && status?.branch == branch
-                              ? onRestore
-                              : null,
-                        );
-                        return why == null
-                            ? button
-                            : Tooltip(message: why, child: button);
-                      },
-                    ),
-                    SecondaryButton(label: 'Discard…', onPressed: onDiscard),
-                  ],
-                ),
-              )
-            else if (onRevert case final revert?)
-              Expanded(
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: SecondaryButton(
-                    label: 'Revert files to before this turn…',
-                    icon: LucideIcons.undo2,
-                    onPressed: revert,
-                  ),
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: WsMetrics.space1),
-        Text(
-          about,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.bodySmall,
         ),
       ],
     );

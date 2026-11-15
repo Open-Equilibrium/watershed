@@ -1,0 +1,6 @@
+instruction:
+  id: inspect
+  name: Inspect
+  1: first
+  "1": second
+  prompt: Inspect input

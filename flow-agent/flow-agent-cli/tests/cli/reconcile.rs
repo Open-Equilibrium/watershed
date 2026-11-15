@@ -14,7 +14,7 @@ fn reconciliation_output() -> String {
             "backend_version": "test",
             "executor": proto::EXECUTOR_NAME_V0,
             "executor_version": "test",
-            "self_protection_active": true,
+            "flow_owned_write_protection_active": true,
             "platform": "fixture-platform",
         },
         "request_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",

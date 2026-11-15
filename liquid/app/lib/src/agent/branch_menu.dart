@@ -12,18 +12,29 @@ import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import '../workspace/row_menu.dart';
 import 'commit_dialog.dart';
+import 'session_card_rows.dart';
 
-/// The checkout's branch with its commits ahead and behind its upstream, in the session header;
-/// it opens the branch menu.
-class BranchChip extends StatelessWidget {
-  const BranchChip({super.key, required this.state});
+/// The checkout's branch with its commits ahead and behind its upstream, as the first row of the
+/// session card. Its name and its chevron are two targets that both open the branch menu, split
+/// by a hairline that shows while the row is hovered, as in T3 Code. A right-click on the name
+/// offers to copy it.
+class BranchRow extends StatefulWidget {
+  const BranchRow({super.key, required this.state});
 
   final SessionState state;
 
   @override
+  State<BranchRow> createState() => _BranchRowState();
+}
+
+class _BranchRowState extends State<BranchRow> {
+  bool _hovered = false;
+
+  @override
   Widget build(BuildContext context) {
-    final git = state.git;
+    final git = widget.state.git;
     return ListenableBuilder(
       listenable: Listenable.merge([git.status, git.problem]),
       builder: (context, _) {
@@ -31,21 +42,16 @@ class BranchChip extends StatelessWidget {
         final small = TextStyle(
           color: ws.textFaint,
           fontSize: WsMetrics.fsSmall,
+          fontWeight: WsMetrics.fwRegular,
           fontFeatures: const [FontFeature.tabularFigures()],
         );
         if (git.problem.value case final problem?) {
           return Tooltip(
             message: problem,
-            child: _Frame(
+            child: CardRow(
               children: [
-                Icon(LucideIcons.triangleAlert, size: 13, color: ws.danger),
-                Text(
-                  'Git unavailable',
-                  style: TextStyle(
-                    color: ws.danger,
-                    fontSize: WsMetrics.fsCompact,
-                  ),
-                ),
+                Icon(LucideIcons.triangleAlert, size: 16, color: ws.danger),
+                Text('Git unavailable', style: TextStyle(color: ws.danger)),
               ],
             ),
           );
@@ -53,10 +59,11 @@ class BranchChip extends StatelessWidget {
         final status = git.status.value;
         if (status == null) return const SizedBox.shrink();
         final name = status.branch ?? status.commit ?? 'no commit';
+        void open() => unawaited(showBranchMenu(context, widget.state));
         return Semantics(
-          key: const Key('branch-chip'),
+          key: const Key('branch-row'),
           button: true,
-          onTap: () => unawaited(showBranchMenu(context, state)),
+          onTap: open,
           label: [
             'Branch $name',
             if (status.ahead > 0) '${status.ahead} ahead',
@@ -68,18 +75,34 @@ class BranchChip extends StatelessWidget {
               'no upstream',
           ].join(', '),
           excludeSemantics: true,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-            onTap: () => unawaited(showBranchMenu(context, state)),
-            child: _Frame(
+          child: HoverRegion(
+            onHover: (hovered, _) {
+              if (mounted) setState(() => _hovered = hovered);
+            },
+            child: CardRow(
+              onTap: open,
               children: [
-                Icon(LucideIcons.gitBranch, size: 14, color: ws.textMuted),
+                Icon(LucideIcons.gitBranch, size: 16, color: ws.textFaint),
                 Flexible(
-                  child: Text(
-                    name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: monoStyle(context, color: ws.text),
+                  child: GestureDetector(
+                    onSecondaryTapUp: (details) => unawaited(
+                      _copyName(context, name, details.globalPosition),
+                    ),
+                    child: Tooltip(
+                      message: name,
+                      child: InkWell(
+                        key: const Key('branch-name'),
+                        hoverColor: Colors.transparent,
+                        highlightColor: Colors.transparent,
+                        onTap: open,
+                        child: Text(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontWeight: WsMetrics.fwRegular),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
                 if (status.merging)
@@ -95,7 +118,25 @@ class BranchChip extends StatelessWidget {
                     status.branch != null &&
                     status.upstream == null)
                   Text('no upstream', style: small),
-                Icon(LucideIcons.chevronDown, size: 13, color: ws.textFaint),
+                Container(
+                  key: const Key('branch-split'),
+                  width: 1,
+                  height: 16,
+                  color: _hovered ? ws.border : Colors.transparent,
+                ),
+                InkWell(
+                  key: const Key('branch-chevron'),
+                  // One stop in the keyboard order, as the row is one control in T3 Code.
+                  canRequestFocus: false,
+                  hoverColor: ws.hover,
+                  borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
+                  onTap: open,
+                  child: Icon(
+                    LucideIcons.chevronDown,
+                    size: 16,
+                    color: ws.textFaint,
+                  ),
+                ),
               ],
             ),
           ),
@@ -105,24 +146,18 @@ class BranchChip extends StatelessWidget {
   }
 }
 
-class _Frame extends StatelessWidget {
-  const _Frame({required this.children});
-
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    height: 28,
-    padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
-    decoration: BoxDecoration(
-      border: Border.all(color: context.ws.borderStrong),
-      borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      spacing: WsMetrics.space2,
-      children: children,
-    ),
+/// Offers to copy the branch name where the pointer right-clicked, as T3 Code's branch menu does.
+Future<void> _copyName(BuildContext context, String name, Offset at) async {
+  final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
+  await showMenu<void>(
+    context: context,
+    position: RelativeRect.fromRect(at & Size.zero, Offset.zero & overlay.size),
+    items: [
+      PopupMenuItem<void>(
+        onTap: () => unawaited(Clipboard.setData(ClipboardData(text: name))),
+        child: const Text('Copy branch name'),
+      ),
+    ],
   );
 }
 
@@ -176,6 +211,13 @@ Future<void> _switch(
   BridgeBranches branches,
 ) async {
   final git = state.git;
+  // Read again, since a change saved while the menu was open must be asked about.
+  await git.refreshSettled();
+  if (!context.mounted) return;
+  if (git.problem.value case final problem?) {
+    state.notify(BridgeLevel.error, 'Could not read the checkout: $problem');
+    return;
+  }
   final left = git.status.value?.branch;
   final changed = git.status.value?.changed ?? 0;
   final stashed = git.stash.value;
@@ -264,10 +306,8 @@ class _BranchMenuState extends State<_BranchMenu> {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    final small = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
     final query = _query.text.trim();
-    final running = widget.branches.running;
-    final refused = running.isNotEmpty;
+    final refused = widget.branches.running.isNotEmpty;
     final matches = [
       for (final branch in widget.branches.branches)
         if (branch.shown.toLowerCase().contains(query.toLowerCase())) branch,
@@ -291,72 +331,6 @@ class _BranchMenuState extends State<_BranchMenu> {
       }
     }
 
-    Widget label(String text) => Padding(
-      padding: const EdgeInsets.fromLTRB(
-        WsMetrics.space3,
-        WsMetrics.space2,
-        WsMetrics.space3,
-        WsMetrics.space1,
-      ),
-      child: Text(text, style: small),
-    );
-    Widget row({
-      required Widget leading,
-      required Widget name,
-      String? detail,
-      VoidCallback? onTap,
-    }) => InkWell(
-      borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-      onTap: onTap,
-      child: SizedBox(
-        height: 28,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
-          child: Row(
-            spacing: WsMetrics.space3,
-            children: [
-              SizedBox(width: 14, child: leading),
-              Expanded(
-                child: DefaultTextStyle.merge(
-                  style: monoStyle(
-                    context,
-                    color: onTap == null ? ws.textFaint : ws.text,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  child: name,
-                ),
-              ),
-              if (detail != null)
-                Flexible(
-                  child: Text(
-                    detail,
-                    style: small,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-    Widget branchRow(BridgeBranch branch) => row(
-      leading: branch.current
-          ? Icon(LucideIcons.check, size: 14, color: ws.accent)
-          : const SizedBox.shrink(),
-      name: Text(branch.shown),
-      detail: [
-        if (branch.stashed) 'stashed changes',
-        if (branch.current) ...[
-          if ((widget.status?.ahead ?? 0) > 0) '↑${widget.status!.ahead}',
-          if ((widget.status?.behind ?? 0) > 0) '↓${widget.status!.behind}',
-          'now',
-        ] else
-          formatAgo(branch.committedMs, now),
-      ].join(' · '),
-      onTap: refused ? null : () => choose(branch),
-    );
     final local = [
       for (final branch in matches)
         if (!branch.remote) branch,
@@ -365,9 +339,6 @@ class _BranchMenuState extends State<_BranchMenu> {
       for (final branch in matches)
         if (branch.remote) branch,
     ];
-    final changes = widget.changed == 1
-        ? '1 uncommitted change'
-        : '${widget.changed} uncommitted changes';
     return Stack(
       children: [
         Positioned(
@@ -390,81 +361,31 @@ class _BranchMenuState extends State<_BranchMenu> {
                   child: ListView(
                     shrinkWrap: true,
                     children: [
-                      TextField(
-                        key: const Key('branch-search'),
-                        controller: _query,
-                        autofocus: true,
-                        style: TextStyle(
-                          fontSize: WsMetrics.fsCompact,
-                          color: ws.text,
-                        ),
-                        decoration: const InputDecoration(
-                          isDense: true,
-                          hintText: 'Search or create a branch',
-                        ),
-                      ),
+                      _search(),
                       const SizedBox(height: WsMetrics.space1),
-                      if (refused)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: WsMetrics.space1,
-                          ),
-                          child: WarningNotice(
-                            '${whoRuns(running)}. ${stopFirst(running)}, then switch branches.',
-                          ),
-                        ),
-                      if (local.isNotEmpty) ...[
-                        label('Local branches'),
-                        for (final branch in local) branchRow(branch),
-                      ],
-                      if (remote.isNotEmpty) ...[
-                        label('Remote branches'),
-                        for (final branch in remote) branchRow(branch),
-                      ],
-                      if (creatable) ...[
-                        if (matches.isEmpty) label('No branch matches'),
-                        row(
-                          leading: Icon(
-                            LucideIcons.gitBranch,
-                            size: 14,
-                            color: ws.textMuted,
-                          ),
-                          name: Text.rich(
-                            TextSpan(
-                              children: [
-                                TextSpan(
-                                  text: 'Create branch ',
-                                  style: DefaultTextStyle.of(context).style,
-                                ),
-                                TextSpan(text: query),
-                              ],
-                            ),
-                          ),
-                          detail: problem == null && matches.isEmpty
-                              ? '⏎'
-                              : null,
-                          onTap: refused || problem != null ? null : create,
-                        ),
-                        _Foot(
-                          problem == null
-                              ? [
-                                  'Starts from the current commit',
-                                  if (widget.current case final current?)
-                                    ' on $current',
-                                  if (widget.changed > 0)
-                                    '; your $changes come along.'
-                                  else
-                                    '.',
-                                ].join()
-                              : '⚠ $problem',
-                          color: problem == null ? null : ws.danger,
-                        ),
-                      ] else if (widget.changed > 0 && !refused) ...[
-                        const Divider(height: WsMetrics.space3),
-                        _Foot(
-                          'You have $changes; switching asks where they go.',
-                        ),
-                      ],
+                      if (refused) _refusal(),
+                      ..._group(
+                        'Local branches',
+                        local,
+                        refused: refused,
+                        now: now,
+                        choose: choose,
+                      ),
+                      ..._group(
+                        'Remote branches',
+                        remote,
+                        refused: refused,
+                        now: now,
+                        choose: choose,
+                      ),
+                      ..._footer(
+                        query: query,
+                        matches: matches,
+                        creatable: creatable,
+                        problem: problem,
+                        refused: refused,
+                        create: create,
+                      ),
                     ],
                   ),
                 ),
@@ -475,6 +396,199 @@ class _BranchMenuState extends State<_BranchMenu> {
       ],
     );
   }
+
+  /// The field that searches the branches; a name that matches none can be created.
+  Widget _search() => TextField(
+    key: const Key('branch-search'),
+    controller: _query,
+    autofocus: true,
+    style: TextStyle(fontSize: WsMetrics.fsCompact, color: context.ws.text),
+    decoration: const InputDecoration(
+      isDense: true,
+      hintText: 'Search or create a branch',
+    ),
+  );
+
+  /// Why the branches cannot be switched now, and which running work to stop first.
+  Widget _refusal() {
+    final running = widget.branches.running;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: WsMetrics.space1),
+      child: WarningNotice(
+        '${whoRuns(running)}. ${stopFirst(running)}, then switch branches.',
+      ),
+    );
+  }
+
+  /// One group of branch rows under its label; nothing when the group is empty.
+  List<Widget> _group(
+    String title,
+    List<BridgeBranch> branches, {
+    required bool refused,
+    required DateTime now,
+    required ValueChanged<BridgeBranch> choose,
+  }) => [
+    if (branches.isNotEmpty) _MenuLabel(title),
+    for (final branch in branches)
+      _branchRow(branch, now, refused ? null : () => choose(branch)),
+  ];
+
+  /// A branch with its mark, and its ahead and behind counts or last commit time.
+  Widget _branchRow(BridgeBranch branch, DateTime now, VoidCallback? onTap) =>
+      _MenuRow(
+        leading: branch.current
+            ? Icon(LucideIcons.check, size: 14, color: context.ws.accent)
+            : const SizedBox.shrink(),
+        name: Text(branch.shown),
+        detail: [
+          if (branch.stashed) 'stashed changes',
+          if (branch.current) ...[
+            if ((widget.status?.ahead ?? 0) > 0) '↑${widget.status!.ahead}',
+            if ((widget.status?.behind ?? 0) > 0) '↓${widget.status!.behind}',
+            'now',
+          ] else
+            formatAgo(branch.committedMs, now),
+        ].join(' · '),
+        onTap: onTap,
+      );
+
+  /// The new-branch row when the search names one, with its note; otherwise the note about changes.
+  List<Widget> _footer({
+    required String query,
+    required List<BridgeBranch> matches,
+    required bool creatable,
+    required String? problem,
+    required bool refused,
+    required VoidCallback create,
+  }) {
+    final changes = widget.changed == 1
+        ? '1 uncommitted change'
+        : '${widget.changed} uncommitted changes';
+    if (!creatable) {
+      return [
+        if (widget.changed > 0 && !refused) ...[
+          const Divider(height: WsMetrics.space3),
+          _Foot('You have $changes; switching asks where they go.'),
+        ],
+      ];
+    }
+    return [
+      if (matches.isEmpty) const _MenuLabel('No branch matches'),
+      _MenuRow(
+        leading: Icon(
+          LucideIcons.gitBranch,
+          size: 14,
+          color: context.ws.textMuted,
+        ),
+        name: Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(
+                text: 'Create branch ',
+                style: DefaultTextStyle.of(context).style,
+              ),
+              TextSpan(text: query),
+            ],
+          ),
+        ),
+        detail: problem == null && matches.isEmpty ? '⏎' : null,
+        onTap: refused || problem != null ? null : create,
+      ),
+      _Foot(
+        problem == null
+            ? [
+                'Starts from the current commit',
+                if (widget.current case final current?) ' on $current',
+                if (widget.changed > 0) '; your $changes come along.' else '.',
+              ].join()
+            : '⚠ $problem',
+        color: problem == null ? null : context.ws.danger,
+      ),
+    ];
+  }
+}
+
+/// A row of the branch menu: a leading mark, the name and an optional detail, tappable unless disabled.
+class _MenuRow extends StatelessWidget {
+  const _MenuRow({
+    required this.leading,
+    required this.name,
+    this.detail,
+    this.onTap,
+  });
+
+  final Widget leading;
+  final Widget name;
+  final String? detail;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return InkWell(
+      borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+      onTap: onTap,
+      child: SizedBox(
+        height: 28,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
+          child: Row(
+            spacing: WsMetrics.space3,
+            children: [
+              SizedBox(width: 14, child: leading),
+              Expanded(
+                child: DefaultTextStyle.merge(
+                  style: monoStyle(
+                    context,
+                    color: onTap == null ? ws.textFaint : ws.text,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  child: name,
+                ),
+              ),
+              if (detail case final detail?)
+                Flexible(
+                  child: Text(
+                    detail,
+                    style: TextStyle(
+                      color: ws.textFaint,
+                      fontSize: WsMetrics.fsSmall,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The heading over one group of rows in the branch menu.
+class _MenuLabel extends StatelessWidget {
+  const _MenuLabel(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(
+      WsMetrics.space3,
+      WsMetrics.space2,
+      WsMetrics.space3,
+      WsMetrics.space1,
+    ),
+    child: Text(
+      text,
+      style: TextStyle(
+        color: context.ws.textFaint,
+        fontSize: WsMetrics.fsSmall,
+      ),
+    ),
+  );
 }
 
 class _Foot extends StatelessWidget {

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/history.dart';
+import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/session/session_state.dart';
 
 import 'fake_backend.dart';
@@ -174,53 +175,168 @@ void main() {
     );
   });
 
-  test('signals when the stored history changes and branches', () async {
-    final changes = <int>[];
-    state.stored.addListener(() => changes.add(state.stored.value));
+  test('reads the stored history and branches, rebuilding the chat', () async {
     await emit(event(BridgeEventKind.turnStarted));
-    await emit(
-      event(
-        BridgeEventKind.contentDelta,
-        item: item(1),
-        text: 'streaming text is not stored yet',
-      ),
-    );
-    expect(changes, isEmpty);
     await emit(event(BridgeEventKind.itemCompleted, item: item(1)));
     await emit(event(BridgeEventKind.turnCompleted));
-    expect(changes, [1, 2]);
 
-    backend.stored = historyOf([]);
-    expect((await state.history(['e2'])).leaf, 'e1');
+    backend.stored = historyOf();
+    await state.loadChat();
+    expect(backend.calls, [
+      'transcript',
+      'history',
+    ], reason: 'a restore reads the chat, then the stored history');
+    backend.calls.clear();
     await state.branch('e1');
     expect(backend.calls, [
-      'history e2',
       'branch e1',
       'transcript',
       'history',
     ], reason: 'a branch rebuilds the chat');
-    expect(changes.last, 3);
+  });
+
+  test('reads the statistics and context window with the chat', () async {
+    backend.stats = statisticsOf(
+      models: [
+        BridgeModelUsage(
+          model: 'anthropic/claude-sonnet',
+          usage: usage(212000, 18300, 1270000),
+          costByKind: const BridgeCostByKind(
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+          ),
+          responses: 41,
+          unpriced: 0,
+        ),
+      ],
+    );
+    backend.contextWindow = const BridgeContext(
+      tokens: 68200,
+      window: 200000,
+      compactsAt: 180000,
+    );
+    await state.loadChat();
+    await pumpEventQueue();
+    expect(state.statistics.value, backend.stats);
+    expect(state.contextWindow.value, backend.contextWindow);
+    expect(backend.statisticsReads, ['statistics', 'context']);
+  });
+
+  test('reads the statistics when a response or a turn ends', () async {
+    await state.loadChat();
+    await pumpEventQueue();
+    backend.statisticsReads.clear();
+    await emit(
+      event(
+        BridgeEventKind.modelRequestCompleted,
+        step: BridgeStep(usage: usage(100, 20, 5), stopReason: 'stop'),
+      ),
+    );
+    expect(backend.statisticsReads, ['statistics', 'context']);
+    backend.statisticsReads.clear();
+    await emit(event(BridgeEventKind.turnStarted));
+    await emit(event(BridgeEventKind.turnCompleted));
+    expect(backend.statisticsReads, contains('statistics'));
   });
 
   test(
-    'a revert continues the chat and the Diff tab on the new branch',
+    'statistics reads never pile up: one more runs after a read in flight',
+    () async {
+      await state.loadChat();
+      await pumpEventQueue();
+      backend.statisticsReads.clear();
+      backend.statisticsGate = Completer<void>();
+      for (var response = 0; response < 3; response++) {
+        await emit(
+          event(
+            BridgeEventKind.modelRequestCompleted,
+            step: BridgeStep(usage: usage(100, 20, 5), stopReason: 'stop'),
+          ),
+        );
+      }
+      backend.statisticsGate!.complete();
+      await pumpEventQueue();
+      expect(
+        backend.statisticsReads,
+        ['statistics', 'context', 'statistics', 'context'],
+        reason: 'responses asked for while a read runs share one read after it',
+      );
+    },
+  );
+
+  test('a failed statistics read is reported once', () async {
+    backend.statisticsError = 'the session file is unreadable';
+    await state.loadChat();
+    await pumpEventQueue();
+    await state.loadChat();
+    await pumpEventQueue();
+    expect(
+      state.notices.value.where((notice) => notice.text.contains('statistics')),
+      hasLength(1),
+    );
+    expect(state.statistics.value, isNull);
+  });
+
+  test('a failed statistics read is shown until a later read works', () async {
+    backend.statisticsError = 'the session file is unreadable';
+    await state.loadChat();
+    await pumpEventQueue();
+    expect(state.statistics.value, isNull);
+    expect(state.statisticsProblem.value, (
+      title: 'No statistics shown',
+      text: 'Could not read the statistics: the session file is unreadable',
+    ));
+
+    backend.statisticsError = null;
+    await state.readStatistics();
+    expect(state.statistics.value, backend.stats);
+    expect(state.statisticsProblem.value, isNull);
+  });
+
+  test('a failed context read keeps the statistics', () async {
+    backend.contextError = 'the model has no window size';
+    await state.loadChat();
+    await pumpEventQueue();
+    expect(state.statistics.value, backend.stats);
+    expect(state.statisticsProblem.value, isNull);
+    expect(state.contextWindow.value, isNull);
+    expect(
+      state.notices.value.map((notice) => notice.text),
+      contains(
+        'Could not read the context window: the model has no window size',
+      ),
+    );
+  });
+
+  test('choosing a model reads the window of the new model again', () async {
+    await state.loadChat();
+    await pumpEventQueue();
+    backend.statisticsReads.clear();
+    await state.setModel(
+      BridgeModel(provider: 'faux', id: 'faux-2', name: 'Faux Two'),
+    );
+    await pumpEventQueue();
+    expect(backend.statisticsReads, ['statistics', 'context']);
+  });
+
+  test(
+    'a revert continues the chat and the Diff panel on the new branch',
     () async {
       final turn = turnOf('T2', number: 2);
       final confirmed = revertPlanOf().confirmation;
       backend.turnList = [turnOf('T1', number: 1), turn];
       await state.readChanges();
-      final changes = <int>[];
-      state.stored.addListener(() => changes.add(state.stored.value));
       // pi continues before the turn's prompt, so the new branch holds only the earlier turn.
       backend.turnList = [turnOf('T1', number: 1)];
 
       expect(await state.revert(turn, confirmed), isTrue);
       expect(backend.calls, containsAllInOrder(['revert T2', 'transcript']));
-      expect(changes, [1], reason: 'the stored history changed');
       expect(state.turns.value.map((turn) => turn.id), ['T1']);
       expect(state.shown.value?.to.id, 'T1');
 
-      // The files changed, but the session stayed on its branch: the Diff tab still rereads.
+      // The files changed, but the session stayed on its branch: the Diff panel still rereads.
       backend
         ..revertError =
             'the files were reverted, but the session could not continue from before the '
@@ -232,7 +348,6 @@ void main() {
         'Could not revert and branch. The files were reverted, but the session could '
         'not continue from before the turn: the agent has exited',
       );
-      expect(changes, [1]);
       expect(state.turns.value.map((turn) => turn.id), ['T0']);
     },
   );
@@ -241,34 +356,22 @@ void main() {
     'rebuilds the chat of the current branch with its branch mark',
     () async {
       backend.stored = historyOf(
-        [],
         tree: [
+          const BridgeTreeNode(id: 'u1', kind: BridgeEntryKind.user),
           const BridgeTreeNode(
-            failed: false,
-            id: 'u1',
-            kind: BridgeEntryKind.user,
-            preview: 'Go',
-          ),
-          const BridgeTreeNode(
-            failed: false,
             id: 'a1',
             parent: 'u1',
             kind: BridgeEntryKind.assistant,
-            preview: 'Looked',
           ),
           const BridgeTreeNode(
-            failed: false,
             id: 'a2',
             parent: 'a1',
             kind: BridgeEntryKind.assistant,
-            preview: 'Done',
           ),
           const BridgeTreeNode(
-            failed: false,
             id: 'b1',
             parent: 'a1',
             kind: BridgeEntryKind.user,
-            preview: 'Instead',
           ),
         ],
         leaf: 'b1',
@@ -305,15 +408,8 @@ void main() {
 
   test('says below each turn what it changed, restored and live', () async {
     BridgeTreeNode node(String id, String? parent, BridgeEntryKind kind) =>
-        BridgeTreeNode(
-          failed: false,
-          id: id,
-          parent: parent,
-          kind: kind,
-          preview: id,
-        );
+        BridgeTreeNode(id: id, parent: parent, kind: kind);
     backend.stored = historyOf(
-      [],
       tree: [
         node('c1', null, BridgeEntryKind.custom),
         node('u1', 'c1', BridgeEntryKind.user),
@@ -372,17 +468,65 @@ void main() {
         removed: 0,
       ),
     ];
-    backend.controller.add(event(BridgeEventKind.turnCompleted));
+    backend.controller.add(
+      event(BridgeEventKind.turnCompleted, checkpoint: 'T2'),
+    );
     await pumpEventQueue();
     expect(state.items.value.map(describe).last, 'T2: 1 files');
     // Ending it again, as after a second read, adds nothing.
-    backend.controller.add(event(BridgeEventKind.turnCompleted));
+    backend.controller.add(
+      event(BridgeEventKind.turnCompleted, checkpoint: 'T2'),
+    );
     await pumpEventQueue();
     expect(
       state.items.value.where((view) => view.turnEnd != null),
       hasLength(2),
     );
   });
+
+  test(
+    'a turn the restore placed gets no second row from its end event',
+    () async {
+      BridgeTreeNode node(String id, String? parent, BridgeEntryKind kind) =>
+          BridgeTreeNode(id: id, parent: parent, kind: kind);
+      backend.stored = historyOf(
+        tree: [
+          node('c1', null, BridgeEntryKind.custom),
+          node('u1', 'c1', BridgeEntryKind.user),
+          node('a1', 'u1', BridgeEntryKind.assistant),
+          node('c2', 'a1', BridgeEntryKind.custom),
+        ],
+        leaf: 'c2',
+      );
+      backend.transcripts[''] = BridgeTranscript(
+        items: [
+          chatItem('u1', BridgeItemKind.userMessage, text: 'Go'),
+          chatItem('a1', BridgeItemKind.assistantMessage, text: 'Looked'),
+        ],
+        more: false,
+      );
+      // The restore already reads the turn's end, which pi stores before it reports the end.
+      backend.turnList = [
+        turnOf(
+          'T1',
+          number: 1,
+          startEntry: 'c1',
+          endEntry: 'c2',
+          added: 1,
+          removed: 0,
+        ),
+      ];
+      await state.loadChat();
+      backend.controller.add(
+        event(BridgeEventKind.turnCompleted, checkpoint: 'T1'),
+      );
+      await pumpEventQueue();
+      expect(
+        state.items.value.where((view) => view.turnEnd != null),
+        hasLength(1),
+      );
+    },
+  );
 
   test('keeps the row of a live turn when earlier messages load', () async {
     backend.transcripts[''] = BridgeTranscript(
@@ -398,7 +542,9 @@ void main() {
     backend.turnList = const [];
     await state.loadChat();
     backend.turnList = [turnOf('T1', number: 1, added: 2, removed: 0)];
-    backend.controller.add(event(BridgeEventKind.turnCompleted));
+    backend.controller.add(
+      event(BridgeEventKind.turnCompleted, checkpoint: 'T1'),
+    );
     await pumpEventQueue();
     await state.loadEarlier();
     expect(
@@ -412,7 +558,9 @@ void main() {
     () async {
       backend.turnList = const [];
       backend.turnsGate = Completer();
-      backend.controller.add(event(BridgeEventKind.turnCompleted));
+      backend.controller.add(
+        event(BridgeEventKind.turnCompleted, checkpoint: 'T1'),
+      );
       // The next turn begins before the ended one was read.
       backend.controller.add(
         event(
@@ -445,7 +593,11 @@ void main() {
         ),
       );
       // Turns 1 and 2 end before their read returns; turn 3 is running.
-      if (id < 3) backend.controller.add(event(BridgeEventKind.turnCompleted));
+      if (id < 3) {
+        backend.controller.add(
+          event(BridgeEventKind.turnCompleted, checkpoint: 'T$id'),
+        );
+      }
     }
     await pumpEventQueue();
     backend.turnList = [
@@ -491,10 +643,39 @@ void main() {
           item: item(3, kind: BridgeItemKind.userMessage),
         ),
       );
-      await emit(event(BridgeEventKind.turnCompleted));
+      await emit(event(BridgeEventKind.turnCompleted, checkpoint: 'T3'));
       expect(
         state.items.value.map((view) => view.turnEnd?.id ?? '${view.id}'),
         ['1', '2', '3', 'T3'],
+      );
+    },
+  );
+
+  test(
+    'a turn without a checkpoint does not take a later turn\'s row place',
+    () async {
+      backend.turnList = const [];
+      await emit(
+        event(
+          BridgeEventKind.itemStarted,
+          item: item(1, kind: BridgeItemKind.userMessage),
+        ),
+      );
+      // Turn 1 took no checkpoint, and the read after its end fails.
+      backend.failTurns = true;
+      await emit(event(BridgeEventKind.turnCompleted));
+      backend.failTurns = false;
+      await emit(
+        event(
+          BridgeEventKind.itemStarted,
+          item: item(2, kind: BridgeItemKind.userMessage),
+        ),
+      );
+      backend.turnList = [turnOf('T2', number: 2, added: 1, removed: 0)];
+      await emit(event(BridgeEventKind.turnCompleted, checkpoint: 'T2'));
+      expect(
+        state.items.value.map((view) => view.turnEnd?.id ?? '${view.id}'),
+        ['1', '2', 'T2'],
       );
     },
   );
@@ -506,7 +687,7 @@ void main() {
         item: item(id, kind: BridgeItemKind.userMessage),
       ),
     );
-    await emit(event(BridgeEventKind.turnCompleted));
+    await emit(event(BridgeEventKind.turnCompleted, checkpoint: 'T$id'));
   }
 
   test('a turn whose end is recorded late keeps its place', () async {
@@ -590,53 +771,26 @@ void main() {
     backend.turnList = [
       turnOf('T1', number: 1, files: 0, added: 0, removed: 0),
     ];
-    backend.controller.add(event(BridgeEventKind.turnCompleted));
+    backend.controller.add(
+      event(BridgeEventKind.turnCompleted, checkpoint: 'T1'),
+    );
     await pumpEventQueue();
     expect(state.items.value.where((view) => view.turnEnd != null), isEmpty);
   });
 
   group('the rebuilt chat', () {
     const tree = [
-      BridgeTreeNode(
-        failed: false,
-        id: 'u1',
-        kind: BridgeEntryKind.user,
-        preview: 'Go',
-      ),
-      BridgeTreeNode(
-        failed: false,
-        id: 'a1',
-        parent: 'u1',
-        kind: BridgeEntryKind.assistant,
-        preview: 'Looked',
-      ),
-      BridgeTreeNode(
-        failed: false,
-        id: 'a2',
-        parent: 'a1',
-        kind: BridgeEntryKind.assistant,
-        preview: 'Done',
-      ),
-      BridgeTreeNode(
-        failed: false,
-        id: 'b1',
-        parent: 'a1',
-        kind: BridgeEntryKind.user,
-        preview: 'Instead',
-      ),
-      BridgeTreeNode(
-        failed: false,
-        id: 'b2',
-        parent: 'b1',
-        kind: BridgeEntryKind.assistant,
-        preview: 'B2',
-      ),
+      BridgeTreeNode(id: 'u1', kind: BridgeEntryKind.user),
+      BridgeTreeNode(id: 'a1', parent: 'u1', kind: BridgeEntryKind.assistant),
+      BridgeTreeNode(id: 'a2', parent: 'a1', kind: BridgeEntryKind.assistant),
+      BridgeTreeNode(id: 'b1', parent: 'a1', kind: BridgeEntryKind.user),
+      BridgeTreeNode(id: 'b2', parent: 'b1', kind: BridgeEntryKind.assistant),
     ];
     String describe(ItemView view) =>
         view.marker == null ? view.text.value : 'marker ${view.marker!.ref}';
 
     test('holds one branch at a time and never doubles', () async {
-      backend.stored = historyOf([], tree: tree, leaf: 'b2');
+      backend.stored = historyOf(tree: tree, leaf: 'b2');
       backend.transcripts[''] = BridgeTranscript(
         items: [
           chatItem('u1', BridgeItemKind.userMessage, text: 'Go'),
@@ -679,7 +833,7 @@ void main() {
     test(
       'marks the branch at the start when earlier pages show nothing',
       () async {
-        backend.stored = historyOf([], tree: tree, leaf: 'b2');
+        backend.stored = historyOf(tree: tree, leaf: 'b2');
         backend.transcripts[''] = BridgeTranscript(
           items: [chatItem('b2', BridgeItemKind.assistantMessage, text: 'B2')],
           more: true,
@@ -697,7 +851,7 @@ void main() {
     );
 
     test('marks the branch where it leaves, also on an earlier page', () async {
-      backend.stored = historyOf([], tree: tree, leaf: 'b2');
+      backend.stored = historyOf(tree: tree, leaf: 'b2');
       // The newest page starts after the first entry past the fork.
       backend.transcripts[''] = BridgeTranscript(
         items: [chatItem('b2', BridgeItemKind.assistantMessage, text: 'B2')],
@@ -729,42 +883,13 @@ void main() {
     'places a live turn\'s row after a branch mark an earlier page adds',
     () async {
       const tree = [
-        BridgeTreeNode(
-          failed: false,
-          id: 'u1',
-          kind: BridgeEntryKind.user,
-          preview: 'Go',
-        ),
-        BridgeTreeNode(
-          failed: false,
-          id: 'a1',
-          parent: 'u1',
-          kind: BridgeEntryKind.assistant,
-          preview: 'Looked',
-        ),
-        BridgeTreeNode(
-          failed: false,
-          id: 'a2',
-          parent: 'a1',
-          kind: BridgeEntryKind.assistant,
-          preview: 'Done',
-        ),
-        BridgeTreeNode(
-          failed: false,
-          id: 'b1',
-          parent: 'a1',
-          kind: BridgeEntryKind.user,
-          preview: 'Instead',
-        ),
-        BridgeTreeNode(
-          failed: false,
-          id: 'b2',
-          parent: 'b1',
-          kind: BridgeEntryKind.assistant,
-          preview: 'B2',
-        ),
+        BridgeTreeNode(id: 'u1', kind: BridgeEntryKind.user),
+        BridgeTreeNode(id: 'a1', parent: 'u1', kind: BridgeEntryKind.assistant),
+        BridgeTreeNode(id: 'a2', parent: 'a1', kind: BridgeEntryKind.assistant),
+        BridgeTreeNode(id: 'b1', parent: 'a1', kind: BridgeEntryKind.user),
+        BridgeTreeNode(id: 'b2', parent: 'b1', kind: BridgeEntryKind.assistant),
       ];
-      backend.stored = historyOf([], tree: tree, leaf: 'b2');
+      backend.stored = historyOf(tree: tree, leaf: 'b2');
       backend.transcripts[''] = BridgeTranscript(
         items: [chatItem('b2', BridgeItemKind.assistantMessage, text: 'B2')],
         more: true,
@@ -789,7 +914,9 @@ void main() {
         ),
       );
       backend.turnsGate = Completer();
-      backend.controller.add(event(BridgeEventKind.turnCompleted));
+      backend.controller.add(
+        event(BridgeEventKind.turnCompleted, checkpoint: 'T9'),
+      );
       await pumpEventQueue();
       await state.loadEarlier();
       backend.turnList = [turnOf('T9', number: 3, added: 1, removed: 0)];
@@ -820,6 +947,21 @@ void main() {
       expect(state.draft.value, 'a\n\nc');
       expect(state.notice.value?.level, BridgeLevel.error);
     });
+
+    test(
+      'a stop whose queue cannot be taken back still aborts the run',
+      () async {
+        backend
+          ..queued = const BridgeQueue(steering: ['x'], followUp: [])
+          ..clearQueueError = 'queue locked';
+        await state.stop();
+        expect(backend.calls, ['clear queue', 'abort']);
+        expect(
+          state.notice.value?.text,
+          'Could not take the waiting messages back: queue locked',
+        );
+      },
+    );
 
     test('a stop that fails still hands the waiting messages back', () async {
       backend
@@ -875,6 +1017,34 @@ void main() {
     expect(state.items.value.single.outcome.value?.failed, isTrue);
   });
 
+  test('a call made during an earlier read waits for that read', () async {
+    backend.transcripts[''] = BridgeTranscript(
+      items: [chatItem('u2', BridgeItemKind.userMessage, text: 'Later')],
+      more: true,
+      start: 'u2',
+    );
+    backend.transcripts['u2'] = BridgeTranscript(
+      items: [chatItem('u1', BridgeItemKind.userMessage, text: 'First')],
+      more: false,
+      start: 'u1',
+    );
+    await state.loadChat();
+    final gate = Completer<void>();
+    backend.earlierGate = gate;
+    final first = state.loadEarlier();
+    var second = false;
+    final waiting = state.loadEarlier().then((_) => second = true);
+    await pumpEventQueue();
+    expect(second, isFalse, reason: 'the page in progress is not read again');
+    gate.complete();
+    await first;
+    await waiting;
+    expect(state.items.value.map((view) => view.text.value), [
+      'First',
+      'Later',
+    ]);
+  });
+
   test('an earlier page read before a branch never doubles the chat', () async {
     backend.transcripts[''] = BridgeTranscript(
       items: [chatItem('u2', BridgeItemKind.userMessage, text: 'Later')],
@@ -897,6 +1067,188 @@ void main() {
       isEmpty,
       reason: 'the page belongs to the chat before the branch',
     );
+  });
+
+  test(
+    'a stale earlier-page read does not stop the next chat reading its own',
+    () async {
+      backend.transcripts[''] = BridgeTranscript(
+        items: [chatItem('u2', BridgeItemKind.userMessage, text: 'Later')],
+        more: true,
+        start: 'u2',
+      );
+      backend.transcripts['u2'] = BridgeTranscript(
+        items: [chatItem('u1', BridgeItemKind.userMessage, text: 'First')],
+        more: false,
+        start: 'u1',
+      );
+      await state.loadChat();
+      final stalled = Completer<void>();
+      backend.earlierGate = stalled;
+      final stale = state.loadEarlier();
+      await pumpEventQueue();
+      // The new session's own reads are not held back by the old one.
+      backend.earlierGate = null;
+      backend.transcripts[''] = const BridgeTranscript(
+        items: [],
+        more: true,
+        start: 'x',
+      );
+      backend.transcripts['x'] = BridgeTranscript(
+        items: [chatItem('u9', BridgeItemKind.userMessage, text: 'Mine')],
+        more: false,
+        start: 'u9',
+      );
+      await state.newSession();
+      expect(state.items.value.map((view) => view.text.value), [
+        'Mine',
+      ], reason: 'the new chat reads its own earlier page');
+      stalled.complete();
+      await stale;
+      expect(state.items.value.map((view) => view.text.value), [
+        'Mine',
+      ], reason: 'the old page never joins the new chat');
+    },
+  );
+
+  test(
+    'an earlier-page read started during a restore leaves the restored chat',
+    () async {
+      backend.transcripts[''] = BridgeTranscript(
+        items: [chatItem('u2', BridgeItemKind.userMessage, text: 'Later')],
+        more: true,
+        start: 'u2',
+      );
+      backend.transcripts['u2'] = BridgeTranscript(
+        items: [chatItem('u1', BridgeItemKind.userMessage, text: 'First')],
+        more: false,
+        start: 'u1',
+      );
+      await state.loadChat();
+      backend.transcripts[''] = BridgeTranscript(
+        items: [chatItem('u3', BridgeItemKind.userMessage, text: 'Newer')],
+        more: false,
+        start: 'u3',
+      );
+      backend.newestGate = Completer();
+      backend.earlierGate = Completer();
+      final restoring = state.loadChat();
+      await pumpEventQueue();
+      // Started with the cursor the restore is about to replace.
+      final earlier = state.loadEarlier();
+      await pumpEventQueue();
+      backend.newestGate!.complete();
+      await restoring;
+      backend.earlierGate!.complete();
+      await earlier;
+      expect(state.items.value.map((view) => view.text.value), ['Newer']);
+      expect(state.chatMore.value, isFalse);
+    },
+  );
+
+  test(
+    'a message sent while the queue is rebuilt follows the kept messages',
+    () async {
+      backend.queued = const BridgeQueue(
+        steering: [],
+        followUp: ['a', 'b', 'c'],
+      );
+      backend.sendGate = Completer();
+      final removing = state.unqueue('b', followUp: true);
+      await pumpEventQueue();
+      final sending = state.send('d');
+      await pumpEventQueue();
+      backend.sendGate!.complete();
+      await Future.wait([removing, sending]);
+      expect(backend.calls, [
+        'clear queue',
+        'follow-up a',
+        'follow-up c',
+        'send d',
+      ], reason: 'the message waits until the kept messages are sent again');
+    },
+  );
+
+  test(
+    'a message waiting for a restore also waits for a switch started meanwhile',
+    () async {
+      backend.gate = Completer();
+      final restoring = state.loadChat();
+      final sending = state.send('Hi');
+      await pumpEventQueue();
+      backend.switchGate = Completer();
+      final switching = state.newSession();
+      await pumpEventQueue();
+      backend.gate!.complete();
+      await pumpEventQueue();
+      expect(
+        backend.calls,
+        isNot(contains('send Hi')),
+        reason: 'the switch is still running',
+      );
+      backend.switchGate!.complete();
+      await Future.wait([restoring, switching, sending]);
+      expect(backend.calls.last, 'send Hi');
+    },
+  );
+
+  test(
+    'a send that completes after a new session leaves its title unset',
+    () async {
+      backend.sendGate = Completer();
+      final sending = state.send('Old');
+      await pumpEventQueue();
+      await state.newSession();
+      backend.sendGate!.complete();
+      await sending;
+      expect(state.sessionTitle.value, isNull);
+    },
+  );
+
+  test(
+    'a start-page read that began before a switch keeps the new list',
+    () async {
+      BridgeStoredSession session(String name) => BridgeStoredSession(
+        path: '/sessions/$name.jsonl',
+        title: name,
+        modifiedMs: 1,
+      );
+      backend.storedSessions = [session('old')];
+      final gate = backend.recentGate = Completer();
+      final starting = state.loadStart();
+      await pumpEventQueue();
+      backend.recentGate = null;
+      backend.storedSessions = [session('new')];
+      await state.continueSession('/sessions/new.jsonl');
+      gate.complete();
+      await starting;
+      expect(state.recent.value.map((stored) => stored.path), [
+        '/sessions/new.jsonl',
+      ]);
+    },
+  );
+
+  test('a stored parent cycle restores without hanging', () async {
+    // a's parent is b and b's is a, so the path to the leaf must stop at the repeated entry.
+    backend.stored = historyOf(
+      tree: const [
+        BridgeTreeNode(id: 'a', parent: 'b', kind: BridgeEntryKind.assistant),
+        BridgeTreeNode(id: 'b', parent: 'a', kind: BridgeEntryKind.user),
+      ],
+      leaf: 'a',
+    );
+    backend.transcripts[''] = BridgeTranscript(
+      items: [
+        chatItem('b', BridgeItemKind.userMessage, text: 'Before'),
+        chatItem('a', BridgeItemKind.assistantMessage, text: 'After'),
+      ],
+      more: false,
+    );
+    await state.loadChat();
+    expect(state.items.value.map((view) => view.entry).whereType<String>(), [
+      'b',
+      'a',
+    ], reason: 'each stored entry appears once');
   });
 
   test('keeps an error in the status bar until it is dismissed', () async {
@@ -933,7 +1285,6 @@ void main() {
 
   test('restores what a continued session used', () async {
     backend.stored = historyOf(
-      [],
       usage: const BridgeUsage(
         input: 100,
         output: 20,
@@ -1100,6 +1451,70 @@ void main() {
     backend.sendGate!.complete();
     await Future.wait([removing, stopping]);
     expect(backend.calls, ['clear queue', 'send Keep', 'clear queue', 'abort']);
+  });
+
+  test('a switch waits for a queue change, so a message it re-sends stays '
+      'in the session it was queued in', () async {
+    backend
+      ..queued = const BridgeQueue(steering: ['a', 'b'], followUp: [])
+      ..clearQueueGate = Completer();
+    await emit(event(BridgeEventKind.turnStarted));
+    final removing = state.unqueue('a', followUp: false);
+    await pumpEventQueue();
+    await emit(event(BridgeEventKind.turnCompleted));
+    final switching = state.newSession();
+    await pumpEventQueue();
+    backend.clearQueueGate!.complete();
+    await Future.wait([removing, switching]);
+    expect(
+      backend.calls,
+      containsAllInOrder(['clear queue', 'send b', 'new session']),
+      reason: 'the re-sent message goes out before the switch',
+    );
+  });
+
+  test('a queue change that starts during a switch sends nothing into the '
+      'new session', () async {
+    backend
+      ..queued = const BridgeQueue(steering: ['a', 'b'], followUp: [])
+      ..switchGate = Completer();
+    final switching = state.newSession();
+    await pumpEventQueue();
+    final removing = state.unqueue('a', followUp: false);
+    await pumpEventQueue();
+    // The new session waits with nothing queued.
+    backend.queued = const BridgeQueue(steering: [], followUp: []);
+    backend.switchGate!.complete();
+    await Future.wait([switching, removing]);
+    expect(
+      backend.calls,
+      isNot(contains('send b')),
+      reason: 'the old session’s queue never reaches the new session',
+    );
+  });
+
+  test('a run that a re-sent message starts makes the switch refuse', () async {
+    backend
+      ..queued = const BridgeQueue(steering: ['a', 'b'], followUp: [])
+      ..clearQueueGate = Completer()
+      ..onSend = (message) {
+        if (message == 'b') {
+          backend.controller.add(event(BridgeEventKind.turnStarted));
+        }
+      };
+    await emit(event(BridgeEventKind.turnStarted));
+    final removing = state.unqueue('a', followUp: false);
+    await pumpEventQueue();
+    await emit(event(BridgeEventKind.turnCompleted));
+    final switching = state.newSession();
+    await pumpEventQueue();
+    backend.clearQueueGate!.complete();
+    await Future.wait([removing, switching]);
+    expect(backend.calls, ['clear queue', 'send b']);
+    expect(
+      state.notice.value?.text,
+      'Stop the agent before starting a new session.',
+    );
   });
 
   test('pages past entries that show nothing in the chat', () async {
@@ -1282,5 +1697,99 @@ void main() {
     await state.dispose().timeout(const Duration(seconds: 2));
     expect(backend.cancelled, isTrue);
     expect(backend.calls, ['shutdown']);
+    expect(backend.confirmed.last, 1 << 53);
+  });
+
+  test(
+    'an event whose handler throws still frees its place in the window',
+    () async {
+      final failing = FakeBackend();
+      final errors = <Object>[];
+      // The listener belongs to the zone that creates the state, so its error is caught here.
+      runZonedGuarded(
+        () => SessionState(failing),
+        (error, _) => errors.add(error),
+      );
+      // A content change without its item makes the handler throw.
+      failing.controller.add(event(BridgeEventKind.contentDelta));
+      failing.controller.add(event(BridgeEventKind.turnStarted));
+      await pumpEventQueue();
+      expect(errors, hasLength(1));
+      expect(
+        failing.confirmed.last,
+        2,
+        reason: 'the bridge waits for a confirmation of every event it sent',
+      );
+    },
+  );
+
+  test('confirms each applied event, so the bridge may send more', () async {
+    await emit(event(BridgeEventKind.turnStarted));
+    await emit(event(BridgeEventKind.notification, text: 'Working'));
+    await emit(event(BridgeEventKind.turnCompleted));
+    expect(backend.confirmed, [1, 2, 3]);
+  });
+
+  test('a fell-behind event reads the chat back from the session file, which then shows the text of the stream without overflow', () async {
+    final whole = FakeBackend();
+    final wholeState = SessionState(whole);
+    final overflowed = FakeBackend();
+    final overflowedState = SessionState(overflowed);
+    overflowed.transcripts[''] = BridgeTranscript(
+      items: [chatItem('e1', BridgeItemKind.assistantMessage, text: 'Hello')],
+      more: false,
+    );
+    BridgeEvent completed() => event(
+      BridgeEventKind.itemCompleted,
+      item: item(1, kind: BridgeItemKind.assistantMessage),
+      text: 'Hello',
+    );
+    // The partial output "llo" went in the overflow; the first turn's end and the second turn
+    // come after the fell-behind event.
+    final turns = [
+      event(BridgeEventKind.turnStarted),
+      event(
+        BridgeEventKind.itemStarted,
+        item: item(1, kind: BridgeItemKind.assistantMessage),
+      ),
+      event(BridgeEventKind.contentDelta, item: item(1), text: 'He'),
+      event(BridgeEventKind.contentDelta, item: item(1), text: 'llo'),
+      completed(),
+      event(BridgeEventKind.turnCompleted),
+      event(BridgeEventKind.turnStarted),
+      event(
+        BridgeEventKind.itemStarted,
+        item: item(2, kind: BridgeItemKind.assistantMessage),
+      ),
+      event(BridgeEventKind.contentDelta, item: item(2), text: 'Bye'),
+      event(BridgeEventKind.turnCompleted),
+    ];
+    final dropped = [
+      ...turns.take(3),
+      event(BridgeEventKind.fellBehind),
+      ...turns.skip(4),
+    ];
+    Future<void> feed(FakeBackend to, List<BridgeEvent> events) async {
+      for (final each in events) {
+        to.controller.add(each);
+        await pumpEventQueue();
+      }
+    }
+
+    await feed(whole, turns);
+    await feed(overflowed, dropped);
+    expect(await assistantTexts(wholeState), ['Hello', 'Bye']);
+    expect(await assistantTexts(overflowedState), ['Hello', 'Bye']);
+    expect(
+      overflowed.calls.where((call) => call.startsWith('transcript')),
+      hasLength(2),
+      reason: 'read at the fell-behind event, and again when the turn that was running ends',
+    );
   });
 }
+
+/// The text of each assistant message the chat shows, in order.
+Future<List<String>> assistantTexts(SessionState state) async => [
+  for (final view in state.items.value)
+    if (view.kind == BridgeItemKind.assistantMessage) view.text.value,
+];

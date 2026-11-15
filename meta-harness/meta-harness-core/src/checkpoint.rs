@@ -1,5 +1,5 @@
 //! Checkpoints of a session's Git project at each turn's start and end (ADR-0220, ADR-0234): commits
-//! under `refs/watershed/checkpoints/<session>/<turn>/<start|end>` that the Diff tab compares. The
+//! under `refs/watershed/checkpoints/<session>/<turn>/<start|end>` that the Diff panel compares. The
 //! checkout's other Git operations, its branches, stash and fetch, run here too: reads and the
 //! background fetch under the checkpoint time limit, and the Git writes a user asks for to their
 //! end under the lock against running agents.
@@ -17,7 +17,7 @@ use tokio::sync::watch;
 mod git;
 pub use git::{CommitFile, CommitPlan};
 
-use crate::checkout::{Alone, Checkout, RETRY, Running};
+use crate::checkout::{Alone, Checkout, RETRY, Running, ShownSession};
 use crate::diff::{
     Branch, BranchTarget, ChangeStatus, Changes, DiffError, FileChange, GitStatus,
     RevertConfirmation, Stash, Whitespace, WorkingTree,
@@ -153,6 +153,8 @@ pub struct Checkpoints {
     /// Marks this session's agent as running in the checkout while a turn runs, with the turn's
     /// start checkpoint, as the agent may switch sessions between turns.
     running: std::sync::Mutex<Option<(Checkpoint, Running)>>,
+    /// The session this window shows, with its mark (ADR-0271).
+    shown: std::sync::Mutex<Option<(String, ShownSession)>>,
     /// Whether that turn's end checkpoint is being taken.
     ending: std::sync::atomic::AtomicBool,
     /// Whether a turn's start waits for a revert or another action that holds the checkout alone.
@@ -186,6 +188,7 @@ impl Checkpoints {
             closed: watch::Sender::new(false),
             captures: tokio::sync::Mutex::new(()),
             running: std::sync::Mutex::new(None),
+            shown: std::sync::Mutex::new(None),
             ending: std::sync::atomic::AtomicBool::new(false),
             waiting: watch::Sender::new(false),
             gh: "gh".into(),
@@ -196,6 +199,46 @@ impl Checkpoints {
     /// which can take a while.
     pub fn waiting(&self) -> watch::Receiver<bool> {
         self.waiting.subscribe()
+    }
+
+    /// Makes `session` the one this window shows, which deleting it is then refused for, in any
+    /// worktree of the project (ADR-0271); `None` shows none. A turn's start shows its session,
+    /// so only a switch or a new session needs this.
+    pub async fn show_session(&self, session: Option<&str>) -> Result<(), DiffError> {
+        let Some(session) = session else {
+            self.shown.lock().expect("shown lock").take();
+            return Ok(());
+        };
+        valid_id(session)?;
+        if self
+            .shown
+            .lock()
+            .expect("shown lock")
+            .as_ref()
+            .is_some_and(|(held, _)| held == session)
+        {
+            return Ok(());
+        }
+        let checkout = match self.tree().await {
+            Ok(tree) => tree.checkout(),
+            Err(DiffError::NotARepository) => Checkout::folder(&self.dir)?,
+            Err(error) => return Err(error),
+        };
+        // Under the folder's shared lock, which a deletion holds alone until the file is gone, so
+        // its look for marks sees this one or runs after the deletion.
+        let held = self
+            .until_closed(async {
+                let _folder = Checkout::folder(&self.dir)?.shared().await?;
+                checkout.show(session).await
+            })
+            .await?;
+        let mut shown = self.shown.lock().expect("shown lock");
+        // Closing sets the flag before it clears `shown`, so a mark taken after closing drops here.
+        if *self.closed.borrow() {
+            return Err(DiffError::Closed);
+        }
+        *shown = Some((session.to_owned(), held));
+        Ok(())
     }
 
     /// Whether the project is in a Git working tree, so it can have checkpoints.
@@ -210,7 +253,7 @@ impl Checkpoints {
     /// Takes `checkpoint` of the project as it is now. It can take a while in a large project.
     /// From a turn's start to its end, the session's agent counts as running in the checkout,
     /// even when its snapshot fails; a turn whose checkout guard cannot be acquired must not
-    /// start. Outside Git the guard belongs to the canonical folder in system temporary storage;
+    /// start. Outside Git the guard belongs to the canonical folder in the user's lock folder;
     /// a turn's start waits for a revert or initialization in progress.
     pub async fn capture(&self, checkpoint: &Checkpoint) -> Result<(), DiffError> {
         let reference = checkpoint.reference()?;
@@ -219,7 +262,11 @@ impl Checkpoints {
         let _ending = (checkpoint.phase == Phase::End).then(|| {
             self.ending
                 .store(self.guards(checkpoint), Ordering::Relaxed);
-            EndingMark(&self.ending)
+            EndingMark {
+                ending: &self.ending,
+                running: &self.running,
+                end: checkpoint.clone(),
+            }
         });
         if checkpoint.phase == Phase::Start {
             // A start whose run never settled ends that mark first, so it removes no name the
@@ -244,15 +291,16 @@ impl Checkpoints {
                                 .await
                         }
                         Err(DiffError::NotARepository) => Ok(folder),
-                        Err(_) => {
-                            Err(std::mem::replace(&mut tree, Err(DiffError::Closed)).unwrap_err())
-                        }
+                        Err(_) => Err(std::mem::replace(&mut tree, Err(DiffError::Closed))
+                            .expect_err("the match arm saw an error")),
                     }
                 })
                 .await;
             // Back to not waiting, telling only if it waited.
             self.waiting.send_if_modified(std::mem::take);
             let running = running?;
+            // Failing here keeps the turn from starting, as a missing checkout guard does.
+            self.show_session(Some(&checkpoint.session)).await?;
             let mut slot = self.running.lock().expect("running lock");
             // Closing empties the slot after telling it closed, so a mark that arrives later
             // drops here instead of outliving the session.
@@ -263,24 +311,13 @@ impl Checkpoints {
         } else {
             tree = self.tree().await;
         }
-        let captured = async {
+        async {
             let _turn = self
                 .until_closed(async { Ok(self.captures.lock().await) })
                 .await?;
             self.bounded(tree?.checkpoint(&reference)).await.map(drop)
         }
-        .await;
-        if checkpoint.phase == Phase::End {
-            // Only its own turn's mark: a later turn's start, perhaps of another session after a
-            // switch, may already have replaced it.
-            let mut slot = self.running.lock().expect("running lock");
-            if slot.as_ref().is_some_and(|(start, _)| {
-                start.session == checkpoint.session && start.turn == checkpoint.turn
-            }) {
-                slot.take();
-            }
-        }
-        captured
+        .await
     }
 
     /// Whether this exact turn acquired and still holds its running checkout guard.
@@ -422,8 +459,9 @@ impl Checkpoints {
     }
 
     /// Creates the branch `name` at the current commit and switches to it; uncommitted changes
-    /// come along. Refused while an agent runs in the checkout.
-    pub async fn create_branch(&self, name: &str) -> Result<(), DiffError> {
+    /// come along. Refused while an agent runs in the checkout. Returns the branch it was created
+    /// from, or none when HEAD was detached.
+    pub async fn create_branch(&self, name: &str) -> Result<Option<String>, DiffError> {
         let name = name.to_owned();
         self.user_write(move |tree| async move { tree.create(&name).await })
             .await
@@ -472,8 +510,8 @@ impl Checkpoints {
     }
 
     /// Fetches the remote of the branch's upstream, or else origin or the only configured remote,
-    /// as Liquid does in the background; returns whether there was one.
-    pub async fn fetch(&self) -> Result<bool, DiffError> {
+    /// as Liquid does in the background; returns the remote fetched, if there was one.
+    pub async fn fetch(&self) -> Result<Option<String>, DiffError> {
         let tree = self.tree().await?;
         self.bounded(tree.fetch()).await
     }
@@ -488,6 +526,20 @@ impl Checkpoints {
         let tree = self.tree().await?;
         let (from, to) = (self.read(&tree, from).await?, self.read(&tree, to).await?);
         self.bounded(tree.changes(&from, &to, whitespace)).await
+    }
+
+    /// The commit `checkpoint` holds, or none when it was not taken or the project is outside
+    /// Git. An id Watershed never writes names no checkpoint.
+    pub async fn commit_of(&self, checkpoint: &Checkpoint) -> Result<Option<String>, DiffError> {
+        let Ok(reference) = checkpoint.reference() else {
+            return Ok(None);
+        };
+        let tree = match self.tree().await {
+            Ok(tree) => tree,
+            Err(DiffError::NotARepository) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        self.bounded(tree.checkpoint_commit(&reference)).await
     }
 
     /// The unified diff of one file from checkpoint `from` to `to`.
@@ -544,7 +596,8 @@ impl Checkpoints {
         self.await_own_ending().await;
         // Turns outside Git hold the folder's guard, which Initialize Git takes too, so it is
         // held before the repository is looked up and until the file is gone.
-        let _folder = Checkout::folder(&self.dir)?.alone().await?;
+        let folder = Checkout::folder(&self.dir)?;
+        let _folder = folder.alone().await?;
         let tree = match self.tree().await {
             Ok(tree) => Some(tree),
             Err(DiffError::NotARepository) => None,
@@ -552,14 +605,26 @@ impl Checkpoints {
         };
         // Held until the file is gone.
         let _alone = match &tree {
-            Some(tree) => {
-                let alone = self.alone_everywhere(tree, false).await?;
-                self.bounded(tree.delete_references(&format!("{REFS}{session}/")))
-                    .await?;
-                Some(alone)
-            }
+            Some(tree) => Some(self.alone_everywhere(tree, false).await?),
             None => None,
         };
+        // Refused while a window shows it, in any worktree of the repository, and in the folder,
+        // where a mark taken before Initialize Git stays.
+        let mut checkouts = match &tree {
+            Some(tree) => tree.checkouts()?,
+            None => Vec::new(),
+        };
+        checkouts.push(folder);
+        if checkouts
+            .iter()
+            .any(|checkout| checkout.shown().iter().any(|shown| shown == session))
+        {
+            return Err(DiffError::SessionShown);
+        }
+        if let Some(tree) = &tree {
+            self.bounded(tree.delete_references(&format!("{REFS}{session}/")))
+                .await?;
+        }
         std::fs::remove_file(file).map_err(DiffError::Io)
     }
 
@@ -672,6 +737,7 @@ impl Checkpoints {
         // Told first, so an open in progress stops instead of holding the project.
         self.closed.send_replace(true);
         self.running.lock().expect("running lock").take();
+        self.shown.lock().expect("shown lock").take();
         let tree = self.tree.lock().await.replace(Err(Unopened::Closed));
         let Some(Ok(tree)) = tree else {
             return;
@@ -805,13 +871,27 @@ impl Checkpoints {
     }
 }
 
-/// Marks a turn's end checkpoint as being taken until dropped, so a capture that ends early, or is
-/// dropped while it waits, leaves no mark for a later delete to wait on.
-struct EndingMark<'a>(&'a std::sync::atomic::AtomicBool);
+/// Marks a turn's end checkpoint as being taken until dropped, and then clears the turn's running
+/// mark, so a capture that ends early, or is dropped while it waits, leaves neither a mark for a
+/// later delete to wait on nor a settled turn that blocks the checkout.
+struct EndingMark<'a> {
+    ending: &'a std::sync::atomic::AtomicBool,
+    running: &'a std::sync::Mutex<Option<(Checkpoint, Running)>>,
+    end: Checkpoint,
+}
 
 impl Drop for EndingMark<'_> {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::Relaxed);
+        // Only its own turn's mark: a later turn's start, perhaps of another session after a
+        // switch, may already have replaced it.
+        let mut slot = self.running.lock().expect("running lock");
+        if slot.as_ref().is_some_and(|(start, _)| {
+            start.session == self.end.session && start.turn == self.end.turn
+        }) {
+            slot.take();
+        }
+        drop(slot);
+        self.ending.store(false, Ordering::Relaxed);
     }
 }
 

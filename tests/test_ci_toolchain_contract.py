@@ -26,7 +26,6 @@ ACTION_PINS = {
     "subosito/flutter-action": "1a449444c387b1966244ae4d4f8c696479add0b2",
     "taiki-e/install-action": "83ac0ad63c0167e6f06796fab0fce28db1bf3db0",
 }
-TOPIC_BRANCH_TYPES = ("feat", "fix", "docs", "test", "ci", "chore", "refactor")
 UBUNTU = "matrix.os == 'ubuntu-24.04'"
 MAC = "matrix.os == 'xcode-27'"
 PRODUCT = "needs.scope.outputs.product == 'true'"
@@ -161,11 +160,17 @@ def step_run(workflow: str, name: str) -> str:
     declaration = lines[run_index].removeprefix("        run:").strip()
     if declaration not in ("|", ">-"):
         return declaration
-    return "\n".join(
-        line.removeprefix("          ")
-        for line in field_block(lines[run_index + 1 :], "          ")
-        if line.startswith("          ")
-    ).rstrip()
+    block = field_block(lines[run_index + 1 :], "          ")
+    if declaration == ">-":
+        # YAML folds plain lines into single spaces but keeps the break beside a blank or
+        # more-indented line, so any other folded block is refused rather than reconstructed.
+        while block and not block[-1].strip():
+            block.pop()
+        if not all(re.match(r"          \S", line) for line in block):
+            raise AssertionError(f"unsupported folded CI command: {name}")
+        return " ".join(line.removeprefix("          ") for line in block)
+    body = [line.removeprefix("          ") if line.startswith("          ") else "" for line in block]
+    return "\n".join(body).rstrip()
 
 
 def folded_tokens(workflow: str, name: str) -> list[str]:
@@ -340,11 +345,12 @@ class CiWorkflowContractTest(unittest.TestCase):
             "  cancel-in-progress: true",
         ])
 
-    def test_ci_runs_on_every_permitted_topic_branch(self) -> None:
-        self.assertEqual(
-            ci_push_branches(workflow_text()),
-            ("main", *(f"{kind}/**" for kind in TOPIC_BRANCH_TYPES)),
-        )
+    def test_topic_branches_run_ci_through_their_pull_request_or_on_request(self) -> None:
+        # A push run besides the pull request run would ask for macOS runners twice per commit.
+        workflow = workflow_text()
+        self.assertEqual(ci_push_branches(workflow), ("main",))
+        self.assertIn("\n  pull_request:\n    branches: [main]\n", workflow)
+        self.assertIn("\n  workflow_dispatch:\n", workflow)
 
     def test_ci_branch_parser_ignores_comments_and_other_trigger_keys(self) -> None:
         workflow = """on:
@@ -366,8 +372,21 @@ class CiWorkflowContractTest(unittest.TestCase):
             with self.subTest(step=step):
                 workflow = (f"jobs:\n  first:\n    steps:\n      - &example\n        name: Example\n{step}"
                             "  second:\n    steps:\n      - *example\n    env:\n      A: b\n")
-                self.assertEqual(step_run(workflow, "Example"), "first\nsecond")
+                self.assertEqual(step_run(workflow, "Example"), "first\n\nsecond")
                 self.assertEqual(job_of(workflow, "Example"), ["first", "second"])
+
+    def test_folded_run_blocks_join_their_lines_with_spaces(self) -> None:
+        workflow = "jobs:\n  first:\n    steps:\n      - name: Example\n        run: >-\n          first\n          second\n"
+        self.assertEqual(step_run(workflow, "Example"), "first second")
+
+    def test_folded_run_blocks_with_other_line_breaks_are_refused(self) -> None:
+        # YAML keeps the line break beside a blank or more-indented line, so such a command is refused.
+        for body in ("          import sys;\n            # comment\n          sys.exit(7)\n",
+                     "          first\n\n          second\n"):
+            with self.subTest(body=body):
+                workflow = "jobs:\n  first:\n    steps:\n      - name: Example\n        run: >-\n" + body
+                with self.assertRaisesRegex(AssertionError, "folded"):
+                    step_run(workflow, "Example")
 
     def test_feature_gated_evidence_reporters_are_registered(self) -> None:
         manifest = tomllib.loads(
@@ -391,6 +410,8 @@ class CiWorkflowContractTest(unittest.TestCase):
         mutations = (
             workflow.replace("cargo fmt --all --check", "true", 1),
             workflow.replace("report --fail-under-lines 88", "report --fail-under-lines 87", 1),
+            workflow.replace("flutter test --coverage", "flutter test", 1),
+            workflow.replace("node ../../scripts/check-dart-coverage.mjs", "true", 1),
             workflow.replace("cargo audit", "true", 1),
             workflow.replace("node scripts/check-html-render.mjs", "true", 1),
             *(workflow.replace(f"      - name: {name}\n",
@@ -402,7 +423,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             workflow.replace('--executor "$M12_INSTALLED_EXECUTOR"',
                              f'--executor "$PWD/{M12_EXECUTOR}"', 1),
             workflow.replace("--test native_contract", "--test absent", 1),
-            workflow.replace("--test native_self_protection", "--test absent", 1),
+            workflow.replace("--test native_flow_owned_write_protection", "--test absent", 1),
             workflow.replace("cargo llvm-cov show-env --sh", "true", 1),
             workflow.replace('eval "$(cargo llvm-cov show-env --sh)"\n          cargo llvm-cov clean --workspace',
                              'cargo llvm-cov clean --workspace\n          eval "$(cargo llvm-cov show-env --sh)"', 1),
@@ -615,7 +636,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         release = step_run(workflow, "Run native release Executor acceptance")
         self.assertIn('FLOW_EXECUTOR_UNDER_TEST="$M12_INSTALLED_EXECUTOR"', release)
         self.assertIn("cargo nextest run --locked -p flow-agent-executor "
-                      "--test native_contract --test native_self_protection", release)
+                      "--test native_contract --test native_flow_owned_write_protection", release)
         self.assertNotIn("--skip", release)
         self.assertLess(order.index("Run native release Executor acceptance"),
                         order.index("Check native coverage and installation acceptance"))
@@ -651,13 +672,30 @@ class CiWorkflowContractTest(unittest.TestCase):
     def assert_liquid_gates(self, workflow: str) -> None:
         assert_step_state(self, workflow, "Install pinned Flutter", job="liquid")
         for name, condition in (("Check the Liquid app", UBUNTU),
+                                ("Check the Liquid app on macOS", MAC),
                                 ("Check the generated Liquid bridge", UBUNTU),
                                 ("Check the Liquid key helper", MAC)):
             assert_step_state(self, workflow, name, job="liquid", condition=condition)
-        assert_step_state(self, workflow, "Build the Liquid macOS app", job="liquid",
-                          condition=MAC, continue_on_error=True)
+        assert_step_state(self, workflow, "Build the Liquid macOS app", job="liquid", condition=MAC)
+        # The scheme's test action runs RunnerTests, and it needs the build's Flutter configuration.
+        assert_step_state(self, workflow, "Run the Liquid macOS app tests", job="liquid", condition=MAC)
+        self.assertEqual(
+            shlex.split(step_run(workflow, "Run the Liquid macOS app tests")),
+            ["xcodebuild", "test", "-workspace", "macos/Runner.xcworkspace", "-scheme", "Runner",
+             "-destination", "platform=macOS"],
+        )
+        names = step_names(workflow, "liquid")
+        self.assertLess(names.index("Build the Liquid macOS app"),
+                        names.index("Run the Liquid macOS app tests"))
         self.assertEqual(
             step_run(workflow, "Check the Liquid app").splitlines(),
+            ["flutter pub get --enforce-lockfile", "flutter analyze", "flutter test --coverage",
+             "node ../../scripts/check-dart-coverage.mjs"],
+        )
+        self.assertIn("        working-directory: liquid/app",
+                      step_lines(workflow, "Check the Liquid app", "liquid"))
+        self.assertEqual(
+            step_run(workflow, "Check the Liquid app on macOS").splitlines(),
             ["flutter pub get --enforce-lockfile", "flutter analyze", "flutter test"],
         )
         bridge = step_run(workflow, "Check the generated Liquid bridge")
@@ -704,7 +742,7 @@ class CiWorkflowContractTest(unittest.TestCase):
                                 "enforcement": {
                                     "executor": "flow-executor", "executor_version": "test",
                                     "platform": platform, "backend": backend, "backend_version": "test",
-                                    "self_protection_active": active, "applied_policy_digest": "b" * 64,
+                                    "flow_owned_write_protection_active": active, "applied_policy_digest": "b" * 64,
                                 },
                             },
                         })

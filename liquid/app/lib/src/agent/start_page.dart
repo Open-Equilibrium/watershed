@@ -90,6 +90,15 @@ class _RecentRow extends StatelessWidget {
     return RowMenu(
       actions: [
         RowAction(
+          'Export record',
+          () => exportSessionRecord(
+            state,
+            path: session.path,
+            title: session.title,
+          ),
+        ),
+        null,
+        RowAction(
           'Delete session…',
           () => confirmDeleteSession(
             context,
@@ -100,7 +109,7 @@ class _RecentRow extends StatelessWidget {
           danger: true,
         ),
       ],
-      child: InkWell(
+      builder: (context, menu, _) => InkWell(
         onTap: () => state.continueSession(session.path),
         borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
         child: Container(
@@ -124,6 +133,7 @@ class _RecentRow extends StatelessWidget {
                   fontSize: WsMetrics.fsSmall,
                 ),
               ),
+              menu,
             ],
           ),
         ),

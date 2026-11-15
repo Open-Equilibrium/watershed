@@ -85,6 +85,7 @@ pub fn reconcile_tool_attempt(
             &reconciliation.enforcement,
             &reconciliation.request_hash,
             serde_json::json!(tool_result),
+            false,
         );
         RunAttemptLedger::open(workspace, conversation_id, run_session_id)?.append_result(
             &RunAttemptResult {

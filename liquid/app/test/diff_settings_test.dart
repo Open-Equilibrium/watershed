@@ -14,7 +14,7 @@ void main() {
   });
   tearDown(() => temp.deleteSync(recursive: true));
 
-  test('keeps the Diff tab settings across a restart', () async {
+  test('keeps the Diff panel settings across a restart', () async {
     final first = await DiffSettingsController.load(SettingsFile(file));
     expect(first.value.layout, DiffLayout.unified);
     expect(first.value.hideWhitespace, isFalse);
@@ -25,6 +25,33 @@ void main() {
     final again = await DiffSettingsController.load(SettingsFile(file));
     expect(again.value.layout, DiffLayout.split);
     expect(again.value.hideWhitespace, isTrue);
+  });
+
+  test(
+    'keeps the Diff panel width across a restart, unset until dragged',
+    () async {
+      final first = await DiffSettingsController.load(SettingsFile(file));
+      expect(first.value.width, isNull);
+      await first.change(const DiffSettings(width: 640));
+
+      final again = await DiffSettingsController.load(SettingsFile(file));
+      expect(again.value.width, 640);
+    },
+  );
+
+  test('treats a width that is not a finite number as unset', () async {
+    file.parent.createSync(recursive: true);
+    file.writeAsStringSync('{"width": 1e309}');
+    final first = await DiffSettingsController.load(SettingsFile(file));
+    expect(first.value.width, isNull);
+
+    await first.change(
+      const DiffSettings(layout: DiffLayout.split, width: 640),
+    );
+
+    final again = await DiffSettingsController.load(SettingsFile(file));
+    expect(again.value.layout, DiffLayout.split);
+    expect(again.value.width, 640);
   });
 
   test(

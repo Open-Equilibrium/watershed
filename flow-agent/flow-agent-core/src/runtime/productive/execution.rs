@@ -3,7 +3,8 @@ use super::provider_turn::execute_leaf_turns;
 use super::tool::SystemProductiveToolExecutor;
 use super::{
     CANCELLED_REASON, ProductiveContext, ProductiveExecution, ProductiveProvider,
-    ProductiveToolExecutor, RUNTIME_ERROR_REASON, emit_and_commit, mark_recovery_failure,
+    ProductiveToolExecutor, ProviderCredential, RUNTIME_ERROR_REASON, emit_and_commit,
+    mark_recovery_failure,
 };
 #[cfg(test)]
 use super::{
@@ -19,6 +20,7 @@ use crate::runtime::{
     execution_plan::{RuntimeExecution, RuntimeFailure},
     failures::runtime_failure_for_unhandled_error,
     live_flow_invocations::acquire_live_flow_invocation,
+    oauth_credential::validate_credential_record,
     phase_control::{PhaseSequenceState, phase_should_repeat},
     run_attempts::{ProductiveAttemptLog, ProductiveRecovery, ProviderTerminalClassification},
     stream_signature::FlowInvocation,
@@ -114,6 +116,10 @@ where
     T: ProductiveToolExecutor,
 {
     execution.workspace.verify_binding()?;
+    // A credential the store would refuse is refused before any attempt intent is recorded.
+    if let ProviderCredential::OpenAiCodex(credential) = execution.credential {
+        validate_credential_record(credential)?;
+    }
     if execution.policy.commands.iter().any(|command| {
         command.tool_kind == core_script::ToolKind::PredefinedCommand
             && core_policy::TrustedPredefinedCommand::parse(&command.command_id)
@@ -554,8 +560,8 @@ fn productive_failure(error: &RuntimeError) -> RuntimeFailure {
         return failure;
     }
     match error {
-        RuntimeError::Provider(_) => {
-            failure.reason = ProviderTerminalClassification::ProviderError
+        RuntimeError::Provider(provider) => {
+            failure.reason = ProviderTerminalClassification::for_failure(provider)
                 .as_str()
                 .to_owned();
         }

@@ -2,13 +2,14 @@ use super::platform::{
     open_anchored_lock_file, private_create_new_anchored_file, verify_private_anchored_file,
 };
 use super::{auth_store_failure, store_io};
-use crate::runtime::fs_guards::{AnchoredFile, sync_anchored_directory};
+use crate::runtime::fs_guards::{
+    AnchoredFile, sync_anchored_directory, sync_durable, write_durable,
+};
 use crate::runtime::fs_guards::{ProtectedStateLock, ProtectedStateLockError, canonical_decimal};
 use crate::runtime::{digest::sha256_hex, types::RuntimeError};
 use std::{
     ffi::OsStr,
     fs,
-    io::Write,
     path::Path,
     sync::atomic::{AtomicU64, Ordering},
     time::Duration,
@@ -136,9 +137,9 @@ pub(super) fn replace_atomically_anchored(
     ));
     let operation = (|| {
         let mut file = private_create_new_anchored_file(&temporary)?;
-        file.write_all(bytes)
-            .and_then(|()| file.write_all(b"\n"))
-            .and_then(|()| file.sync_all())
+        write_durable(&mut file, temporary.diagnostic_path(), bytes)
+            .and_then(|()| write_durable(&mut file, temporary.diagnostic_path(), b"\n"))
+            .and_then(|()| sync_durable(&file, temporary.diagnostic_path()))
             .map_err(|error| store_io(temporary.diagnostic_path(), error))?;
         temporary.rename_to(&path.leaf)?;
         let finalization = (|| {

@@ -4,10 +4,12 @@ use super::bounded_read::{
 };
 use crate::runtime::{digest::sha256_hex, types::RuntimeError};
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+use cap_std::fs::OpenOptionsExt as _;
 #[cfg(test)]
 use std::cell::RefCell;
 use std::{
     fs, io,
+    ops::ControlFlow,
     path::{Path, PathBuf},
 };
 
@@ -24,9 +26,23 @@ pub fn open_anchored_session_log_append_file(
     let mut options = cap_std::fs::OpenOptions::new();
     options.append(true);
     options.follow(FollowSymlinks::No);
+    options.custom_flags(nonblocking_flag());
     let file = path.open(&options)?;
     validate_open_session_log_append_file(&path.path, &file)?;
+    clear_nonblocking(&path.path, &file)?;
     Ok(file)
+}
+
+/// `O_NONBLOCK` makes an open of a FIFO return instead of waiting for its other end.
+fn nonblocking_flag() -> i32 {
+    rustix::fs::OFlags::NONBLOCK.bits() as i32
+}
+
+fn clear_nonblocking(path: &Path, file: &fs::File) -> Result<(), RuntimeError> {
+    let flags =
+        rustix::fs::fcntl_getfl(file).map_err(|source| path_io_error(path, source.into()))?;
+    rustix::fs::fcntl_setfl(file, flags & !rustix::fs::OFlags::NONBLOCK)
+        .map_err(|source| path_io_error(path, source.into()))
 }
 
 pub fn validate_open_session_log_append_file(
@@ -89,6 +105,8 @@ impl AnchoredFile {
         &self,
         options: &cap_std::fs::OpenOptions,
     ) -> Result<fs::File, RuntimeError> {
+        #[cfg(test)]
+        super::durable_step(&self.path, "create");
         let _publication = self
             .parent
             .publication_guard()
@@ -105,6 +123,8 @@ impl AnchoredFile {
 
     pub(crate) fn hard_link_to(&self, leaf: &Path) -> Result<(), RuntimeError> {
         let target = self.parent.file(leaf);
+        #[cfg(test)]
+        super::durable_step(&target.path, "link");
         let _publication = self
             .parent
             .publication_guard()
@@ -120,7 +140,7 @@ pub fn for_each_anchored_file_line_with_limit(
     path: &AnchoredFile,
     max_bytes: u64,
     require_trailing_lf: bool,
-    visit: impl FnMut(&str) -> Result<(), RuntimeError>,
+    visit: impl FnMut(&str) -> Result<ControlFlow<()>, RuntimeError>,
 ) -> Result<u64, RuntimeError> {
     let (file, metadata) = open_anchored_file_for_read(path)?;
     if metadata.len() > max_bytes {
@@ -253,11 +273,13 @@ pub fn open_anchored_real_file_for_read(
     ensure_anchored_real_file(file)?;
     let mut options = cap_std::fs::OpenOptions::new();
     options.read(true).follow(FollowSymlinks::No);
+    options.custom_flags(nonblocking_flag());
     let opened = file.open(&options)?;
     let metadata = opened
         .metadata()
         .map_err(|source| path_io_error(&file.path, source))?;
     validate_real_file(&file.path, &metadata)?;
+    clear_nonblocking(&file.path, &opened)?;
     Ok((opened, metadata))
 }
 

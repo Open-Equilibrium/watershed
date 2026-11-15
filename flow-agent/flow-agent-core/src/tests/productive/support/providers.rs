@@ -1,7 +1,6 @@
 use crate::runtime::{
-    oauth_credential::CredentialRecord,
-    openai_codex::{ProviderToolCall, ProviderTurn},
-    productive::ProductiveProvider,
+    openai_codex::{ProviderToolCall, ProviderTurn, decode_responses_turn},
+    productive::{ProductiveProvider, ProviderCredential},
     types::RuntimeError,
 };
 use std::collections::VecDeque;
@@ -20,6 +19,23 @@ pub(in super::super) struct ScriptedProvider {
 
 pub(in super::super) struct DefinitiveFailureProvider {
     pub(in super::super) bodies: Vec<serde_json::Value>,
+}
+
+/// Decodes a fixed reply, so a broken format reaches the productive path as the decoder reports it.
+pub(in super::super) struct ReplyInvalidProvider {
+    pub(in super::super) bodies: Vec<serde_json::Value>,
+    pub(in super::super) events: Vec<serde_json::Value>,
+}
+
+impl ProductiveProvider for ReplyInvalidProvider {
+    fn turn(
+        &mut self,
+        _credential: &ProviderCredential,
+        body: &serde_json::Value,
+    ) -> Result<ProviderTurn, RuntimeError> {
+        self.bodies.push(body.clone());
+        decode_responses_turn(&self.events)
+    }
 }
 
 pub(in super::super) fn single_tool_provider_turn(
@@ -42,7 +58,7 @@ pub(in super::super) fn single_tool_provider_turn(
 impl ProductiveProvider for DefinitiveFailureProvider {
     fn turn(
         &mut self,
-        _credential: &CredentialRecord,
+        _credential: &ProviderCredential,
         body: &serde_json::Value,
     ) -> Result<ProviderTurn, RuntimeError> {
         self.bodies.push(body.clone());
@@ -56,7 +72,7 @@ impl ProductiveProvider for DefinitiveFailureProvider {
 impl ProductiveProvider for ScriptedProvider {
     fn turn(
         &mut self,
-        _credential: &CredentialRecord,
+        _credential: &ProviderCredential,
         body: &serde_json::Value,
     ) -> Result<ProviderTurn, RuntimeError> {
         self.bodies.push(body.clone());
@@ -69,7 +85,7 @@ impl ProductiveProvider for ScriptedProvider {
 impl ProductiveProvider for FakeProvider {
     fn turn(
         &mut self,
-        _credential: &CredentialRecord,
+        _credential: &ProviderCredential,
         body: &serde_json::Value,
     ) -> Result<ProviderTurn, RuntimeError> {
         self.bodies.push(body.clone());

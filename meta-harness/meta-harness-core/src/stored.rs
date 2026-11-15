@@ -1,9 +1,9 @@
 //! pi's stored session files, read only as far as a listing needs.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Read;
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -42,11 +42,25 @@ pub fn recent_sessions(
     exclude: Option<&Path>,
     limit: usize,
 ) -> std::io::Result<Vec<StoredSession>> {
+    // Left out by file rather than by spelling, so a link to the open session does not list it.
+    let open = exclude
+        .and_then(|path| path.metadata().ok())
+        .map(|file| (file.dev(), file.ino()));
+    // A session reached through several links is listed once, under the first name read.
+    let mut seen = HashSet::new();
     let mut files: Vec<(u64, PathBuf)> = session_files(dir)?
-        .filter(|path| Some(path.as_path()) != exclude)
         .filter_map(|path| {
-            let modified = path.metadata().ok()?.modified().ok()?;
-            let millis = modified.duration_since(UNIX_EPOCH).ok()?.as_millis();
+            let file = path.metadata().ok()?;
+            let identity = (file.dev(), file.ino());
+            if Some(identity) == open || !seen.insert(identity) {
+                return None;
+            }
+            let millis = file
+                .modified()
+                .ok()?
+                .duration_since(UNIX_EPOCH)
+                .ok()?
+                .as_millis();
             Some((u64::try_from(millis).ok()?, path))
         })
         .collect();
@@ -169,12 +183,15 @@ fn head(path: &Path, project: &Path) -> Option<Head> {
     }
     Some(Head {
         id,
-        title: name.or(prompt).filter(|title: &String| !title.is_empty()),
+        title: name
+            .filter(|name: &String| !name.is_empty())
+            .or(prompt)
+            .filter(|title: &String| !title.is_empty()),
     })
 }
 
-/// Opens a session file pi stored, perhaps linked. pi writes plain files, so a pipe or device
-/// opens without waiting and is refused.
+/// Opens a file pi stored, such as a session or settings file, perhaps linked. pi writes plain
+/// files, so a pipe or device opens without waiting and is refused.
 pub(crate) fn open(path: &Path) -> std::io::Result<File> {
     let file = File::options()
         .read(true)

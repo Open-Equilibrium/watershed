@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/rust/api/history.dart';
+import 'package:liquid/src/session/branch_bases.dart';
 import 'package:liquid/src/session/git_state.dart';
 
 import 'fake_backend.dart';
@@ -89,6 +90,37 @@ void main() {
   });
 
   test(
+    'a refused new branch names the files and says nothing was created',
+    () async {
+      backend.outcome = outcomeOf(
+        BridgeGitOutcomeKind.wouldOverwrite,
+        files: const ['private.txt'],
+      );
+      await git.create('feature');
+      expect(notices.single.$2, contains('private.txt'));
+      expect(notices.single.$2, contains('Nothing was created.'));
+    },
+  );
+
+  test('a commit onto a refused new branch names the files and says nothing was created', () async {
+    backend.outcome = outcomeOf(
+      BridgeGitOutcomeKind.wouldOverwrite,
+      files: const ['private.txt'],
+    );
+    await git.commit(
+      ['a.txt'],
+      'Subject',
+      snapshot: 'snapshot',
+      branch: 'feature',
+    );
+    expect(notices.single.$2, contains('private.txt'));
+    expect(
+      notices.single.$2,
+      contains('No branch was created and nothing was committed.'),
+    );
+  });
+
+  test(
     'several hook-changed files stay uncommitted after the success notice',
     () async {
       backend.outcome = const BridgeGitOutcome(
@@ -103,6 +135,88 @@ void main() {
         notices.single.$2,
         'Committed 2 files on main: “Subject” A hook also changed a.txt, b.txt, which stay uncommitted.',
       );
+    },
+  );
+
+  test('fetch freshness belongs to the remote git fetched', () async {
+    // The checkout names origin, but the fetch reached backup.
+    backend.fetchedRemote = 'backup';
+    await git.refresh();
+    await git.fetchNow();
+    expect(
+      git.fetched,
+      isNull,
+      reason: 'origin was not fetched, so it is not fresh',
+    );
+
+    backend.git = gitStatusOf(remote: 'backup', upstream: 'backup/main');
+    await git.refresh();
+    expect(git.fetched, isNotNull, reason: 'backup was fetched');
+  });
+
+  test('a failed fetch names no remote the failure cannot attribute', () async {
+    // The cached status names origin, but Git's upstream has moved to backup since.
+    await git.refresh();
+    backend.git = gitStatusOf(remote: 'backup', upstream: 'backup/main');
+    backend.fetchError = 'offline';
+    await git.fetchNow();
+    expect(notices.single.$2, contains('Could not fetch: “offline”'));
+    expect(notices.single.$2, isNot(contains('origin')));
+  });
+
+  test('a created branch records the branch Git created it from', () async {
+    // The cached status says main, but the checkout moved to other before the branch was created.
+    final bases = BranchBases();
+    final state = GitState(
+      backend,
+      notify: (level, text) => notices.add((level, text)),
+      bases: bases,
+    );
+    await state.refresh();
+    backend.createdFrom = 'other';
+    await state.create('feature');
+    expect(await bases.baseOf('/work/api/.git', 'feature'), 'other');
+  });
+
+  test(
+    'a commit onto a new branch records the branch Git created it from',
+    () async {
+      // The cached status says main, but Git created the branch from other.
+      for (final kind in [
+        BridgeGitOutcomeKind.done,
+        BridgeGitOutcomeKind.commitBranchFailed,
+      ]) {
+        final bases = BranchBases();
+        final state = GitState(
+          backend,
+          notify: (level, text) => notices.add((level, text)),
+          bases: bases,
+        );
+        await state.refresh();
+        backend.outcome = BridgeGitOutcome(
+          kind: kind,
+          files: const [],
+          running: const [],
+          detail: '',
+          commit: const BridgeCommit(
+            branch: 'feature',
+            subject: null,
+            count: 1,
+          ),
+          createdFrom: 'other',
+        );
+        await state.commit(
+          ['a.txt'],
+          'Subject',
+          snapshot: 'snapshot',
+          branch: 'feature',
+        );
+        expect(
+          await bases.baseOf('/work/api/.git', 'feature'),
+          'other',
+          reason: '$kind',
+        );
+      }
     },
   );
 
@@ -263,10 +377,7 @@ void main() {
       await requested;
       expect(pending.calls.where((call) => call == 'fetch'), hasLength(1));
       expect(notices.single.$1, BridgeLevel.error);
-      expect(
-        notices.single.$2,
-        contains('Could not fetch from origin: “offline”'),
-      );
+      expect(notices.single.$2, contains('Could not fetch: “offline”'));
       state.stop();
     },
   );
@@ -294,7 +405,7 @@ void main() {
       expect(finished, isFalse);
       expect(pending.remotes, ['origin']);
       if (stopped) state.stop();
-      pending.fetches.first.complete(true);
+      pending.fetches.first.complete('origin');
       await tester.pump();
       if (!stopped) {
         expect(pending.remotes, ['origin', 'other']);
@@ -303,10 +414,7 @@ void main() {
         pending.fetches.last.completeError('offline');
         await tester.pump();
         expect(notices.single.$1, BridgeLevel.error);
-        expect(
-          notices.single.$2,
-          contains('Could not fetch from other: “offline”'),
-        );
+        expect(notices.single.$2, contains('Could not fetch: “offline”'));
       } else {
         expect(pending.remotes, ['origin']);
       }
@@ -449,9 +557,9 @@ void main() {
     await second;
     expect(notices.map((notice) => notice.$2), [
       'Switched to one.',
-      'one has stashed changes from 10:41; the Diff tab shows them.',
+      'one has stashed changes from 10:41; the Diff panel shows them.',
       'Switched to two.',
-      'two has stashed changes from 10:41; the Diff tab shows them.',
+      'two has stashed changes from 10:41; the Diff panel shows them.',
     ]);
   });
 
@@ -555,7 +663,10 @@ void main() {
     await tester.pump(const Duration(seconds: 15));
     expect(fetches(), 2);
     expect(notices.single.$1, BridgeLevel.warning);
-    expect(notices.single.$2, contains('Could not fetch from origin'));
+    expect(
+      notices.single.$2,
+      contains('Could not fetch: “Could not resolve host: github.com”'),
+    );
     // The wait after a failure doubles from 30 seconds; a streak tells once.
     await tester.pump(const Duration(seconds: 29));
     expect(fetches(), 2);
@@ -673,7 +784,27 @@ void main() {
 
     expect(notices.map((notice) => notice.$2), [
       'Switched to main.',
-      'main has stashed changes from 10:41; the Diff tab shows them.',
+      'main has stashed changes from 10:41; the Diff panel shows them.',
+    ]);
+  });
+
+  test('leaving detached HEAD for a branch with a stash says so', () async {
+    // A loaded detached status has no branch name, but it is still the checkout to compare with.
+    backend.git = gitStatusOf(branch: null);
+    await git.refresh();
+    backend.git = gitStatusOf();
+    backend.stashed = BridgeStash(
+      current: true,
+      id: 's1',
+      createdMs: DateTime(2026, 11, 1, 10, 41).millisecondsSinceEpoch,
+      files: [change('a.txt')],
+    );
+
+    await git.refresh();
+
+    expect(notices.map((notice) => notice.$2), [
+      'The checkout switched to main outside Liquid.',
+      'main has stashed changes from 10:41; the Diff panel shows them.',
     ]);
   });
 
@@ -866,10 +997,10 @@ BridgeFileChange change(String path) => BridgeFileChange(
 );
 
 class _PendingFetchBackend extends FakeBackend {
-  final fetched = Completer<bool>();
+  final fetched = Completer<String?>();
 
   @override
-  Future<bool> fetch() {
+  Future<String?> fetch() {
     calls.add('fetch');
     return fetched.future;
   }
@@ -877,12 +1008,12 @@ class _PendingFetchBackend extends FakeBackend {
 
 class _QueuedFetchBackend extends FakeBackend {
   final remotes = <String?>[];
-  final fetches = <Completer<bool>>[];
+  final fetches = <Completer<String?>>[];
 
   @override
-  Future<bool> fetch() {
+  Future<String?> fetch() {
     remotes.add(git?.remote);
-    final fetched = Completer<bool>();
+    final fetched = Completer<String?>();
     fetches.add(fetched);
     return fetched.future;
   }

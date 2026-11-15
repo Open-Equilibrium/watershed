@@ -459,10 +459,13 @@ void main() {
       await tester.pump();
       expect(
         tester
-            .widget<OutlinedButton>(
-              find.widgetWithText(OutlinedButton, 'Initialize Git'),
+            .widget<InkWell>(
+              find.ancestor(
+                of: find.text('Initialize Git'),
+                matching: find.byType(InkWell),
+              ),
             )
-            .onPressed,
+            .onTap,
         isNull,
       );
       expect(
@@ -547,6 +550,9 @@ void main() {
     (tester) async {
       await show(tester);
       await tester.binding.setSurfaceSize(const Size(1050, 650));
+      await tester.pumpAndSettle();
+      // In this window the card is a popover, which the sliders button opens.
+      await tester.tap(find.byTooltip('Session card'));
       await tester.pumpAndSettle();
       await open(tester);
       expect(tester.takeException(), isNull);
@@ -681,6 +687,12 @@ void main() {
         ),
         findsOneWidget,
       );
+      // Leaving the detached checkout outside Liquid is reported.
+      expect(
+        state.notices.value.first.text,
+        'The checkout switched to main outside Liquid.',
+      );
+      await tester.pump(const Duration(seconds: 7));
     },
   );
 

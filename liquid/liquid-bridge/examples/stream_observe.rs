@@ -1,6 +1,7 @@
 //! Observation workload for Liquid's token streaming (PERFORMANCE.md, Liquid): a scripted agent
 //! streams one response of 20,000 text deltas through the Meta-Harness core and the bridge to a
-//! consumer that takes each event at once. It prints one JSON line per sample and a summary and
+//! consumer that takes and confirms each event at once, as Liquid confirms what it applies. It
+//! prints one JSON line per sample and a summary and
 //! never compares with a threshold. Run from the repository root:
 //!
 //! ```sh
@@ -48,6 +49,7 @@ fn main() {
                 .recv_timeout(Duration::from_secs(60))
                 .expect("event arrives");
             events += 1;
+            session.confirm_applied(events);
             match event.kind {
                 BridgeEventKind::ContentDelta => {
                     let length = event.text.map_or(0, |text| text.len());

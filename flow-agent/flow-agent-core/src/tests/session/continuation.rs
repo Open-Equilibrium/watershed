@@ -5,17 +5,21 @@ use crate::{
         context::{CONTEXT_SAFETY_MARGIN, ContextModelProfile, OPERATOR_MODEL_PROFILE_ID},
         conversations::{
             append_productive_run_checkpoint, conversation_status_page,
-            create_conversation_run_with_model_profile, reserve_conversation_continuation,
+            create_conversation_run_with_model_profile, read_conversation_history,
+            reserve_conversation_continuation,
         },
         fs_guards::AnchoredWorkspace,
         instructions::{read_applicable_agent_instructions, read_workspace_agent_instructions},
         live_events::live_event_channel,
+        openai_codex::ProviderTurn,
+        productive::{ProductiveProvider, ProviderCredential},
         session::{
             continue_conversation, continue_conversation_with_execution_activation,
             continue_conversation_with_live_events, continue_conversation_with_provider,
             resume_conversation_run, resume_conversation_run_with_execution_activation,
-            resume_conversation_run_with_live_events, run_flow_with_root_input_and_live_events,
-            run_productive_session_with_provider, set_productive_executor_readiness_observer,
+            resume_conversation_run_with_live_events, run_flow_with_root_input,
+            run_flow_with_root_input_and_live_events, run_productive_session_with_provider,
+            set_productive_executor_readiness_observer,
         },
         session_reading::SessionEventReader,
         session_store::open_flow_agent_home,
@@ -59,16 +63,34 @@ fn executor_readiness_failure_precedes_continuation_reservation() {
     )
     .expect("recorded Tool-bearing run is created");
     crate::tests::conversations::write_terminal_run(&workspace, "conversation", "run");
+    // The snapshot header must name the Flow definition of the run it checkpoints.
+    write_terminal_recovery_snapshot(&workspace, "conversation", "run");
+    let recovery_path = crate::tests::helpers::workspace_session_dir(&workspace)
+        .join("conversation/runs/run/recovery.jsonl");
+    let snapshot = fs::read_to_string(&recovery_path).expect("recovery reads");
+    let (header, terminal) = snapshot.split_once('\n').expect("header and terminal");
+    let mut header: serde_json::Value = serde_json::from_str(header).expect("header parses");
+    header["flow_definition_id"] = serde_json::json!(definition.flow_definition_id);
+    header["registry_hash"] = serde_json::json!(definition.registry_hash);
+    header["flow_definition_hash"] = serde_json::json!(definition.flow_definition_hash);
+    let snapshot = format!(
+        "{}\n{terminal}",
+        proto::canonical_json(&header).expect("header canonicalizes")
+    );
+    fs::write(&recovery_path, &snapshot).expect("recovery header writes");
     append_productive_run_checkpoint(
         &workspace,
         "conversation",
         "run",
         None,
-        &write_terminal_recovery_snapshot(&workspace, "conversation", "run"),
+        &crate::runtime::digest::sha256_hex(snapshot.as_bytes()),
         2,
         "2026-07-30T12:00:01Z",
     )
     .expect("root checkpoint appends");
+    // Another owner holds the reservation, so readiness must fail before any reservation attempt.
+    let held = reserve_conversation_continuation(&workspace, "conversation", None)
+        .expect("another owner holds the continuation reservation");
     set_productive_executor_readiness_observer(|| {
         Err(RuntimeError::executor(
             proto::ExecutorErrorCodeV0::PolicyUnsupported,
@@ -100,6 +122,7 @@ fn executor_readiness_failure_precedes_continuation_reservation() {
             .join("conversation/runs/conversation")
             .exists()
     );
+    held.release().expect("continuation reservation releases");
     reserve_conversation_continuation(&workspace, "conversation", None)
         .expect("failed readiness leaves continuation reservation available")
         .release()
@@ -271,21 +294,27 @@ fn workspace_agent_instructions_refuse_symlinks() {
 
 #[test]
 fn conversation_entry_points_validate_ids_before_workspace_access() {
+    const RUN_ID_USAGE: &str = "invalid conversation or run id";
+    const ENTRY_ID_USAGE: &str = "invalid conversation or entry id";
     let missing = Path::new("this-workspace-must-not-be-opened");
+    let open_error = AnchoredWorkspace::open(missing)
+        .expect_err("missing workspace fails to open")
+        .to_string();
     for (conversation_id, run_id) in [("INVALID", "run"), ("conversation", "INVALID")] {
-        assert!(
-            resume_conversation_run(missing, conversation_id, run_id, EmitMode::Human).is_err()
+        assert_invalid_id_usage(
+            resume_conversation_run(missing, conversation_id, run_id, EmitMode::Human),
+            RUN_ID_USAGE,
         );
-        assert!(
+        assert_invalid_id_usage(
             resume_conversation_run_with_live_events(
                 missing,
                 conversation_id,
                 run_id,
                 live_event_channel().0,
-            )
-            .is_err()
+            ),
+            RUN_ID_USAGE,
         );
-        assert!(
+        assert_invalid_id_usage(
             resume_conversation_run_with_execution_activation(
                 missing,
                 conversation_id,
@@ -293,22 +322,25 @@ fn conversation_entry_points_validate_ids_before_workspace_access() {
                 None,
                 EmitMode::Human,
                 |_| -> Result<(), RuntimeError> { Ok(()) },
-            )
-            .is_err()
+            ),
+            RUN_ID_USAGE,
         );
     }
-    assert!(continue_conversation(missing, "INVALID", None, None, EmitMode::Human).is_err());
-    assert!(
+    assert_invalid_id_usage(
+        continue_conversation(missing, "INVALID", None, None, EmitMode::Human),
+        ENTRY_ID_USAGE,
+    );
+    assert_invalid_id_usage(
         continue_conversation_with_live_events(
             missing,
             "INVALID",
             None,
             None,
             live_event_channel().0,
-        )
-        .is_err()
+        ),
+        ENTRY_ID_USAGE,
     );
-    assert!(
+    assert_invalid_id_usage(
         continue_conversation_with_execution_activation(
             missing,
             "INVALID",
@@ -317,30 +349,30 @@ fn conversation_entry_points_validate_ids_before_workspace_access() {
             None,
             EmitMode::Human,
             |_| -> Result<(), RuntimeError> { Ok(()) },
-        )
-        .is_err()
+        ),
+        ENTRY_ID_USAGE,
     );
-    assert!(
+    assert_invalid_id_usage(
         continue_conversation(
             missing,
             "conversation",
             Some("INVALID"),
             None,
             EmitMode::Human,
-        )
-        .is_err()
+        ),
+        ENTRY_ID_USAGE,
     );
-    assert!(
+    assert_invalid_id_usage(
         continue_conversation_with_live_events(
             missing,
             "conversation",
             Some("INVALID"),
             None,
             live_event_channel().0,
-        )
-        .is_err()
+        ),
+        ENTRY_ID_USAGE,
     );
-    assert!(
+    assert_invalid_id_usage(
         continue_conversation_with_execution_activation(
             missing,
             "conversation",
@@ -349,9 +381,24 @@ fn conversation_entry_points_validate_ids_before_workspace_access() {
             None,
             EmitMode::Human,
             |_| -> Result<(), RuntimeError> { Ok(()) },
-        )
-        .is_err()
+        ),
+        ENTRY_ID_USAGE,
     );
+
+    // A valid identifier reaches the workspace open, so the usage error above is not incidental.
+    let Err(control) = resume_conversation_run(missing, "conversation", "run", EmitMode::Human)
+    else {
+        panic!("missing workspace must not resume");
+    };
+    assert_eq!(control.to_string(), open_error);
+}
+
+fn assert_invalid_id_usage<T>(result: Result<T, RuntimeError>, message: &str) {
+    match result {
+        Err(RuntimeError::Usage(actual)) => assert_eq!(actual, message),
+        Err(error) => panic!("expected an invalid identifier usage error, got: {error}"),
+        Ok(_) => panic!("invalid identifier was accepted"),
+    }
 }
 
 #[test]
@@ -368,6 +415,48 @@ fn typed_live_run_uses_notifications_instead_of_buffered_stdout() {
 
     assert!(output.stdout.is_empty());
     assert!(receiver.highest_committed_sequence() > 0);
+}
+
+#[test]
+fn fixture_resume_refuses_a_partial_run_started_with_a_root_input() {
+    let workspace = workspace_copy("smoke-flow");
+    run_flow_with_root_input(
+        &workspace,
+        "smoke-flow",
+        core_script::FlowValue::String("operator input".to_owned()),
+        EmitMode::Human,
+    )
+    .expect("typed root input run completes");
+    let events_path =
+        crate::tests::helpers::workspace_session_dir(&workspace).join("smoke-flow.jsonl");
+    let partial = fs::read_to_string(&events_path)
+        .expect("session log exists")
+        .lines()
+        .take(2)
+        .map(|line| format!("{line}\n"))
+        .collect::<String>();
+    fs::write(&events_path, &partial).expect("partial session log written");
+    fs::write(
+        crate::tests::helpers::workspace_log_dir(&workspace).join("smoke-flow.contexts.jsonl"),
+        "",
+    )
+    .expect("partial run has no completed turns");
+
+    let error = resume_conversation_run(&workspace, "smoke-flow", "smoke-flow", EmitMode::Human)
+        .expect_err("a Fixture Run started with a root input cannot be resumed");
+
+    assert!(
+        matches!(
+            &error,
+            RuntimeError::Usage(message) if message.contains("started with a root input")
+        ),
+        "{error}"
+    );
+    assert_eq!(
+        fs::read_to_string(&events_path).expect("session log reads"),
+        partial,
+        "the refused resume must not write"
+    );
 }
 
 #[test]
@@ -485,6 +574,106 @@ fn productive_continuation_uses_the_selected_history_input_and_live_checkpoint_s
     );
 }
 
+/// Keeps the request bodies so a test can see which history each turn carried.
+#[derive(Default)]
+struct BodyRecordingProvider {
+    provider: SessionProvider,
+    bodies: Vec<String>,
+}
+
+impl ProductiveProvider for BodyRecordingProvider {
+    fn turn(
+        &mut self,
+        credential: &ProviderCredential,
+        body: &serde_json::Value,
+    ) -> Result<ProviderTurn, RuntimeError> {
+        self.bodies.push(body.to_string());
+        self.provider.turn(credential, body)
+    }
+}
+
+#[test]
+fn continuation_from_an_earlier_entry_branches_from_that_entry() {
+    let (workspace, fixture) = disabled_configured_smoke_productive_execution_fixture();
+    let config = load_global_config().expect("productive config");
+    let credential = fixture.credential();
+    let mut provider = BodyRecordingProvider::default();
+    let model_profile = ContextModelProfile {
+        context_limit: 128000,
+        id: OPERATOR_MODEL_PROFILE_ID,
+        output_reserve: 16384,
+        safety_margin: CONTEXT_SAFETY_MARGIN,
+    };
+    run_productive_session_with_provider(
+        &workspace,
+        &fixture.anchored,
+        &config,
+        "gpt-fixture",
+        model_profile,
+        &fixture.registry,
+        fixture.smoke_flow(),
+        &fixture.policy,
+        None,
+        false,
+        || Ok(credential.clone()),
+        "Agent guidance.",
+        None,
+        &mut provider,
+    )
+    .expect("initial productive run completes");
+    let page = conversation_status_page(&workspace, None).expect("conversation status");
+    let conversation_id = page.conversations[0].conversation_id.clone();
+    let first_entry = page.conversations[0]
+        .latest_entry_id
+        .clone()
+        .expect("first entry");
+    // Continuing from the newest entry gives the older entry a later sibling to be distinguished from.
+    continue_conversation_with_provider(
+        &workspace,
+        &conversation_id,
+        None,
+        Some(core_script::FlowValue::String("newer-follow-up".to_owned())),
+        None,
+        false,
+        || Ok(credential.clone()),
+        &mut provider,
+    )
+    .expect("newest-entry continuation completes");
+
+    continue_conversation_with_provider(
+        &workspace,
+        &conversation_id,
+        Some(&first_entry),
+        Some(core_script::FlowValue::String(
+            "branch-follow-up".to_owned(),
+        )),
+        None,
+        false,
+        || Ok(credential.clone()),
+        &mut provider,
+    )
+    .expect("continuation from the earlier entry completes");
+
+    let history = read_conversation_history(&workspace, &conversation_id).expect("history reads");
+    let branch = history.last().expect("branch entry exists");
+    assert_eq!(
+        branch.parent_entry_id.as_deref(),
+        Some(first_entry.as_str())
+    );
+    // Both continuations start from the first entry. Only the newer one carries the newer input,
+    // so the branch must carry its own input and never the newer one.
+    assert!(
+        provider.bodies[1].contains("interaction-"),
+        "history is carried"
+    );
+    assert!(provider.bodies[1].contains("newer-follow-up"));
+    assert!(provider.bodies[2].contains("branch-follow-up"));
+    assert!(
+        !provider.bodies[2].contains("newer-follow-up"),
+        "the branch must not carry the newer entry's history"
+    );
+}
+
 #[test]
 fn newest_entry_continuations_outgrow_any_single_run_event_sequence() {
     let (workspace, fixture) = disabled_configured_smoke_productive_execution_fixture();
@@ -582,7 +771,7 @@ fn conversation_continuation_rejects_registry_drift_before_auth_or_run_creation(
         None,
         None,
         false,
-        || Ok(session_credential()),
+        || Ok(ProviderCredential::OpenAiCodex(session_credential())),
         &mut provider,
     )
     .expect_err("registry drift must reject continuation");

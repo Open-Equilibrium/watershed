@@ -8,16 +8,17 @@ use std::path::{Path, PathBuf};
 use meta_harness_core::{
     AgentCommand, Answer, Checkpoint, Checkpoints, CommandError, Delivery, DiffError, Phase,
     RequestId, Session, SessionEvent, TurnCheckpoints, Whitespace, recent_sessions, session_id,
-    session_title, session_title_of, session_titles, visible_lines, visible_name,
+    session_record, session_title, session_title_of, session_titles, visible_lines, visible_name,
 };
 use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
 
 use crate::api::events::{BridgeEvent, BridgeQueue};
 use crate::api::history::{
-    BridgeChangesState, BridgeContextDetail, BridgeHistory, BridgeRevertConfirmation,
-    BridgeRevertPlan, BridgeRunningAgent, BridgeTranscript, BridgeTurn, BridgeTurnChanges,
+    BridgeChangesState, BridgeContext, BridgeHistory, BridgeRevertConfirmation, BridgeRevertPlan,
+    BridgeRunningAgent, BridgeStatistics, BridgeTranscript, BridgeTurn, BridgeTurnChanges,
 };
+use crate::api::record::{README, SESSION_FILE, download_dir, record_name, write_folder};
 use crate::convert::describe;
 use crate::frb_generated::StreamSink;
 use crate::ready::{SHUTDOWN_GRACE, error_output, ready};
@@ -100,6 +101,15 @@ pub struct AgentSession {
     pub(crate) pi_args: Vec<std::ffi::OsString>,
     /// Stops waiting for the latest pull request text; left in place once that text arrived.
     pub(crate) writing: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    /// How many of the stream's events Liquid applied, which reopens the window (ADR-0272).
+    credit: std::sync::Arc<stream::Credit>,
+}
+
+impl Drop for AgentSession {
+    fn drop(&mut self) {
+        // No confirmation comes once the session is gone, so its stream stops waiting for one.
+        self.credit.close();
+    }
 }
 
 impl AgentSession {
@@ -144,7 +154,12 @@ impl AgentSession {
         early.shrink_to_fit();
         let stopper = session.stopper();
         let checkpoints = session.checkpoints();
-        Ok(Self {
+        // The session pi resumes is the one this window shows (ADR-0271).
+        let resumed = command
+            .session
+            .as_deref()
+            .and_then(|file| session_id(file, &command.cwd));
+        let window = Self {
             stopper: std::sync::Mutex::new(stopper),
             responder: session.responder(),
             session: Mutex::new(Some(session)),
@@ -155,7 +170,12 @@ impl AgentSession {
             pi_program: command.program,
             pi_args: command.args,
             writing: std::sync::Mutex::new(None),
-        })
+            credit: std::sync::Arc::default(),
+        };
+        RUNTIME
+            .block_on(window.checkpoints.show_session(resumed.as_deref()))
+            .map_err(shown)?;
+        Ok(window)
     }
 
     /// Streams the session's events; a session has one subscriber.
@@ -177,13 +197,24 @@ impl AgentSession {
             .take()
             .ok_or_else(|| "the session's events already have a subscriber".to_owned())?;
         let early = std::mem::take(&mut *self.early.lock().unwrap_or_else(PoisonError::into_inner));
-        RUNTIME.spawn(stream::forward(early, receiver, deliver));
+        RUNTIME.spawn(stream::forward(
+            early,
+            receiver,
+            self.credit.clone(),
+            deliver,
+        ));
         Ok(())
+    }
+
+    /// Confirms that Liquid applied the stream's first `applied` events, which lets the stream
+    /// send that many more. Liquid calls it after applying each batch it received (ADR-0272).
+    pub fn confirm_applied(&self, applied: i64) {
+        self.credit.confirm(u64::try_from(applied).unwrap_or(0));
     }
 
     /// Sends a message: an idle agent starts a run with it, a running one takes it before its
     /// next model request or, with `follow_up`, once it is done. Each run's start and end are
-    /// checkpointed, so the Diff tab shows what it changed.
+    /// checkpointed, so the Diff panel shows what it changed.
     pub fn send(&self, message: String, follow_up: bool) -> Result<(), String> {
         RUNTIME.block_on(async {
             let pending = {
@@ -247,7 +278,7 @@ impl AgentSession {
 
     /// The unified diff of one file from the start of turn `from` to the end of turn `to`;
     /// characters that could hide or reorder its lines are written out, as in the file's shown
-    /// name, but for the carriage returns of Windows line ends, which the Diff tab marks.
+    /// name, but for the carriage returns of Windows line ends, which the Diff panel marks.
     pub fn turn_patch(
         &self,
         from: String,
@@ -471,6 +502,57 @@ impl AgentSession {
         })
     }
 
+    /// Writes the record of the session stored in `path` as a new folder in Downloads and returns
+    /// its path. `title` is the name Liquid shows, `host` the machine's name and `day` the local
+    /// date as `YYYY-MM-DD`. A failure writes nothing and says why.
+    pub fn export_record(
+        &self,
+        path: String,
+        title: String,
+        host: String,
+        day: String,
+    ) -> Result<String, String> {
+        let downloads = download_dir().ok_or("no home folder, so no Downloads folder")?;
+        self.export_into(&downloads, &path, &title, &host, &day)
+            .map(|folder| folder.display().to_string())
+    }
+
+    /// [`AgentSession::export_record`] into `downloads`.
+    pub(crate) fn export_into(
+        &self,
+        downloads: &Path,
+        path: &str,
+        title: &str,
+        host: &str,
+        day: &str,
+    ) -> Result<PathBuf, String> {
+        let id = RUNTIME
+            .block_on(async {
+                let mut session = self.session.lock().await;
+                self.stored_session(&mut session, path, Open::Counts).await
+            })?
+            .ok_or_else(|| "pi has not stored this session yet, so it has no record".to_owned())?;
+        write_folder(downloads, &record_name(title, day), |folder| {
+            let copy = folder.join(SESSION_FILE);
+            std::fs::copy(path, &copy)
+                .map_err(|error| format!("could not copy pi's session file: {error}"))?;
+            let record = RUNTIME
+                .block_on(session_record(
+                    &self.checkpoints,
+                    &copy,
+                    &self.cwd,
+                    host,
+                    &id,
+                    title,
+                ))
+                .map_err(shown)?;
+            std::fs::write(folder.join("record.json"), record)
+                .map_err(|error| format!("could not write record.json: {error}"))?;
+            std::fs::write(folder.join("README.txt"), README)
+                .map_err(|error| format!("could not write README.txt: {error}"))
+        })
+    }
+
     /// The sessions with checkpoints, by id with their turns; none outside Git.
     async fn checkpoint_ids(&self) -> Result<Vec<(String, usize)>, String> {
         match self.checkpoints.sessions().await {
@@ -525,27 +607,39 @@ impl AgentSession {
         Ok(Some(id))
     }
 
-    /// Reads the session's branch tree and the Trajectory of each branch ending at an entry in
-    /// `leaves`, or of the current branch when `leaves` is empty.
-    pub fn history(&self, leaves: Vec<String>) -> Result<BridgeHistory, String> {
+    /// Reads the session's branch tree and what its stored responses used.
+    pub fn history(&self) -> Result<BridgeHistory, String> {
         RUNTIME.block_on(async {
             let mut session = self.session.lock().await;
             let history = open(&mut session)?.history().await.map_err(describe)?;
             let tree = history.tree();
-            let trajectories = if leaves.is_empty() {
-                vec![history.trajectory(None).into()]
-            } else {
-                leaves
-                    .iter()
-                    .map(|leaf| history.trajectory(Some(leaf)).into())
-                    .collect()
-            };
             Ok(BridgeHistory {
                 tree: tree.nodes.into_iter().map(Into::into).collect(),
                 leaf: tree.leaf,
-                trajectories,
                 usage: history.usage().into(),
             })
+        })
+    }
+
+    /// What the session's stored entries count to, on every branch (ADR-0279).
+    pub fn statistics(&self) -> Result<BridgeStatistics, String> {
+        RUNTIME.block_on(async {
+            let mut session = self.session.lock().await;
+            let history = open(&mut session)?.history().await.map_err(describe)?;
+            Ok(history.statistics().into())
+        })
+    }
+
+    /// The context window the next request fills and when pi compacts it; `None` when the agent
+    /// reports no window.
+    pub fn context(&self) -> Result<Option<BridgeContext>, String> {
+        RUNTIME.block_on(async {
+            let mut session = self.session.lock().await;
+            Ok(open(&mut session)?
+                .context()
+                .await
+                .map_err(describe)?
+                .map(Into::into))
         })
     }
 
@@ -561,16 +655,6 @@ impl AgentSession {
             let history = open(&mut session)?.history().await.map_err(describe)?;
             let limit = usize::try_from(limit).unwrap_or(usize::MAX);
             Ok(history.transcript(before.as_deref(), limit).into())
-        })
-    }
-
-    /// Everything the model saw for the request behind the response `entry`; `None` unless
-    /// `entry` is a response.
-    pub fn context(&self, entry: String) -> Result<Option<BridgeContextDetail>, String> {
-        RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            let history = open(&mut session)?.history().await.map_err(describe)?;
-            Ok(history.context(&entry).map(Into::into))
         })
     }
 
@@ -599,7 +683,11 @@ impl AgentSession {
         let limit = usize::try_from(limit).unwrap_or(usize::MAX);
         let stored = recent_sessions(dir, &self.cwd, Some(&file), limit)
             .map_err(|error| error.to_string())?;
-        Ok(stored.into_iter().map(Into::into).collect())
+        // A session whose path is not UTF-8 has no name to reopen it by, so it is not listed.
+        Ok(stored
+            .into_iter()
+            .filter_map(|session| BridgeStoredSession::try_from(session).ok())
+            .collect())
     }
 
     /// The open session's title, as the start page names stored sessions; none before pi
@@ -622,7 +710,12 @@ impl AgentSession {
                 .await
                 .map_err(describe)?;
             // Waits without holding the session.
-            pending.switched().await.map_err(describe)
+            let switched = pending.switched().await.map_err(describe)?;
+            // A new session is shown once its first turn starts.
+            if switched {
+                self.checkpoints.show_session(None).await.map_err(shown)?;
+            }
+            Ok(switched)
         })
     }
 
@@ -633,7 +726,15 @@ impl AgentSession {
                 .switch_session(Path::new(&path))
                 .await
                 .map_err(describe)?;
-            pending.switched().await.map_err(describe)
+            let switched = pending.switched().await.map_err(describe)?;
+            if switched {
+                let id = session_id(Path::new(&path), &self.cwd);
+                self.checkpoints
+                    .show_session(id.as_deref())
+                    .await
+                    .map_err(shown)?;
+            }
+            Ok(switched)
         })
     }
 

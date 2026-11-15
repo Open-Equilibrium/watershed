@@ -84,8 +84,12 @@ class Sidebar extends StatelessWidget {
   /// Shows the session in place of the open Page.
   final VoidCallback? onShowSession;
 
-  /// Asks before deleting the open session, which a new session then replaces.
-  Future<void> _deleteOpen(BuildContext context, SessionState state) async {
+  /// Runs `action` on the open session's file and title; a session pi keeps in memory has none.
+  Future<void> _openSessionFile(
+    BuildContext context,
+    SessionState state,
+    Future<void> Function(String path, String title) action,
+  ) async {
     final generation = state.generation;
     final String? path;
     try {
@@ -103,12 +107,7 @@ class Sidebar extends StatelessWidget {
       );
       return;
     }
-    await confirmDeleteSession(
-      context,
-      state,
-      path: path,
-      title: state.sessionTitle.value ?? 'New session',
-    );
+    await action(path, state.sessionTitle.value ?? 'New session');
   }
 
   /// The project and the session's card, which shows the session when tapped.
@@ -139,30 +138,56 @@ class Sidebar extends StatelessWidget {
             danger: true,
           ),
         ],
-        child: Padding(
+        builder: (context, menu, _) => Padding(
           padding: const EdgeInsets.symmetric(
             horizontal: WsMetrics.space3,
             vertical: WsMetrics.space2,
           ),
-          child: Text(
-            info.project,
-            style: TextStyle(
-              color: ws.textMuted,
-              fontWeight: WsMetrics.fwMedium,
-            ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  info.project,
+                  style: TextStyle(
+                    color: ws.textMuted,
+                    fontWeight: WsMetrics.fwMedium,
+                  ),
+                ),
+              ),
+              menu,
+            ],
           ),
         ),
       ),
       RowMenu(
         actions: [
           RowAction(
+            'Export record',
+            () => _openSessionFile(
+              context,
+              state,
+              (path, title) =>
+                  exportSessionRecord(state, path: path, title: title),
+            ),
+          ),
+          null,
+          RowAction(
             'Delete session…',
-            () => _deleteOpen(context, state),
+            () => _openSessionFile(
+              context,
+              state,
+              (path, title) => confirmDeleteSession(
+                context,
+                state,
+                path: path,
+                title: title,
+              ),
+            ),
             danger: true,
           ),
         ],
         // Marked while it shows rather than a Page.
-        child: ValueListenableBuilder(
+        builder: (context, menu, shown) => ValueListenableBuilder(
           valueListenable: workspace?.open ?? _noPage,
           builder: (context, open, card) => Semantics(
             selected: open == null,
@@ -208,12 +233,23 @@ class Sidebar extends StatelessWidget {
                         ),
                         const SizedBox(width: WsMetrics.space3),
                         Expanded(child: SessionTitle(state: state)),
-                        Text(
-                          label,
-                          style: TextStyle(
-                            color: color,
-                            fontSize: WsMetrics.fsSmall,
-                          ),
+                        // The "···" takes the status word's place while it shows; the dot
+                        // keeps the status.
+                        Stack(
+                          alignment: Alignment.centerRight,
+                          children: [
+                            Opacity(
+                              opacity: shown ? 0 : 1,
+                              child: Text(
+                                label,
+                                style: TextStyle(
+                                  color: color,
+                                  fontSize: WsMetrics.fsSmall,
+                                ),
+                              ),
+                            ),
+                            menu,
+                          ],
                         ),
                       ],
                     ),

@@ -59,7 +59,7 @@ fn completed(request: &str, mode: &str) -> String {
     } else {
         policy_digest
     };
-    let self_protection_active = mode != "inactive-evidence";
+    let flow_owned_write_protection_active = mode != "inactive-evidence";
     let legacy_evidence = if mode == "legacy-evidence" {
         "\"isolation_active\":true,"
     } else {
@@ -71,7 +71,7 @@ fn completed(request: &str, mode: &str) -> String {
         backend()
     };
     let enforcement = format!(
-        "\"enforcement\":{{\"applied_policy_digest\":\"{policy_digest}\",\"backend\":\"{backend}\",\"backend_version\":\"1\",\"executor\":\"fake-executor\",\"executor_version\":\"1\",{legacy_evidence}\"platform\":\"{}\",\"self_protection_active\":{self_protection_active}}},",
+        "\"enforcement\":{{\"applied_policy_digest\":\"{policy_digest}\",\"backend\":\"{backend}\",\"backend_version\":\"1\",\"executor\":\"fake-executor\",\"executor_version\":\"1\",\"flow_owned_write_protection_active\":{flow_owned_write_protection_active},{legacy_evidence}\"platform\":\"{}\"}},",
         platform(),
     );
     let enforcement = if mode == "missing-evidence" {

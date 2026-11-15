@@ -143,7 +143,7 @@ pub(crate) fn run_productive_session_with_provider<P, C>(
 ) -> Result<RunOutput, RuntimeError>
 where
     P: ProductiveProvider,
-    C: FnOnce() -> Result<crate::runtime::oauth_credential::CredentialRecord, RuntimeError>,
+    C: FnOnce() -> Result<crate::runtime::productive::ProviderCredential, RuntimeError>,
 {
     let mut tool_executor = prepare_productive_tool_executor(policy)?;
     let credential = reconcile_productive_preflight(resolve_credential())?;
@@ -185,7 +185,7 @@ pub(super) fn execute_reserved_productive_session<P: ProductiveProvider>(
     policy: &core_policy::PolicyArtifact,
     root_input: Option<core_script::FlowValue>,
     capture_jsonl: bool,
-    credential: &crate::runtime::oauth_credential::CredentialRecord,
+    credential: &crate::runtime::productive::ProviderCredential,
     agent_instructions: &str,
     notifier: Option<LiveEventNotifier>,
     provider: &mut P,
@@ -359,7 +359,7 @@ pub(crate) fn execute_reserved_productive_recovery<P, T>(
     flow_block: &core_script::FlowBlock,
     policy: &core_policy::PolicyArtifact,
     capture_jsonl: bool,
-    credential: &crate::runtime::oauth_credential::CredentialRecord,
+    credential: &crate::runtime::productive::ProviderCredential,
     agent_instructions: &str,
     provider: &mut P,
     tool_executor: &mut T,

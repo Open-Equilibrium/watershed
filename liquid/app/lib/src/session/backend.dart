@@ -13,6 +13,10 @@ const recentLimit = 8;
 /// What [SessionState] needs from a running agent session; tests substitute a fake.
 abstract interface class SessionBackend {
   Stream<BridgeEvent> events();
+
+  /// Confirms that the first [applied] events of [events] were applied, so the bridge may send
+  /// that many more (ADR-0272).
+  Future<void> confirmApplied(int applied);
   Future<void> send(String message, {required bool followUp});
   Future<BridgeQueue> clearQueue();
   Future<void> abort();
@@ -41,8 +45,14 @@ abstract interface class SessionBackend {
     String path, {
     required bool hideWhitespace,
   });
-  Future<BridgeHistory> history(List<String> leaves);
-  Future<BridgeContextDetail?> context(String entry);
+  Future<BridgeHistory> history();
+
+  /// What the session's stored entries count to, on every branch (ADR-0279).
+  Future<BridgeStatistics> statistics();
+
+  /// The context window the next request fills and when pi compacts it; null when the agent
+  /// reports no window.
+  Future<BridgeContext?> context();
   Future<BridgeTranscript> transcript(String? before);
   Future<void> branch(String entry);
 
@@ -69,6 +79,14 @@ abstract interface class SessionBackend {
   /// Deletes the stored session at `path`, not the open one, with its checkpoints.
   Future<void> deleteSession(String path);
 
+  /// Writes the record of the session stored at `path` into Downloads; returns the folder.
+  Future<String> exportRecord({
+    required String path,
+    required String title,
+    required String host,
+    required String day,
+  });
+
   /// The project's recent stored sessions, newest first, without the current one.
   Future<List<BridgeStoredSession>> recentSessions();
 
@@ -94,7 +112,8 @@ abstract interface class SessionBackend {
     required String? replacingStash,
   });
 
-  /// Creates the branch `name` at the current commit and switches to it.
+  /// Creates the branch `name` at the current commit and switches to it; the outcome names the
+  /// branch it was created from.
   Future<BridgeGitOutcome> createBranch(String name);
 
   /// Captures the current whole files and their checkpoint attribution.
@@ -137,8 +156,9 @@ abstract interface class SessionBackend {
   Future<BridgeGitOutcome> restoreStash(String id);
   Future<BridgeGitOutcome> discardStash(String id);
 
-  /// Fetches the upstream's remote, or else origin or the only remote; whether there was one.
-  Future<bool> fetch();
+  /// Fetches the upstream's remote, or else origin or the only remote; the remote fetched, if
+  /// there was one.
+  Future<String?> fetch();
 
   Future<BridgeGitOutcome> push(BridgePushConfirmation? confirmed);
   Future<BridgeGitOutcome> pull();
@@ -160,6 +180,13 @@ abstract interface class SessionBackend {
 
   /// The branches of `target` on GitHub, to choose a base from.
   Future<BridgePullRequestOutcome> pullRequestBases(String host, String target);
+
+  /// The branches of `target` on GitHub whose names contain `query`.
+  Future<BridgePullRequestOutcome> pullRequestBaseSearch(
+    String host,
+    String target,
+    String query,
+  );
 
   /// The title and description the Chat's `model` (`provider/id`) writes about the commits
   /// from `mergeBase` to `headCommit`; a later request or [stopPullRequestText] stops it.
@@ -214,6 +241,9 @@ class RustSessionBackend implements SessionBackend {
   @override
   Stream<BridgeEvent> events() => _session.events();
   @override
+  Future<void> confirmApplied(int applied) =>
+      _session.confirmApplied(applied: applied);
+  @override
   Future<void> send(String message, {required bool followUp}) =>
       _session.send(message: message, followUp: followUp);
   @override
@@ -254,14 +284,14 @@ class RustSessionBackend implements SessionBackend {
     hideWhitespace: hideWhitespace,
   );
   @override
-  Future<BridgeHistory> history(List<String> leaves) =>
-      _session.history(leaves: leaves);
+  Future<BridgeHistory> history() => _session.history();
+  @override
+  Future<BridgeStatistics> statistics() => _session.statistics();
+  @override
+  Future<BridgeContext?> context() => _session.context();
   @override
   Future<BridgeTranscript> transcript(String? before) =>
       _session.transcript(before: before, limit: chatPage);
-  @override
-  Future<BridgeContextDetail?> context(String entry) =>
-      _session.context(entry: entry);
   @override
   Future<void> branch(String entry) => _session.branch(entry: entry);
   @override
@@ -284,6 +314,13 @@ class RustSessionBackend implements SessionBackend {
       (await _session.storedTurns(path: path)).toInt();
   @override
   Future<void> deleteSession(String path) => _session.deleteSession(path: path);
+  @override
+  Future<String> exportRecord({
+    required String path,
+    required String title,
+    required String host,
+    required String day,
+  }) => _session.exportRecord(path: path, title: title, host: host, day: day);
   @override
   Future<List<BridgeStoredSession>> recentSessions() =>
       _session.recentSessions(limit: recentLimit);
@@ -358,7 +395,7 @@ class RustSessionBackend implements SessionBackend {
   Future<BridgeGitOutcome> discardStash(String id) =>
       _session.discardStash(id: id);
   @override
-  Future<bool> fetch() => _session.fetch();
+  Future<String?> fetch() => _session.fetch();
   @override
   Future<BridgeGitOutcome> push(BridgePushConfirmation? confirmed) =>
       _session.push(confirmed: confirmed);
@@ -380,6 +417,12 @@ class RustSessionBackend implements SessionBackend {
     String host,
     String target,
   ) => _session.pullRequestBases(host: host, target: target);
+  @override
+  Future<BridgePullRequestOutcome> pullRequestBaseSearch(
+    String host,
+    String target,
+    String query,
+  ) => _session.pullRequestBaseSearch(host: host, target: target, query: query);
 
   @override
   Future<BridgePullRequestText> writePullRequestText({

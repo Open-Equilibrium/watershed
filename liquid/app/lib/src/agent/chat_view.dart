@@ -1,19 +1,18 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../controls.dart';
 import '../diff/revert_dialog.dart';
 import '../format.dart';
 import '../rust/api/events.dart';
 import '../rust/api/history.dart';
+import '../session/session_graph.dart';
 import '../session/session_state.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
-import '../trajectory/step_parts.dart';
-import '../trajectory/trajectory_model.dart';
-import '../trajectory/tree_view.dart';
 import 'input_lane.dart';
 import 'sidebar.dart';
 import 'start_page.dart';
@@ -21,7 +20,7 @@ import 'start_page.dart';
 /// The chat timeline of the current branch. It builds only visible items, each item rebuilds
 /// alone while its text streams (client architecture rules 5 and 6), and scrolling to the top
 /// reads earlier stored entries.
-class ChatView extends StatelessWidget {
+class ChatView extends StatefulWidget {
   const ChatView({
     super.key,
     required this.state,
@@ -32,7 +31,7 @@ class ChatView extends StatelessWidget {
 
   final SessionState state;
 
-  /// Shows the Diff tab with a turn's changes, by the turn's id.
+  /// Shows the Diff panel with a turn's changes, by the turn's id.
   final ValueChanged<String>? onOpenDiff;
 
   /// The session's project, harness and device, as the start page greets with them.
@@ -41,18 +40,122 @@ class ChatView extends StatelessWidget {
   /// The input area, floating at the bottom.
   final Widget? input;
 
+  @override
+  State<ChatView> createState() => _ChatViewState();
+}
+
+class _ChatViewState extends State<ChatView> {
   /// How close to the oldest item reading earlier entries starts, in pixels.
   static const _readAhead = 600.0;
 
+  /// Earlier pages a scroll to an entry reads at most, and the jumps it makes to build the entry.
+  static const _revealPages = 50;
+  static const _revealJumps = 6;
+
+  final _scroll = ScrollController();
+
+  /// The widget of each item by its id, so a scroll finds the item it brings into view.
+  final _itemKeys = <int, GlobalKey>{};
+
+  @override
+  void initState() {
+    super.initState();
+    widget.state.scrollChatTo.addListener(_scrollRequested);
+    widget.state.items.addListener(_pruneItemKeys);
+  }
+
+  @override
+  void didUpdateWidget(ChatView old) {
+    super.didUpdateWidget(old);
+    if (old.state != widget.state) {
+      old.state.scrollChatTo.removeListener(_scrollRequested);
+      old.state.items.removeListener(_pruneItemKeys);
+      widget.state.scrollChatTo.addListener(_scrollRequested);
+      widget.state.items.addListener(_pruneItemKeys);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.state.scrollChatTo.removeListener(_scrollRequested);
+    widget.state.items.removeListener(_pruneItemKeys);
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// Forgets the keys of the items that a reload of the chat dropped.
+  void _pruneItemKeys() {
+    final ids = {for (final item in widget.state.items.value) item.id};
+    _itemKeys.removeWhere((id, _) => !ids.contains(id));
+  }
+
+  void _scrollRequested() {
+    final entry = widget.state.scrollChatTo.value;
+    if (entry == null) return;
+    widget.state.scrollChatTo.value = null;
+    unawaited(_scrollTo(entry));
+  }
+
+  /// Reads earlier pages until the chat shows `entry`, then brings its first item into view. A
+  /// list builds only the items near its view, so the scroll first jumps near the item, where
+  /// the item builds, and repeats the jump a few times if the estimate missed.
+  Future<void> _scrollTo(String entry) async {
+    final state = widget.state;
+    // Earlier pages of this branch cannot bring in an entry of another one.
+    if (!state.onBranch(entry)) return;
+    for (
+      var page = 0;
+      page < _revealPages && _indexOf(entry) < 0 && state.chatMore.value;
+      page++
+    ) {
+      await state.loadEarlier();
+    }
+    for (var jump = 0; jump < _revealJumps; jump++) {
+      final index = _indexOf(entry);
+      if (index < 0 || !mounted) return;
+      final built = _itemKeys[state.items.value[index].id]?.currentContext;
+      if (built != null && built.mounted) {
+        await Scrollable.ensureVisible(built, alignment: 0.5);
+        return;
+      }
+      _jumpNear(index, state.items.value.length);
+      await WidgetsBinding.instance.endOfFrame;
+    }
+  }
+
+  int _indexOf(String entry) =>
+      widget.state.items.value.indexWhere((item) => item.entry == entry);
+
+  /// Jumps so the item at `index` of `count` lies near the middle of the view. The list is
+  /// reversed, so offset 0 is the newest item and the estimate counts the items newer than it,
+  /// at the average height of the items the list has measured.
+  void _jumpNear(int index, int count) {
+    if (!_scroll.hasClients) return;
+    final position = _scroll.position;
+    final average =
+        (position.maxScrollExtent + position.viewportDimension) / count;
+    final newer = (count - 1 - index) * average;
+    _scroll.jumpTo(
+      (newer - position.viewportDimension / 2)
+          .clamp(0.0, position.maxScrollExtent)
+          .toDouble(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final state = widget.state;
     return InputLane(
-      input: input,
-      child: NotificationListener<ScrollNotification>(
+      input: widget.input,
+      child: NotificationListener<Notification>(
         onNotification: (notification) {
-          final metrics = notification.metrics;
-          if (metrics.pixels >= metrics.maxScrollExtent - _readAhead) {
-            state.loadEarlier();
+          // Layout changes count as well: a newest page that fits the viewport never scrolls.
+          if (notification
+              case ScrollNotification(:final metrics) ||
+                  ScrollMetricsNotification(:final metrics)) {
+            if (metrics.pixels >= metrics.maxScrollExtent - _readAhead) {
+              state.loadEarlier();
+            }
           }
           return false;
         },
@@ -60,24 +163,26 @@ class ChatView extends StatelessWidget {
           valueListenable: state.items,
           // A session without a conversation shows the start page.
           builder: (context, items, _) => items.isEmpty
-              ? StartPage(state: state, info: info)
+              ? StartPage(state: state, info: widget.info)
               // Messages start at the top and flow down; a long chat
               // still keeps its newest message above the input.
               : Align(
                   alignment: Alignment.topCenter,
                   child: ListView.builder(
+                    controller: _scroll,
                     shrinkWrap: true,
                     reverse: true,
                     padding: EdgeInsets.only(
                       top: WsMetrics.space5,
                       bottom:
                           WsMetrics.space5 +
-                          (input == null ? 0 : inputClearance),
+                          (widget.input == null ? 0 : inputClearance),
                     ),
                     itemCount: items.length,
                     itemBuilder: (context, index) {
                       final item = items[items.length - 1 - index];
                       return Center(
+                        key: _itemKeys.putIfAbsent(item.id, GlobalKey.new),
                         child: SizedBox(
                           width: readingWidth,
                           child: Padding(
@@ -91,9 +196,9 @@ class ChatView extends StatelessWidget {
                                 ),
                                 (_, final turn?) => TurnChanges(
                                   turn: turn,
-                                  onOpenDiff: onOpenDiff == null
+                                  onOpenDiff: widget.onOpenDiff == null
                                       ? null
-                                      : () => onOpenDiff!(turn.id),
+                                      : () => widget.onOpenDiff!(turn.id),
                                   onRevert: () => unawaited(
                                     confirmRevert(context, state, turn),
                                   ),
@@ -183,7 +288,7 @@ class BranchMark extends StatelessWidget {
           Icon(LucideIcons.gitBranch, size: 13, color: ws.accent),
           const SizedBox(width: WsMetrics.space2),
           if (ref != null) ...[
-            RefBadge(ref: ref, shown: true),
+            RefBadge(ref: ref),
             const SizedBox(width: WsMetrics.space2),
           ] else ...[
             Text('New session branch', style: style),
@@ -228,13 +333,107 @@ class ItemTile extends StatelessWidget {
             child: Text(text, style: prose),
           ),
         ),
-        BridgeItemKind.assistantMessage => SelectableText(text, style: prose),
+        // The text's own scrolling must not read earlier entries: it stops here.
+        BridgeItemKind.assistantMessage => NotificationListener<Notification>(
+          onNotification: (notification) =>
+              notification is ScrollNotification ||
+              notification is ScrollMetricsNotification,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: SelectableText(text, style: prose)),
+              if (item.entry case final entry?)
+                _AnswerMenu(state: state, entry: entry, text: text),
+            ],
+          ),
+        ),
         BridgeItemKind.reasoning => Text(
           'Thinking',
           style: TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall),
         ),
         _ => ToolRow(item: item),
       },
+    );
+  }
+}
+
+/// An agent answer's ··· menu: Copy takes the answer's text, and Branch from here continues the
+/// session from the answer.
+class _AnswerMenu extends StatelessWidget {
+  const _AnswerMenu({
+    required this.state,
+    required this.entry,
+    required this.text,
+  });
+
+  final SessionState state;
+
+  /// The stored entry the answer comes from.
+  final String entry;
+
+  /// The answer's text, which Copy takes.
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => SizedBox.square(
+    dimension: 28,
+    child: PopupMenuButton<String>(
+      key: const Key('answer menu'),
+      tooltip: 'More',
+      padding: EdgeInsets.zero,
+      icon: Icon(LucideIcons.ellipsis, size: 16, color: context.ws.textFaint),
+      onSelected: (action) {
+        if (action == 'copy') {
+          unawaited(Clipboard.setData(ClipboardData(text: text)));
+        } else {
+          _branch();
+        }
+      },
+      itemBuilder: (context) {
+        final ws = context.ws;
+        final busy = _busy;
+        return [
+          const PopupMenuItem(value: 'copy', child: Text('Copy')),
+          // The reason shows under the item while the agent runs, which the item says it waits for.
+          PopupMenuItem(
+            value: 'branch',
+            enabled: !busy,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Branch from here'),
+                if (busy)
+                  Text(
+                    'Available once the agent is idle',
+                    style: TextStyle(
+                      fontSize: WsMetrics.fsSmall,
+                      color: ws.textFaint,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ];
+      },
+    ),
+  );
+
+  bool get _busy {
+    final status = state.status.value;
+    return status == RunStatus.running || status == RunStatus.waitingForYou;
+  }
+
+  /// Branches from the answer once the agent is idle, as the branch is made from stored entries
+  /// only. The item is disabled while the agent runs, so this only guards a run that starts with
+  /// the menu open.
+  void _branch() {
+    if (_busy) return;
+    unawaited(
+      state.branch(entry).catchError((Object error) {
+        state.notify(BridgeLevel.error, 'The session could not branch: $error');
+        return false;
+      }),
     );
   }
 }
@@ -323,3 +522,54 @@ class ToolRow extends StatelessWidget {
     );
   }
 }
+
+/// A branch's letter in the accent color.
+class RefBadge extends StatelessWidget {
+  const RefBadge({super.key, required this.ref});
+
+  final String ref;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space2),
+      decoration: BoxDecoration(
+        color: ws.accent,
+        borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
+      ),
+      child: Text(
+        ref,
+        style: TextStyle(
+          color: ws.onAccent,
+          fontSize: WsMetrics.fsSmall,
+          height: WsMetrics.lhSmall / WsMetrics.fsSmall,
+          fontWeight: WsMetrics.fwMedium,
+        ),
+      ),
+    );
+  }
+}
+
+/// How a part of a changed-lines count reads; the chat gives each tone its color.
+enum Tone { good, bad, plain }
+
+/// Changed lines as `+added −removed`, leaving out a missing count.
+List<(String, Tone)> lineParts(int? added, int? removed) => [
+  if (added != null) ('+$added', Tone.good),
+  if (added != null && removed != null) (' ', Tone.plain),
+  if (removed != null) ('−$removed', Tone.bad),
+];
+
+/// `parts` as spans in their tones' colors.
+List<TextSpan> toneSpans(WsPalette ws, List<(String, Tone)> parts) => [
+  for (final (text, tone) in parts)
+    TextSpan(
+      text: text,
+      style: switch (tone) {
+        Tone.good => TextStyle(color: ws.success),
+        Tone.bad => TextStyle(color: ws.danger),
+        Tone.plain => null,
+      },
+    ),
+];

@@ -5,7 +5,8 @@ use crate::runtime::{
     openai_codex::{ProviderTokenUsage, ProviderToolCall, ProviderTurn},
     productive::{
         MAX_DURABLE_PROVIDER_OUTPUT_BYTES, durable_provider_output, parse_provider_result,
-        provider_turn_from_durable_output, verify_provider_result_session_objects,
+        provider_turn_from_durable_output, verify_leaf_provider_result,
+        verify_provider_result_session_objects,
     },
     types::MAX_SESSION_OBJECT_BYTES,
 };
@@ -189,6 +190,32 @@ fn provider_result_session_objects_must_resolve_to_matching_run_objects() {
             &ObjectRecovery(BTreeMap::from([(uri, b"wrong object".to_vec())])),
         )
         .is_err()
+    );
+}
+
+#[test]
+fn string_phase_rejects_object_map_before_reading_objects() {
+    let workspace = workspace_copy("smoke-flow");
+    let registry = load_test_registry(&workspace, "smoke-flow");
+    let phase = registry.phase_block("smoke").expect("smoke Phase");
+    let bytes = b"object under a string Phase".to_vec();
+    let uri = format!("session-object:sha256:{}", sha256_hex(&bytes));
+    let result = core_script::FlowValue::Map(BTreeMap::from([(
+        "object".to_owned(),
+        core_script::FlowValue::SessionObject(uri.clone()),
+    )]));
+    let recovery = CountingObjectRecovery {
+        objects: ObjectRecovery(BTreeMap::from([(uri, bytes)])),
+        reads: Cell::new(0),
+    };
+
+    let error = verify_leaf_provider_result(phase, &result, &recovery)
+        .expect_err("a map violates the string Phase contract");
+    assert!(error.to_string().contains("output contract"), "{error}");
+    assert_eq!(
+        recovery.reads.get(),
+        0,
+        "no object is read before the contract"
     );
 }
 

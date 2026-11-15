@@ -1,5 +1,6 @@
 mod cancellation;
 mod capacity;
+mod endpoint_provider;
 mod execution;
 mod persistence;
 mod platform;

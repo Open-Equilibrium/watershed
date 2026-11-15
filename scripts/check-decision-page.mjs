@@ -18,7 +18,7 @@ export async function assertDecisionPage(page) {
   for (const [id, heading] of [
     ["d-066", "Flow Agent - First Release"],
     ["d-065", "Watershed - Shared Release Safeguards"],
-    ["d-074", "M2 - Meta-Harness"],
+    ["d-107", "M2 - Meta-Harness"],
     ["d-020", "Flow Agent - Permissions, Integrations And Offline Use"],
     ["d-059", "Flow Agent - Permissions, Integrations And Offline Use"],
   ]) {
@@ -39,14 +39,14 @@ export async function assertDecisionPage(page) {
   assert.equal(await page.locator("#d-063").count(), 0, "the decided protection scope leaves the live index");
 
   const url = page.url().split("#")[0];
-  await page.goto(`${url}#d-074`, { waitUntil: "load" });
-  const serviceStart = page.locator("#d-074");
+  await page.goto(`${url}#d-107`, { waitUntil: "load" });
+  const serviceStart = page.locator("#d-107");
   assert.equal(await serviceStart.locator("p").first().isVisible(), true, "direct links reveal their question");
   assert.equal(await page.locator("#d-065 p").first().isVisible(), false, "questions stay independent");
-  const packagingLink = serviceStart.getByRole("link", { name: "D-021", exact: true });
+  const packagingLink = serviceStart.getByRole("link", { name: "D-106", exact: true });
   await packagingLink.click();
-  assert.equal(new URL(page.url()).hash, "#d-021", "question links update the address");
-  const packaging = page.locator("#d-021");
+  assert.equal(new URL(page.url()).hash, "#d-106", "question links update the address");
+  const packaging = page.locator("#d-106");
   assert.equal(await packaging.locator("p").first().isVisible(), true, "in-page links reveal their question");
   await packaging.locator("summary").press("Space");
   assert.equal(await packaging.locator("p").first().isVisible(), false);
@@ -55,12 +55,12 @@ export async function assertDecisionPage(page) {
   await serviceStart.locator("summary").press("Enter");
   assert.equal(await serviceStart.locator("p").first().isVisible(), false);
   await page.goBack();
-  assert.equal(new URL(page.url()).hash, "#d-074", "reopening the same question adds no history entry");
+  assert.equal(new URL(page.url()).hash, "#d-107", "reopening the same question adds no history entry");
   await serviceStart.locator("p").first().waitFor({ state: "visible" });
   await packaging.locator("summary").press("Enter");
   assert.equal(await packaging.locator("p").first().isVisible(), false);
   await page.goForward();
-  assert.equal(new URL(page.url()).hash, "#d-021", "forward navigation restores the question address");
+  assert.equal(new URL(page.url()).hash, "#d-106", "forward navigation restores the question address");
   await packaging.locator("p").first().waitFor({ state: "visible" });
 
   await page.goto(url, { waitUntil: "load" });

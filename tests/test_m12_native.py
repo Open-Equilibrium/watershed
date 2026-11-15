@@ -1,6 +1,12 @@
 """Portable process-boundary tests; these do not certify a native backend."""
 
+import contextlib
+import os
+import pathlib
+import signal
 import subprocess
+import tempfile
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch, sentinel
@@ -43,19 +49,17 @@ class NativeProcessTest(unittest.TestCase):
                 self.assertEqual(self.boundary.mock_calls, [call.communicate(timeout=timeout)])
 
     def test_timeout_cleanup_is_ordered_and_bounded(self):
-        for timeouts in (1, 2, 3):
-            with self.subTest(timeouts=timeouts):
+        for grace_expires in (False, True):
+            with self.subTest(grace_expires=grace_expires):
                 self.boundary.reset_mock()
                 expired = subprocess.TimeoutExpired("fixture", 2)
-                self.child.communicate.side_effect = [expired] * timeouts + [(b"", b"")]
-                expected_error = subprocess.TimeoutExpired if timeouts == 3 else AssertionError
-                with self.assertRaises(expected_error):
+                self.child.communicate.side_effect = [
+                    expired, expired if grace_expires else (b"", b"")]
+                with self.assertRaises(AssertionError):
                     native.run(["fixture"])
-                expected = [call.communicate(timeout=20), call.killpg(123, sentinel.term),
-                            call.communicate(timeout=2)]
-                if timeouts > 1:
-                    expected += [call.killpg(123, sentinel.kill), call.communicate(timeout=2)]
-                self.assertEqual(self.boundary.mock_calls, expected)
+                self.assertEqual(self.boundary.mock_calls, [
+                    call.communicate(timeout=20), call.killpg(123, sentinel.term),
+                    call.communicate(timeout=2), call.killpg(123, sentinel.kill)])
 
     def test_process_errors_propagate(self):
         for stage in ("launch", "communicate", "signal"):
@@ -112,6 +116,38 @@ class NativeHostTest(unittest.TestCase):
                     else:
                         with self.assertRaises(AssertionError):
                             native.native_host()
+
+
+class TimeoutProcessGroupTest(unittest.TestCase):
+    def test_run_timeout_kills_term_ignoring_descendants(self):
+        # The parent exits on SIGTERM; its background sleeper ignores SIGTERM and has
+        # its streams redirected, so only a group SIGKILL can stop it.
+        script = '(trap "" TERM; exec sleep 30) >/dev/null 2>&1 & echo $! > "$1"; wait'
+        for capture in (False, True):
+            with self.subTest(capture=capture), tempfile.TemporaryDirectory() as directory:
+                pid_file = pathlib.Path(directory) / "sleeper.pid"
+                try:
+                    with self.assertRaises(AssertionError):
+                        native.run(["/bin/sh", "-c", script, "sh", str(pid_file)],
+                                   timeout=1, capture=capture)
+                    sleeper = int(pid_file.read_text())
+                    self.assertTrue(wait_until_process_gone(sleeper), "descendant survived the timeout")
+                finally:
+                    if pid_file.exists():
+                        with contextlib.suppress(ProcessLookupError):
+                            os.kill(int(pid_file.read_text()), signal.SIGKILL)
+
+
+def wait_until_process_gone(pid, seconds=2):
+    deadline = time.monotonic() + seconds
+    while True:
+        state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)],
+                               capture_output=True, text=True).stdout.strip()
+        if not state or state.startswith("Z"):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
 
 
 if __name__ == "__main__":

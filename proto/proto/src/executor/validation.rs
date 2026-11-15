@@ -14,6 +14,7 @@ use crate::{canonical::is_nfc, session_object::decode_lowercase_sha256_hex};
 pub(super) fn validate_request(request: &ExecutorRequestV0) -> Result<(), ExecutorProtocolError> {
     validate_schema(&request.schema, EXECUTOR_REQUEST_SCHEMA_V0, "request")?;
     validate_text(&request.request_id, "request_id", MAX_ID_CHARS)?;
+    validate_nfc(&request.request_id, "request_id")?;
     let policy = &request.resolved_policy;
     validate_text(&policy.tool_id, "tool_id", MAX_ID_CHARS)?;
     validate_text(&policy.tool_kind, "tool_kind", MAX_NAME_CHARS)?;
@@ -32,7 +33,12 @@ pub(super) fn validate_request(request: &ExecutorRequestV0) -> Result<(), Execut
     }
     for (name, value) in &policy.environment {
         validate_text(name, "environment name", MAX_NAME_CHARS)?;
+        validate_nfc(name, "environment name")?;
         validate_text(value, "environment value", MAX_PATH_CHARS)?;
+        validate_nfc(value, "environment value")?;
+    }
+    for argument in &policy.argv {
+        validate_nfc(argument, "argv")?;
     }
     if let Err(error) =
         validate_executor_exec_vector_v0(&policy.executable, &policy.argv, &policy.environment)
@@ -173,7 +179,7 @@ pub(super) fn validate_response(
             validate_tool_result(tool_result)?;
         }
         ExecutorResponseV0::Error { code, message, .. } => {
-            if *code != ExecutorErrorCodeV0::SandboxSetupFailed {
+            if *code != ExecutorErrorCodeV0::FlowOwnedWriteProtectionSetupFailed {
                 return Err(ExecutorProtocolError::new(
                     "Executor terminal error code is invalid",
                 ));
@@ -232,9 +238,9 @@ pub(super) fn validate_receipt(
             "Executor applied the wrong policy digest",
         ));
     }
-    if !receipt.self_protection_active {
+    if !receipt.flow_owned_write_protection_active {
         return Err(ExecutorProtocolError::new(
-            "Executor self-protection was not active",
+            "Executor did not confirm Flow-owned write protection",
         ));
     }
     Ok(())
@@ -320,6 +326,17 @@ pub(super) fn validate_text(
         )))
     } else {
         Ok(())
+    }
+}
+
+// WHY: canonical serialization converts text to NFC, so refusing keeps the bytes Flow reviewed.
+pub(super) fn validate_nfc(value: &str, name: &str) -> Result<(), ExecutorProtocolError> {
+    if is_nfc(value) {
+        Ok(())
+    } else {
+        Err(ExecutorProtocolError::new(format!(
+            "Executor {name} must use NFC text"
+        )))
     }
 }
 

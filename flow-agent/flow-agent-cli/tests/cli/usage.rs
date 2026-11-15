@@ -56,6 +56,11 @@ fn unknown_commands_print_readable_global_usage_error() {
     assert_global_usage_error(&["unknown"]);
 }
 
+#[test]
+fn unknown_command_help_is_a_usage_error() {
+    assert_global_usage_error(&["not-a-command", "--help"]);
+}
+
 fn assert_global_usage_error(args: &[&str]) {
     let help = flow_command()
         .arg("--help")
@@ -64,7 +69,7 @@ fn assert_global_usage_error(args: &[&str]) {
     assert!(help.status.success());
     assert!(help.stderr.is_empty());
     let usage = String::from_utf8(help.stdout).expect("help should be UTF-8");
-    assert_eq!(usage.lines().count(), 19);
+    assert_eq!(usage.lines().count(), 22);
 
     let output = flow_command()
         .args(args)

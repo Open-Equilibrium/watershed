@@ -12,7 +12,10 @@ use serde::Deserialize;
 
 const EXECUTOR_STAGE_ERROR_SCHEMA_V0: &str = "flow-executor-stage-error-v0";
 const ATTEMPT_CANCELLED_SCHEMA_V0: &str = "flow-attempt-cancelled-v0";
+const ATTEMPT_CANCELLED_TOOL_SCHEMA_V1: &str = "flow-attempt-cancelled-v1";
 const TOOL_ATTEMPT_OUTPUT_SCHEMA_V1: &str = "flow-tool-attempt-output-v1";
+const TOOL_ATTEMPT_OUTPUT_SCHEMA_V2: &str = "flow-tool-attempt-output-v2";
+const PROCESS_CLEANUP_UNKNOWN_MARK: &str = "process_cleanup_unknown";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -33,17 +36,97 @@ pub(super) fn cancelled_attempt_output() -> serde_json::Value {
     })
 }
 
+pub(super) fn cancelled_tool_attempt_output(stage: ExecutorAttemptStage) -> serde_json::Value {
+    serde_json::json!({
+        "schema": ATTEMPT_CANCELLED_TOOL_SCHEMA_V1,
+        "stage": stage,
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CancelledToolOutput {
+    #[serde(rename = "schema")]
+    _schema: String,
+    stage: ExecutorAttemptStage,
+}
+
+/// Whether a recovered Tool attempt carries a full output envelope; a cancelled one may too.
+pub(super) fn has_tool_output_envelope(result: &RunAttemptResult) -> bool {
+    result
+        .durable_output
+        .as_ref()
+        .and_then(|output| output.get("schema"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|schema| {
+            matches!(
+                schema,
+                TOOL_ATTEMPT_OUTPUT_SCHEMA_V1 | TOOL_ATTEMPT_OUTPUT_SCHEMA_V2
+            )
+        })
+}
+
+/// Returns the stage of a recovered cancelled Tool attempt. v0 records carry no stage and
+/// were always written after `tool.started`, so they read as `started`; so does a record
+/// without durable output, as recovery read it before stages existed. A full Tool output
+/// envelope is written only once the Tool started.
+pub(super) fn recovered_cancelled_tool_stage(
+    result: &RunAttemptResult,
+) -> Result<ExecutorAttemptStage, RuntimeError> {
+    let Some(durable_output) = result.durable_output.as_ref() else {
+        return Ok(ExecutorAttemptStage::Started);
+    };
+    match durable_output
+        .get("schema")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some(ATTEMPT_CANCELLED_SCHEMA_V0) => Ok(ExecutorAttemptStage::Started),
+        Some(TOOL_ATTEMPT_OUTPUT_SCHEMA_V1 | TOOL_ATTEMPT_OUTPUT_SCHEMA_V2) => {
+            Ok(ExecutorAttemptStage::Started)
+        }
+        Some(ATTEMPT_CANCELLED_TOOL_SCHEMA_V1) => {
+            let output: CancelledToolOutput =
+                serde_json::from_value(durable_output.clone()).map_err(RuntimeError::Json)?;
+            Ok(output.stage)
+        }
+        _ => Err(RuntimeError::Protocol(
+            "recovered cancelled Tool attempt has an unsupported schema".to_owned(),
+        )),
+    }
+}
+
+/// Builds a Tool attempt's durable output; v2 adds the mark that its process cleanup is unknown.
 pub(super) fn tool_attempt_output(
     enforcement: &proto::EnforcementReceiptV0,
     request_hash: &str,
     tool_result: serde_json::Value,
+    cleanup_unknown: bool,
 ) -> serde_json::Value {
+    if !cleanup_unknown {
+        return serde_json::json!({
+            "enforcement": enforcement,
+            "request_hash": request_hash,
+            "schema": TOOL_ATTEMPT_OUTPUT_SCHEMA_V1,
+            "tool_result": tool_result,
+        });
+    }
     serde_json::json!({
         "enforcement": enforcement,
+        "process_cleanup_unknown": true,
         "request_hash": request_hash,
-        "schema": TOOL_ATTEMPT_OUTPUT_SCHEMA_V1,
+        "schema": TOOL_ATTEMPT_OUTPUT_SCHEMA_V2,
         "tool_result": tool_result,
     })
+}
+
+/// Whether a Tool attempt's durable output records that its process cleanup is unknown.
+pub(crate) fn cleanup_unknown_recorded(result: &RunAttemptResult) -> bool {
+    result
+        .durable_output
+        .as_ref()
+        .and_then(|output| output.get(PROCESS_CLEANUP_UNKNOWN_MARK))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
 }
 
 pub(super) fn executor_dispatch_failure_output(
@@ -64,7 +147,18 @@ pub(super) struct ToolAttemptOutput {
     pub(super) request_hash: String,
     #[serde(rename = "schema")]
     _schema: String,
+    #[serde(default, rename = "process_cleanup_unknown")]
+    process_cleanup_unknown: bool,
     pub(super) tool_result: serde_json::Value,
+}
+
+/// v1 carries no cleanup mark and v2 always carries one, so the mark never contradicts its schema.
+fn cleanup_mark_matches_schema(schema: &str, mark: bool) -> bool {
+    match schema {
+        TOOL_ATTEMPT_OUTPUT_SCHEMA_V1 => !mark,
+        TOOL_ATTEMPT_OUTPUT_SCHEMA_V2 => mark,
+        _ => false,
+    }
 }
 
 #[derive(Deserialize)]
@@ -107,9 +201,15 @@ pub(super) fn parse_tool_reconciliation(
             "Tool reconciliation output has an unsupported schema".to_owned(),
         ));
     }
-    serde_json::from_value(document).map_err(|error| {
+    let output: ToolAttemptOutput = serde_json::from_value(document).map_err(|error| {
         RuntimeError::Usage(format!("Tool reconciliation output is invalid: {error}"))
-    })
+    })?;
+    if output.process_cleanup_unknown {
+        return Err(RuntimeError::Usage(
+            "Tool reconciliation output has an unsupported cleanup mark".to_owned(),
+        ));
+    }
+    Ok(output)
 }
 
 pub(super) fn recovered_executor_dispatch_error(
@@ -144,11 +244,12 @@ pub(super) fn recovered_tool_output(
     let durable_output = result.durable_output.as_ref().ok_or_else(|| {
         RuntimeError::Protocol("recovered Tool attempt has no durable output".to_owned())
     })?;
-    if durable_output
-        .get("schema")
-        .and_then(serde_json::Value::as_str)
-        != Some(TOOL_ATTEMPT_OUTPUT_SCHEMA_V1)
-    {
+    if !matches!(
+        durable_output
+            .get("schema")
+            .and_then(serde_json::Value::as_str),
+        Some(TOOL_ATTEMPT_OUTPUT_SCHEMA_V1 | TOOL_ATTEMPT_OUTPUT_SCHEMA_V2)
+    ) {
         return Err(RuntimeError::Protocol(
             "recovered Tool output has an unsupported schema".to_owned(),
         ));
@@ -158,7 +259,14 @@ pub(super) fn recovered_tool_output(
             "recovered Tool output has no enforcement receipt".to_owned(),
         ));
     }
-    serde_json::from_value(durable_output.clone()).map_err(RuntimeError::Json)
+    let output: ToolAttemptOutput =
+        serde_json::from_value(durable_output.clone()).map_err(RuntimeError::Json)?;
+    if !cleanup_mark_matches_schema(&output._schema, output.process_cleanup_unknown) {
+        return Err(RuntimeError::Protocol(
+            "recovered Tool output's cleanup mark contradicts its schema".to_owned(),
+        ));
+    }
+    Ok(output)
 }
 
 pub(super) fn recovered_tool_value_bound(

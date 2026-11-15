@@ -17,6 +17,9 @@ import 'branch_menu.dart';
 import 'commit_dialog.dart';
 import 'commit_draft.dart';
 import 'git_actions.dart';
+import 'pull_request_choice.dart';
+import 'pull_request_refusal.dart';
+import 'pull_request_writing.dart';
 import 'session_menus.dart';
 
 /// The approved "Create pull request" dialog for a pushed branch (pull request mockups §2–3),
@@ -29,20 +32,20 @@ Future<void> showPullRequestDialog(
   required String device,
   bool compose = false,
 }) async {
-  final next = await showDialog<_Next>(
+  final next = await showDialog<PullRequestNext>(
     context: context,
     builder: (_) =>
         _PullRequestDialog(state: state, device: device, compose: compose),
   );
   if (!context.mounted) return;
   switch (next) {
-    case _Next.push:
+    case PullRequestNext.push:
       await pushBranch(context, state, device: device);
-    case _Next.branch:
+    case PullRequestNext.branch:
       await showBranchMenu(context, state);
-    case _Next.commit:
+    case PullRequestNext.commit:
       await showCommitDialog(context, state);
-    case _Next.compose:
+    case PullRequestNext.compose:
       await showPullRequestDialog(
         context,
         state,
@@ -52,12 +55,6 @@ Future<void> showPullRequestDialog(
     case null:
   }
 }
-
-/// What the dialog hands off to when the branch needs another step first.
-enum _Next { push, branch, commit, compose }
-
-/// Where the title and description came from.
-enum _Text { commit, written, failed }
 
 class _PullRequestDialog extends StatefulWidget {
   const _PullRequestDialog({
@@ -75,8 +72,9 @@ class _PullRequestDialog extends StatefulWidget {
 }
 
 class _PullRequestDialogState extends State<_PullRequestDialog> {
-  final _title = TextEditingController();
-  final _body = TextEditingController();
+  /// The fields are the writing's, which may replace them with fresh ones.
+  TextEditingController get _title => _writing.titleField;
+  TextEditingController get _body => _writing.bodyField;
   final _titleFocus = FocusNode();
   final _bodyFocus = FocusNode();
   bool _draft = false;
@@ -106,24 +104,9 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
 
   /// The Chat's model as `provider/id`, read when the dialog opened.
   late final String? _model = widget.state.model.value;
-  _Text _text = _Text.commit;
-  bool _writing = false;
 
-  /// What the model was last asked about, and how many commits it read.
-  String? _asked;
-  int _written = 0;
-
-  /// The model's text also describes uncommitted files.
-  bool _writtenFiles = false;
-  int _writes = 0;
-
-  /// Runs while Create waits after the model changed the fields, so a click meant for the
-  /// earlier text does not send unread text.
-  Timer? _settling;
-
-  /// What the dialog last put in the fields; a field that differs is the user's.
-  String _filledTitle = '';
-  String _filledBody = '';
+  /// The title and description the model writes into the fields the user has not edited.
+  late final PullRequestWriting _writing;
 
   /// "Commit, push & create PR": the uncommitted files, the selection and message, and the
   /// steps done so far, which a later run skips. Once pushed, the dialog creates as for a
@@ -151,8 +134,9 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
   @override
   void initState() {
     super.initState();
-    _title.addListener(() => setState(() {}));
     _bodyFocus.addListener(() => setState(() {}));
+    _writing = PullRequestWriting(pulls: _pulls)
+      ..addListener(() => setState(() {}));
     if (_compose && (widget.state.git.status.value?.changed ?? 0) > 0) {
       _files = CommitDraft(widget.state)..addListener(_filesChanged);
     }
@@ -174,11 +158,8 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
 
   @override
   void dispose() {
-    _stopWriting();
-    _settling?.cancel();
+    _writing.dispose();
     _elapsed?.cancel();
-    _title.dispose();
-    _body.dispose();
     _files?.dispose();
     _titleFocus.dispose();
     _bodyFocus.dispose();
@@ -224,8 +205,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
 
   void _accept(BridgePullRequestPlan plan) {
     if (_plan == null) {
-      _title.text = _filledTitle = plan.subject;
-      _body.text = _filledBody = plan.body;
+      _writing.fillFromCommit(plan.subject, plan.body);
       // The form replaces the reading state, whose dialog took the focus first.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         // The commit message comes first when there is one to write.
@@ -251,7 +231,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
       // After the push the text stays as the user reviewed it.
       if (!_beforePush || _running || _loadingFiles) return;
       if (model == null || plan.open != null) {
-        _stopWriting();
+        _writing.stop();
         return;
       }
       final paths = _files?.paths ?? const <String>[];
@@ -259,7 +239,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
       final base = plan.target == plan.identity.headRepository
           ? plan.base?.name
           : null;
-      _ask(
+      _writing.ask(
         plan,
         'draft ${base ?? ''}\n${paths.join('\n')}',
         files: paths.isNotEmpty,
@@ -279,79 +259,14 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
         comparison.commits == 0 ||
         comparison.mergeBase.isEmpty) {
       // Text for other commits would not fit this plan.
-      _stopWriting();
+      _writing.stop();
       return;
     }
-    _ask(
+    _writing.ask(
       plan,
       '${comparison.mergeBase}..${plan.identity.headCommit}',
       () => _pulls.write(model, plan),
     );
-  }
-
-  /// Asks the model through `write` unless it already wrote for `key`; `write` gives none
-  /// when there is nothing to describe.
-  void _ask(
-    BridgePullRequestPlan plan,
-    String key,
-    Future<BridgePullRequestText?> Function() write, {
-    bool files = false,
-  }) {
-    if (key == _asked) return;
-    _asked = key;
-    final asked = ++_writes;
-    _writing = true;
-    unawaited(() async {
-      BridgePullRequestText? text;
-      var failed = false;
-      try {
-        text = await write();
-      } on Object {
-        failed = true;
-      }
-      if (!mounted || asked != _writes) return;
-      setState(() {
-        _writing = false;
-        _written = text?.commits.toInt() ?? 0;
-        _writtenFiles = files;
-        _text = failed
-            ? _Text.failed
-            : text == null
-            ? _Text.commit
-            : _Text.written;
-        // Without an answer, fields that still show earlier model text show the commit again.
-        _fill(text?.title ?? plan.subject, text?.body ?? plan.body);
-      });
-    }());
-  }
-
-  /// Puts `title` and `body` in the fields the user has not edited.
-  void _fill(String title, String body) {
-    var changed = false;
-    if (_title.text == _filledTitle && title != _filledTitle) {
-      _title.text = _filledTitle = title;
-      changed = true;
-    }
-    if (_body.text == _filledBody && body != _filledBody) {
-      _body.text = _filledBody = body;
-      changed = true;
-    }
-    if (!changed) return;
-    _settling?.cancel();
-    _settling = Timer(
-      const Duration(milliseconds: 500),
-      () => setState(() => _settling = null),
-    );
-  }
-
-  /// Stops waiting for the model; what it would have written is dropped, and the same commits
-  /// may be written for again.
-  void _stopWriting() {
-    if (!_writing) return;
-    _writes++;
-    _writing = false;
-    _asked = null;
-    unawaited(_pulls.stopWriting().catchError((Object _) {}));
   }
 
   bool get _sameBranch {
@@ -367,7 +282,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
         !_stale &&
         !_creating &&
         !_running &&
-        _settling == null &&
+        !_writing.settling &&
         plan.target != null &&
         plan.base != null &&
         !plan.baseMissing &&
@@ -392,7 +307,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
   Future<void> _run() async {
     if (!_ready) return;
     setState(() {
-      _stopWriting();
+      _writing.stop();
       _running = true;
       _result = null;
     });
@@ -489,7 +404,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
     if (!_ready) return null;
     final plan = _plan!;
     setState(() {
-      _stopWriting();
+      _writing.stop();
       _result = null;
       _creating = true;
       _seconds = 0;
@@ -578,14 +493,13 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
       );
       return;
     }
-    final chosen = await showDialog<BridgeName>(
-      context: context,
-      builder: (context) => _BaseChoice(
-        target: target,
-        names: listed.bases,
-        more: listed.moreBases,
-        unknown: _recorded == null && plan.defaultBranch == null,
-      ),
+    final chosen = await showBaseChoice(
+      context,
+      target: target,
+      names: listed.bases,
+      more: listed.moreBases,
+      unknown: _recorded == null && plan.defaultBranch == null,
+      search: (query) => _pulls.searchBases(plan.identity.host, target, query),
     );
     if (chosen != null && mounted) {
       await _read(target: target, base: chosen.name);
@@ -594,6 +508,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
 
   @override
   Widget build(BuildContext context) {
+    _writing.adoptFields();
     final text = DangerDialog.text(context);
     if (_existing case final pull?) {
       return ActionDialog(
@@ -614,8 +529,19 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
       );
     }
     final plan = _plan;
-    if (plan != null) return _form(context, plan);
-    if (_refused case final refused?) return _refusal(context, refused);
+    if (plan != null) return _form(plan);
+    if (_refused case final refused?) {
+      return PullRequestRefusal(
+        state: widget.state,
+        device: widget.device,
+        outcome: refused,
+        compose: _compose,
+        beforePush: _beforePush,
+        composeTitle: _dialogTitle,
+        reading: _reading,
+        onCheckAgain: _checkAgain,
+      );
+    }
     return ActionDialog(
       title: _dialogTitle,
       actions: const [],
@@ -644,151 +570,177 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
 
   /// Where the title and description came from (mockup §2's generating and failure states).
   Widget? _textNote(TextStyle faint) {
-    if (_writing) {
+    if (_writing.writing) {
       return Text(
         '◌ $_writer is writing the title and description… The fields stay editable.',
         style: faint,
       );
     }
-    return switch (_text) {
-      _Text.commit => null,
-      _Text.written => Text(
+    return switch (_writing.source) {
+      TextSource.commit => null,
+      TextSource.written => Text(
         'Written by $_writer from ${_compose
-            ? _writtenFiles
-                  ? _written == 0
+            ? _writing.writtenFiles
+                  ? _writing.written == 0
                         ? 'the files above'
                         : "the branch's commits and the files above"
-                  : "the branch's ${plural(_written, 'commit')}"
-            : _written == 1
+                  : "the branch's ${plural(_writing.written, 'commit')}"
+            : _writing.written == 1
             ? 'the commit and its diff'
-            : 'the $_written commits and their diff'}. Edit before creating.',
+            : 'the ${_writing.written} commits and their diff'}. Edit before creating.',
         style: faint,
       ),
-      _Text.failed => WarningNotice(
+      TextSource.failed => WarningNotice(
         "Could not write the text with $_writer. Filled from the latest commit's subject and body instead; edit before creating.",
       ),
     };
   }
 
-  Widget _refusal(BuildContext context, BridgePullRequestOutcome outcome) {
-    final text = DangerDialog.text(context);
-    final problem = pullRequestProblem(outcome, device: widget.device)!;
-    final uncommitted = widget.state.git.status.value?.changed ?? 0;
-    void next(_Next next) => Navigator.of(context).pop(next);
-    final checkAgain = SecondaryButton(
-      label: 'Check again',
-      onPressed: _reading ? null : _checkAgain,
+  /// The hint and note style beside the form's fields.
+  TextStyle get _faint =>
+      TextStyle(color: context.ws.textFaint, fontSize: WsMetrics.fsSmall);
+
+  /// A form row: a fixed label, its value, and an optional faint hint.
+  Widget _row(String label, Widget value, [String? hint]) => Row(
+    spacing: WsMetrics.space3,
+    children: [
+      SizedBox(width: 64, child: Text(label, style: _faint)),
+      Flexible(child: value),
+      if (hint != null) Text(hint, style: _faint),
+    ],
+  );
+
+  Widget _mono(String value) => Text(
+    value,
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+    style: monoStyle(context, color: context.ws.text),
+  );
+
+  /// A value the user picks from, with a chevron; without `onTap` it cannot be pressed.
+  Widget _chooser(String label, String value, VoidCallback? onTap) => Semantics(
+    button: true,
+    enabled: onTap != null,
+    label: '$label: $value',
+    excludeSemantics: true,
+    onTap: onTap,
+    child: InkWell(
+      borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
+      onTap: onTap,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        spacing: WsMetrics.space1,
+        children: [
+          Flexible(child: _mono(value)),
+          Icon(LucideIcons.chevronDown, size: 13, color: context.ws.textFaint),
+        ],
+      ),
+    ),
+  );
+
+  /// The repository row: the target, with a chooser when GitHub names a parent for a fork.
+  Widget _repository(BridgePullRequestPlan plan) {
+    // Targets and the head repository are owner/name values GitHub validated, which show as
+    // they are; the head branch shows only as `plan.head`.
+    final target = plan.target;
+    final fork = plan.targets.length > 1;
+    if (!fork && !plan.parentUnknown) {
+      return _row('GitHub', _mono(target ?? ''), widget.device);
+    }
+    return _row(
+      'Target',
+      _chooser(
+        'Target',
+        target ?? 'Choose a repository…',
+        _reading || _running || _creating
+            ? null
+            : () => unawaited(_retarget(plan)),
+      ),
+      target != null && fork && target == plan.targets.first
+          ? 'parent of ${plan.identity.headRepository}'
+          : null,
     );
-    final (title, actions) = switch (outcome.kind) {
-      BridgePullRequestOutcomeKind.needsPush => (
-        'Push before creating a pull request',
-        [
-          PrimaryButton(label: 'Push…', onPressed: () => next(_Next.push)),
-          SecondaryButton(
-            label: 'Commit, push & create PR…',
-            onPressed: () => next(_Next.compose),
-          ),
-        ],
+  }
+
+  /// Chooses another target repository and reads the plan again for it.
+  Future<void> _retarget(BridgePullRequestPlan plan) async {
+    final chosen = await showTargetChoice(context, plan);
+    if (chosen != null && chosen != plan.target && mounted) {
+      await _read(target: chosen, base: plan.base?.name);
+    }
+  }
+
+  Widget _baseRow(BridgePullRequestPlan plan) {
+    final base = plan.base;
+    final baseHint = base == null
+        ? null
+        : base.name == _recorded
+        ? 'created from ${base.shown}'
+        : base.name == plan.defaultBranch?.name
+        ? "GitHub's default"
+        : null;
+    return _row(
+      'Base',
+      _chooser(
+        'Base',
+        base?.shown ?? 'Choose a branch…',
+        _reading || _running || _creating || plan.target == null
+            ? null
+            : _chooseBase,
       ),
-      BridgePullRequestOutcomeKind.noBranch => (
-        'Detached HEAD',
-        [
-          PrimaryButton(
-            label: 'Create branch…',
-            onPressed: () => next(_Next.branch),
-          ),
-        ],
-      ),
-      BridgePullRequestOutcomeKind.noCommit => (
-        'Nothing committed',
-        [
-          PrimaryButton(
-            label: 'Commit changes…',
-            onPressed: () => next(_Next.commit),
-          ),
-        ],
-      ),
-      BridgePullRequestOutcomeKind.behind => (
-        'Pull before creating a pull request',
-        <Widget>[],
-      ),
-      BridgePullRequestOutcomeKind.notGitHub when outcome.page.isNotEmpty => (
-        'Create pull request',
-        [
-          PrimaryButton(
-            label: 'Open in browser ↗',
-            onPressed: () =>
-                unawaited(openInBrowser(widget.state, outcome.page)),
-          ),
-          checkAgain,
-        ],
-      ),
-      _ => ('Create pull request', [checkAgain]),
-    };
-    return ActionDialog(
-      title: _compose ? _dialogTitle : title,
-      actions: actions,
+      baseHint,
+    );
+  }
+
+  /// Says which repository is the fork and that GitHub names its parent, or that the parent is
+  /// unknown.
+  Widget? _forkNote(BridgePullRequestPlan plan) {
+    if (plan.parentUnknown) {
+      return const WarningNotice(
+        "Could not read the fork's parent from GitHub, so only the fork itself can be targeted. Choose it as the target; Liquid does not guess the parent.",
+      );
+    }
+    if (plan.targets.length < 2) return null;
+    final remote = widget.state.git.status.value?.remote ?? 'the remote';
+    return Text(
+      '$remote is the fork ${plan.identity.headRepository}; GitHub names ${plan.targets.first} as its parent. Pushes still go only to $remote.',
+      style: DangerDialog.text(context),
+    );
+  }
+
+  /// The comparison with the base on GitHub, with a link to it.
+  Widget? _comparison(BridgePullRequestPlan plan) {
+    if (_reading) return Text('Comparing on GitHub…', style: _faint);
+    final compared = _compared(plan);
+    if (compared == null) return null;
+    final comparison = plan.comparison;
+    final text = DangerDialog.text(context);
+    return Row(
+      spacing: WsMetrics.space3,
       children: [
-        Text(problem, style: text),
-        if (_beforePush) Text('Nothing was committed or pushed.', style: text),
-        if (outcome.kind == BridgePullRequestOutcomeKind.needsPush &&
-            uncommitted > 0)
-          Text(
-            '${plural(uncommitted, 'uncommitted file')} ${uncommitted == 1 ? 'is' : 'are'} not part of the pull request. Commit them first if you want to include them.',
-            style: text,
+        Flexible(child: Text(compared, style: text)),
+        if (comparison != null && comparison.url.startsWith('https://'))
+          Semantics(
+            button: true,
+            child: InkWell(
+              onTap: () =>
+                  unawaited(openInBrowser(widget.state, comparison.url)),
+              child: Text(
+                'Compare on GitHub ↗',
+                style: text.copyWith(color: context.ws.accent),
+              ),
+            ),
           ),
       ],
     );
   }
 
-  Widget _form(BuildContext context, BridgePullRequestPlan plan) {
-    final ws = context.ws;
-    final text = DangerDialog.text(context);
-    final faint = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
-    final fork = plan.targets.length > 1;
-    // Targets and the head repository are owner/name values GitHub validated, which show as
-    // they are; the head branch shows only as `plan.head`.
-    final target = plan.target;
+  /// What GitHub's comparison says about the head and the base, once it is known.
+  String? _compared(BridgePullRequestPlan plan) {
     final base = plan.base;
-    final remote = widget.state.git.status.value?.remote ?? 'the remote';
-    Widget row(String label, Widget value, [String? hint]) => Row(
-      spacing: WsMetrics.space3,
-      children: [
-        SizedBox(width: 64, child: Text(label, style: faint)),
-        Flexible(child: value),
-        if (hint != null) Text(hint, style: faint),
-      ],
-    );
-    Widget mono(String value) => Text(
-      value,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: monoStyle(context, color: ws.text),
-    );
-    Widget chooser(String label, String value, VoidCallback? onTap) =>
-        Semantics(
-          button: true,
-          enabled: onTap != null,
-          label: '$label: $value',
-          excludeSemantics: true,
-          onTap: onTap,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
-            onTap: onTap,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              spacing: WsMetrics.space1,
-              children: [
-                Flexible(child: mono(value)),
-                Icon(LucideIcons.chevronDown, size: 13, color: ws.textFaint),
-              ],
-            ),
-          ),
-        );
-    final comparison = plan.comparison;
-    final compared = switch ((base, comparison)) {
+    return switch ((base, plan.comparison)) {
       _ when plan.baseMissing =>
-        '⚠ ${base?.shown} does not exist in $target on GitHub. Choose another base.',
+        '⚠ ${base?.shown} does not exist in ${plan.target} on GitHub. Choose another base.',
       (_?, _) when _sameBranch =>
         '⚠ A pull request cannot merge ${base!.shown} into itself. Create a branch or choose a different base.',
       (_?, _) when plan.comparisonFailed =>
@@ -799,23 +751,77 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
         '${plural(comparison.commits.toInt(), 'pushed commit')} · ${plural(comparison.files.toInt(), 'changed file')} · +${comparison.added} −${comparison.removed}',
       _ => null,
     };
-    final baseHint = base == null
-        ? null
-        : base.name == _recorded
-        ? 'created from ${base.shown}'
-        : base.name == plan.defaultBranch?.name
-        ? "GitHub's default"
-        : null;
-    void retarget() async {
-      final chosen = await showDialog<String>(
-        context: context,
-        builder: (context) => _TargetChoice(plan: plan),
-      );
-      if (chosen != null && chosen != target && mounted) {
-        await _read(target: chosen, base: base?.name);
-      }
-    }
+  }
 
+  Widget _titleField(Future<Object?> Function() act) => TextField(
+    key: const Key('pull-request-title'),
+    controller: _title,
+    focusNode: _titleFocus,
+    enabled: !_creating,
+    onSubmitted: (_) => unawaited(act()),
+    style: const TextStyle(fontSize: WsMetrics.fsCompact),
+    decoration: InputDecoration(
+      labelText: _compose ? 'Pull request title' : 'Title',
+      hintText: 'Describe the change',
+    ),
+  );
+
+  Widget _descriptionField() => TextField(
+    key: const Key('pull-request-description'),
+    controller: _body,
+    focusNode: _bodyFocus,
+    enabled: !_creating,
+    minLines: 3,
+    maxLines: 8,
+    textInputAction: TextInputAction.newline,
+    style: const TextStyle(fontSize: WsMetrics.fsCompact),
+    decoration: const InputDecoration(
+      labelText: 'Description',
+      alignLabelWithHint: true,
+    ),
+  );
+
+  /// The draft checkbox; its whole row toggles it.
+  Widget _draftToggle() => InkWell(
+    onTap: _creating ? null : () => setState(() => _draft = !_draft),
+    child: Row(
+      children: [
+        Checkbox(
+          value: _draft,
+          semanticLabel: 'Create as draft',
+          onChanged: _creating
+              ? null
+              : (value) => setState(() => _draft = value ?? false),
+        ),
+        ExcludeSemantics(
+          child: Text('Create as draft', style: DangerDialog.text(context)),
+        ),
+      ],
+    ),
+  );
+
+  /// What the form still waits for, or where the pull request is created.
+  Widget? _footer(BridgePullRequestPlan plan) {
+    if (_creating) {
+      return Text(
+        'Creating pull request… $_seconds s · Create is disabled while this request runs.',
+        style: _faint,
+      );
+    }
+    if (plan.base == null || _title.text.trim().isEmpty) {
+      return Text(
+        'Choose a base and enter a title before creating the pull request.',
+        style: _faint,
+      );
+    }
+    if (_beforePush) return null;
+    return Text(
+      'Creates the pull request on GitHub through gh on ${widget.device}.',
+      style: _faint,
+    );
+  }
+
+  Widget _form(BridgePullRequestPlan plan) {
     final enter =
         !_bodyFocus.hasFocus && !(_files?.messageFocus.hasFocus ?? false);
     final act = _beforePush ? _run : _create;
@@ -848,110 +854,21 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
           ),
       ],
       children: [
-        if (_compose) ..._branchPart(context, row, mono, faint),
-        if (fork || plan.parentUnknown)
-          row(
-            'Target',
-            chooser(
-              'Target',
-              target ?? 'Choose a repository…',
-              _reading || _running || _creating ? null : retarget,
-            ),
-            target != null && fork && target == plan.targets.first
-                ? 'parent of ${plan.identity.headRepository}'
-                : null,
-          )
-        else
-          row('GitHub', mono(target ?? ''), widget.device),
-        if (!_compose) row('Head', mono(plan.head)),
-        row(
-          'Base',
-          chooser(
-            'Base',
-            base?.shown ?? 'Choose a branch…',
-            _reading || _running || _creating || target == null
-                ? null
-                : _chooseBase,
-          ),
-          baseHint,
-        ),
-        if (plan.parentUnknown)
-          const WarningNotice(
-            "Could not read the fork's parent from GitHub, so only the fork itself can be targeted. Choose it as the target; Liquid does not guess the parent.",
-          )
-        else if (fork)
-          Text(
-            '$remote is the fork ${plan.identity.headRepository}; GitHub names ${plan.targets.first} as its parent. Pushes still go only to $remote.',
-            style: text,
-          ),
-        if (_reading)
-          Text('Comparing on GitHub…', style: faint)
-        else if (compared != null)
-          Row(
-            spacing: WsMetrics.space3,
-            children: [
-              Flexible(child: Text(compared, style: text)),
-              if (comparison != null && comparison.url.startsWith('https://'))
-                Semantics(
-                  button: true,
-                  child: InkWell(
-                    onTap: () =>
-                        unawaited(openInBrowser(widget.state, comparison.url)),
-                    child: Text(
-                      'Compare on GitHub ↗',
-                      style: text.copyWith(color: ws.accent),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        TextField(
-          key: const Key('pull-request-title'),
-          controller: _title,
-          focusNode: _titleFocus,
-          enabled: !_creating,
-          onSubmitted: (_) => unawaited(act()),
-          style: const TextStyle(fontSize: WsMetrics.fsCompact),
-          decoration: InputDecoration(
-            labelText: _compose ? 'Pull request title' : 'Title',
-            hintText: 'Describe the change',
-          ),
-        ),
-        TextField(
-          key: const Key('pull-request-description'),
-          controller: _body,
-          focusNode: _bodyFocus,
-          enabled: !_creating,
-          minLines: 3,
-          maxLines: 8,
-          textInputAction: TextInputAction.newline,
-          style: const TextStyle(fontSize: WsMetrics.fsCompact),
-          decoration: const InputDecoration(
-            labelText: 'Description',
-            alignLabelWithHint: true,
-          ),
-        ),
-        ?_textNote(faint),
+        if (_compose) ..._branchPart(),
+        _repository(plan),
+        if (!_compose) _row('Head', _mono(plan.head)),
+        _baseRow(plan),
+        ?_forkNote(plan),
+        ?_comparison(plan),
+        _titleField(act),
+        _descriptionField(),
+        ?_textNote(_faint),
         if (plan.uncommitted > 0 && !_compose)
           Text(
             '${plural(plan.uncommitted.toInt(), 'uncommitted file')} ${plan.uncommitted == 1 ? 'is' : 'are'} not part of the pull request. Commit them first if you want to include them.',
-            style: faint,
+            style: _faint,
           ),
-        InkWell(
-          onTap: _creating ? null : () => setState(() => _draft = !_draft),
-          child: Row(
-            children: [
-              Checkbox(
-                value: _draft,
-                semanticLabel: 'Create as draft',
-                onChanged: _creating
-                    ? null
-                    : (value) => setState(() => _draft = value ?? false),
-              ),
-              ExcludeSemantics(child: Text('Create as draft', style: text)),
-            ],
-          ),
-        ),
+        _draftToggle(),
         if (_changed)
           WarningNotice(
             '${plan.head} changed since this dialog opened. Review the updated commits before creating the pull request.',
@@ -959,40 +876,21 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
         if (_result case final result?)
           WarningNotice('⚠ $result', danger: true),
         if (_error case final error?) WarningNotice(error),
-        if (_creating)
-          Text(
-            'Creating pull request… $_seconds s · Create is disabled while this request runs.',
-            style: faint,
-          )
-        else if (base == null || _title.text.trim().isEmpty)
-          Text(
-            'Choose a base and enter a title before creating the pull request.',
-            style: faint,
-          )
-        else if (!_beforePush)
-          Text(
-            'Creates the pull request on GitHub through gh on ${widget.device}.',
-            style: faint,
-          ),
+        ?_footer(plan),
       ],
     );
   }
 
   /// "Commit, push & create PR"'s branch and what it pushes: the approved commit dialog's
   /// fields, or the commits to push when there is nothing to commit.
-  List<Widget> _branchPart(
-    BuildContext context,
-    Widget Function(String, Widget, [String?]) row,
-    Widget Function(String) mono,
-    TextStyle faint,
-  ) {
+  List<Widget> _branchPart() {
     final status = widget.state.git.status.value;
     final files = _files;
     if (files != null && (files.plan == null || _hasFiles)) {
       return commitDraftFields(
         context,
         files,
-        trailing: Text('→ ${status?.remote ?? ''}', style: faint),
+        trailing: Text('→ ${status?.remote ?? ''}', style: _faint),
         enabled: !_running && _committed == null,
         // The text describes the files that will be committed.
         onEdited: () => _write(_plan!),
@@ -1009,12 +907,12 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
           mainAxisSize: MainAxisSize.min,
           spacing: WsMetrics.space2,
           children: [
-            row(
+            _row(
               'Branch',
-              mono(status?.branch ?? ''),
+              _mono(status?.branch ?? ''),
               '→ ${status?.remote ?? ''}',
             ),
-            row(
+            _row(
               'Push',
               Text(
                 status == null || status.upstream == null || status.gone
@@ -1028,156 +926,4 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
       ),
     ];
   }
-}
-
-/// The target repository: GitHub's parent of a fork, or the fork itself.
-class _TargetChoice extends StatelessWidget {
-  const _TargetChoice({required this.plan});
-
-  final BridgePullRequestPlan plan;
-
-  @override
-  Widget build(BuildContext context) => ActionDialog(
-    title: 'Target repository',
-    actions: const [],
-    children: [
-      for (final target in plan.targets)
-        _ChoiceRow(
-          label: target,
-          detail: target == plan.identity.headRepository
-              ? 'this fork'
-              : 'parent of ${plan.identity.headRepository}',
-          onTap: () => Navigator.of(context).pop(target),
-        ),
-    ],
-  );
-}
-
-/// The base branch, from the target's branches on GitHub.
-class _BaseChoice extends StatefulWidget {
-  const _BaseChoice({
-    required this.target,
-    required this.names,
-    required this.more,
-    required this.unknown,
-  });
-
-  final String target;
-  final List<BridgeName> names;
-
-  /// GitHub may list more branches than [names].
-  final bool more;
-
-  /// Liquid has no record of the branch's start, and GitHub's default is unknown.
-  final bool unknown;
-
-  @override
-  State<_BaseChoice> createState() => _BaseChoiceState();
-}
-
-class _BaseChoiceState extends State<_BaseChoice> {
-  final _query = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _query.addListener(() => setState(() {}));
-  }
-
-  @override
-  void dispose() {
-    _query.dispose();
-    super.dispose();
-  }
-
-  List<BridgeName> get _matches {
-    final query = _query.text.trim().toLowerCase();
-    return [
-      for (final name in widget.names)
-        if (name.shown.toLowerCase().contains(query)) name,
-    ];
-  }
-
-  void _submit() {
-    final typed = _query.text.trim();
-    if (_matches.firstOrNull case final first?) {
-      Navigator.of(context).pop(first);
-    } else if (widget.more && typed.isNotEmpty) {
-      // GitHub checks a branch Liquid did not list when the plan is read again.
-      Navigator.of(context).pop(BridgeName(name: typed, shown: typed));
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final matches = _matches;
-    final text = DangerDialog.text(context);
-    return ActionDialog(
-      title: 'Base branch',
-      actions: const [],
-      children: [
-        TextField(
-          key: const Key('base-filter'),
-          controller: _query,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: 'Filter branches'),
-          onSubmitted: (_) => _submit(),
-        ),
-        for (final name in matches)
-          _ChoiceRow(
-            label: name.shown,
-            onTap: () => Navigator.of(context).pop(name),
-          ),
-        if (matches.isEmpty)
-          Text(
-            widget.more
-                ? 'No match among the first ${widget.names.length} branches. Press Enter to use the name as typed.'
-                : 'No branch matches.',
-            style: text,
-          ),
-        Text(
-          'The base is the branch you want these commits to join.${widget.unknown ? " Liquid has no record of where this branch started, and GitHub's default could not be read." : ''} Only branches in ${widget.target} are listed.',
-          style: text,
-        ),
-      ],
-    );
-  }
-}
-
-class _ChoiceRow extends StatelessWidget {
-  const _ChoiceRow({required this.label, required this.onTap, this.detail});
-
-  final String label;
-  final String? detail;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => InkWell(
-    borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-    onTap: onTap,
-    child: SizedBox(
-      height: 28,
-      child: Row(
-        spacing: WsMetrics.space3,
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: monoStyle(context, color: context.ws.text),
-            ),
-          ),
-          if (detail case final detail?)
-            Text(
-              detail,
-              style: TextStyle(
-                color: context.ws.textFaint,
-                fontSize: WsMetrics.fsSmall,
-              ),
-            ),
-        ],
-      ),
-    ),
-  );
 }

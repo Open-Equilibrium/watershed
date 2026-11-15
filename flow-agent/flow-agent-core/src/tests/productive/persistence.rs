@@ -103,7 +103,7 @@ fn run_default_smoke_productive_session_with_credential_resolver<P, C>(
 ) -> Result<RunOutput, RuntimeError>
 where
     P: ProductiveProvider,
-    C: FnOnce() -> Result<crate::runtime::oauth_credential::CredentialRecord, RuntimeError>,
+    C: FnOnce() -> Result<crate::runtime::productive::ProviderCredential, RuntimeError>,
 {
     let config = load_global_config()?;
     run_productive_session_with_provider(

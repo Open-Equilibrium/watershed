@@ -62,6 +62,7 @@ impl Drop for Repo {
 }
 
 fn run<F: std::future::Future>(test: F) -> F::Output {
+    crate::checkout::isolate_user_home();
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -737,6 +738,95 @@ fn the_search_for_repositories_stops_at_its_budget_and_counts_it_as_found() {
     assert!(
         holds_repository(&dir, &mut short),
         "a spent budget stays spent for the next path"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_revert_lists_an_ignored_link_standing_in_a_folder_alone() {
+    run(async {
+        let repo = Repo::new("revert-link-in-the-way");
+        let outside = Repo::new("revert-link-outside");
+        std::fs::create_dir_all(repo.path().join("d")).expect("folder");
+        repo.write("d/x", "inside\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        let tree = WorkingTree::open(repo.path())
+            .await
+            .expect("repository opens");
+        let to = tree.snapshot().await.expect("snapshot");
+
+        // An ignored link now stands where the folder was, and a recent file lies at its target.
+        std::fs::remove_dir_all(repo.path().join("d")).expect("folder removed");
+        repo.write(".git/info/exclude", "/d\n");
+        std::os::unix::fs::symlink(outside.path(), repo.path().join("d")).expect("link");
+        outside.write("x", "outside\n");
+        let from = tree.snapshot().await.expect("snapshot");
+
+        let plan = tree.revert_planned(&from, &to).await.expect("planned");
+        assert_eq!(plan.confirmation.ignored, ["d"]);
+        tree.restore(
+            &to,
+            &plan.confirmation,
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+        .await
+        .expect("restored");
+        assert_eq!(
+            std::fs::read_to_string(outside.path().join("x")).expect("outside file"),
+            "outside\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("d/x")).expect("restored file"),
+            "inside\n"
+        );
+    });
+}
+
+#[test]
+fn hashing_a_fifo_put_in_a_files_place_fails_without_waiting_for_a_writer() {
+    use crate::diff::hash_contents;
+    let dir = std::env::temp_dir().join(format!("watershed-fifo-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("folder");
+    let fifo = dir.join("pipe");
+    assert!(
+        Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("mkfifo runs")
+            .success(),
+        "a FIFO is made"
+    );
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut digest = std::hash::DefaultHasher::new();
+        let _ = sender.send(hash_contents(&fifo, &mut digest, u64::MAX).is_err());
+    });
+    let refused = receiver
+        .recv_timeout(Duration::from_secs(10))
+        .expect("hashing a FIFO returns at once");
+    assert!(refused, "a FIFO is no file to hash");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn hashing_a_file_that_grew_past_the_budget_left_fails() {
+    use crate::diff::hash_contents;
+    let dir = std::env::temp_dir().join(format!("watershed-grown-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("folder");
+    let file = dir.join("grows");
+    std::fs::write(&file, "0123456789").expect("file");
+    let mut digest = std::hash::DefaultHasher::new();
+    // Its contents read after the stamp that counted them can exceed the budget left.
+    assert!(
+        matches!(hash_contents(&file, &mut digest, 9), Err(DiffError::Git(_))),
+        "ten bytes do not fit nine"
+    );
+    assert_eq!(
+        hash_contents(&file, &mut digest, 10).expect("ten bytes fit ten"),
+        10
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

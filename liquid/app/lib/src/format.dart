@@ -4,13 +4,16 @@ import 'rust/api/events.dart';
 int promptTokens(BridgeUsage usage) =>
     usage.input + usage.cacheRead + usage.cacheWrite;
 
-/// A duration as milliseconds, seconds or minutes and seconds.
+/// A duration as milliseconds, seconds, minutes and seconds, or hours and minutes.
 String formatDuration(int ms) {
   if (ms < 1000) return '$ms ms';
   // Seconds keep one decimal until they would round to a whole minute.
   if (ms < 59950) return '${(ms / 1000).toStringAsFixed(1)} s';
   final seconds = ms < 60000 ? 60 : ms ~/ 1000;
-  return '${seconds ~/ 60}m ${(seconds % 60).toString().padLeft(2, '0')}s';
+  String two(int value) => value.toString().padLeft(2, '0');
+  final hours = seconds ~/ 3600;
+  if (hours > 0) return '${hours}h ${two(seconds % 3600 ~/ 60)}m';
+  return '${seconds ~/ 60}m ${two(seconds % 60)}s';
 }
 
 /// A count with thousands separators.
@@ -23,9 +26,21 @@ String formatCount(int count) => count.toString().replaceAllMapped(
 String formatCost(int microUsd) =>
     '\$${(microUsd / 1e6).toStringAsFixed(microUsd < 10000 ? 3 : 2)}';
 
-/// A count in thousands once it reaches them, such as `6.1k`.
-String formatCompact(int count) =>
-    count >= 1000 ? '${(count / 1000).toStringAsFixed(1)}k' : '$count';
+/// A token count with three significant digits and a unit, such as `212 k` or `1.85 M`.
+/// From 999.5 M on, whole millions: three digits would need a larger unit, and
+/// `toStringAsPrecision` switches to exponent notation there.
+String formatTokens(int count) {
+  if (count < 1000) return '$count';
+  if (count < 999500) return '${(count / 1000).toStringAsPrecision(3)} k';
+  final millions = count / 1e6;
+  return millions < 999.5
+      ? '${millions.toStringAsPrecision(3)} M'
+      : '${millions.round()} M';
+}
+
+/// A part's share of a whole, rounded to a whole percent, such as `95%`.
+String formatShare(int part, int whole) =>
+    whole == 0 ? '0%' : '${(part * 100 / whole).round()}%';
 
 /// A local time of day, such as `10:58`.
 String formatClock(DateTime at) =>

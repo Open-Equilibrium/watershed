@@ -5,13 +5,17 @@ use crate::runtime::{
     context::ContextModelProfile,
     conversations::MAX_CONVERSATION_RECORD_BYTES,
     deadlines::{RESPONSES_HTTP_DEADLINES, block_on_network, build_http_client},
+    endpoint_credential::EndpointCredential,
     executor::{
         ExecutorDispatchOutcome, ExecutorPreflightOutcome, PreparedExecutor, PreparedExecutorTool,
         PreparedExecutorWaiting,
     },
     fs_guards::AnchoredWorkspace,
     oauth_credential::CredentialRecord,
-    openai_codex::{OPENAI_CODEX_RESPONSES_URL, ProviderTurn, request_responses_with_client_async},
+    openai_codex::{
+        OPENAI_CODEX_RESPONSES_URL, ProviderTurn, ResponsesAuth,
+        request_responses_with_client_async,
+    },
     productive_capacity::ProductiveDispatchReservation,
     responses::MAX_RESPONSES_DECODED_STREAM_BYTES,
     tool_runner::{MAX_TOOL_STREAM_BYTES, ToolInvocation},
@@ -44,7 +48,8 @@ pub(crate) use provider_result::MAX_DURABLE_PROVIDER_OUTPUT_BYTES;
 #[cfg(test)]
 pub(crate) use provider_result::{
     ProviderInput, durable_provider_output, parse_provider_result,
-    provider_turn_from_durable_output, verify_provider_result_session_objects,
+    provider_turn_from_durable_output, verify_leaf_provider_result,
+    verify_provider_result_session_objects,
 };
 pub use reconciliation::{
     MAX_TOOL_RECONCILIATION_BYTES, read_tool_reconciliation_file, reconcile_tool_attempt,
@@ -57,6 +62,7 @@ pub(crate) use tool::test_enforcement_receipt;
 pub(crate) use tool_result::{tool_result_value, tool_terminal};
 
 const PROVIDER_ERROR_SCHEMA_V0: &str = "flow-provider-error-v0";
+const PROVIDER_REPLY_INVALID_SCHEMA_V0: &str = "flow-provider-reply-invalid-v0";
 const PROVIDER_OUTPUT_SCHEMA_V2: &str = "flow-provider-output-v2";
 
 #[cfg(test)]
@@ -131,10 +137,17 @@ fn observe_productive_result_persist(kind: RunAttemptKind) {
     }
 }
 
+/// The credential a Run resolved for its provider; each variant belongs to exactly one provider.
+#[derive(Clone, Debug)]
+pub(crate) enum ProviderCredential {
+    OpenAiCodex(CredentialRecord),
+    OpenAiCompatible(EndpointCredential),
+}
+
 pub(crate) trait ProductiveProvider {
     fn turn(
         &mut self,
-        credential: &CredentialRecord,
+        credential: &ProviderCredential,
         body: &serde_json::Value,
     ) -> Result<ProviderTurn, RuntimeError>;
 }
@@ -157,6 +170,15 @@ impl OpenAiCodexProvider {
         credential: &CredentialRecord,
         body: &serde_json::Value,
     ) -> Result<ProviderTurn, RuntimeError> {
+        self.turn_with_auth(endpoint, ResponsesAuth::Subscription(credential), body)
+    }
+
+    fn turn_with_auth(
+        &mut self,
+        endpoint: &str,
+        auth: ResponsesAuth<'_>,
+        body: &serde_json::Value,
+    ) -> Result<ProviderTurn, RuntimeError> {
         block_on_network(async {
             let client = match &self.client {
                 Some(client) => client.clone(),
@@ -174,7 +196,7 @@ impl OpenAiCodexProvider {
             request_responses_with_client_async(
                 client,
                 endpoint,
-                credential,
+                auth,
                 body,
                 RESPONSES_HTTP_DEADLINES,
                 crate::runtime::cancellation::productive_cancellation(),
@@ -187,7 +209,7 @@ impl OpenAiCodexProvider {
 impl ProductiveProvider for OpenAiCodexProvider {
     fn turn(
         &mut self,
-        credential: &CredentialRecord,
+        credential: &ProviderCredential,
         body: &serde_json::Value,
     ) -> Result<ProviderTurn, RuntimeError> {
         #[cfg(feature = "m12-install-acceptance")]
@@ -195,7 +217,15 @@ impl ProductiveProvider for OpenAiCodexProvider {
         if let Some(turn) = crate::runtime::m12_install_acceptance::maybe_provider_turn(body)? {
             return Ok(turn);
         }
-        self.turn_at(OPENAI_CODEX_RESPONSES_URL, credential, body)
+        match credential {
+            ProviderCredential::OpenAiCodex(credential) => {
+                self.turn_at(OPENAI_CODEX_RESPONSES_URL, credential, body)
+            }
+            ProviderCredential::OpenAiCompatible(credential) => {
+                let endpoint = credential.responses_url()?;
+                self.turn_with_auth(&endpoint, ResponsesAuth::ApiKey(&credential.key), body)
+            }
+        }
     }
 }
 
@@ -429,7 +459,7 @@ pub(crate) fn message_delta_chunks(mut content: &str) -> impl Iterator<Item = &s
 pub(crate) struct ProductiveExecution<'a> {
     pub(crate) clock: EventClock,
     pub(crate) conversation_id: &'a str,
-    pub(crate) credential: &'a CredentialRecord,
+    pub(crate) credential: &'a ProviderCredential,
     pub(crate) model: &'a str,
     pub(crate) model_profile: ContextModelProfile,
     pub(crate) policy: &'a core_policy::PolicyArtifact,

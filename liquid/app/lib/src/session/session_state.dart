@@ -42,12 +42,12 @@ const _noticeFades = Duration(seconds: 6);
 class SessionState {
   SessionState(this._backend, {BranchBases? bases})
     : _bases = bases ?? BranchBases() {
-    _subscription = _backend.events().listen(_apply);
+    _subscription = _backend.events().listen(_receive);
     hideWhitespace.addListener(() => unawaited(readChanges()));
     git.refreshed.addListener(() {
       if (diffScope.value is UncommittedChanges) unawaited(readChanges());
     });
-    // Stashed changes restored or discarded leave the Diff tab.
+    // Stashed changes restored or discarded leave the Diff panel.
     git.stash.addListener(() {
       if (diffScope.value is StashedChanges) unawaited(readChanges());
     });
@@ -109,6 +109,12 @@ class SessionState {
   /// Whether earlier stored entries of the chat remain to be read.
   ValueNotifier<bool> get chatMore => _chat.more;
 
+  /// Whether `entry` is on the branch the chat shows; the chat cannot show another branch.
+  bool onBranch(String entry) => _chat.onBranch(entry);
+
+  /// The entry the Chat scrolls to next; the Chat clears it once it has scrolled there.
+  final scrollChatTo = ValueNotifier<String?>(null);
+
   /// The checkout's branch, its counts and its stash.
   late final git = GitState(_backend, notify: notify, bases: _bases);
 
@@ -118,9 +124,6 @@ class SessionState {
   /// The branch's pull request on GitHub.
   PullRequests get pulls => _pulls ??= PullRequests(_backend, git, _bases);
   PullRequests? _pulls;
-
-  /// Counts the changes of the session's stored history; the Trajectory reloads on each.
-  final stored = ValueNotifier(0);
 
   /// What the start page offers: the project's recent sessions, the models and the selected
   /// one as `provider/id`.
@@ -143,12 +146,25 @@ class SessionState {
   /// Reads what the start page offers, and the open session's title.
   Future<void> loadStart() async {
     unawaited(loadTitle());
+    // A switch that finishes meanwhile replaces these reads; its own loadStart reads them again.
+    final generation = _generation;
     try {
-      recent.value = await _backend.recentSessions();
-      models.value = await _backend.models();
-      model.value = await _backend.currentModel();
+      final sessions = await _backend.recentSessions();
+      if (generation != _generation) return;
+      recent.value = sessions;
+      final modelList = await _backend.models();
+      if (generation != _generation) return;
+      models.value = modelList;
+      final selected = await _backend.currentModel();
+      if (generation != _generation) return;
+      model.value = selected;
     } on Object catch (error) {
-      notify(BridgeLevel.warning, 'Could not read the recent sessions: $error');
+      if (generation == _generation) {
+        notify(
+          BridgeLevel.warning,
+          'Could not read the recent sessions: $error',
+        );
+      }
     }
   }
 
@@ -192,17 +208,19 @@ class SessionState {
     required String busy,
   }) async {
     if (_switching != null) return;
-    if (status.value case RunStatus.running || RunStatus.waitingForYou) {
-      notify(BridgeLevel.info, busy);
-      return;
-    }
     final switching = _switching = Completer<void>();
-    // Extension displays belong to their session. The new session's extensions may set theirs
-    // before pi confirms the switch, so the old ones go now and come back if it does not happen.
-    final (shownWidgets, shownStatuses) = (widgets.value, statuses.value);
-    widgets.value = const {};
-    statuses.value = const {};
     try {
+      // A queue change in progress re-sends waiting messages, which may start a run.
+      await _queueChange;
+      if (status.value case RunStatus.running || RunStatus.waitingForYou) {
+        notify(BridgeLevel.info, busy);
+        return;
+      }
+      // Extension displays belong to their session. The new session's extensions may set theirs
+      // before pi confirms the switch, so the old ones go now and come back if it does not happen.
+      final (shownWidgets, shownStatuses) = (widgets.value, statuses.value);
+      widgets.value = const {};
+      statuses.value = const {};
       if (!await _replace(switchTo)) {
         widgets.value = shownWidgets;
         statuses.value = shownStatuses;
@@ -227,8 +245,12 @@ class SessionState {
     _generation++;
     _failing.clear();
     sessionTitle.value = null;
-    // The previous session's turns no longer apply.
+    // The previous session's turns and statistics no longer apply.
     turns.value = const [];
+    statistics.value = null;
+    statisticsProblem.value = null;
+    contextWindow.value = null;
+    statisticsOpen.value = false;
     diffScope.value = const LatestTurn();
     shownScope.value = const LatestTurn();
     shown.value = null;
@@ -240,7 +262,6 @@ class SessionState {
     _chat.reset();
     totals.value = const SessionTotals();
     queue.value = const BridgeQueue(steering: [], followUp: []);
-    stored.value++;
     await loadChat();
     await loadStart();
     return true;
@@ -251,6 +272,8 @@ class SessionState {
     try {
       await _backend.setModel(next);
       model.value = '${next.provider}/${next.id}';
+      // The window and the compaction point belong to the model.
+      unawaited(readStatistics());
     } on Object catch (error) {
       notify(BridgeLevel.error, 'Could not select ${next.name}: $error');
     }
@@ -262,44 +285,70 @@ class SessionState {
   Future<void> send(String message, {bool followUp = false}) async {
     // A message typed while the session changes goes to the new one, and one typed while the
     // chat is restored or branched follows it, so the restored chat does not hold its items twice
-    // and keeps the items of the turn the message starts.
-    await _switching?.future;
-    try {
-      await _branching;
-    } on Object {
-      // The branch or revert reports its own failure; the message still goes out.
-    }
-    try {
-      await _chat.loading;
-    } on Object {
-      // The chat reports its own failure; the message still goes out.
-    }
+    // and keeps the items of the turn the message starts. One typed during a queue change follows
+    // the messages the change keeps.
+    await _untilSettled();
+    final generation = _generation;
     try {
       await _backend.send(message, followUp: followUp);
-      // Named like a stored session until pi stores this one.
-      sessionTitle.value ??= _firstLine(message);
+      // Named like a stored session until pi stores this one, unless another session replaced it.
+      if (generation == _generation) sessionTitle.value ??= _firstLine(message);
     } on Object catch (error) {
       draft.value = message;
       notify(BridgeLevel.error, 'The message was not sent: $error');
     }
   }
 
+  /// Waits until no session switch, branch, chat restore or queue change is running. Each may
+  /// start another while it is awaited, so the check repeats.
+  Future<void> _untilSettled() async {
+    for (var pending = _pending; pending != null; pending = _pending) {
+      try {
+        await pending;
+      } on Object {
+        // Each reports its own failure; the message still goes out.
+      }
+    }
+  }
+
+  Future<Object?>? get _pending =>
+      _switching?.future ?? _branching ?? _chat.loading ?? _queueChange;
+
   /// Queue changes run one after another: each clears pi's whole queue, and a removal sends the
-  /// others again, which a second removal or Stop must not overtake.
-  Future<void> _queueChange = Future.value();
+  /// others again, which a second removal, Stop or a new message must not overtake. Null while
+  /// none runs.
+  Future<void>? _queueChange;
 
   Future<void> _changeQueue(Future<void> Function() change) {
-    final next = _queueChange.then((_) => change());
-    _queueChange = next.then((_) {}, onError: (Object _) {});
+    final next = (_queueChange ?? Future.value()).then((_) => change());
+    final settled = next.then((_) {}, onError: (Object _) {});
+    _queueChange = settled;
+    unawaited(
+      settled.whenComplete(() {
+        if (identical(_queueChange, settled)) _queueChange = null;
+      }),
+    );
     return next;
   }
 
   /// Takes one waiting message out of the queue; pi clears the whole queue, so the others are
-  /// sent again in their order.
-  Future<void> unqueue(String message, {required bool followUp}) =>
-      _changeQueue(() => _unqueue(message, followUp: followUp));
+  /// sent again in their order. `occurrence` counts the equal messages before it in its queue.
+  Future<void> unqueue(
+    String message, {
+    required bool followUp,
+    int occurrence = 0,
+  }) => _changeQueue(
+    () => _unqueue(message, followUp: followUp, occurrence: occurrence),
+  );
 
-  Future<void> _unqueue(String message, {required bool followUp}) async {
+  Future<void> _unqueue(
+    String message, {
+    required bool followUp,
+    required int occurrence,
+  }) async {
+    // A switch under way decides which session's queue this reads, so the old session's
+    // messages never reach the new one.
+    await _switching?.future;
     final BridgeQueue waiting;
     try {
       waiting = await _backend.clearQueue();
@@ -314,7 +363,17 @@ class SessionState {
     // Only the queue the chip belongs to loses the message; the same text may wait in both.
     List<String> kept(List<String> texts, {required bool inFollowUp}) {
       final rest = [...texts];
-      if (!removed && inFollowUp == followUp) removed = rest.remove(message);
+      if (!removed && inFollowUp == followUp) {
+        final matches = [
+          for (final (index, text) in texts.indexed)
+            if (text == message) index,
+        ];
+        // The cleared queue may hold fewer equal messages than the chip counted; the last goes.
+        if (matches.isNotEmpty) {
+          rest.removeAt(matches[occurrence.clamp(0, matches.length - 1)]);
+          removed = true;
+        }
+      }
       return rest;
     }
 
@@ -344,14 +403,26 @@ class SessionState {
 
   Future<void> _stop() async {
     _stopping = true;
+    await _takeWaitingBack();
     try {
-      final waiting = await _backend.clearQueue();
-      final texts = [...waiting.steering, ...waiting.followUp];
-      if (texts.isNotEmpty) draft.value = texts.join('\n\n');
       await _backend.abort();
     } on Object catch (error) {
       _stopping = false;
       notify(BridgeLevel.error, 'Could not stop the agent: $error');
+    }
+  }
+
+  /// Clears the queue into the input area; a failure says so, and Stop goes on without it.
+  Future<void> _takeWaitingBack() async {
+    try {
+      final waiting = await _backend.clearQueue();
+      final texts = [...waiting.steering, ...waiting.followUp];
+      if (texts.isNotEmpty) draft.value = texts.join('\n\n');
+    } on Object catch (error) {
+      notify(
+        BridgeLevel.error,
+        'Could not take the waiting messages back: $error',
+      );
     }
   }
 
@@ -384,13 +455,26 @@ class SessionState {
   /// The turns of the current branch, oldest first, with what each changed.
   final turns = ValueNotifier<List<BridgeTurn>>(const []);
 
-  /// Which turns the Diff tab compares.
+  /// What the session's stored entries count to, as last read; null until the first read and
+  /// after a switch, or when the read failed (ADR-0279).
+  final statistics = ValueNotifier<BridgeStatistics?>(null);
+
+  /// Why the statistics are not shown, with their heading; null once a read works.
+  final statisticsProblem = ValueNotifier<({String title, String text})?>(null);
+
+  /// The context window the next request fills, as last read with the statistics.
+  final contextWindow = ValueNotifier<BridgeContext?>(null);
+
+  /// Whether the statistics panel is open over the session's card; a switch closes it.
+  final statisticsOpen = ValueNotifier(false);
+
+  /// Which turns the Diff panel compares.
   final diffScope = ValueNotifier<DiffScope>(const LatestTurn());
 
-  /// The checkpoints the Diff tab compares, as last read; null while no turn ended.
+  /// The checkpoints the Diff panel compares, as last read; null while no turn ended.
   final shown = ValueNotifier<Compared?>(null);
 
-  /// The turns the Diff tab shows, set with [shown] and their files; [diffScope] holds the
+  /// The turns the Diff panel shows, set with [shown] and their files; [diffScope] holds the
   /// choice still being read.
   final shownScope = ValueNotifier<DiffScope>(const LatestTurn());
 
@@ -399,7 +483,7 @@ class SessionState {
     null,
   );
 
-  /// The files the shown turns changed, as last read; null before the first read. The Diff tab
+  /// The files the shown turns changed, as last read; null before the first read. The Diff panel
   /// and its count show them.
   final changed = ValueNotifier<List<BridgeFileChange>?>(null);
 
@@ -409,14 +493,14 @@ class SessionState {
   /// Tree identities of the published uncommitted list, also validating pending patches.
   String? get uncommittedRevision => _uncommittedRead?.$1;
 
-  /// Why the Diff tab shows no files, with its heading; null while it shows a list.
+  /// Why the Diff panel shows no files, with its heading; null while it shows a list.
   final changesProblem = ValueNotifier<({String title, String text})?>(null);
 
   /// Whether the changes leave out what is only whitespace; a change reads them
   /// again.
   final hideWhitespace = ValueNotifier(false);
 
-  /// Shows `scope` in the Diff tab.
+  /// Shows `scope` in the Diff panel.
   Future<void> showTurns(DiffScope scope) async {
     diffScope.value = scope;
     if (scope is StashedChanges || scope is UncommittedChanges) {
@@ -426,27 +510,39 @@ class SessionState {
   }
 
   /// Reads the branch's turns and what the shown ones changed between their checkpoints. A
-  /// failed read is reported once, and the Diff tab says so instead of showing earlier changes.
-  Future<void> readChanges() {
-    // A read asked for meanwhile runs once after the current one instead of queueing.
-    if (_readingChanges case final reading?) {
-      _changesAgain = true;
-      return reading;
-    }
-    return _readingChanges = _readChanges();
-  }
+  /// failed read is reported once, and the Diff panel says so instead of showing earlier changes.
+  Future<void> readChanges() => _changesRead();
+  late final _changesRead = _ReadLoop(_readChangesOnce);
 
-  Future<void>? _readingChanges;
-  bool _changesAgain = false;
+  /// Reads the statistics and the context window, as [readChanges] reads the turns.
+  Future<void> readStatistics() => _statisticsRead();
+  late final _statisticsRead = _ReadLoop(_readStatisticsOnce);
 
-  Future<void> _readChanges() async {
+  /// Reads the statistics, then the context window, so a window that fails keeps the statistics.
+  Future<void> _readStatisticsOnce() async {
+    final generation = _generation;
     try {
-      do {
-        _changesAgain = false;
-        await _readChangesOnce();
-      } while (_changesAgain);
-    } finally {
-      _readingChanges = null;
+      final stats = await _backend.statistics();
+      if (generation != _generation) return;
+      statistics.value = stats;
+      statisticsProblem.value = null;
+      reportRead('statistics', null);
+    } on Object catch (error) {
+      if (generation != _generation) return;
+      final problem = 'Could not read the statistics: $error';
+      statistics.value = null;
+      statisticsProblem.value = (title: 'No statistics shown', text: problem);
+      reportRead('statistics', problem);
+    }
+    try {
+      final window = await _backend.context();
+      if (generation != _generation) return;
+      contextWindow.value = window;
+      reportRead('context window', null);
+    } on Object catch (error) {
+      if (generation != _generation) return;
+      contextWindow.value = null;
+      reportRead('context window', 'Could not read the context window: $error');
     }
   }
 
@@ -558,6 +654,7 @@ class SessionState {
     final generation = _generation;
     final asked = _turnReadsStarted;
     unawaited(git.refresh());
+    unawaited(readStatistics());
     await readChanges();
     if (generation != _generation) return;
     _chat.endTurns(turns.value, _turnsRead > asked ? ended : 0);
@@ -606,14 +703,6 @@ class SessionState {
       hideWhitespace: hideWhitespace.value,
     );
   }
-
-  /// The branch tree and the Trajectory of each branch ending at an entry in `leaves`, or of
-  /// the current branch.
-  Future<BridgeHistory> history([List<String> leaves = const []]) =>
-      _backend.history(leaves);
-
-  /// Everything the model saw for the request behind the response `entry`.
-  Future<BridgeContextDetail?> context(String entry) => _backend.context(entry);
 
   /// Continues the session from `entry`; the next prompt starts a new branch there. The chat
   /// then shows the branch the session continues. Returns whether this call branched: one asked
@@ -685,16 +774,41 @@ class SessionState {
     return true;
   }
 
+  /// Writes the record of the session stored at `path` into Downloads and returns its folder;
+  /// returns none and says why when nothing was written.
+  Future<String?> exportRecord({
+    required String path,
+    required String title,
+    required String host,
+    required String day,
+  }) async {
+    try {
+      final folder = await _backend.exportRecord(
+        path: path,
+        title: title,
+        host: host,
+        day: day,
+      );
+      notify(BridgeLevel.info, 'Exported the record of “$title” to Downloads.');
+      return folder;
+    } on Object catch (error) {
+      notify(BridgeLevel.error, 'Nothing was exported: $error');
+      return null;
+    }
+  }
+
+  /// Whether a turn runs, including while it waits for the user.
+  bool get turnRuns => switch (status.value) {
+    RunStatus.running || RunStatus.waitingForYou => true,
+    _ => false,
+  };
+
   /// Waits, up to a few seconds, until the stopped agent no longer runs.
   Future<void> _settled() async {
-    bool busy() => switch (status.value) {
-      RunStatus.running || RunStatus.waitingForYou => true,
-      _ => false,
-    };
-    if (!busy()) return;
+    if (!turnRuns) return;
     final settled = Completer<void>();
     void check() {
-      if (!busy() && !settled.isCompleted) settled.complete();
+      if (!turnRuns && !settled.isCompleted) settled.complete();
     }
 
     status.addListener(check);
@@ -737,7 +851,7 @@ class SessionState {
     try {
       await _backend.revertToTurn(turn.id, confirmation);
     } on Object catch (error) {
-      // The error says whether the files changed; the Diff tab shows them either way.
+      // The error says whether the files changed; the Diff panel shows them either way.
       final said = '$error';
       notify(
         BridgeLevel.error,
@@ -760,13 +874,15 @@ class SessionState {
 
   /// Shows the branch the session now continues.
   Future<void> _branched() async {
-    stored.value++;
     await loadChat();
   }
 
   /// Rebuilds the chat from the session's current branch, as the model sees it, and marks
   /// where it leaves the other branches. Items that arrive meanwhile stay after it.
-  Future<void> loadChat() => _chat.load();
+  Future<void> loadChat() async {
+    await _chat.load();
+    unawaited(readStatistics());
+  }
 
   /// Reads the stored entries before the earliest one the chat covers.
   Future<void> loadEarlier() => _chat.loadEarlier();
@@ -831,11 +947,53 @@ class SessionState {
     git.stop();
     _pulls?.dispose();
     // The bridge's stream finishes cancelling only with its next event, which an idle agent
-    // sends once it is shut down, so the agent stops first.
+    // sends once it is shut down, so the agent stops first. Nothing confirms events any more, so
+    // a count this large releases the window: the bridge's next send then finds the stream closed.
     final cancelled = _subscription.cancel();
+    unawaited(_backend.confirmApplied(_released).catchError((Object _) {}));
     await _backend.shutdown();
     await cancelled;
   }
+
+  /// A count no session reaches, which releases the bridge's window on dispose.
+  static const _released = 1 << 53;
+
+  /// Events applied so far, and the count Liquid last confirmed to the bridge.
+  int _applied = 0;
+  int _confirmed = 0;
+  bool _confirming = false;
+
+  /// Applies an event from the bridge, then confirms it (ADR-0272).
+  void _receive(BridgeEvent event) {
+    try {
+      _apply(event);
+    } finally {
+      // Counted even when applying throws, so the bridge gets the place back.
+      _applied++;
+      if (!_confirming) unawaited(_confirm());
+    }
+  }
+
+  /// Confirms what has been applied, one call at a time; a count that grows meanwhile goes in
+  /// the next call, so calls batch while the bridge answers slowly.
+  Future<void> _confirm() async {
+    _confirming = true;
+    try {
+      while (_confirmed < _applied) {
+        final applied = _applied;
+        await _backend.confirmApplied(applied);
+        _confirmed = applied;
+      }
+    } on Object {
+      // The session is gone, so nothing waits for the count.
+    } finally {
+      _confirming = false;
+    }
+  }
+
+  /// Whether a fell-behind event came during a running turn, whose end then reads the chat again,
+  /// because its finished items may not have been stored when the earlier read ran.
+  bool _readAgainAtEnd = false;
 
   void _apply(BridgeEvent event) {
     switch (event.kind) {
@@ -845,9 +1003,14 @@ class SessionState {
       case BridgeEventKind.turnCompleted || BridgeEventKind.turnAborted:
         _turnActive = false;
         _stopping = false;
-        stored.value++;
         unawaited(loadTitle());
-        unawaited(_endTurn(_chat.turnCompleted()));
+        final readAgain = _readAgainAtEnd;
+        _readAgainAtEnd = false;
+        unawaited(
+          _endTurn(_chat.turnCompleted(event.checkpoint)).then((_) {
+            if (readAgain) return loadChat();
+          }),
+        );
       case BridgeEventKind.itemStarted:
         final started = event.item!;
         final view = ItemView(
@@ -866,7 +1029,6 @@ class SessionState {
       case BridgeEventKind.itemUpdated:
         _byId[event.item!.id]?.text.value = event.text ?? '';
       case BridgeEventKind.itemCompleted:
-        stored.value++;
         final view = _byId[event.item!.id];
         if (view != null) {
           view
@@ -879,6 +1041,7 @@ class SessionState {
         }
       case BridgeEventKind.modelRequestCompleted:
         totals.value = totals.value.add(event.step!.usage);
+        unawaited(readStatistics());
         // A request Stop ended reports an abort, some providers as an error.
         if (event.step!.error case final error?
             when event.step!.stopReason != 'aborted' && !_stopping) {
@@ -915,7 +1078,17 @@ class SessionState {
         notify(event.display?.level ?? BridgeLevel.info, event.text ?? '');
       case BridgeEventKind.failed:
         _failed(event.text);
+      case BridgeEventKind.fellBehind:
+        // Partial output was dropped, so the chat is read back from the session file, which holds
+        // the finished items; a turn still running reads it again when it ends.
+        _readAgainAtEnd = _turnActive;
+        unawaited(loadChat());
       case BridgeEventKind.exited:
+        // A turn that ends with the agent has no end event to read the chat again at.
+        if (_readAgainAtEnd) {
+          _readAgainAtEnd = false;
+          unawaited(loadChat());
+        }
         // Nothing an exited agent started is still running.
         for (final view in _byId.values) {
           if (view.outcome.value == null &&
@@ -949,4 +1122,33 @@ class SessionState {
 String _firstLine(String message) {
   final line = message.trim().split('\n').first.trim();
   return String.fromCharCodes(line.runes.take(120));
+}
+
+/// Runs a read, and one more after each read asked for while one runs, so the reads of a kind
+/// never pile up. A read asked for meanwhile waits for the one in flight instead of queueing.
+class _ReadLoop {
+  _ReadLoop(this._read);
+
+  final Future<void> Function() _read;
+  Future<void>? _reading;
+  bool _again = false;
+
+  Future<void> call() {
+    if (_reading case final reading?) {
+      _again = true;
+      return reading;
+    }
+    return _reading = _loop();
+  }
+
+  Future<void> _loop() async {
+    try {
+      do {
+        _again = false;
+        await _read();
+      } while (_again);
+    } finally {
+      _reading = null;
+    }
+  }
 }

@@ -1,11 +1,11 @@
 use crate::{
-    EXECUTOR_FEATURE_SELF_PROTECTION_V0, EXECUTOR_PREFLIGHT_SCHEMA_V0, EXECUTOR_PROBE_SCHEMA_V0,
-    EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0, EXECUTOR_REQUEST_SCHEMA_V0, EXECUTOR_RESPONSE_SCHEMA_V0,
-    EXECUTOR_START_SCHEMA_V0, EnforcementReceiptV0, ExecutorErrorCodeV0, ExecutorLimitsV0,
-    ExecutorObjectKindV0, ExecutorPreflightV0, ExecutorProbeV0, ExecutorProtectedObjectV0,
-    ExecutorRequestV0, ExecutorResolvedPolicyV0, ExecutorResponseV0, ExecutorStartV0,
-    ExecutorToolClassificationV0, ExecutorToolResultV0, ExecutorToolStatusV0,
-    MAX_EXECUTOR_CONTROL_BYTES_V0, MAX_EXECUTOR_EXEC_VECTOR_BYTES_V0,
+    EXECUTOR_FEATURE_FLOW_OWNED_WRITE_PROTECTION_V0, EXECUTOR_PREFLIGHT_SCHEMA_V0,
+    EXECUTOR_PROBE_SCHEMA_V0, EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0, EXECUTOR_REQUEST_SCHEMA_V0,
+    EXECUTOR_RESPONSE_SCHEMA_V0, EXECUTOR_START_SCHEMA_V0, EnforcementReceiptV0,
+    ExecutorErrorCodeV0, ExecutorLimitsV0, ExecutorObjectKindV0, ExecutorPreflightV0,
+    ExecutorProbeV0, ExecutorProtectedObjectV0, ExecutorRequestV0, ExecutorResolvedPolicyV0,
+    ExecutorResponseV0, ExecutorStartV0, ExecutorToolClassificationV0, ExecutorToolResultV0,
+    ExecutorToolStatusV0, MAX_EXECUTOR_CONTROL_BYTES_V0, MAX_EXECUTOR_EXEC_VECTOR_BYTES_V0,
     MAX_EXECUTOR_EXEC_VECTOR_ENTRIES_V0, MAX_EXECUTOR_PROBE_BYTES_V0,
     MAX_EXECUTOR_PROTECTED_OBJECTS_V0, MAX_EXECUTOR_REQUEST_BYTES_V0,
     MAX_EXECUTOR_RESPONSE_BYTES_V0, MAX_EXECUTOR_TOOL_STREAM_BYTES_V0,
@@ -65,7 +65,7 @@ fn executor_request_binds_host_invocation_and_own_file_protection_once() {
     });
     let bytes = canonical_wire(&document);
     let request = parse_executor_request_v0(&bytes)
-        .expect("host invocation with mandatory own-file protection is supported");
+        .expect("host invocation with mandatory Flow-owned write protection is supported");
     assert_eq!(canonical_executor_request_v0(&request).unwrap(), bytes);
 
     for field in [
@@ -95,7 +95,7 @@ fn executor_request_binds_host_invocation_and_own_file_protection_once() {
 }
 
 #[test]
-fn executor_receipt_wire_attests_only_bound_self_protection() {
+fn executor_receipt_wire_attests_only_bound_flow_owned_write_protection() {
     let document = serde_json::json!({
         "applied_policy_digest": "a".repeat(64),
         "backend": "native-protection",
@@ -103,10 +103,10 @@ fn executor_receipt_wire_attests_only_bound_self_protection() {
         "executor": "flow-executor",
         "executor_version": "0.1.0",
         "platform": "test-platform",
-        "self_protection_active": true
+        "flow_owned_write_protection_active": true
     });
     let receipt: EnforcementReceiptV0 = serde_json::from_value(document.clone())
-        .expect("receipt requires only the bound self-protection evidence");
+        .expect("receipt requires only the bound Flow-owned write protection evidence");
     assert_eq!(serde_json::to_value(receipt).unwrap(), document);
     for (field, value) in [
         ("isolation_active", serde_json::json!(true)),
@@ -127,7 +127,7 @@ fn executor_receipt_wire_attests_only_bound_self_protection() {
     missing
         .as_object_mut()
         .unwrap()
-        .remove("self_protection_active");
+        .remove("flow_owned_write_protection_active");
     assert!(serde_json::from_value::<EnforcementReceiptV0>(missing).is_err());
 }
 
@@ -216,7 +216,7 @@ fn probe() -> ExecutorProbeV0 {
         protocol_versions: vec!["0".to_owned()],
         ready: true,
         schema: EXECUTOR_PROBE_SCHEMA_V0.to_owned(),
-        supported_policy_features: vec![EXECUTOR_FEATURE_SELF_PROTECTION_V0.to_owned()],
+        supported_policy_features: vec![EXECUTOR_FEATURE_FLOW_OWNED_WRITE_PROTECTION_V0.to_owned()],
     }
 }
 
@@ -227,7 +227,7 @@ fn receipt() -> EnforcementReceiptV0 {
         backend_version: "1".to_owned(),
         executor: "flow-executor".to_owned(),
         executor_version: "0.1.0".to_owned(),
-        self_protection_active: true,
+        flow_owned_write_protection_active: true,
         platform: "test-platform".to_owned(),
     }
 }
@@ -306,7 +306,7 @@ fn executor_generated_records_bind_normalized_ids_to_the_original_request() {
         (
             "response",
             canonical_executor_response_v0(&ExecutorResponseV0::Error {
-                code: ExecutorErrorCodeV0::SandboxSetupFailed,
+                code: ExecutorErrorCodeV0::FlowOwnedWriteProtectionSetupFailed,
                 message: "setup failed".to_owned(),
                 request_id,
                 schema: EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
@@ -321,6 +321,18 @@ fn executor_generated_records_bind_normalized_ids_to_the_original_request() {
 }
 
 #[test]
+fn non_nfc_request_id_is_refused_before_serialization() {
+    let mut request = request();
+    request.request_id = "e\u{301}".to_owned();
+    assert_eq!(
+        canonical_executor_request_v0(&request)
+            .unwrap_err()
+            .to_string(),
+        "Executor request_id must use NFC text"
+    );
+}
+
+#[test]
 fn executor_generated_diagnostics_enforce_the_normalized_character_bound() {
     for count in [4_000, 4_001] {
         let preflight = ExecutorPreflightV0::Error {
@@ -330,7 +342,7 @@ fn executor_generated_diagnostics_enforce_the_normalized_character_bound() {
             schema: EXECUTOR_PREFLIGHT_SCHEMA_V0.to_owned(),
         };
         let response = ExecutorResponseV0::Error {
-            code: ExecutorErrorCodeV0::SandboxSetupFailed,
+            code: ExecutorErrorCodeV0::FlowOwnedWriteProtectionSetupFailed,
             message: "e\u{301}".repeat(count),
             request_id: "request-1".to_owned(),
             schema: EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
@@ -432,11 +444,14 @@ fn executor_response_is_closed_and_bound_to_request_and_policy() {
     let ExecutorResponseV0::Completed { enforcement, .. } = &mut inactive else {
         unreachable!("fixture is a completed response");
     };
-    enforcement.self_protection_active = false;
+    enforcement.flow_owned_write_protection_active = false;
     let error =
         parse_executor_response_v0(&canonical_wire(&inactive), "run-1-tool-1", &"a".repeat(64))
             .unwrap_err();
-    assert_eq!(error.to_string(), "Executor self-protection was not active");
+    assert_eq!(
+        error.to_string(),
+        "Executor did not confirm Flow-owned write protection"
+    );
 
     let mut unknown = serde_json::to_value(&response).expect("response serializes");
     unknown
@@ -477,7 +492,7 @@ fn executor_wire_framing_matrix_is_platform_neutral() {
         "outcome": "error",
         "schema": EXECUTOR_RESPONSE_SCHEMA_V0,
         "request_id": "request-1",
-        "code": ExecutorErrorCodeV0::SandboxSetupFailed,
+        "code": ExecutorErrorCodeV0::FlowOwnedWriteProtectionSetupFailed,
         "message": "unsupported capability"
     });
     let canonical = crate::canonical_json(&response).unwrap();
@@ -570,34 +585,24 @@ fn executor_request_preserves_literal_argument_strings() {
     assert_eq!(parse_executor_request_v0(&bytes).unwrap(), request);
 }
 
-fn assert_normalized_environment_bound(field: &str, limit: usize) {
+fn assert_environment_bound(field: &str, limit: usize) {
     for suffix in ["", "x"] {
-        let expanding = format!("{}{suffix}", "\u{344}".repeat(limit / 2));
+        let text = format!("{}{suffix}", "x".repeat(limit));
         let mut candidate = request();
         candidate.resolved_policy.environment = BTreeMap::from([if field == "name" {
-            (expanding, "value".to_owned())
+            (text, "value".to_owned())
         } else {
-            ("X".to_owned(), expanding)
+            ("X".to_owned(), text)
         }]);
         refresh_policy_digest(&mut candidate);
         let result = canonical_executor_request_v0(&candidate);
         if suffix.is_empty() {
-            let bytes = result.expect("the exact normalized bound is valid");
+            let bytes = result.expect("the exact environment bound is valid");
             assert_eq!(bytes, canonical_wire(&candidate));
-            let parsed = parse_executor_request_v0(&bytes).expect("generated request is valid");
-            let (name, value) = parsed
-                .resolved_policy
-                .environment
-                .first_key_value()
-                .unwrap();
-            assert_eq!(
-                if field == "name" { name } else { value }.chars().count(),
-                limit
-            );
         } else {
             assert_eq!(
                 result
-                    .expect_err("one normalized scalar over the bound must be rejected")
+                    .expect_err("one scalar over the bound must be rejected")
                     .to_string(),
                 format!("Executor environment {field} is invalid")
             );
@@ -606,13 +611,52 @@ fn assert_normalized_environment_bound(field: &str, limit: usize) {
 }
 
 #[test]
-fn executor_request_enforces_normalized_environment_name_bound() {
-    assert_normalized_environment_bound("name", 256);
+fn executor_request_enforces_environment_name_bound() {
+    assert_environment_bound("name", 256);
 }
 
 #[test]
-fn executor_request_enforces_normalized_environment_value_bound() {
-    assert_normalized_environment_bound("value", 4_096);
+fn executor_request_enforces_environment_value_bound() {
+    assert_environment_bound("value", 4_096);
+}
+
+#[test]
+fn executor_request_refuses_non_nfc_arguments_and_environment_without_converting() {
+    type Mutation = fn(&mut ExecutorResolvedPolicyV0);
+    let cases: &[(&str, Mutation, &str)] = &[
+        (
+            "argument",
+            |policy| policy.argv = vec!["e\u{301}".to_owned()],
+            "Executor argv must use NFC text",
+        ),
+        (
+            "environment name",
+            |policy| {
+                policy
+                    .environment
+                    .insert("e\u{301}".to_owned(), "value".to_owned());
+            },
+            "Executor environment name must use NFC text",
+        ),
+        (
+            "environment value",
+            |policy| {
+                policy
+                    .environment
+                    .insert("LANG".to_owned(), "e\u{301}".to_owned());
+            },
+            "Executor environment value must use NFC text",
+        ),
+    ];
+
+    for &(name, mutate, expected) in cases {
+        let mut candidate = request();
+        mutate(&mut candidate.resolved_policy);
+        refresh_policy_digest(&mut candidate);
+        let error = canonical_executor_request_v0(&candidate)
+            .expect_err(&format!("accepted request with non-NFC {name}"));
+        assert_eq!(error.to_string(), expected, "{name}");
+    }
 }
 
 #[test]
@@ -1048,14 +1092,14 @@ fn executor_request_rejects_legacy_and_duplicate_security_fields() {
 }
 
 #[test]
-fn executor_receipt_proves_requested_policy_and_active_self_protection() {
+fn executor_receipt_proves_requested_policy_and_active_flow_owned_write_protection() {
     let valid = receipt();
     validate_enforcement_receipt_v0(&valid, &"a".repeat(64)).expect("matching active receipt");
 
     let mut cases = Vec::new();
     let mut candidate = valid.clone();
-    candidate.self_protection_active = false;
-    cases.push(("inactive self-protection", candidate));
+    candidate.flow_owned_write_protection_active = false;
+    cases.push(("inactive Flow-owned write protection", candidate));
     let mut candidate = valid.clone();
     candidate.applied_policy_digest = "b".repeat(64);
     cases.push(("wrong policy", candidate));
@@ -1077,7 +1121,7 @@ fn executor_receipt_proves_requested_policy_and_active_self_protection() {
 #[test]
 fn executor_setup_error_is_terminal_without_a_policy_receipt() {
     let response = ExecutorResponseV0::Error {
-        code: ExecutorErrorCodeV0::SandboxSetupFailed,
+        code: ExecutorErrorCodeV0::FlowOwnedWriteProtectionSetupFailed,
         message: "sandbox setup failed".to_owned(),
         request_id: "request-1".to_owned(),
         schema: EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
@@ -1149,7 +1193,7 @@ fn executor_paths_are_canonical_object_identities() {
 #[test]
 fn executor_probe_round_trips_readiness_and_features() {
     assert_eq!(
-        EXECUTOR_FEATURE_SELF_PROTECTION_V0,
+        EXECUTOR_FEATURE_FLOW_OWNED_WRITE_PROTECTION_V0,
         "flow-owned-write-protection"
     );
     for ready in [false, true] {

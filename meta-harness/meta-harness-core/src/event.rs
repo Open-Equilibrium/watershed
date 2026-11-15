@@ -56,6 +56,20 @@ pub struct Usage {
     pub cost_micro_usd: u64,
 }
 
+/// What each kind of a request's tokens cost, in millionths of a US dollar. The kinds add up to
+/// the request's cost within rounding.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CostByKind {
+    /// Input tokens.
+    pub input: u64,
+    /// Output tokens.
+    pub output: u64,
+    /// Input tokens read from the provider's cache.
+    pub cache_read: u64,
+    /// Input tokens written to the provider's cache.
+    pub cache_write: u64,
+}
+
 /// The lines a file change added and removed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChangedLines {
@@ -91,14 +105,6 @@ pub struct TreeNode {
     pub parent: Option<String>,
     /// What the entry holds.
     pub kind: EntryKind,
-    /// A one-line preview of its text or tool.
-    pub preview: String,
-    /// The branch label set on this entry.
-    pub label: Option<String>,
-    /// Unix milliseconds when the entry was stored, if known.
-    pub at_ms: Option<u64>,
-    /// Whether a tool call or model response failed.
-    pub failed: bool,
 }
 
 /// A session's entries as a tree, in append order.
@@ -190,11 +196,15 @@ pub enum AgentEvent {
     TurnCompleted {
         /// The turn.
         turn: TurnId,
+        /// The turn's checkpoint id, which names its end checkpoint; absent when it requested none.
+        checkpoint: Option<String>,
     },
     /// A turn ended because it was aborted.
     TurnAborted {
         /// The turn.
         turn: TurnId,
+        /// The turn's checkpoint id, which names its end checkpoint; absent when it requested none.
+        checkpoint: Option<String>,
     },
     /// An item started.
     ItemStarted {

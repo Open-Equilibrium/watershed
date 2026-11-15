@@ -1,5 +1,7 @@
 use crate::runtime::{
-    fs_guards::AnchoredDir, productive::SystemProductiveToolExecutor, tool_runner::ToolInvocation,
+    fs_guards::AnchoredDir,
+    productive::{ProductiveToolExecutor, ProductiveToolPreflight, SystemProductiveToolExecutor},
+    tool_runner::ToolInvocation,
 };
 use crate::{
     runtime::{
@@ -70,9 +72,10 @@ fn cancellation_after_tool_started_settles_without_dispatch() {
     assert_eq!(
         attempts.durable_outputs[1],
         Some(serde_json::json!({
-            "schema": "flow-attempt-cancelled-v0",
+            "schema": "flow-attempt-cancelled-v1",
+            "stage": "started",
         })),
-        "pre-Start cancellation remains reconstructable after a recovery write failure"
+        "a cancellation after tool.started stays reconstructable with its stage"
     );
     assert_controlled_cancellation_lifecycle(&sink.events);
 }
@@ -108,6 +111,13 @@ fn cancellation_during_executor_preflight_settles_the_tool_attempt() {
     assert_eq!(attempts.results.len(), 2);
     assert_eq!(attempts.results[1].0, RunAttemptKind::Tool);
     assert_eq!(attempts.results[1].2, CANCELLED_REASON);
+    assert_eq!(
+        attempts.durable_outputs[1],
+        Some(serde_json::json!({
+            "schema": "flow-attempt-cancelled-v1",
+            "stage": "preflight",
+        })),
+    );
     assert!(
         !sink
             .0
@@ -275,6 +285,61 @@ fn tool_cancellation_persists_cancelled_attempt_and_lifecycle() {
 }
 
 #[test]
+fn system_productive_tool_executor_runs_the_command_only_at_start() {
+    let (workspace, fixture) = smoke_productive_execution_fixture();
+    let execution = fixture.execution(fixture.smoke_flow(), "system-tool-lifecycle");
+    let command_policy = execution
+        .policy
+        .commands
+        .first()
+        .expect("smoke command policy");
+    let marker = workspace.as_ref().join("system-tool-marker");
+    let invocation = ToolInvocation {
+        executable: proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0.to_owned(),
+        argv: vec![
+            "-c".to_owned(),
+            "touch \"$1\"".to_owned(),
+            "flow-tool:marker".to_owned(),
+            marker.display().to_string(),
+        ],
+    };
+    let prepare = |executor: &mut SystemProductiveToolExecutor| {
+        executor
+            .prepare(
+                &invocation,
+                execution.workspace,
+                execution.policy,
+                command_policy,
+                "request-system-tool-lifecycle",
+            )
+            .expect("Tool prepares")
+    };
+    let mut executor = SystemProductiveToolExecutor;
+
+    let abandoned = prepare(&mut executor);
+    assert!(!marker.exists(), "prepare must not run the Tool");
+    let ProductiveToolPreflight::Ready(waiting) = executor
+        .preflight(abandoned)
+        .expect("preflight accepts the Tool")
+    else {
+        panic!("preflight rejected the Tool");
+    };
+    assert!(!marker.exists(), "preflight must not run the Tool");
+    drop(waiting);
+    assert!(!marker.exists(), "an abandoned Tool must not run");
+
+    let prepared = prepare(&mut executor);
+    let ProductiveToolPreflight::Ready(waiting) = executor
+        .preflight(prepared)
+        .expect("preflight accepts the Tool")
+    else {
+        panic!("preflight rejected the Tool");
+    };
+    executor.start(waiting).expect("Tool starts");
+    assert!(marker.exists(), "start runs the Tool");
+}
+
+#[test]
 fn system_productive_tool_executor_observes_process_cancellation() {
     const CHILD_ENV: &str = "WATERSHED_PRODUCTIVE_TOOL_CANCELLATION_CHILD";
     if run_isolated_test(CHILD_ENV) {
@@ -282,12 +347,26 @@ fn system_productive_tool_executor_observes_process_cancellation() {
     }
 
     crate::begin_productive_operation().expect("productive operation begins");
-    let cancellation = std::thread::spawn(|| {
-        std::thread::sleep(Duration::from_millis(50));
-        assert_eq!(
-            crate::request_productive_interrupt(),
-            crate::ProductiveInterruptAction::Cancel
-        );
+    let root = crate::tests::empty_workspace();
+    let started_marker = root.join("cancellation-started");
+    let pid_marker = root.join("cancellation-pid");
+    let cancellation = std::thread::spawn({
+        let started_marker = started_marker.clone();
+        move || {
+            // The interrupt must land while the Tool runs, so wait for its marker first.
+            let started = std::time::Instant::now();
+            while !started_marker.exists() {
+                assert!(
+                    started.elapsed() < Duration::from_secs(5),
+                    "the Tool never started"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(
+                crate::request_productive_interrupt(),
+                crate::ProductiveInterruptAction::Cancel
+            );
+        }
     });
     let mut executor = SystemProductiveToolExecutor;
     let workspace = AnchoredDir::workspace(Path::new(".")).expect("workspace anchors");
@@ -297,8 +376,11 @@ fn system_productive_tool_executor_observes_process_cancellation() {
                 executable: proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0.to_owned(),
                 argv: vec![
                     "-c".to_owned(),
-                    "/bin/sleep 5".to_owned(),
+                    // The shell records its pid, then becomes the sleep, so the pid is the sleep's.
+                    "echo $$ > \"$2\"; touch \"$1\"; exec /bin/sleep 5".to_owned(),
                     "flow-tool:cancellation".to_owned(),
+                    started_marker.display().to_string(),
+                    pid_marker.display().to_string(),
                 ],
             },
             &workspace,
@@ -314,4 +396,22 @@ fn system_productive_tool_executor_observes_process_cancellation() {
         Some(ToolTerminalClassification::Cancelled)
     );
     assert_eq!(outcome.exit_code, None);
+
+    // The report alone is not proof: the Tool's own process must end, within a bound.
+    let pid = rustix::process::Pid::from_raw(
+        std::fs::read_to_string(&pid_marker)
+            .expect("Tool records its pid before it runs")
+            .trim()
+            .parse()
+            .expect("recorded pid is an integer"),
+    )
+    .expect("recorded pid is positive");
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while rustix::process::test_kill_process(pid).is_ok() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "cancelled Tool process is still running"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }

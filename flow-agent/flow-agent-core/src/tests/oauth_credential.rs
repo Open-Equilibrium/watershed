@@ -57,6 +57,35 @@ fn credential_record_validation_is_bounded() {
 }
 
 #[test]
+fn credential_record_debug_never_prints_tokens_or_account() {
+    let credential = CredentialRecord {
+        credential_type: "oauth".to_owned(),
+        access: "access-secret-fixture".to_owned(),
+        refresh: "refresh-secret-fixture".to_owned(),
+        expires: 1,
+        account_id: "account-secret-fixture".to_owned(),
+        is_fedramp: false,
+    };
+    let debug = format!("{credential:?}");
+    for secret in [
+        "access-secret-fixture",
+        "refresh-secret-fixture",
+        "account-secret-fixture",
+    ] {
+        assert!(!debug.contains(secret), "{debug}");
+    }
+}
+
+#[test]
+fn account_routing_debug_never_prints_the_account() {
+    let routing = account_routing_from_id_token(&jwt_with_account("account-secret-fixture"))
+        .expect("account routing parses");
+    let debug = format!("{routing:?}");
+    assert!(!debug.contains("account-secret-fixture"), "{debug}");
+    assert!(debug.contains("<redacted>"), "{debug}");
+}
+
+#[test]
 fn account_routing_defaults_to_standard_and_preserves_fedramp() {
     for (claim, expected) in [(None, false), (Some(false), false), (Some(true), true)] {
         let routing = account_routing_from_id_token(&jwt_with_account_routing("account", claim))
@@ -105,4 +134,35 @@ fn base64url_decoder_accepts_canonical_chunk_shapes() {
         base64url_decode("-A").expect("URL-safe dash decodes"),
         [248]
     );
+}
+
+#[test]
+fn header_bound_credential_fields_accept_only_visible_ascii() {
+    let credential = CredentialRecord {
+        credential_type: "oauth".to_owned(),
+        access: "access".to_owned(),
+        refresh: "refresh".to_owned(),
+        expires: 1,
+        account_id: "account".to_owned(),
+        is_fedramp: false,
+    };
+    validate_credential_record(&credential).expect("valid credential record");
+
+    // reqwest refuses these header values when a request is built, after the attempt is recorded.
+    for invalid in [
+        CredentialRecord {
+            account_id: "account\nx".to_owned(),
+            ..credential.clone()
+        },
+        CredentialRecord {
+            access: "access x".to_owned(),
+            ..credential.clone()
+        },
+        CredentialRecord {
+            access: "access\u{e9}".to_owned(),
+            ..credential.clone()
+        },
+    ] {
+        assert!(validate_credential_record(&invalid).is_err(), "{invalid:?}");
+    }
 }

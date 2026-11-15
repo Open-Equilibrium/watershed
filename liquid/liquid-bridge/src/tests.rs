@@ -3,25 +3,27 @@ mod workspace;
 
 use meta_harness_core::{
     AgentCommand, AgentEvent, ChangedLines, CommandError, ItemDetail, ItemId, ItemKind, ItemStatus,
-    RequestId, SessionEvent, TurnId, Usage, UserInput,
+    NotificationLevel, RequestId, SessionEvent, StoredSession, TurnId, Usage, UserInput,
 };
 
 use crate::api::events::{
     BridgeChangeStatus, BridgeEvent, BridgeEventKind, BridgeFileChange, BridgeItemKind,
-    BridgeQuestionKind, BridgeQueue,
+    BridgeQuestionKind, BridgeQueue, BridgeUsage,
 };
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use crate::api::history::{
-    BridgeChangesState, BridgeEntryKind, BridgeRecordKind, BridgeRevertConfirmation,
-    BridgeRevertFile, BridgeRunningAgent, BridgeTurn, BridgeTurnChanges,
+    BridgeChangesState, BridgeContext, BridgeCostByKind, BridgeEntryKind, BridgeModelUsage,
+    BridgeRevertConfirmation, BridgeRevertFile, BridgeRunningAgent, BridgeStatistics,
+    BridgeToolCalls, BridgeTurn, BridgeTurnChanges, BridgeTurnStatistics,
 };
 use crate::api::session::{
     AgentSession, BridgeCheckpointSession, BridgeModel, BridgeStoredSession, SessionConfig,
 };
 use crate::convert::describe;
-use crate::stream::{forward, gather, push};
+use crate::stream::{Credit, Outbox, WINDOW, forward, gather, push};
 
 /// The extension path the fake agents are started with.
 const EXTENSION: &str = "/w/meta-harness/pi-extension/watershed.ts";
@@ -45,8 +47,26 @@ fn gated(script: &str) -> String {
     format!("{}{script}", gate(1))
 }
 
+/// Points the per-user lock folder at a test home, so no test writes into the real one. The test
+/// runner gives each test process its own (`WATERSHED_TEST_USER_HOME`); without it, a folder per
+/// process in the temporary folder. Each test runs in its own process under nextest.
+fn isolate_user_home() {
+    let home = std::env::var_os("WATERSHED_TEST_USER_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::temp_dir().join(format!("watershed-bridge-test-home-{}", std::process::id()))
+        });
+    std::fs::create_dir_all(&home).expect("test user home");
+    unsafe {
+        std::env::set_var("HOME", home);
+        std::env::remove_var("XDG_RUNTIME_DIR");
+        std::env::remove_var("XDG_CONFIG_HOME");
+    }
+}
+
 /// Starts a scripted stand-in for pi in `cwd`; `sh` takes pi's arguments as `$0` and `$@`.
 fn launch(script: String, cwd: String) -> Result<AgentSession, String> {
+    isolate_user_home();
     AgentSession::launch(AgentCommand {
         program: "/bin/sh".into(),
         args: vec!["-c".into(), script.into()],
@@ -66,6 +86,7 @@ fn no_session_file(id: u32) -> String {
 /// Runs an async call as flutter_rust_bridge does: on a runtime of its own, apart from the
 /// bridge's.
 fn call<F: std::future::Future>(call: F) -> F::Output {
+    isolate_user_home();
     tokio::runtime::Runtime::new()
         .expect("runtime starts")
         .block_on(call)
@@ -151,6 +172,26 @@ fn model_requests_carry_usage_and_how_they_ended() {
         (6140, 820, 214)
     );
     assert_eq!(step.usage.cost_micro_usd, 23457);
+}
+
+#[test]
+fn turn_ends_carry_their_checkpoint_id_to_dart() {
+    let ended = bridge(AgentEvent::TurnCompleted {
+        turn: TurnId(1),
+        checkpoint: Some("T1".to_owned()),
+    });
+    let aborted = bridge(AgentEvent::TurnAborted {
+        turn: TurnId(2),
+        checkpoint: None,
+    });
+    assert_eq!(
+        (ended.kind, ended.checkpoint.as_deref()),
+        (BridgeEventKind::TurnCompleted, Some("T1"))
+    );
+    assert_eq!(
+        (aborted.kind, aborted.checkpoint),
+        (BridgeEventKind::TurnAborted, None)
+    );
 }
 
 #[test]
@@ -256,6 +297,45 @@ IFS= read -r line || exit 0"#;
         session.send("again".to_owned(), false),
         Err("the session was shut down".to_owned())
     );
+}
+
+#[test]
+fn dropping_a_session_releases_its_stream_when_liquid_confirms_nothing() {
+    // Two events per turn, more than the window, so the stream waits for Liquid.
+    let turns = WINDOW;
+    let script = gated(&format!(
+        "for turn in $(seq 1 {turns}); do printf '%s\\n' '{{\"type\":\"agent_start\"}}' '{{\"type\":\"agent_settled\",\"aborted\":false}}'; done\nIFS= read -r line || exit 0"
+    ));
+    let session = launch(script, std::env::temp_dir().display().to_string()).expect("agent starts");
+    let delivered = Arc::new(AtomicUsize::new(0));
+    let probe = Arc::new(());
+    let (counter, held) = (delivered.clone(), probe.clone());
+    session
+        .forward(move |_event| {
+            let _held = &held;
+            counter.fetch_add(1, Ordering::SeqCst);
+            true
+        })
+        .expect("first subscriber");
+    let wait_until = |condition: &dyn Fn() -> bool| {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !condition() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the condition is reached"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+    wait_until(&|| delivered.load(Ordering::SeqCst) == WINDOW);
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(
+        delivered.load(Ordering::SeqCst),
+        WINDOW,
+        "the window holds until Liquid confirms"
+    );
+    drop(session);
+    wait_until(&|| Arc::strong_count(&probe) == 1);
 }
 
 #[test]
@@ -455,6 +535,18 @@ fn starts_and_resumes_sessions_and_picks_models() {
     assert!(call(session.shutdown()));
 }
 
+#[cfg(unix)]
+#[test]
+fn a_session_path_that_is_not_utf8_is_not_listed() {
+    use std::os::unix::ffi::OsStrExt;
+    let stored = StoredSession {
+        path: std::ffi::OsStr::from_bytes(b"/s/session-\xff.jsonl").into(),
+        title: "Fix login".to_owned(),
+        modified_ms: 1_000_000,
+    };
+    assert_eq!(BridgeStoredSession::try_from(stored).ok(), None);
+}
+
 #[test]
 fn answers_a_question_the_agent_asks_while_selecting_a_model() {
     // pi runs extensions' model selection handlers before it answers, and they may ask first.
@@ -541,12 +633,14 @@ fn gathers_streaming_text_until_its_window_passes() {
             tokio::task::yield_now().await;
             sender.send(delta("late")).await.expect("sent");
         });
-        let mut batch = vec![BridgeEvent::from(delta("0"))];
-        gather(&mut batch, &mut receiver, async {
+        let mut outbox = Outbox::default();
+        outbox.admit(BridgeEvent::from(delta("0")));
+        gather(&mut outbox, &mut receiver, async {
             let _ = window.await;
         })
         .await;
-        let text: Vec<_> = batch
+        let text: Vec<_> = outbox
+            .pending
             .iter()
             .filter_map(|event| event.text.as_deref())
             .collect();
@@ -556,7 +650,7 @@ fn gathers_streaming_text_until_its_window_passes() {
             "everything until the window passed"
         );
         assert_eq!(
-            batch.len(),
+            outbox.pending.len(),
             1,
             "deltas merge as they arrive, so the batch stays small"
         );
@@ -568,12 +662,14 @@ fn gathers_streaming_text_until_its_window_passes() {
         sender
             .send(SessionEvent::Agent(AgentEvent::TurnCompleted {
                 turn: TurnId(1),
+                checkpoint: None,
             }))
             .await
             .expect("sent");
-        let mut batch = vec![BridgeEvent::from(delta("0"))];
-        gather(&mut batch, &mut receiver, std::future::pending()).await;
-        assert_eq!(batch.len(), 2);
+        let mut outbox = Outbox::default();
+        outbox.admit(BridgeEvent::from(delta("0")));
+        gather(&mut outbox, &mut receiver, std::future::pending()).await;
+        assert_eq!(outbox.pending.len(), 2);
     });
 }
 
@@ -595,11 +691,16 @@ fn forwards_streaming_text_once_its_window_passed() {
             let (events, receiver) = tokio::sync::mpsc::channel(16);
             let (delivered, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
             let start = tokio::time::Instant::now();
-            tokio::spawn(forward(Vec::new(), receiver, move |event| {
-                delivered
-                    .send((start.elapsed(), event.kind, event.text))
-                    .is_ok()
-            }));
+            tokio::spawn(forward(
+                Vec::new(),
+                receiver,
+                Arc::default(),
+                move |event| {
+                    delivered
+                        .send((start.elapsed(), event.kind, event.text))
+                        .is_ok()
+                },
+            ));
             let streamed =
                 |at, text: &str| Some((at, BridgeEventKind::ContentDelta, Some(text.to_owned())));
             events.send(delta("Hel")).await.expect("sent");
@@ -609,7 +710,10 @@ fn forwards_streaming_text_once_its_window_passed() {
             // Anything else ends the window at once, with the text before it.
             tokio::time::sleep(ms(10)).await;
             events.send(delta("!")).await.expect("sent");
-            let completed = AgentEvent::TurnCompleted { turn: TurnId(1) };
+            let completed = AgentEvent::TurnCompleted {
+                turn: TurnId(1),
+                checkpoint: None,
+            };
             events
                 .send(SessionEvent::Agent(completed))
                 .await
@@ -635,7 +739,10 @@ fn merges_consecutive_deltas_of_one_item() {
         delta(1, "He"),
         delta(1, "llo"),
         delta(2, "Hi"),
-        bridge(AgentEvent::TurnCompleted { turn: TurnId(1) }),
+        bridge(AgentEvent::TurnCompleted {
+            turn: TurnId(1),
+            checkpoint: None,
+        }),
         delta(2, "!"),
     ] {
         push(&mut merged, event);
@@ -667,6 +774,443 @@ fn merges_consecutive_deltas_of_one_item() {
             (BridgeEventKind::ContentDelta, Some(2), Some("!".to_owned())),
         ]
     );
+}
+
+#[test]
+fn keeps_only_the_latest_partial_output_of_adjacent_updates() {
+    let output = |item: u64, text: &str| {
+        bridge(AgentEvent::ItemUpdated {
+            item: ItemId(item),
+            output: text.to_owned(),
+        })
+    };
+    let mut merged = Vec::new();
+    for event in [
+        output(1, "a"),
+        output(1, "ab"),
+        output(2, "x"),
+        output(1, "abc"),
+        bridge(AgentEvent::TurnCompleted {
+            turn: TurnId(1),
+            checkpoint: None,
+        }),
+        output(1, "b"),
+    ] {
+        push(&mut merged, event);
+    }
+    let summary: Vec<_> = merged
+        .iter()
+        .map(|event| {
+            (
+                event.kind,
+                event.item.as_ref().map(|item| item.id),
+                event.text.clone(),
+            )
+        })
+        .collect();
+    // Each update carries the whole output so far, so an adjacent one replaces the last; an
+    // update after another item or event keeps its place in the order.
+    assert_eq!(
+        summary,
+        [
+            (BridgeEventKind::ItemUpdated, Some(1), Some("ab".to_owned())),
+            (BridgeEventKind::ItemUpdated, Some(2), Some("x".to_owned())),
+            (
+                BridgeEventKind::ItemUpdated,
+                Some(1),
+                Some("abc".to_owned())
+            ),
+            (BridgeEventKind::TurnCompleted, None, None),
+            (BridgeEventKind::ItemUpdated, Some(1), Some("b".to_owned())),
+        ]
+    );
+}
+
+#[test]
+fn forwards_partial_output_once_its_window_passed() {
+    let output = |text: &str| {
+        SessionEvent::Agent(AgentEvent::ItemUpdated {
+            item: ItemId(1),
+            output: text.to_owned(),
+        })
+    };
+    let ms = Duration::from_millis;
+    tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .start_paused(true)
+        .build()
+        .expect("runtime starts")
+        .block_on(async {
+            let (events, receiver) = tokio::sync::mpsc::channel(16);
+            let (delivered, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
+            let start = tokio::time::Instant::now();
+            tokio::spawn(forward(
+                Vec::new(),
+                receiver,
+                Arc::default(),
+                move |event| {
+                    delivered
+                        .send((start.elapsed(), event.kind, event.text))
+                        .is_ok()
+                },
+            ));
+            // Two updates within one window reach Dart as the latest output only.
+            events.send(output("a")).await.expect("sent");
+            tokio::time::sleep(ms(30)).await;
+            events.send(output("ab")).await.expect("sent");
+            assert_eq!(
+                deliveries.recv().await,
+                Some((ms(50), BridgeEventKind::ItemUpdated, Some("ab".to_owned())))
+            );
+            // Anything else ends the window at once, after the output before it.
+            tokio::time::sleep(ms(10)).await;
+            events.send(output("b")).await.expect("sent");
+            events
+                .send(SessionEvent::Agent(AgentEvent::TurnCompleted {
+                    turn: TurnId(1),
+                    checkpoint: None,
+                }))
+                .await
+                .expect("sent");
+            assert_eq!(
+                deliveries.recv().await,
+                Some((ms(60), BridgeEventKind::ItemUpdated, Some("b".to_owned())))
+            );
+            assert_eq!(
+                deliveries.recv().await,
+                Some((ms(60), BridgeEventKind::TurnCompleted, None))
+            );
+        });
+}
+
+/// A session event that starts item `item`, which no later event merges with.
+fn started(item: u64) -> SessionEvent {
+    SessionEvent::Agent(AgentEvent::ItemStarted {
+        turn: TurnId(1),
+        item: ItemId(item),
+        kind: ItemKind::CommandExecution,
+        detail: ItemDetail::None,
+    })
+}
+
+/// A session event that finishes item `item` with `text`.
+fn finished(item: u64, text: &str) -> SessionEvent {
+    SessionEvent::Agent(AgentEvent::ItemCompleted {
+        turn: TurnId(1),
+        item: ItemId(item),
+        kind: ItemKind::CommandExecution,
+        text: text.to_owned(),
+        status: ItemStatus::Completed,
+        duration_ms: None,
+        lines: None,
+    })
+}
+
+/// A session event that appends `delta` to item `item`.
+fn delta(item: u64, delta: &str) -> SessionEvent {
+    SessionEvent::Agent(AgentEvent::ContentDelta {
+        item: ItemId(item),
+        delta: delta.to_owned(),
+    })
+}
+
+/// Starts forwarding a session's events under `credit`; the events are sent in, and what the
+/// sink receives comes out.
+fn start_forwarding(
+    credit: Arc<Credit>,
+) -> (
+    tokio::sync::mpsc::Sender<SessionEvent>,
+    tokio::sync::mpsc::UnboundedReceiver<BridgeEvent>,
+) {
+    let (events, receiver) = tokio::sync::mpsc::channel(4096);
+    let (delivered, deliveries) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(forward(Vec::new(), receiver, credit, move |event| {
+        delivered.send(event).is_ok()
+    }));
+    (events, deliveries)
+}
+
+/// What the sink received since the last call, in order.
+fn taken(deliveries: &mut tokio::sync::mpsc::UnboundedReceiver<BridgeEvent>) -> Vec<BridgeEvent> {
+    std::iter::from_fn(|| deliveries.try_recv().ok()).collect()
+}
+
+/// Lets the forwarder run until it waits for an event or for Liquid, past any gathering window.
+async fn settle() {
+    tokio::time::sleep(Duration::from_millis(100)).await;
+}
+
+fn paused_runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .start_paused(true)
+        .build()
+        .expect("runtime starts")
+}
+
+#[test]
+fn holds_events_beyond_the_window_until_liquid_confirms() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let (events, mut deliveries) = start_forwarding(credit.clone());
+        for item in 1..=WINDOW as u64 + 44 {
+            events.send(started(item)).await.expect("sent");
+        }
+        settle().await;
+        assert_eq!(
+            taken(&mut deliveries).len(),
+            WINDOW,
+            "the sink never holds more than the window unconfirmed"
+        );
+        credit.confirm(WINDOW as u64);
+        settle().await;
+        assert_eq!(
+            taken(&mut deliveries).len(),
+            44,
+            "a confirmation reopens the window for what waits"
+        );
+    });
+}
+
+#[test]
+fn closing_a_full_window_releases_the_forwarder() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let (events, receiver) = tokio::sync::mpsc::channel(4096);
+        let (delivered, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
+        let forwarding = tokio::spawn(forward(
+            Vec::new(),
+            receiver,
+            credit.clone(),
+            move |event| delivered.send(event).is_ok(),
+        ));
+        for item in 1..=WINDOW as u64 + 44 {
+            events.send(started(item)).await.expect("sent");
+        }
+        settle().await;
+        assert_eq!(taken(&mut deliveries).len(), WINDOW);
+        // Closing confirms everything Liquid applied, then ends the session.
+        credit.confirm(1 << 53);
+        drop(events);
+        tokio::time::timeout(Duration::from_secs(1), forwarding)
+            .await
+            .expect("forward returns once the window is confirmed and the session ended")
+            .expect("forward completes");
+        assert_eq!(taken(&mut deliveries).len(), 44);
+    });
+}
+
+#[test]
+fn closing_the_credit_releases_a_forwarder_that_waits_on_a_dropped_session() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let probe = Arc::new(());
+        let held = probe.clone();
+        let (events, receiver) = tokio::sync::mpsc::channel(4096);
+        let forwarding = tokio::spawn(forward(
+            Vec::new(),
+            receiver,
+            credit.clone(),
+            move |_event| {
+                let _held = &held;
+                true
+            },
+        ));
+        for item in 1..=WINDOW as u64 + 1 {
+            events.send(started(item)).await.expect("sent");
+        }
+        settle().await;
+        // Liquid confirms nothing, so the one event past the window waits; the session ends
+        // and dropping it closes the credit.
+        drop(events);
+        credit.close();
+        tokio::time::timeout(Duration::from_secs(1), forwarding)
+            .await
+            .expect("forward returns once the session ended and its credit closed")
+            .expect("forward completes");
+        assert_eq!(
+            Arc::strong_count(&probe),
+            1,
+            "the forwarder released its sink and its pending events"
+        );
+    });
+}
+
+#[test]
+fn falling_behind_keeps_finished_items_and_sends_one_fell_behind_event() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let (events, mut deliveries) = start_forwarding(credit.clone());
+        for item in 1..=WINDOW as u64 {
+            events.send(started(item)).await.expect("sent");
+        }
+        // Liquid applies nothing: finished items queue, then more partial output than the bound
+        // allows, and events after that overflow come behind it.
+        for item in 1000..1100 {
+            events.send(finished(item, "done")).await.expect("sent");
+        }
+        for item in 3000..3200 {
+            events.send(delta(item, "partial")).await.expect("sent");
+        }
+        for item in 5000..5010 {
+            events.send(started(item)).await.expect("sent");
+        }
+        settle().await;
+        assert_eq!(taken(&mut deliveries).len(), WINDOW);
+        credit.confirm(WINDOW as u64);
+        settle().await;
+        let sent: Vec<_> = taken(&mut deliveries)
+            .iter()
+            .map(|event| (event.kind, event.item.as_ref().map(|item| item.id)))
+            .collect();
+        let finished_items =
+            (1000i64..1100).map(|item| (BridgeEventKind::ItemCompleted, Some(item)));
+        // The partial output queued before the overflow is gone; what came after the fell-behind
+        // event is live and stays.
+        let live_after = (3157i64..3200).map(|item| (BridgeEventKind::ContentDelta, Some(item)));
+        let started_after = (5000i64..5010).map(|item| (BridgeEventKind::ItemStarted, Some(item)));
+        let expected: Vec<_> = finished_items
+            .chain([(BridgeEventKind::FellBehind, None)])
+            .chain(live_after)
+            .chain(started_after)
+            .collect();
+        assert_eq!(
+            sent, expected,
+            "the finished items stay in order, one fell-behind event follows the partial output that went, and what comes after is live"
+        );
+    });
+}
+
+#[test]
+fn an_overflow_keeps_the_exit_last() {
+    let mut outbox = Outbox::default();
+    outbox.admit(BridgeEvent::from(delta(1, "partial")));
+    let note = || {
+        SessionEvent::Agent(AgentEvent::Notification {
+            level: NotificationLevel::Info,
+            message: "note".to_owned(),
+        })
+    };
+    for _ in 0..255 {
+        outbox.admit(BridgeEvent::from(note()));
+    }
+    outbox.admit(BridgeEvent::from(SessionEvent::Exited {
+        success: true,
+        error_output: String::new(),
+    }));
+    let kinds: Vec<_> = outbox.pending.iter().map(|event| event.kind).collect();
+    assert_eq!(
+        kinds.last(),
+        Some(&BridgeEventKind::Exited),
+        "the exit ends the stream even when the overflow comes with it"
+    );
+    assert_eq!(
+        kinds.get(kinds.len() - 2),
+        Some(&BridgeEventKind::FellBehind)
+    );
+}
+
+#[test]
+fn events_other_than_partial_output_wait_for_liquid_and_are_never_dropped() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let (events, mut deliveries) = start_forwarding(credit.clone());
+        for item in 1..=1000 {
+            events.send(started(item)).await.expect("sent");
+        }
+        settle().await;
+        let mut delivered = taken(&mut deliveries);
+        for applied in [256u64, 512, 768] {
+            credit.confirm(applied);
+            settle().await;
+            delivered.extend(taken(&mut deliveries));
+        }
+        let items: Vec<_> = delivered
+            .iter()
+            .map(|event| (event.kind, event.item.as_ref().map(|item| item.id)))
+            .collect();
+        let expected: Vec<_> = (1..=1000i64)
+            .map(|item| (BridgeEventKind::ItemStarted, Some(item)))
+            .collect();
+        assert_eq!(
+            items, expected,
+            "a queue past its bound waits for confirmations, in order, and drops nothing"
+        );
+    });
+}
+
+#[test]
+fn a_second_overflow_while_the_fell_behind_event_waits_adds_no_second_one() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let (events, mut deliveries) = start_forwarding(credit.clone());
+        for item in 1..=WINDOW as u64 {
+            events.send(started(item)).await.expect("sent");
+        }
+        // Two overflows before Liquid confirms anything.
+        for item in 3000..3700 {
+            events.send(delta(item, "partial")).await.expect("sent");
+        }
+        settle().await;
+        let mut delivered = taken(&mut deliveries);
+        for applied in [512u64, 768, 1024, 1280] {
+            credit.confirm(applied);
+            settle().await;
+            delivered.extend(taken(&mut deliveries));
+        }
+        let fell_behind = delivered
+            .iter()
+            .filter(|event| event.kind == BridgeEventKind::FellBehind)
+            .count();
+        assert_eq!(fell_behind, 1, "one fell-behind event per stall");
+    });
+}
+
+#[test]
+fn merges_text_and_partial_output_while_the_window_is_full() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let (events, mut deliveries) = start_forwarding(credit.clone());
+        for item in 1..=WINDOW as u64 {
+            events.send(started(item)).await.expect("sent");
+        }
+        settle().await;
+        assert_eq!(taken(&mut deliveries).len(), WINDOW);
+        events.send(delta(1, "He")).await.expect("sent");
+        events.send(delta(1, "llo")).await.expect("sent");
+        events
+            .send(SessionEvent::Agent(AgentEvent::ItemUpdated {
+                item: ItemId(2),
+                output: "a".to_owned(),
+            }))
+            .await
+            .expect("sent");
+        events
+            .send(SessionEvent::Agent(AgentEvent::ItemUpdated {
+                item: ItemId(2),
+                output: "ab".to_owned(),
+            }))
+            .await
+            .expect("sent");
+        events.send(delta(1, "!")).await.expect("sent");
+        settle().await;
+        assert!(taken(&mut deliveries).is_empty(), "the window is full");
+        credit.confirm(WINDOW as u64);
+        settle().await;
+        let texts: Vec<_> = taken(&mut deliveries)
+            .into_iter()
+            .map(|event| (event.kind, event.text))
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                (BridgeEventKind::ContentDelta, Some("Hello".to_owned())),
+                (BridgeEventKind::ItemUpdated, Some("ab".to_owned())),
+                (BridgeEventKind::ContentDelta, Some("!".to_owned())),
+            ],
+            "deltas concatenate and the latest partial output wins, in order"
+        );
+    });
 }
 
 /// A new Git repository with `a.txt` committed as `old`.
@@ -766,9 +1310,16 @@ fn diffs_each_turn_between_its_checkpoints() {
         "touch .git/checkpointed\n".to_owned(),
         no_session_file(2),
         entries(3, TURN),
-        entries(4, ""),
-        entries(5, ""),
+        no_session_file(4),
+        no_session_file(5),
         entries(6, ""),
+        no_session_file(7),
+        no_session_file(8),
+        entries(9, ""),
+        no_session_file(10),
+        no_session_file(11),
+        entries(12, ""),
+        no_session_file(13),
         "IFS= read -r line || exit 0".to_owned(),
     ]
     .concat();
@@ -838,18 +1389,25 @@ fn reverts_a_turns_files_and_continues_from_before_its_prompt() {
         "touch .git/checkpointed\n".to_owned(),
         no_session_file(2),
         entries(3, TURN),
-        // The plan looks for pi's session directory to name the other agent's session.
         no_session_file(4),
-        entries(5, ""),
-        entries(6, ""),
-        gate(7),
+        // The plan looks for pi's session directory to name the other agent's session.
+        no_session_file(5),
+        no_session_file(6),
+        entries(7, ""),
+        no_session_file(8),
+        no_session_file(9),
+        entries(10, ""),
+        no_session_file(11),
+        gate(12),
         r#"IFS= read -r line
 case "$line" in *'"message":"/watershed-branch u1"'*) ;; *) exit 9 ;; esac
-printf '%s\n' '{"id":"8","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
+printf '%s\n' '{"id":"13","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
 "#
         .to_owned(),
         // pi now continues before the turn's prompt.
-        entries_at(9, "", "c1"),
+        no_session_file(14),
+        entries_at(15, "", "c1"),
+        no_session_file(16),
         "IFS= read -r line || exit 0".to_owned(),
     ]
     .concat();
@@ -920,13 +1478,16 @@ fn says_when_pi_handled_the_branch_but_stayed_on_the_turn() {
         "touch .git/checkpointed\n".to_owned(),
         no_session_file(2),
         entries(3, TURN),
-        gate(4),
+        no_session_file(4),
+        gate(5),
         // An extension cancelled the navigation; pi still reports the command handled.
         r#"IFS= read -r line
-printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
+printf '%s\n' '{"id":"6","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
 "#
         .to_owned(),
-        entries(6, ""),
+        no_session_file(7),
+        entries(8, ""),
+        no_session_file(9),
         "IFS= read -r line || exit 0".to_owned(),
     ]
     .concat();
@@ -955,6 +1516,7 @@ fn refuses_a_revert_once_the_files_left_the_confirmed_plan() {
         "touch .git/checkpointed\n".to_owned(),
         no_session_file(2),
         entries(3, TURN),
+        no_session_file(4),
         "IFS= read -r line || exit 0".to_owned(),
     ]
     .concat();
@@ -990,7 +1552,8 @@ fn a_prompt_waits_until_the_revert_moved_the_session() {
         "touch .git/checkpointed\n".to_owned(),
         no_session_file(2),
         entries(3, TURN),
-        gate(4),
+        no_session_file(4),
+        gate(5),
         // An extension asks before the move; the next line must be its answer, not a prompt.
         r#"IFS= read -r line
 case "$line" in *'"type":"prompt"'*) ;; *) exit 9 ;; esac
@@ -998,14 +1561,16 @@ printf '%s\n' '{"type":"extension_ui_request","id":"x1","method":"confirm","titl
 touch .git/asked
 IFS= read -r line
 case "$line" in *'"id":"x1"'*) ;; *) exit 9 ;; esac
-printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":true}'
+printf '%s\n' '{"id":"6","type":"response","command":"prompt","success":true}'
 "#
         .to_owned(),
-        entries_at(6, "", "c1"),
-        gate(7),
+        no_session_file(7),
+        entries_at(8, "", "c1"),
+        no_session_file(9),
+        gate(10),
         r#"IFS= read -r line
 case "$line" in *'"message":"next"'*) ;; *) exit 9 ;; esac
-printf '%s\n' '{"id":"8","type":"response","command":"prompt","success":true}'
+printf '%s\n' '{"id":"11","type":"response","command":"prompt","success":true}'
 IFS= read -r line || exit 0"#
             .to_owned(),
     ]
@@ -1043,9 +1608,10 @@ fn says_when_the_files_were_reverted_but_the_session_did_not_branch() {
         "touch .git/checkpointed\n".to_owned(),
         no_session_file(2),
         entries(3, TURN),
-        gate(4),
+        no_session_file(4),
+        gate(5),
         r#"IFS= read -r line
-printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":false,"error":"Agent is busy"}'
+printf '%s\n' '{"id":"6","type":"response","command":"prompt","success":false,"error":"Agent is busy"}'
 IFS= read -r line || exit 0"#
             .to_owned(),
     ]
@@ -1135,6 +1701,8 @@ fn deletes_a_stored_session_with_its_checkpoints_and_removes_all_checkpoints() {
             .expect("captured");
         }
     }
+    // The window that took these checkpoints moved on, as a switch or a new session does.
+    call(checkpoints.show_session(None)).expect("moved on");
     let script = [
         (2..=10).map(|id| state_with(id, &current)).collect(),
         "IFS= read -r line || exit 0".to_owned(),
@@ -1202,6 +1770,47 @@ fn deletes_a_stored_session_with_its_checkpoints_and_removes_all_checkpoints() {
 }
 
 #[test]
+fn a_session_a_window_shows_is_not_deleted_by_another_window() {
+    isolate_user_home();
+    let repo = repository("shown");
+    let sessions = repo.join(".git/pi-sessions");
+    std::fs::create_dir_all(&sessions).expect("sessions");
+    let header = |id: &str| {
+        format!(
+            r#"{{"type":"session","version":3,"id":"{id}","cwd":"{}"}}"#,
+            repo.display()
+        ) + "\n"
+    };
+    let current = sessions.join("current.jsonl");
+    let old = sessions.join("old.jsonl");
+    std::fs::write(&current, header("s1")).expect("current");
+    std::fs::write(&old, header("s9")).expect("old");
+    // This window resumes `old`, so it shows that session.
+    let window = AgentSession::launch(AgentCommand {
+        program: "/bin/sh".into(),
+        args: vec!["-c".into(), gated("IFS= read -r line || exit 0").into()],
+        extension: EXTENSION.into(),
+        session: Some(old.clone()),
+        cwd: repo.clone(),
+    })
+    .expect("agent starts");
+    let script = [
+        state_with(2, &current),
+        state_with(3, &current),
+        "IFS= read -r line || exit 0".to_owned(),
+    ]
+    .concat();
+    let other = launch(gated(&script), repo.display().to_string()).expect("agent starts");
+    assert!(other.delete_session(old.display().to_string()).is_err());
+    assert!(old.exists(), "kept while another window shows it");
+    assert!(call(window.shutdown()));
+    assert_eq!(other.delete_session(old.display().to_string()), Ok(()));
+    assert!(!old.exists());
+    assert!(call(other.shutdown()));
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
 fn deletes_a_session_of_a_project_outside_git() {
     let dir = std::env::temp_dir().join(format!(
         "liquid-bridge-delete-no-git-{}",
@@ -1246,7 +1855,10 @@ fn a_project_outside_git_has_no_checkpoints_and_says_so() {
         "touch checkpointed\n".to_owned(),
         no_session_file(2),
         entries(3, TURN),
-        entries(4, ""),
+        no_session_file(4),
+        no_session_file(5),
+        entries(6, ""),
+        no_session_file(7),
         "IFS= read -r line || exit 0".to_owned(),
     ]
     .concat();
@@ -1289,7 +1901,7 @@ IFS= read -r line || exit 0"#;
 }
 
 #[test]
-fn reads_the_history_of_each_branch_and_branches_from_a_step() {
+fn reads_the_history_of_the_branch_and_branches_from_a_step() {
     // A session forked after its first response: `e2` ends the original branch, `b1` the fork.
     let entries = r#"{"entries":[{"type":"message","id":"e1","parentId":null,"timestamp":"2026-10-24T10:00:00.000Z","message":{"role":"user","content":"Add rate limiting"}},{"type":"message","id":"e2","parentId":"e1","timestamp":"2026-10-24T10:00:02.000Z","message":{"role":"assistant","model":"faux-1","usage":{"input":10,"output":2,"cost":{"total":0.001}},"content":[{"type":"text","text":"Done."}]}},{"type":"message","id":"b1","parentId":"e1","timestamp":"2026-10-24T10:01:00.000Z","message":{"role":"user","content":"Use a token bucket"}}],"leafId":"b1"}"#;
     let respond = |id: &str| {
@@ -1300,16 +1912,19 @@ fn reads_the_history_of_each_branch_and_branches_from_a_step() {
     let script = [
         no_session_file(2),
         respond("3"),
+        no_session_file(4),
+        no_session_file(5),
         // The second read continues after the last entry; nothing was added.
         r#"IFS= read -r line
 case "$line" in *'"since":"b1"'*) ;; *) exit 9 ;; esac
-printf '%s\n' '{"id":"4","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":"b1"}}'
+printf '%s\n' '{"id":"6","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":"b1"}}'
 "#
         .to_owned(),
-        gate(5),
+        no_session_file(7),
+        gate(8),
         r#"IFS= read -r line
 case "$line" in *'"message":"/watershed-branch e1"'*) ;; *) exit 9 ;; esac
-printf '%s\n' '{"id":"6","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
+printf '%s\n' '{"id":"9","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
 IFS= read -r line || exit 0"#
             .to_owned(),
     ]
@@ -1317,7 +1932,7 @@ IFS= read -r line || exit 0"#
     let session =
         launch(gated(&script), std::env::temp_dir().display().to_string()).expect("agent starts");
 
-    let current = session.history(Vec::new()).expect("history");
+    let current = session.history().expect("history");
     assert_eq!(
         (
             current.usage.input,
@@ -1331,131 +1946,137 @@ IFS= read -r line || exit 0"#
     let nodes: Vec<_> = current
         .tree
         .iter()
-        .map(|node| {
-            (
-                node.id.as_str(),
-                node.parent.as_deref(),
-                node.kind,
-                node.at_ms,
-            )
-        })
+        .map(|node| (node.id.as_str(), node.parent.as_deref(), node.kind))
         .collect();
     assert_eq!(
         nodes,
         [
-            ("e1", None, BridgeEntryKind::User, Some(1_792_836_000_000)),
-            (
-                "e2",
-                Some("e1"),
-                BridgeEntryKind::Assistant,
-                Some(1_792_836_002_000)
-            ),
-            (
-                "b1",
-                Some("e1"),
-                BridgeEntryKind::User,
-                Some(1_792_836_060_000)
-            ),
+            ("e1", None, BridgeEntryKind::User),
+            ("e2", Some("e1"), BridgeEntryKind::Assistant),
+            ("b1", Some("e1"), BridgeEntryKind::User),
         ]
     );
-    let steps =
-        |history: &crate::api::history::BridgeHistory| -> Vec<Vec<(BridgeRecordKind, String)>> {
-            history
-                .trajectories
-                .iter()
-                .map(|trajectory| {
-                    trajectory
-                        .records
-                        .iter()
-                        .map(|record| (record.kind, record.label.clone()))
-                        .collect()
-                })
-                .collect()
-        };
-    assert_eq!(
-        steps(&current),
-        [vec![
-            (BridgeRecordKind::User, "Add rate limiting".to_owned()),
-            (BridgeRecordKind::User, "Use a token bucket".to_owned()),
-        ]]
-    );
-
-    let both = session
-        .history(vec!["e2".to_owned(), "b1".to_owned()])
-        .expect("history");
-    assert_eq!(
-        steps(&both)[0][1],
-        (BridgeRecordKind::Message, "Done.".to_owned())
-    );
-    assert_eq!(both.trajectories[0].duration_ms, 2000);
-    let response = &both.trajectories[0].records[1];
-    assert_eq!(
-        (
-            response.duration_ms,
-            response.usage.map(|usage| usage.cost_micro_usd)
-        ),
-        (None, Some(1000))
-    );
-    assert_eq!(steps(&both)[1], steps(&current)[0]);
+    // The second read continues after the last entry and adds nothing.
+    let again = session.history().expect("history");
+    assert_eq!((again.leaf.as_deref(), again.tree.len()), (Some("b1"), 3));
 
     assert_eq!(session.branch("e1".to_owned()), Ok(()));
     assert!(call(session.shutdown()));
 }
 
 #[test]
-fn reads_tool_outcomes_and_what_the_model_saw() {
+fn reads_what_a_write_changed_in_the_chat() {
     let entries = r#"{"entries":[{"type":"message","id":"s1","parentId":null,"message":{"role":"system","content":"","sections":{"preamble":"You are pi."},"toolsAdded":[{"name":"write"}]}},{"type":"message","id":"u1","parentId":"s1","message":{"role":"user","content":"Write it"}},{"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"write","arguments":{"path":"a.ts","content":"x\ny\n"}}]}},{"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"c1","toolName":"write","content":[{"type":"text","text":"ok"}]}},{"type":"message","id":"a2","parentId":"r1","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}],"leafId":"a2"}"#;
     let script = no_session_file(2)
         + &format!(
-            "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"3\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{entries}}}'\nIFS= read -r line\nprintf '%s\\n' '{{\"id\":\"4\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[],\"leafId\":\"a2\"}}}}'\nIFS= read -r line || exit 0"
-        );
+            "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"3\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{entries}}}'\n"
+        )
+        + &no_session_file(4)
+        + &no_session_file(5)
+        + "IFS= read -r line\nprintf '%s\\n' '{\"id\":\"6\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{\"entries\":[],\"leafId\":\"a2\"}}'\n"
+        + &no_session_file(7)
+        + "IFS= read -r line || exit 0";
     let session =
         launch(gated(&script), std::env::temp_dir().display().to_string()).expect("agent starts");
-    let history = session.history(Vec::new()).expect("history");
-    let records = &history.trajectories[0].records;
-    assert_eq!(records[2].kind, BridgeRecordKind::Tool);
-    assert_eq!(records[2].outcome.added, Some(2), "lines the write wrote");
-    let result = history.tree.iter().find(|node| node.id == "r1");
+    let history = session.history().expect("history");
     assert_eq!(
-        result.map(|node| (node.preview.as_str(), node.failed)),
-        Some(("write a.ts", false)),
-        "the tree names what the write wrote to"
+        history.leaf.as_deref(),
+        Some("a2"),
+        "the chat ends at the last answer"
     );
-    assert_eq!(
-        records
-            .iter()
-            .map(|record| record.added_chars)
-            .collect::<Vec<_>>(),
-        [8, 34, 2, 5],
-        "what the prompt, the call, the result and the answer add to the context"
-    );
-    let context = records[3].context.as_ref().expect("a2 saw context");
-    assert_eq!(
-        (
-            context.prompt_chars,
-            context.sections.clone(),
-            context.tool_chars > 0,
-            context.messages
+    let chat = session.transcript(None, 50).expect("transcript");
+    let write = chat
+        .items
+        .iter()
+        .find(|item| item.tool.as_deref() == Some("write"))
+        .expect("the write");
+    assert_eq!(write.added, Some(2), "lines the write wrote");
+    assert!(call(session.shutdown()));
+}
+
+#[test]
+fn reads_statistics_and_the_context_window_for_liquid() {
+    let entries = r#"{"type":"custom","id":"k1","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T1","phase":"start"}},{"type":"message","id":"u1","parentId":"k1","timestamp":"2026-11-01T10:00:00.100Z","message":{"role":"user","content":"Fix login"}},{"type":"custom","id":"t1","parentId":"u1","timestamp":"2026-11-01T10:00:00.200Z","customType":"watershed.timing","data":{"kind":"request","durationMs":1500}},{"type":"message","id":"a1","parentId":"t1","timestamp":"2026-11-01T10:00:02.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[{"type":"toolCall","id":"c1","name":"edit","arguments":{}}],"usage":{"input":10,"output":4,"cacheRead":2,"cost":{"input":0.2,"output":0.25,"cacheRead":0.05,"total":0.5}}}},{"type":"custom","id":"t2","parentId":"a1","timestamp":"2026-11-01T10:00:02.500Z","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"c1","durationMs":700}},{"type":"message","id":"r1","parentId":"t2","timestamp":"2026-11-01T10:00:03.000Z","message":{"role":"toolResult","toolCallId":"c1","toolName":"edit","isError":true,"content":[]}},{"type":"custom","id":"k2","parentId":"r1","timestamp":"2026-11-01T10:00:04.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T1","phase":"end","files":0,"added":0,"removed":0}}"#;
+    let answer = |id: u32, command: &str, data: &str| {
+        let answer = format!(
+            r#"{{"id":"{id}","type":"response","command":"{command}","success":true,"data":{data}}}"#
+        );
+        format!(
+            "IFS= read -r line\ncase \"$line\" in *'\"type\":\"{command}\"'*) ;; *) exit 9 ;; esac\nprintf '%s\\n' {}\n",
+            shell_word(&answer)
+        )
+    };
+    let script = [
+        no_session_file(2),
+        entries_at(3, entries, "k2"),
+        no_session_file(4),
+        answer(
+            5,
+            "get_session_stats",
+            r#"{"contextUsage":{"tokens":4321,"contextWindow":200000,"percent":2}}"#,
         ),
-        (11, vec!["preamble".to_owned()], true, 3)
-    );
-    let detail = session
-        .context("a2".to_owned())
-        .expect("context")
-        .expect("a2 is a response");
+        answer(
+            6,
+            "get_state",
+            r#"{"model":{"provider":"faux","id":"faux-1"},"autoCompactionEnabled":true}"#,
+        ),
+        "IFS= read -r line || exit 0".to_owned(),
+    ]
+    .concat();
+    let session =
+        launch(gated(&script), std::env::temp_dir().display().to_string()).expect("agent starts");
+    let model = BridgeModelUsage {
+        model: "faux/faux-1".to_owned(),
+        usage: BridgeUsage {
+            input: 10,
+            output: 4,
+            cache_read: 2,
+            cost_micro_usd: 500_000,
+            ..BridgeUsage::default()
+        },
+        cost_by_kind: BridgeCostByKind {
+            input: 200_000,
+            output: 250_000,
+            cache_read: 50_000,
+            cache_write: 0,
+        },
+        responses: 1,
+        unpriced: 0,
+    };
     assert_eq!(
-        detail
-            .messages
-            .iter()
-            .map(|message| (message.label.as_str(), message.fresh))
-            .collect::<Vec<_>>(),
-        [
-            ("prompt · Write it", false),
-            ("response · (tool calls)", false),
-            ("result of write · a.ts", true),
-        ]
+        session.statistics(),
+        Ok(BridgeStatistics {
+            models: vec![model.clone()],
+            tools: vec![BridgeToolCalls {
+                name: "edit".to_owned(),
+                succeeded: 0,
+                failed: 1,
+                cancelled: 0,
+                open: 0,
+                duration_ms: Some(700),
+            }],
+            turns: vec![BridgeTurnStatistics {
+                entry: "u1".to_owned(),
+                prompt: "Fix login".to_owned(),
+                started_ms: Some(1_793_527_200_000),
+                ended_ms: Some(1_793_527_204_000),
+                models: vec![model],
+                model_ms: Some(1_500),
+                tool_ms: Some(700),
+                failed: 1,
+            }],
+            started_ms: Some(1_793_527_200_000),
+            ended_ms: Some(1_793_527_204_000),
+        })
     );
-    assert_eq!(detail.tools[0].name, "write");
+    assert_eq!(
+        session.context(),
+        Ok(Some(BridgeContext {
+            tokens: Some(4_321),
+            window: 200_000,
+            compacts_at: Some(183_616),
+        }))
+    );
     assert!(call(session.shutdown()));
 }
 
@@ -1464,8 +2085,10 @@ fn rebuilds_the_chat_of_the_current_branch() {
     let entries = r#"{"entries":[{"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Fix it"}},{"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"text","text":"Editing."},{"type":"toolCall","id":"c1","name":"edit","arguments":{"path":"a.ts"}}]}},{"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"c1","toolName":"edit","content":[]}}],"leafId":"r1"}"#;
     let script = no_session_file(2)
         + &format!(
-            "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"3\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{entries}}}'\nIFS= read -r line || exit 0"
-        );
+            "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"3\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{entries}}}'\n"
+        )
+        + &no_session_file(4)
+        + "IFS= read -r line || exit 0";
     let session =
         launch(gated(&script), std::env::temp_dir().display().to_string()).expect("agent starts");
     let transcript = session.transcript(None, 50).expect("transcript");
@@ -1575,9 +2198,17 @@ fn starts_after_an_agent_says_much_before_it_is_ready() {
     session
         .forward(move |event| sender.send(event).is_ok())
         .expect("first subscriber");
-    let last = std::iter::from_fn(|| receiver.recv_timeout(Duration::from_secs(5)).ok())
-        .find(|event| event.text.as_deref() == Some("299"));
-    assert!(last.is_some(), "every early event reaches Dart");
+    // The consumer confirms each event it applied, as Liquid does; the window waits otherwise.
+    let mut applied = 0;
+    let statuses = std::iter::from_fn(|| receiver.recv_timeout(Duration::from_secs(5)).ok())
+        .inspect(|_| {
+            applied += 1;
+            session.confirm_applied(applied);
+        })
+        .take(300)
+        .filter(|event| event.kind == BridgeEventKind::StatusChanged)
+        .count();
+    assert_eq!(statuses, 300, "every early event reaches Dart");
     assert!(call(session.shutdown()));
 }
 
@@ -1625,8 +2256,13 @@ fn commit_bridge_exposes_attribution_whole_files_and_safe_notices() {
         "touch .git/ready\n".to_owned(),
         no_session_file(2),
         entries(3, TURN),
-        entries(4, TURN),
-        entries(5, TURN),
+        no_session_file(4),
+        no_session_file(5),
+        entries(6, TURN),
+        no_session_file(7),
+        no_session_file(8),
+        entries(9, TURN),
+        no_session_file(10),
         "IFS= read -r line || exit 0".to_owned(),
     ]
     .concat();
@@ -1849,7 +2485,7 @@ fn git_transfer_bridge_confirms_push_tracks_and_pulls() {
     std::fs::write(other.join("a.txt"), "remote change\n").unwrap();
     git(&other, &["commit", "-am", "Remote"]);
     git(&other, &["push"]);
-    assert!(session.fetch().unwrap());
+    assert_eq!(session.fetch().unwrap().as_deref(), Some("origin"));
     assert_eq!(session.git_status().unwrap().unwrap().behind, 1);
     assert_eq!(
         session.push(None).unwrap().kind,
@@ -1919,6 +2555,41 @@ fn initialize_bridge_exposes_the_new_repository_without_backfilled_checkpoints()
 }
 
 #[test]
+fn create_bridge_reports_the_branch_it_created_the_branch_from() {
+    use crate::api::git::BridgeGitOutcomeKind;
+    use std::os::unix::fs::PermissionsExt;
+    for (name, hook) in [
+        ("create-done", None),
+        ("create-hook", Some("post-checkout")),
+    ] {
+        let repo = repository(name);
+        git(&repo, &["branch", "-M", "main"]);
+        if let Some(hook) = hook {
+            let path = repo.join(".git/hooks").join(hook);
+            std::fs::write(&path, "#!/bin/sh\nexit 1\n").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let session = launch(
+            gated("IFS= read -r line || exit 0"),
+            repo.display().to_string(),
+        )
+        .unwrap();
+        let created = session.create_branch("feat".into()).unwrap();
+        let expected = if hook.is_some() {
+            BridgeGitOutcomeKind::HookFailed
+        } else {
+            BridgeGitOutcomeKind::Done
+        };
+        assert_eq!(created.kind, expected);
+        assert_eq!(created.created_from.as_deref(), Some("main"));
+        let status = session.git_status().unwrap().unwrap();
+        assert_eq!(status.branch.as_deref(), Some("feat"));
+        assert!(call(session.shutdown()));
+        let _ = std::fs::remove_dir_all(repo);
+    }
+}
+
+#[test]
 fn commit_bridge_names_the_created_branch_when_either_hook_refuses() {
     use crate::api::git::BridgeGitOutcomeKind;
     use std::os::unix::fs::PermissionsExt;
@@ -1934,6 +2605,7 @@ fn commit_bridge_names_the_created_branch_when_either_hook_refuses() {
         let script = [
             no_session_file(2),
             entries(3, ""),
+            no_session_file(4),
             "IFS= read -r line || exit 0".to_owned(),
         ]
         .concat();
@@ -1967,6 +2639,61 @@ fn commit_bridge_names_the_created_branch_when_either_hook_refuses() {
 }
 
 #[test]
+fn commit_bridge_reports_the_branch_a_new_branch_was_created_from() {
+    use crate::api::git::BridgeGitOutcomeKind;
+    use std::os::unix::fs::PermissionsExt;
+    for hook_name in [None, Some("pre-commit"), Some("post-checkout")] {
+        let repo = repository(&format!(
+            "commit-created-from-{}",
+            hook_name.unwrap_or("clean")
+        ));
+        git(&repo, &["branch", "-M", "main"]);
+        git(&repo, &["config", "user.name", "Test"]);
+        git(&repo, &["config", "user.email", "test@example.com"]);
+        git(&repo, &["config", "commit.gpgsign", "false"]);
+        git(&repo, &["branch", "other"]);
+        std::fs::write(repo.join("a.txt"), "changed\n").unwrap();
+        let script = [
+            no_session_file(2),
+            entries(3, ""),
+            no_session_file(4),
+            "IFS= read -r line || exit 0".to_owned(),
+        ]
+        .concat();
+        let session = launch(gated(&script), repo.display().to_string()).unwrap();
+        let plan = session.commit_plan().unwrap();
+        // Git moves HEAD to `other` at the same commit after the plan was read.
+        git(&repo, &["switch", "-q", "other"]);
+        if let Some(hook) = hook_name {
+            let path = repo.join(".git/hooks").join(hook);
+            std::fs::write(&path, "#!/bin/sh\nexit 1\n").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let result = session
+            .commit_files(
+                plan.snapshot,
+                vec!["a.txt".into()],
+                "Subject".into(),
+                Some("feat".into()),
+            )
+            .unwrap();
+        let expected = if hook_name.is_some() {
+            BridgeGitOutcomeKind::CommitBranchFailed
+        } else {
+            BridgeGitOutcomeKind::Done
+        };
+        assert_eq!(result.kind, expected, "{hook_name:?}");
+        assert_eq!(
+            result.created_from.as_deref(),
+            Some("other"),
+            "{hook_name:?}"
+        );
+        assert!(call(session.shutdown()));
+        let _ = std::fs::remove_dir_all(repo);
+    }
+}
+
+#[test]
 fn a_committed_bridge_outcome_survives_failed_inspection() {
     use crate::api::git::BridgeGitOutcomeKind;
     use std::os::unix::fs::PermissionsExt;
@@ -1981,6 +2708,7 @@ fn a_committed_bridge_outcome_survives_failed_inspection() {
     let script = [
         no_session_file(2),
         entries(3, TURN),
+        no_session_file(4),
         "IFS= read -r line || exit 0".into(),
     ]
     .concat();
@@ -2176,4 +2904,179 @@ fn a_reviewed_worktree_is_removed_as_the_user_saw_it() {
     assert!(!linked.exists());
     assert!(call(session.shutdown()));
     let _ = std::fs::remove_dir_all(repo);
+}
+
+#[test]
+fn exports_a_sessions_record_as_a_new_folder_in_downloads_and_never_overwrites() {
+    isolate_user_home();
+    let repo = repository("export");
+    let sessions = repo.join(".git/pi-sessions");
+    std::fs::create_dir_all(&sessions).expect("sessions");
+    let header = |id: &str| {
+        format!(
+            r#"{{"type":"session","version":3,"id":"{id}","cwd":"{}"}}"#,
+            repo.display()
+        )
+    };
+    let current = sessions.join("current.jsonl");
+    std::fs::write(&current, header("s1") + "\n").expect("current");
+    let old = sessions.join("old.jsonl");
+    std::fs::write(
+        &old,
+        header("s9")
+            + "\n"
+            + r#"{"type":"custom","id":"c1","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z","customType":"watershed.checkpoint","data":{"session":"s9","turn":"T1","phase":"start"}}"#
+            + "\n"
+            + r#"{"type":"message","id":"u1","parentId":"c1","timestamp":"2026-11-01T10:00:00.100Z","message":{"role":"user","content":"edit"}}"#
+            + "\n"
+            + r#"{"type":"custom","id":"c2","parentId":"u1","timestamp":"2026-11-01T10:00:05.000Z","customType":"watershed.checkpoint","data":{"session":"s9","turn":"T1","phase":"end","files":1,"added":1,"removed":1}}"#
+            + "\n",
+    )
+    .expect("old");
+    let checkpoints = meta_harness_core::Checkpoints::new(&repo);
+    call(checkpoints.capture(&meta_harness_core::Checkpoint {
+        session: "s9".to_owned(),
+        turn: "T1".to_owned(),
+        phase: meta_harness_core::Phase::Start,
+    }))
+    .expect("start captured");
+    std::fs::write(repo.join("a.txt"), "new\n").expect("edit");
+    call(checkpoints.capture(&meta_harness_core::Checkpoint {
+        session: "s9".to_owned(),
+        turn: "T1".to_owned(),
+        phase: meta_harness_core::Phase::End,
+    }))
+    .expect("end captured");
+    call(checkpoints.close());
+    let script = [
+        (2..=4).map(|id| state_with(id, &current)).collect(),
+        "IFS= read -r line || exit 0".to_owned(),
+    ]
+    .concat();
+    let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
+    let downloads =
+        std::env::temp_dir().join(format!("liquid-bridge-downloads-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&downloads);
+    std::fs::create_dir_all(&downloads).expect("downloads");
+    let export = |session: &AgentSession| {
+        session.export_into(
+            &downloads,
+            &old.display().to_string(),
+            "Rate limit for /login",
+            "test-host",
+            "2026-11-11",
+        )
+    };
+    let folder = export(&session).expect("exported");
+    assert_eq!(
+        folder,
+        downloads.join("Rate limit for login – record 2026-11-11")
+    );
+    assert_eq!(
+        std::fs::read(folder.join("session.jsonl")).expect("session copy"),
+        std::fs::read(&old).expect("session file"),
+        "pi's file is copied byte for byte"
+    );
+    let record = std::fs::read_to_string(folder.join("record.json")).expect("record");
+    assert!(record.contains("\"turn\": \"T1\"") && record.contains("\"path\": \"a.txt\""));
+    assert!(folder.join("README.txt").is_file());
+    // Another export never takes an existing folder's name.
+    assert_eq!(
+        export(&session).expect("second export"),
+        downloads.join("Rate limit for login – record 2026-11-11 2")
+    );
+    assert_eq!(
+        export(&session).expect("third export"),
+        downloads.join("Rate limit for login – record 2026-11-11 3")
+    );
+    let names = std::fs::read_dir(&downloads).expect("listed").count();
+    assert_eq!(names, 3, "nothing but the three folders");
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(&downloads);
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn a_failed_export_leaves_no_folder_behind() {
+    let downloads =
+        std::env::temp_dir().join(format!("liquid-bridge-failed-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&downloads);
+    std::fs::create_dir_all(&downloads).expect("downloads");
+    let failed = crate::api::record::write_folder(&downloads, "Broken", |folder| {
+        std::fs::write(folder.join("session.jsonl"), "partial").expect("partial copy");
+        Err("disk full".to_owned())
+    });
+    assert_eq!(failed, Err("disk full".to_owned()));
+    assert_eq!(
+        std::fs::read_dir(&downloads).expect("listed").count(),
+        0,
+        "neither the folder nor its temporary copy stays"
+    );
+    let _ = std::fs::remove_dir_all(&downloads);
+}
+
+#[test]
+fn an_export_never_deletes_a_folder_it_did_not_create() {
+    let downloads =
+        std::env::temp_dir().join(format!("liquid-bridge-foreign-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&downloads);
+    std::fs::create_dir_all(&downloads).expect("downloads");
+    let foreign = downloads.join(".Demo – record 2026-11-12.partial");
+    std::fs::create_dir(&foreign).expect("foreign folder");
+    std::fs::write(foreign.join("keep.txt"), "not ours").expect("foreign file");
+    let _ = crate::api::record::write_folder(&downloads, "Demo – record 2026-11-12", |folder| {
+        std::fs::write(folder.join("session.jsonl"), "copy").map_err(|error| error.to_string())
+    });
+    assert!(
+        foreign.join("keep.txt").is_file(),
+        "a folder the export did not create survives"
+    );
+    let _ = std::fs::remove_dir_all(&downloads);
+}
+
+#[test]
+fn a_long_multibyte_title_keeps_its_record_name_within_a_file_name() {
+    // File systems such as ext4 count bytes, and the temporary folder adds `.` and `.partial`.
+    let title = "語".repeat(80);
+    let name = crate::api::record::record_name(&title, "2026-11-11");
+    assert!(format!(".{name}.partial").len() <= 255, "{name}");
+}
+
+#[test]
+fn downloads_go_to_the_folder_the_system_names_or_to_downloads() {
+    let home = std::path::Path::new("/home/ana");
+    assert_eq!(
+        crate::api::record::download_dir_in(home, None),
+        home.join("Downloads")
+    );
+    assert_eq!(
+        crate::api::record::download_dir_in(
+            home,
+            Some("XDG_DESKTOP_DIR=\"$HOME/Desk\"\nXDG_DOWNLOAD_DIR=\"$HOME/Transfers\"\n")
+        ),
+        home.join("Transfers")
+    );
+    assert_eq!(
+        crate::api::record::download_dir_in(home, Some("XDG_DOWNLOAD_DIR=\"/srv/incoming\"")),
+        std::path::PathBuf::from("/srv/incoming")
+    );
+    assert_eq!(
+        crate::api::record::download_dir_in(home, Some(r#"XDG_DOWNLOAD_DIR="$HOME/My \$tuff""#)),
+        home.join("My $tuff")
+    );
+    assert_eq!(
+        crate::api::record::download_dir_in(
+            home,
+            Some(r#"XDG_DOWNLOAD_DIR="/srv/\"q\" \\ \`x\`""#)
+        ),
+        std::path::PathBuf::from(r#"/srv/"q" \ `x`"#)
+    );
+    assert_eq!(
+        crate::api::record::download_dir_in(
+            home,
+            Some("XDG_DOWNLOAD_DIR=\"$HOME/First\"\nXDG_DOWNLOAD_DIR=\"$HOME/Second\"\n")
+        ),
+        home.join("Second"),
+        "the shell reads the file in order, so the last assignment is the one in effect"
+    );
 }

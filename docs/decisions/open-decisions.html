@@ -6,7 +6,8 @@
 <title>Watershed - Open Decisions</title>
 <style>
 :root{--bg:#101317;--panel:#171b21;--panel2:#20262e;--text:#eef1f5;--muted:#a8b1bd;--line:#303844;--accent:#6db7ff;--warn:#ffd37a;--good:#8ce8aa;--r:8px;--font:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 var(--font)}a{color:var(--accent)}main{max-width:1180px;margin:0 auto;padding:28px}.hero{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:20px}h1{font-size:40px;line-height:1.05;margin:0 0 10px}h2{font-size:22px;margin:28px 0 12px}h3{font-size:18px;margin:0 0 8px}.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start}.decision{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px}.decision p{margin:8px 0}.decision ul{margin:8px 0 0 20px;padding:0}.tag{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:2px 8px;margin:0 4px 8px 0;color:var(--muted);font-size:12px}.m1{color:var(--good)}.m2{color:var(--warn)}nav{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}nav a{border:1px solid var(--line);border-radius:999px;padding:5px 10px;text-decoration:none;color:var(--muted)}nav a:hover{background:var(--panel2);color:var(--text)}.decision code{overflow-wrap:anywhere}@media(max-width:820px){main{padding:18px}.grid{grid-template-columns:minmax(0,1fr)}h1{font-size:32px}}
-summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{outline:2px solid var(--accent);outline-offset:5px}details[open]>summary{margin-bottom:12px}
+.decision table{border-collapse:collapse;width:100%;font-size:14px;margin:8px 0}.decision th,.decision td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}.decision th{color:var(--muted);font-weight:500}summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{outline:2px solid var(--accent);outline-offset:5px}details[open]>summary{margin-bottom:12px}
+.decision.wide{grid-column:1/-1}.legend{display:flex;flex-wrap:wrap;gap:6px}.key{border:1px solid;border-radius:6px;padding:1px 8px;font-size:12px}.dia{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin:10px 0}.opt{border:1px solid var(--line);border-radius:var(--r);padding:10px;background:var(--bg)}.opt.rec{border-color:var(--good)}.opt h4{margin:0 0 8px;font-size:15px}.opt .tag{color:var(--good);border-color:var(--good);margin:0 0 0 4px}.opt ul{font-size:14px;margin-top:10px}.b{border:1px solid;border-radius:6px;padding:6px 8px;font-size:13px;line-height:1.35;text-align:center;background:var(--panel2);margin:4px 0}.b small{color:var(--muted)}.ws{border-color:var(--accent)}.t3{border-color:var(--warn)}.h{border-color:var(--muted);border-style:dashed}.gone{border-color:#ff8a8a;color:var(--muted);text-decoration:line-through}.a{text-align:center;color:var(--muted);font-size:12px;line-height:1.3}.a::before{content:"\2193  ";color:var(--text)}.row{display:flex;gap:6px}.row>.b{flex:1}.overview{grid-template-columns:minmax(0,1fr) 120px minmax(0,1fr);align-items:center}.overview .wide-b{grid-column:1/-1}.host{border:1px dashed var(--line);border-radius:var(--r);padding:8px}.cap{font-size:12px;color:var(--muted);margin-bottom:4px}.link{text-align:center;font-size:12px;color:var(--muted);border-top:2px solid var(--accent);border-bottom:2px solid var(--accent);padding:6px 2px}@media(max-width:820px){.overview{grid-template-columns:minmax(0,1fr)}}
 </style>
 </head>
 <body>
@@ -38,53 +39,6 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         </ul>
         <p><strong>Recommendation:</strong> A, with the smallest useful set. Before choosing it, specify each Tool's input/path/action limits, replacement procedure, dependency/update responsibility and executable-code trust display. A safe file Tool and a build command that executes project code have different responsibilities; neither a description nor a marketplace listing proves safety. Ordinary assigned Tool calls remain prompt-free; first-release configuration administration stays manual under <a href="../../SECURITY.md#configuration-boundary">SECURITY.md</a>.</p>
         <p><strong>Acceptance criterion:</strong> Approve the catalog and user-facing trust explanation, then prove each shipped Tool's promised behavior under adversarial inputs on its declared platforms. Demonstrate replacing a default Tool without widening authority silently. Do not advertise third-party Tool certification or general host isolation.</p>
-      </details>
-      <details id="d-077" class="decision">
-        <summary><h3>D-077 - Unicode Form Of Tool Scripts And Arguments</h3></summary>
-        <p><strong>Status:</strong> Open before the first Flow Agent release. The same letter can be stored as different bytes, for example "é" as one character or as "e" plus an accent; Unicode NFC is the form that always uses the single character. <a href="../../PROTOCOL.md#m11-authoring-cli-grammar">PROTOCOL.md</a> says Tool text "is preserved as exact UTF-8", but building the registry converts every own-script body and argument literal to NFC, and a <code>core-script</code> test asserts that conversion. The published file keeps the authored bytes, so the bytes that run can differ from the bytes on disk. Host paths in an Executor request are already refused when they are not NFC.</p>
-        <p><strong>Question:</strong> May Flow Agent change the bytes of a Tool's script body and arguments to NFC before running them?</p>
-        <ul>
-          <li><strong>A: Refuse script bodies and arguments that are not NFC</strong> when the Tool is created or validated. Pro: the stored and the executed bytes always match, and nothing is rewritten silently. Con: an Engineer whose editor or file system produced the other form must convert the text once.</li>
-          <li><strong>B: Keep converting, and say so in PROTOCOL.md.</strong> Pro: no change for existing definitions. Con: a script that names a file whose name uses the other form opens a different or missing file on Linux, and the executed text is not the reviewed text.</li>
-          <li><strong>C: Stop converting these fields</strong> and run the authored bytes. Pro: matches the documented sentence. Con: the canonical hash of a definition then depends on the form, so two definitions that look identical get different hashes.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> A, the rule the Executor request already follows for paths.</p>
-        <p><strong>Acceptance criterion:</strong> PROTOCOL.md states one rule for script bodies, argument literals, patterns and allowed values; a test shows a definition in the other form is refused (A), runs converted (B) or runs unchanged (C), and the contradicting test or sentence is gone.</p>
-      </details>
-      <details id="d-078" class="decision">
-        <summary><h3>D-078 - A Cut-Off Last Line In A Run's Event Log</h3></summary>
-        <p><strong>Status:</strong> Open before the first Flow Agent release. A Run appends one line per event to its event and context logs. If the process is killed or the power fails in the middle of an append, the last line is incomplete. Exact Resume then refuses that Run for good ("prefix must end with LF"), as the <a href="../../PROTOCOL.md#local-run-storage-and-m11-conversation-trees">recovery matrix</a> and a test require today. The recovery log already drops such an incomplete last line.</p>
-        <p><strong>Question:</strong> Should exact Resume drop an incomplete last line of the event and context logs?</p>
-        <ul>
-          <li><strong>A: Keep refusing.</strong> Pro: every difference in a log counts as damage, the simplest rule. Con: an ordinary crash at the wrong moment makes the Run impossible to resume.</li>
-          <li><strong>B: Drop the incomplete last line</strong> while holding the Run's lock, as for the recovery log. Pro: a crash during an append no longer blocks Resume; a line that never ended was never announced, so no recorded event is lost. Con: the recovery matrix, that test and the Replay and Tail readers change with it.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> B.</p>
-        <p><strong>Acceptance criterion:</strong> PROTOCOL.md's recovery matrix states the rule; tests show a Run with a cut-off last event line resuming (B) or being refused (A), and Replay and Tail treating the same file the same way.</p>
-      </details>
-      <details id="d-079" class="decision">
-        <summary><h3>D-079 - A Provider Reply That Ends But Breaks The Format</h3></summary>
-        <p><strong>Status:</strong> Open before the first Flow Agent release. <a href="../../PROTOCOL.md#m11-codex-subscription-provider">PROTOCOL.md</a> knows two outcomes for a failed model request: <code>provider_error</code>, carrying the provider's own message, and <em>uncertain</em>, for a reply that stopped early. A reply that ends properly but breaks the format fits neither: a repeated call id, an output item without content, data after the end, or a reply that is not an event stream. Today it is stored as <code>provider_error</code> with Flow Agent's own text in the place of the provider's message.</p>
-        <p><strong>Question:</strong> How is such a reply recorded?</p>
-        <ul>
-          <li><strong>A: As uncertain.</strong> Pro: no new term. Con: an uncertain model request cannot be settled by hand, so the Run cannot continue past it.</li>
-          <li><strong>B: As a third outcome</strong> that closes the attempt and labels the message as Flow Agent's. Pro: truthful, and the Run is not blocked. Con: one more outcome in the event schema, GLOSSARY.md and PROTOCOL.md.</li>
-          <li><strong>C: Keep <code>provider_error</code></strong> and let PROTOCOL.md allow a message Flow Agent wrote. Pro: no code change. Con: a reader can no longer trust that the message came from the provider.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> B.</p>
-        <p><strong>Acceptance criterion:</strong> PROTOCOL.md names the outcome for each such reply, and a test per case shows it recorded that way and never retried.</p>
-      </details>
-      <details id="d-080" class="decision">
-        <summary><h3>D-080 - A Tool Process On macOS That Outlives Its Tool</h3></summary>
-        <p><strong>Status:</strong> Open before the first Flow Agent release. When the Executor exits, Flow Agent ends every process left in the Executor's process group and waits one second. On macOS a Tool's child processes are in that group. If one cannot end in time, such as a process stuck on a hung network drive or one running as root, Flow Agent stops itself at once and discards the Executor's valid answer; the Tool call is then recorded as uncertain and must be settled by hand with <code>flow reconcile-tool</code>. Linux is not affected, because its Tools run in their own process namespace.</p>
-        <p><strong>Question:</strong> What should Flow Agent do when such a process survives the wait?</p>
-        <ul>
-          <li><strong>A: Keep stopping at once</strong> and record it as an accepted risk in SECURITY.md. Pro: Flow Agent never continues while a process it started may still be acting. Con: a valid result is lost and a person must settle the call.</li>
-          <li><strong>B: Keep the Executor's answer</strong> and record that cleanup of the Tool's processes is unknown. Pro: the evidence survives and the Run can continue or stop on a recorded fact. Con: a new recorded state, and a decision on whether the Run may go on.</li>
-          <li><strong>C: Give the Tool its own process group on macOS.</strong> Pro: ending the Executor no longer depends on the Tool's children. Con: Flow Agent would then have to end the Tool's group separately, or leave its children running.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> B, with the Run stopping after it records the answer.</p>
-        <p><strong>Acceptance criterion:</strong> A macOS test with a child that cannot be ended shows the chosen behavior, and SECURITY.md states it under effects and recovery.</p>
       </details>
     </div>
   </section>
@@ -118,35 +72,46 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
   <section id="m2">
     <h2>M2 - Meta-Harness</h2>
     <div class="grid">
-      <details id="d-021" class="decision">
-        <summary><h3>D-021 - Meta-Harness Packaging</h3></summary>
-        <p><strong>Status:</strong> Open implementation detail before M2; Meta-Harness must already run headless, without Liquid (<a href="../concept/V-Spec_MetaHarness.html">Meta-Harness V-Spec</a>).</p>
-        <p><strong>Question:</strong> How should Meta-Harness be packaged for its first release?</p>
-        <ul><li><strong>A:</strong> A command-line app plus a background service. Pro: useful without Liquid and easy to test. Con: no rich interface.</li><li><strong>B:</strong> Add a small status screen once Meta-Harness itself works headless. Pro: easier demonstrations. Con: another part to package and maintain.</li></ul>
-        <p><strong>Recommendation:</strong> A; no competing full standalone GUI in the MVP.</p>
+      <details id="d-107" class="decision wide">
+        <summary><h3>D-107 - Meta-Harness Natively On Windows 11</h3></summary>
+        <p><strong>Status:</strong> Open (asked 2026-11-15). The old rule that Meta-Harness reaches Windows only through WSL rested on Windows not being a runtime for agents. Since ADR-0280, T3 Code runs the harnesses, and T3 runs natively on Windows. Most of Meta-Harness's Unix-specific code, the locks and Git code in <code>checkout.rs</code> and <code>diff/</code>, is deleted under ADR-0282. Flow Agent stays without native Windows support (<a href="../../PLATFORMS.md">PLATFORMS.md</a>).</p>
+        <p><strong>Question:</strong> Does Meta-Harness ship a native build for Windows 11 x86_64?</p>
+        <div class="dia">
+          <div class="opt rec"><h4>A: Native <span class="tag">Recommended</span></h4>
+            <div class="b ws">Liquid, Meta-Harness, T3 Code and the agents run natively on Windows</div>
+            <ul><li>Pro: agents use Windows tools such as .NET, PowerShell and Visual Studio on fast NTFS; no WSL, administrator rights or VM memory; the same layout as on macOS and Linux.</li><li>Con: a third native platform with its own CI runner and tests; Windows versions of the login service, the secret store and private folders, where inherited access rights raise the question of <a href="#d-106">D-106</a>.</li></ul>
+          </div>
+          <div class="opt"><h4>B: WSL, as before</h4>
+            <div class="b ws">Liquid on Windows starts Meta-Harness, T3 Code and the agents in WSL</div>
+            <ul><li>Pro: the Linux build serves; no Windows code.</li><li>Con: agents have Linux tools only; projects on <code>C:</code> are slow; WSL needs administrator rights and reserves memory.</li></ul>
+          </div>
+        </div>
+        <p><strong>Recommendation:</strong> A, x86_64 first; ARM64 after Release 1.</p>
+        <p><strong>Acceptance criterion:</strong> on Windows 11 x86_64 without WSL, an agent started from Liquid builds a .NET project with <code>dotnet</code>.</p>
       </details>
-      <details id="d-024" class="decision">
-        <summary><h3>D-024 - Meta-Harness State Storage</h3></summary>
-        <p><strong>Status:</strong> Open before M2 implementation.</p>
-        <p><strong>Question:</strong> Where do session registry, config proposals, audit records and metrics live?</p>
-        <ul><li><strong>A:</strong> SQLite plus append-only transcript/log files. Pro: queryable and local. Con: migration discipline needed.</li><li><strong>B:</strong> JSONL/files only. Pro: transparent. Con: weaker queries and concurrency.</li></ul>
-        <p><strong>Recommendation:</strong> A for registry/config/metrics, while keeping transcripts append-only and exportable.</p>
-      </details>
-      <details id="d-048" class="decision">
-        <summary><h3>D-048 - HerdR CLI-Agent Backend Integration</h3></summary>
-        <p><strong>Status:</strong> Open, M2 blocker before Meta-Harness CLI-agent process execution.</p>
-        <p><strong>Question:</strong> Should Meta-Harness reuse HerdR for host-local terminals, whole CLI agent processes and session persistence while retaining policy, normalized records, shared config, schedules, audit and AgentPulse? This boundary is unrelated to Flow's Executor protocol.</p>
-        <ul><li><strong>A:</strong> Integrate HerdR as an optional Meta-Harness agent executor through its versioned CLI/socket API. Pro: reuses terminal multiplexing, process persistence, agent detection and remote attachment while preserving Meta-Harness boundaries. Con: requires stable identity mapping, failure recovery and a maintained adapter.</li><li><strong>B:</strong> Require HerdR as the runtime for all external CLI agents. Pro: one execution path and an existing terminal UI. Con: couples M2 availability and semantics to HerdR's platform support, protocol and roadmap.</li><li><strong>C:</strong> Build the Meta-Harness agent executor independently and use HerdR only as a comparison. Pro: complete control over the CLI-process boundary. Con: duplicates substantial terminal, process and persistence work.</li></ul>
-        <p><strong>Recommendation:</strong> A behind a backend-neutral Meta-Harness agent-executor contract, subject to a bounded integration spike; keep direct semantic adapters where they provide richer events.</p>
-        <p><strong>Acceptance criterion:</strong> The spike starts, steers, observes and restores Codex plus one other CLI agent without an attached HerdR UI; preserves stable Meta-Harness session identity across detach and service restarts; routes every configuration change and control command through the Meta-Harness policy/audit gate; normalizes HerdR events without treating terminal inference as semantic truth; rejects cross-host process claims; and documents fail-closed behavior for unsupported capabilities on the native targets in <a href="../../PLATFORMS.md">PLATFORMS.md</a>.</p>
-      </details>
-      <details id="d-074" class="decision">
-        <summary><h3>D-074 - Who Starts The Local Meta-Harness Service</h3></summary>
-        <p><strong>Status:</strong> Open; decide with the service-mode slice. ADR-0215 settled that Liquid reaches its own host's Meta-Harness as a separate service.</p>
-        <p><strong>Question:</strong> On a Mac or Linux computer, who starts the Meta-Harness service, and does it keep running when Liquid closes?</p>
-        <ul><li><strong>A: Liquid starts it when needed and stops it when it quits</strong>, as T3 Code does with its server, restarting it after a crash. Pro: nothing to install or register, and no background process while Liquid is closed. Con: agents end when Liquid quits or updates, and the CLI needs its own instance or must find Liquid's.</li><li><strong>B: A login service runs it</strong> (a launchd user agent on macOS, a systemd user unit on Linux, both without administrator rights); Liquid and the CLI connect to it. Pro: agents keep running through Liquid closing, crashing or updating; one instance serves Liquid, the CLI and remote clients; the operating system restarts it. Con: installation registers the service and removal must unregister it, a process runs while nobody uses it, and updating it must not end running agents.</li><li><strong>C: Liquid starts it if none runs, and it stays while agents run.</strong> Pro: no installation step, and agents finish after Liquid closes. Con: more lifetime rules to get right, and a service nobody stops if they are wrong.</li></ul>
-        <p><strong>Recommendation:</strong> B, which matches the background service <a href="#d-021">D-021</a> recommends: agents survive the window, and the operating system supervises the service instead of our own restart code.</p>
-        <p><strong>Acceptance criterion:</strong> The ADR log names who starts and stops the service, and tests show Liquid connecting to a running service and reporting one it cannot reach.</p>
+      <details id="d-106" class="decision wide">
+        <summary><h3>D-106 - Closing The Gap When Flow Agent Creates A Private Folder</h3></summary>
+        <p><strong>Status:</strong> Open; part of the <a href="../../SECURITY.md#flow-owned-write-protection-and-its-limits">Flow-owned write protection</a>. <code>create_private_anchored_directory</code> in <code>flow-agent/flow-agent-core/src/runtime/fs_guards.rs</code> creates the folder first and clears inherited access rights only afterwards.</p>
+        <p><strong>Problem:</strong> If a parent folder carries an inheritable right that lets another user add files, that user can drop a file, such as a config file, into Flow Agent's new private folder in the moment between creating it and clearing the rights. Only the user or an administrator can put such a right on the parent. The obvious fix, requiring the new folder to be empty after clearing, breaks a legitimate case: another thread of the same user may already write into it.</p>
+        <p><strong>Question:</strong> How should Flow Agent make sure nothing foreign got into a private folder it just created?</p>
+        <div class="dia">
+          <div class="opt"><h4>A: Check owners</h4>
+            <div class="b ws">After clearing, every entry must belong to the user</div>
+            <ul><li>Pro: small; parallel threads keep working.</li><li>Con: a foreign file moved or hard-linked in keeps the user as owner and passes.</li></ul>
+          </div>
+          <div class="opt"><h4>B: Lock while creating</h4>
+            <div class="b ws">Opening a private folder Flow Agent did not create waits on the parent's lock</div>
+            <ul><li>Pro: the folder can be required empty.</li><li>Con: a lock on every private open, which needs a deadlock review across processes.</li></ul>
+          </div>
+          <div class="opt rec"><h4>C: Prepare, then publish <span class="tag">Recommended</span></h4>
+            <div class="b ws">Create under a random name, clear the rights, require it empty</div>
+            <div class="a">rename into place, never replacing</div>
+            <div class="b ws">Private folder</div>
+            <ul><li>Pro: correct by construction, no lock on the open path.</li><li>Con: the no-replace rename differs per platform, and on macOS needs a system call outside the current library or a dependency decision; leftovers after a crash need cleanup.</li></ul>
+          </div>
+        </div>
+        <p><strong>Recommendation:</strong> C, because it closes the gap without slowing every open.</p>
+        <p><strong>Acceptance criterion:</strong> an entry planted right after the folder is created makes creation fail, and the shared-workspace concurrency test passes 50 of 50 runs on macOS.</p>
       </details>
     </div>
   </section>
@@ -160,18 +125,6 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <p><strong>Question:</strong> Which typed Workspace reads, changes and App actions should remain stable in the MVP?</p>
         <ul><li><strong>A:</strong> A small set of resource-specific commands and action schemas. Pro: compact for agents, easy to test and restrict. Con: new capabilities need explicit additions.</li><li><strong>B:</strong> One broad document interface. Pro: flexible. Con: harder to secure, discover efficiently and change safely.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
-      </details>
-      <details id="d-081" class="decision">
-        <summary><h3>D-081 - How Liquid Finds A Workspace's Key</h3></summary>
-        <p><strong>Status:</strong> Open before Liquid's first release. Liquid encrypts a Workspace's database and keeps the key in the operating system's keystore, filed under the full path of the Workspace folder. If that path changes, for example when a person renames their macOS account and home folder or moves to a new Mac with Migration Assistant, Liquid looks under the new path, finds no key and refuses to open the Workspace, although the key still exists under the old path. ADR-0249 covers only the opposite case, a key without its file.</p>
-        <p><strong>Question:</strong> What identifies a Workspace's key?</p>
-        <ul>
-          <li><strong>A: A random name stored in a small file inside the Workspace folder.</strong> Pro: the key is found wherever the folder moves. Con: one more file that must be kept with the database, and existing Workspaces need a one-time move of their key.</li>
-          <li><strong>B: Keep the path, and search all of Liquid's keys when none matches.</strong> Pro: no new file. Con: with several Workspaces Liquid cannot tell which key belongs to which and would have to try each.</li>
-          <li><strong>C: Keep the path only.</strong> Pro: no change. Con: a renamed home folder locks the Workspace until someone edits the keystore by hand.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> A.</p>
-        <p><strong>Acceptance criterion:</strong> A test opens a Workspace, moves its folder and opens it again; SECURITY.md says what identifies the key.</p>
       </details>
     </div>
   </section>
@@ -225,7 +178,7 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
       <details id="d-061" class="decision">
         <summary><h3>D-061 - Local Inference Process Trust Boundary</h3></summary>
         <p><strong>Status:</strong> Open before D-059 can enable a productive local model runtime.</p>
-        <p><strong>Question:</strong> What may executable local inference code access on the host while it receives model context outside the Tool's native protection boundary?</p>
+        <p><strong>Question:</strong> What may executable local inference code access on the host while it receives model context outside the Tool's Flow-owned write protection?</p>
         <ul><li><strong>A:</strong> Treat the runtime as part of Flow Agent's trusted computing base under the operator's OS identity. Pro: simplest integration and lowest IPC overhead. Con: it may read global config, credentials, sessions and Workspace bytes; signatures prove provenance, not confinement.</li><li><strong>B:</strong> Run it under a separate identity or enforceable Sandbox/service boundary with only a bounded authenticated inference channel and declared model/cache storage. Pro: contains filesystem, secret, process and network access. Con: substantial cross-platform packaging, accelerator and performance work.</li><li><strong>C:</strong> Link the runtime in-process. Pro: smallest transport overhead. Con: maximally expands Flow Agent's memory-safety, dependency and secret-access trust base.</li></ul>
         <p><strong>Recommendation:</strong> B for the supported offline claim. An explicit A installation may exist only with a clear no-isolation warning and no claim that signed artifacts are contained.</p>
         <p><strong>Acceptance criterion:</strong> For every option, record the process/identity, IPC, filesystem, credential, config, session, Workspace, model/cache, network, child-process, resource, crash and update boundaries per supported platform and enforce bounded request/result I/O. If B is selected, authenticate the channel and prove the runtime receives only admitted context/capabilities and cannot obtain protected stores or Workspace data outside that contract. If A or C is allowed, name the runtime and dependencies as trusted computing base, display the no-isolation status before use, make no secret/filesystem containment claim and test provenance, update and failure behavior under that stated trust model.</p>

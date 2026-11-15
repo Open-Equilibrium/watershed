@@ -11,7 +11,57 @@ use crate::runtime::{
     },
     types::RuntimeError,
 };
-use std::{cell::Cell, fs, io, time::Duration};
+use std::{
+    cell::{Cell, RefCell},
+    fs, io,
+    os::unix::fs::MetadataExt as _,
+    time::Duration,
+};
+
+#[test]
+fn refresh_recheck_uses_the_time_after_the_store_lock_is_acquired() {
+    const NEAR_EXPIRY: u64 = 1_000_000 + 240_000;
+    let workspace = empty_workspace("credential-refresh-after-lock");
+    let store = CredentialStore::at(workspace.join("private/credentials.json"));
+    store
+        .replace(&credential(NEAR_EXPIRY))
+        .expect("near-expiry credential stores");
+    let held = RefCell::new(Some(
+        store
+            .acquire_lock_for_test(|| Duration::ZERO, |_| {})
+            .expect("test holds the credential lock"),
+    ));
+    let now = Cell::new(1_000_000u64);
+    let refreshes = Cell::new(0usize);
+    let replacement = credential(3_600_000 + 1_000_000);
+
+    let resolved = store
+        .resolve_with_clock(
+            || Ok(now.get()),
+            |_| {
+                refreshes.set(refreshes.get() + 1);
+                Ok(replacement.clone())
+            },
+            || Duration::ZERO,
+            |_| {
+                // The other owner refreshes to a record that is fresh at the first check but
+                // near expiry once the lock is acquired two minutes later.
+                drop(held.borrow_mut().take());
+                now.set(1_000_000 + 120_000);
+                store
+                    .replace(&credential(1_000_000 + 360_000))
+                    .expect("other owner publishes its refresh");
+            },
+        )
+        .expect("resolution completes");
+
+    assert_eq!(
+        refreshes.get(),
+        1,
+        "a record near expiry after the lock must refresh"
+    );
+    assert_eq!(resolved, replacement);
+}
 
 #[test]
 fn credential_lock_deadline() {
@@ -67,7 +117,7 @@ fn published_credential_parent_sync_failure_is_distinct_and_reuses_the_replaceme
 
     let error = store
         .resolve_with_clock(
-            1,
+            || Ok(1),
             |_| {
                 refreshes.set(refreshes.get() + 1);
                 set_directory_sync_error_for_path_for_test(&parent, io::ErrorKind::Other);
@@ -98,7 +148,7 @@ fn published_credential_parent_sync_failure_is_distinct_and_reuses_the_replaceme
 
     let resolved = store
         .resolve_with_clock(
-            1,
+            || Ok(1),
             |_| panic!("the published replacement must prevent another provider refresh"),
             || Duration::ZERO,
             |_| {},
@@ -133,7 +183,7 @@ fn published_credential_protection_failure_is_distinct_and_next_lock_finalizes()
 
     let error = store
         .resolve_with_clock(
-            1,
+            || Ok(1),
             |_| {
                 refreshes.set(refreshes.get() + 1);
                 Ok(replacement.clone())
@@ -167,6 +217,63 @@ fn published_credential_protection_failure_is_distinct_and_next_lock_finalizes()
         "the credential parent was not finalized: {trace:?}"
     );
     assert_eq!(refreshes.get(), 1);
+}
+
+#[test]
+fn published_credential_finalization_is_retried_by_a_locked_refresh_that_writes_nothing() {
+    let workspace = empty_workspace("credential-published-locked-retry");
+    let parent = workspace.join("private");
+    let path = parent.join("credentials.json");
+    let store = CredentialStore::at(path.clone());
+    store
+        .replace(&credential(300_000))
+        .expect("near-expiry credential stores");
+    // The replacement is also near expiry, so the next resolve must take the lock.
+    let replacement = credential(200_000);
+    let refreshes = Cell::new(0usize);
+    store
+        .resolve_with_clock(
+            || Ok(1),
+            |_| {
+                refreshes.set(refreshes.get() + 1);
+                set_directory_sync_error_for_path_for_test(&parent, io::ErrorKind::Other);
+                Ok(replacement.clone())
+            },
+            || Duration::ZERO,
+            |_| {},
+        )
+        .expect_err("published finalization failure is reported");
+    let published_identity = fs::metadata(&path).expect("replacement is published").ino();
+
+    start_directory_sync_trace_for_test();
+    let error = store
+        .resolve_with_clock(
+            || Ok(1),
+            |_| {
+                refreshes.set(refreshes.get() + 1);
+                Err(RuntimeError::Protocol("refresh is unavailable".to_owned()))
+            },
+            || Duration::ZERO,
+            |_| {},
+        )
+        .expect_err("the failed refresh is reported");
+    let trace = take_directory_sync_trace_for_test();
+
+    assert!(matches!(error, RuntimeError::Protocol(_)));
+    assert_eq!(refreshes.get(), 2, "the locked resolve reached its refresh");
+    assert!(
+        trace.iter().any(|synced| synced == &parent),
+        "the locked resolve did not retry the parent finalization: {trace:?}"
+    );
+    assert_eq!(
+        fs::metadata(&path).expect("replacement remains").ino(),
+        published_identity,
+        "a refresh that fails must not write a new replacement"
+    );
+    assert_eq!(
+        store.read().expect("published replacement reads"),
+        Some(replacement)
+    );
 }
 
 #[test]
@@ -243,7 +350,7 @@ fn failed_credential_refresh_removes_its_atomic_staging_file() {
         .expect("near-expiry credential stores");
 
     let result = store.resolve_with_clock(
-        1,
+        || Ok(1),
         |_| {
             fs::remove_file(&path).expect("credential file removes for conflict fixture");
             fs::create_dir(&path).expect("conflicting destination directory creates");

@@ -49,7 +49,7 @@ flowchart TD
   M --> T
 ```
 
-The Fixture path is deterministic and in process and makes no OS-isolation claim. Productive execution shares request validation, Ready/Start, supervision and result handling; native modules enforce only the selected self-protection boundary. This source implementation still requires native replacement acceptance. Provider-only Flows have a separate [platform boundary](../PLATFORMS.md). [SECURITY.md](../SECURITY.md) defines guarantees and trusted Tool/delegation responsibilities.
+The Fixture path is deterministic and in process and makes no Flow-owned write protection claim. Productive execution shares request validation, Ready/Start, supervision and result handling; native modules enforce only the selected Flow-owned write protection. This source implementation still requires native replacement acceptance. Provider-only Flows have a separate [platform boundary](../PLATFORMS.md). [SECURITY.md](../SECURITY.md) defines guarantees and trusted Tool/delegation responsibilities.
 
 ### Persistence and inputs
 

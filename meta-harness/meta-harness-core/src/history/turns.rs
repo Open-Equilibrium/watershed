@@ -1,12 +1,11 @@
 //! A branch's turns with the checkpoints Watershed's extension recorded at their start and end
 //! (ADR-0234).
 
-use super::entry::{Body, Entry, first_line};
-use super::trajectory::path;
+use super::entry::{Body, Entry, first_line, path};
 use crate::Phase;
 
 /// Longest prompt shown for a turn, in characters.
-const PROMPT_CHARS: usize = 80;
+pub(super) const PROMPT_CHARS: usize = 80;
 
 /// A turn and its checkpoints.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,8 +18,8 @@ pub struct TurnCheckpoints {
     pub start_entry: String,
     /// The entry that recorded its end checkpoint, once it ended.
     pub end_entry: Option<String>,
-    /// The Trajectory's turn of its first prompt, counted from 1 on the branch; 0 before a
-    /// prompt was stored.
+    /// The turn of its first prompt, counted from 1 on the branch; 0 before a prompt was
+    /// stored.
     pub number: u64,
     /// The entry of its first prompt; continuing the session from it hands the prompt back.
     pub prompt_entry: Option<String>,
@@ -36,6 +35,11 @@ pub struct TurnCheckpoints {
     pub failure: Option<String>,
     /// What it changed, counted when its end checkpoint was taken.
     pub changed: Option<ChangeCount>,
+    /// Why the last response before its end checkpoint stopped, as pi stored it, such as `stop`
+    /// or `aborted`.
+    pub stop_reason: Option<String>,
+    /// The error pi stored for that response, when it failed.
+    pub stop_error: Option<String>,
 }
 
 /// Files and lines a turn changed.
@@ -59,7 +63,7 @@ pub(super) fn turns(entries: &[Entry], leaf: Option<&str>) -> Vec<TurnCheckpoint
                 prompts += 1;
                 if let Some(turn) = turns.last_mut()
                     && turn.number == 0
-                    && turn.ended_ms.is_none()
+                    && turn.end_entry.is_none()
                 {
                     turn.number = prompts;
                     turn.prompt_entry = Some(entry.id.clone());
@@ -85,7 +89,17 @@ pub(super) fn turns(entries: &[Entry], leaf: Option<&str>) -> Vec<TurnCheckpoint
                 ended: false,
                 failure: error.clone(),
                 changed: None,
+                stop_reason: None,
+                stop_error: None,
             }),
+            Body::Assistant {
+                stop_reason, error, ..
+            } => {
+                if let Some(turn) = turns.last_mut().filter(|turn| turn.end_entry.is_none()) {
+                    turn.stop_reason = (!stop_reason.is_empty()).then(|| stop_reason.clone());
+                    turn.stop_error = error.clone();
+                }
+            }
             Body::Checkpoint {
                 session,
                 turn,

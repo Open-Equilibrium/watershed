@@ -87,12 +87,11 @@ pub(crate) fn exchange_authorization_code_body_with_transport(
 
 pub(super) fn refresh_credential(
     prior: &CredentialRecord,
-    now_epoch_milliseconds: u64,
 ) -> Result<CredentialRecord, RuntimeError> {
     refresh_credential_for_endpoint(
         OPENAI_TOKEN_URL,
         prior,
-        now_epoch_milliseconds,
+        protocol::epoch_milliseconds,
         AUTH_HTTP_DEADLINES,
     )
 }
@@ -101,30 +100,27 @@ pub(super) fn refresh_credential(
 pub(crate) fn refresh_credential_at(
     endpoint: &str,
     prior: &CredentialRecord,
-    now_epoch_milliseconds: u64,
+    now: impl FnOnce() -> Result<u64, RuntimeError>,
     deadlines: HttpDeadlines,
 ) -> Result<CredentialRecord, RuntimeError> {
-    refresh_credential_for_endpoint(endpoint, prior, now_epoch_milliseconds, deadlines)
+    refresh_credential_for_endpoint(endpoint, prior, now, deadlines)
 }
 
 fn refresh_credential_for_endpoint(
     endpoint: &str,
     prior: &CredentialRecord,
-    now_epoch_milliseconds: u64,
+    now: impl FnOnce() -> Result<u64, RuntimeError>,
     deadlines: HttpDeadlines,
 ) -> Result<CredentialRecord, RuntimeError> {
-    refresh_credential_with_transport(
-        endpoint,
-        prior,
-        now_epoch_milliseconds,
-        |endpoint, fields, maximum| post_form_with_deadlines(endpoint, fields, maximum, deadlines),
-    )
+    refresh_credential_with_transport(endpoint, prior, now, |endpoint, fields, maximum| {
+        post_form_with_deadlines(endpoint, fields, maximum, deadlines)
+    })
 }
 
 pub(crate) fn refresh_credential_with_transport(
     endpoint: &str,
     prior: &CredentialRecord,
-    now_epoch_milliseconds: u64,
+    now: impl FnOnce() -> Result<u64, RuntimeError>,
     transport: impl FnOnce(&str, &[(&str, &str)], usize) -> Result<Vec<u8>, RuntimeError>,
 ) -> Result<CredentialRecord, RuntimeError> {
     let body = transport(
@@ -136,7 +132,7 @@ pub(crate) fn refresh_credential_with_transport(
         ],
         MAX_OAUTH_TOKEN_BODY_BYTES,
     )?;
-    protocol::parse_refresh_token_body(&body, prior, now_epoch_milliseconds)
+    protocol::parse_refresh_token_body(&body, prior, now()?)
 }
 
 fn post_form_with_deadlines(

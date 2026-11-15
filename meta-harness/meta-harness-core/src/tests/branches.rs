@@ -391,6 +391,63 @@ fn the_bounded_branch_list_keeps_the_current_branch_and_recent_order() {
     });
 }
 
+/// A commit with the tree of HEAD whose committer date is `seconds` after the Unix epoch.
+fn commit_at(repo: &Repo, seconds: u64) -> String {
+    let tree = repo.git(&["rev-parse", "HEAD^{tree}"]);
+    repo.write(
+        ".git/dated-commit",
+        &format!(
+            "tree {}\nauthor Test <test@example.com> {seconds} +0000\ncommitter Test <test@example.com> {seconds} +0000\n\ndated\n",
+            tree.trim()
+        ),
+    );
+    repo.git(&["hash-object", "-t", "commit", "-w", ".git/dated-commit"])
+        .trim()
+        .to_owned()
+}
+
+#[test]
+fn a_remote_stays_hidden_when_an_old_local_branch_past_the_cap_tracks_it() {
+    run(async {
+        let repo = Repo::new("branches-tracked-past-cap");
+        repo.git(&[
+            "remote",
+            "add",
+            "origin",
+            "https://example.invalid/repo.git",
+        ]);
+        let head = repo
+            .git(&["show", "-s", "--format=%ct", "HEAD"])
+            .trim()
+            .parse::<u64>()
+            .expect("commit timestamp");
+        let old = commit_at(&repo, head - 100);
+        let newer = commit_at(&repo, head + 1);
+        let shown = commit_at(&repo, head + 2);
+        let mut refs = format!("{shown} refs/remotes/origin/shown\n{old} refs/heads/old\n");
+        for i in 0..1000 {
+            refs += &format!("{newer} refs/remotes/origin/recent/{i:04}\n");
+        }
+        repo.write(".git/packed-refs", &refs);
+        repo.git(&["config", "branch.old.remote", "origin"]);
+        repo.git(&["config", "branch.old.merge", "refs/heads/shown"]);
+        let checkpoints = Checkpoints::new(repo.path());
+
+        let branches = checkpoints.branches().await.expect("branches").branches;
+
+        assert!(
+            branches.iter().all(|branch| branch.name != "origin/shown"),
+            "a remote that a local branch tracks is hidden even when that branch is past the cap"
+        );
+        assert!(
+            branches
+                .iter()
+                .any(|branch| branch.name == "origin/recent/0000"),
+            "untracked remotes stay listed"
+        );
+    });
+}
+
 #[test]
 fn tracking_a_local_branch_keeps_both_local_branches_in_the_list() {
     run(async {
@@ -684,16 +741,90 @@ fn a_new_branch_starts_at_the_current_commit_unless_git_refuses_its_name() {
         }
         assert_eq!(repo.git(&["branch", "--list"]).lines().count(), 1);
 
-        checkpoints
-            .create_branch("feature/retry-after")
-            .await
-            .expect("created");
+        let from = repo
+            .git(&["branch", "--show-current"])
+            .trim_end()
+            .to_owned();
+        assert_eq!(
+            checkpoints
+                .create_branch("feature/retry-after")
+                .await
+                .expect("created"),
+            Some(from),
+            "the new branch reports the branch it was created from"
+        );
         assert_eq!(
             repo.git(&["branch", "--show-current"]),
             "feature/retry-after\n"
         );
         assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
         assert_eq!(read(&repo, "a.txt"), "edited\n");
+    });
+}
+
+#[test]
+fn a_new_branch_starts_at_the_base_it_reports_when_another_git_moves_head() {
+    run(async {
+        let repo = Repo::new("create-moved-head");
+        let base = repo.git(&["rev-parse", "HEAD"]);
+        let from = repo
+            .git(&["branch", "--show-current"])
+            .trim_end()
+            .to_owned();
+        repo.git(&["switch", "-c", "other"]);
+        repo.git(&["commit", "--allow-empty", "-qm", "other work"]);
+        repo.git(&["switch", &from]);
+        let checkpoints = Checkpoints::new(repo.path());
+        let root = repo.path().to_owned();
+        crate::diff::before_create_base(repo.path(), move || {
+            // Another Git checks out `other` after Liquid read main as the base.
+            let external = Repo(root);
+            external.git(&["switch", "other"]);
+            std::mem::forget(external);
+        });
+
+        let reported = checkpoints
+            .create_branch("feature/race")
+            .await
+            .expect("created");
+
+        assert_eq!(reported.as_deref(), Some(from.as_str()));
+        assert_eq!(
+            repo.git(&["rev-parse", "feature/race"]),
+            base,
+            "the branch starts at the base it reports, not at the commit another Git checked out"
+        );
+    });
+}
+
+#[test]
+fn a_new_branch_never_overwrites_ignored_files_when_another_git_moves_head() {
+    run(async {
+        let repo = Repo::new("create-moved-head-ignored");
+        repo.git(&["branch", "other"]);
+        repo.write("private.txt", "committed\n");
+        repo.git(&["add", "private.txt"]);
+        repo.git(&["commit", "-qm", "private file"]);
+        repo.write(".git/info/exclude", "private.txt\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        let root = repo.path().to_owned();
+        crate::diff::before_create_base(repo.path(), move || {
+            // Another Git checks out `other`, then leaves an ignored file where the base tracks one.
+            let external = Repo(root);
+            external.git(&["switch", "-q", "other"]);
+            external.write("private.txt", "unsaved ignored contents\n");
+            std::mem::forget(external);
+        });
+
+        let created = checkpoints.create_branch("feature/race").await;
+
+        assert!(
+            matches!(created, Err(DiffError::WouldOverwrite(ref paths)) if paths == &["private.txt"]),
+            "{created:?}"
+        );
+        assert_eq!(read(&repo, "private.txt"), "unsaved ignored contents\n");
+        assert_eq!(repo.git(&["branch", "--show-current"]), "other\n");
+        assert_eq!(repo.git(&["branch", "--list", "feature/race"]), "");
     });
 }
 
@@ -708,7 +839,11 @@ fn fetching_updates_only_the_upstreams_remote_tracking_branches() {
         clone.origin.git(&["tag", "v1"]);
         let _ = std::fs::remove_file(repo.path().join(".git/FETCH_HEAD"));
 
-        assert!(checkpoints.fetch().await.expect("fetched"));
+        assert_eq!(
+            checkpoints.fetch().await.expect("fetched").as_deref(),
+            Some("origin"),
+            "Fetch reports the remote it fetched"
+        );
 
         assert_eq!(checkpoints.status().await.expect("status").behind, 1);
         assert_eq!(read(repo, "a.txt"), "old\n", "the files stay");
@@ -719,7 +854,11 @@ fn fetching_updates_only_the_upstreams_remote_tracking_branches() {
 
         repo.git(&["switch", "-q", "-c", "local"]);
         assert!(
-            checkpoints.fetch().await.expect("sole remote fetched"),
+            checkpoints
+                .fetch()
+                .await
+                .expect("sole remote fetched")
+                .is_some(),
             "Fetch uses the sole remote before an upstream is configured"
         );
     });
@@ -751,7 +890,7 @@ fn automatic_fetch_never_imports_configured_bundles() {
             let bundles = repo.git(&["for-each-ref", "refs/bundles"]);
             let checkpoints = Checkpoints::new(repo.path());
 
-            assert!(checkpoints.fetch().await.expect("remote fetched"));
+            assert!(checkpoints.fetch().await.expect("remote fetched").is_some());
 
             assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "{symbolic}");
             assert_eq!(repo.git(&["for-each-ref", "refs/bundles"]), bundles);
@@ -798,7 +937,13 @@ fn automatic_fetch_never_expands_a_remote_group_into_unchecked_destinations() {
             assert!(matches!(fetched, Err(DiffError::Git(_))), "{fetched:?}");
             // Git uses the named remote for a one-member group, without expanding it.
             repo.git(&["config", "--replace-all", "remotes.origin", "backup"]);
-            assert!(checkpoints.fetch().await.expect("only origin fetched"));
+            assert!(
+                checkpoints
+                    .fetch()
+                    .await
+                    .expect("only origin fetched")
+                    .is_some()
+            );
             assert_eq!(
                 repo.git(&["rev-parse", "release"]),
                 repo.git(&["rev-parse", "HEAD"])
@@ -813,6 +958,7 @@ fn automatic_fetch_never_expands_a_remote_group_into_unchecked_destinations() {
                     .fetch()
                     .await
                     .expect("Origin is not the group origin")
+                    .is_some()
             );
             assert_eq!(
                 repo.git(&["rev-parse", "release"]),
@@ -925,7 +1071,7 @@ fn a_background_fetch_leaves_tags_alone_despite_pruning_settings() {
             repo.git(&["config", &format!("{scope}.pruneTags"), "true"]);
             let checkpoints = Checkpoints::new(repo.path());
 
-            assert!(checkpoints.fetch().await.expect("fetched"));
+            assert!(checkpoints.fetch().await.expect("fetched").is_some());
 
             assert_eq!(repo.git(&["show-ref", "--tags"]), tags, "{scope}");
             assert_eq!(checkpoints.status().await.expect("status").behind, 1);
@@ -1470,7 +1616,8 @@ fn a_hook_failing_after_git_switched_keeps_the_changes_left_on_the_branch() {
         );
         assert!(matches!(
             checkpoints.create_branch("new").await,
-            Err(DiffError::HookFailed(_))
+            Err(DiffError::CreatedBranchHookFailed { from: Some(from), error })
+                if from == "other" && matches!(*error, DiffError::HookFailed(_))
         ));
         assert_eq!(repo.git(&["branch", "--show-current"]), "new\n");
     });
@@ -2185,7 +2332,7 @@ fn a_tag_named_like_the_branch_changes_nothing() {
         clone.commit_upstream("theirs\n");
         let checkpoints = Checkpoints::new(repo.path());
 
-        assert!(checkpoints.fetch().await.expect("fetched"));
+        assert!(checkpoints.fetch().await.expect("fetched").is_some());
         repo.write("a.txt", "edited\n");
         checkpoints
             .switch_branch(&local("other"), leave_on(&checkpoints).await)
@@ -2261,7 +2408,7 @@ fn automatic_fetch_follows_symbolic_destinations_only_within_remote_refs() {
             let fetched = checkpoints.fetch().await;
 
             if allowed {
-                assert!(fetched.expect("remote target fetched"));
+                assert!(fetched.expect("remote target fetched").is_some());
                 assert_eq!(
                     repo.git(&["rev-parse", target]),
                     clone.origin.git(&["rev-parse", "HEAD"])
@@ -2758,6 +2905,173 @@ fn a_stash_liquid_cannot_put_back_is_named_for_recovery() {
 
         let error = discarded
             .expect_err("the other stash was not put back")
+            .to_string();
+        assert!(
+            error.contains(&format!("git stash store {theirs}")),
+            "{error}"
+        );
+    });
+}
+
+#[test]
+fn a_concurrent_drop_of_liquids_entry_keeps_a_personal_backup_of_its_commit() {
+    run(async {
+        let repo = Repo::new("stash-drop-backup");
+        let branch = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        // A personal stash of a commit, another stash, then Liquid's entry of the same commit.
+        repo.write("a.txt", "mine\n");
+        repo.git(&["stash", "push", "-q", "-m", "personal"]);
+        let commit = repo.git(&["rev-parse", "stash@{0}"]).trim().to_owned();
+        repo.write("a.txt", "theirs\n");
+        repo.git(&["stash", "push", "-q", "-m", "theirs"]);
+        repo.git(&[
+            "stash",
+            "store",
+            "-m",
+            &format!("On {branch}: Liquid: changes left on {branch} · 0123456789abcdef"),
+            &commit,
+        ]);
+        let root = repo.path().to_owned();
+        // Between finding Liquid's entry and dropping it, another Git drops the two entries above
+        // the personal backup, which then sits where Liquid's entry was.
+        crate::diff::before_drop(repo.path(), move || {
+            let external = Repo(root);
+            external.git(&["stash", "drop", "-q", "stash@{0}"]);
+            external.git(&["stash", "drop", "-q", "stash@{0}"]);
+            std::mem::forget(external);
+        });
+
+        Checkpoints::new(repo.path())
+            .discard_stash(&commit)
+            .await
+            .expect("discarded");
+
+        assert_eq!(
+            repo.git(&["stash", "list", "--format=%H %gs"]),
+            format!("{commit} On {branch}: personal\n"),
+            "the personal backup stays under its message"
+        );
+    });
+}
+
+#[test]
+fn a_stash_stored_during_a_drop_is_not_claimed_by_liquid() {
+    run(async {
+        let repo = Repo::new("stash-drop-claimed");
+        let branch = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        // A Liquid stash whose entry goes while its commit stays, and Liquid's stash to discard.
+        repo.write("a.txt", "kept\n");
+        repo.git(&[
+            "stash",
+            "push",
+            "-q",
+            "-m",
+            &format!("Liquid: changes left on {branch} · 0123456789abcdef"),
+        ]);
+        let kept = repo.git(&["rev-parse", "stash@{0}"]).trim().to_owned();
+        repo.git(&["stash", "drop", "-q", "stash@{0}"]);
+        repo.write("a.txt", "mine\n");
+        repo.git(&[
+            "stash",
+            "push",
+            "-q",
+            "-m",
+            &format!("Liquid: changes left on {branch} · fedcba9876543210"),
+        ]);
+        let mine = repo.git(&["rev-parse", "stash@{0}"]).trim().to_owned();
+        let root = repo.path().to_owned();
+        let stored = kept.clone();
+        // Between finding its place and dropping it, another Git stores the commit on top, under a
+        // message of its own; the drop then takes that entry.
+        crate::diff::before_drop(repo.path(), move || {
+            let external = Repo(root);
+            external.git(&["stash", "store", "-m", "manual backup", &stored]);
+            std::mem::forget(external);
+        });
+        let checkpoints = Checkpoints::new(repo.path());
+
+        checkpoints.discard_stash(&mine).await.expect("discarded");
+
+        assert!(
+            checkpoints.stash().await.expect("read").is_none(),
+            "the stored commit is not Liquid's stash on {branch}"
+        );
+    });
+}
+
+#[test]
+fn a_failed_check_after_a_drop_names_the_dropped_commit_instead_of_succeeding() {
+    run(async {
+        let repo = Repo::new("stash-drop-check-fails");
+        let branch = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.write("a.txt", "mine\n");
+        repo.git(&["stash", "push", "-q", "-m", "personal"]);
+        let commit = repo.git(&["rev-parse", "stash@{0}"]).trim().to_owned();
+        repo.write("a.txt", "other\n");
+        repo.git(&["stash", "push", "-q", "-m", "other"]);
+        repo.git(&[
+            "stash",
+            "store",
+            "-m",
+            &format!("On {branch}: Liquid: changes left on {branch} · 0123456789abcdef"),
+            &commit,
+        ]);
+        let root = repo.path().to_owned();
+        // The drop takes the personal backup of Liquid's commit, and the stash list cannot be read
+        // after it.
+        crate::diff::before_drop(repo.path(), move || {
+            let external = Repo(root);
+            external.git(&["stash", "drop", "-q", "stash@{0}"]);
+            external.git(&["stash", "drop", "-q", "stash@{0}"]);
+            external.git(&["config", "log.date", "bogus"]);
+            std::mem::forget(external);
+        });
+
+        let discarded = Checkpoints::new(repo.path()).discard_stash(&commit).await;
+
+        let error = discarded
+            .expect_err("the dropped commit was not checked")
+            .to_string();
+        assert!(
+            error.contains(&format!("git stash store {commit}")),
+            "{error}"
+        );
+    });
+}
+
+#[test]
+fn a_foreign_stash_whose_subject_cannot_be_read_is_named_for_recovery() {
+    run(async {
+        let repo = Repo::new("stash-subject-unreadable");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.git(&["branch", "other"]);
+        repo.write("a.txt", "mine\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("left");
+        checkpoints
+            .switch_branch(&local(&main), Changes::Bring)
+            .await
+            .expect("back");
+        let mine = stash_of(&checkpoints).await;
+        let theirs = external_stash(&repo, "theirs\n");
+        let root = repo.path().to_owned();
+        let stored = theirs.clone();
+        // Another Git stores a stash on top, so Liquid drops the other entry, and then the commit
+        // log cannot read its subject any more.
+        crate::diff::before_drop(repo.path(), move || {
+            let external = Repo(root.clone());
+            external.git(&["stash", "store", "-m", "theirs", &stored]);
+            external.git(&["config", "log.date", "bogus"]);
+            std::mem::forget(external);
+        });
+
+        let discarded = checkpoints.discard_stash(&mine).await;
+
+        let error = discarded
+            .expect_err("the other stash was dropped and cannot be read")
             .to_string();
         assert!(
             error.contains(&format!("git stash store {theirs}")),
@@ -3379,6 +3693,31 @@ fn leaving_changes_leaves_an_untracked_nested_repository_alone() {
         assert_eq!(repo.git(&["branch", "--show-current"]), "other\n");
         assert_eq!(read(&nested, "a.txt"), "old\n");
         assert_eq!(nested.git(&["rev-parse", "HEAD"]), nested_head);
+    });
+}
+
+#[test]
+fn leaving_changes_refuses_a_staged_file_inside_a_nested_repository() {
+    run(async {
+        let repo = Repo::new("stash-staged-in-repository");
+        repo.git(&["branch", "other"]);
+        repo.write("a.txt", "unsaved\n");
+        std::fs::create_dir(repo.path().join("nested")).expect("folder");
+        repo.write("nested/file", "staged\n");
+        repo.git(&["add", "nested/file"]);
+        // The project's index still holds the file, which Git's reset would remove from the repository.
+        repo.git(&["init", "-q", "nested"]);
+        let checkpoints = Checkpoints::new(repo.path());
+
+        let switched = checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await;
+
+        assert!(
+            matches!(switched, Err(DiffError::WouldOverwrite(ref paths)) if paths == &["nested"]),
+            "{switched:?}"
+        );
+        assert_eq!(read(&repo, "nested/file"), "staged\n");
     });
 }
 

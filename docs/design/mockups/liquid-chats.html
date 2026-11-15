@@ -58,12 +58,12 @@
   </section>
   <section>
     <h3 class="sec">3 · An agent at work in a folder</h3>
-    <p class="sub">The agent's work folder is the folder Source <b>acme-api</b> in the area Acme API, which Liquid only reads; the agent writes it through Meta-Harness. Agent questions appear in the Chat, and each answer that changed files ends with its Diff and Trajectory, which open beside the Chat; they are details of an answer, no longer tabs of their own.</p>
+    <p class="sub">The agent's work folder is the folder Source <b>acme-api</b> in the area Acme API, which Liquid only reads; the agent writes it through Meta-Harness. Agent questions appear in the Chat, and each answer that changed files ends with its Diff, which opens beside the Chat; it is a detail of an answer, no longer a tab of its own.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-work" data-w="1240"></div></div></div>
   </section>
   <section>
     <h3 class="sec">4 · An agent is a participant</h3>
-    <p class="sub">A click on an agent's name shows its profile: the durable part, which outlives every Chat. It names its harness, model and instructions, its work folder and its rights, which a person grants (ADR-0223). A new Chat with the same agent starts a fresh history; branching from a message makes a branch within the same Chat, as the Trajectory shows it (ADR-0241).</p>
+    <p class="sub">A click on an agent's name shows its profile: the durable part, which outlives every Chat. It names its harness, model and instructions, its work folder and its rights, which a person grants (ADR-0223). A new Chat with the same agent starts a fresh history; branching from a message makes a branch within the same Chat (ADR-0241).</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-prof" data-w="1240"></div></div></div>
   </section>
   <section>
@@ -71,7 +71,7 @@
     <ol class="qs">
       <li>Whether a Page's Chat is listed among all Chats or only on its Page.</li>
       <li>Where agents are created and their profiles edited: in Settings or from a Chat.</li>
-      <li>How Diff and Trajectory open: beside the Chat, as here, or in the main area.</li>
+      <li>How Diff opens: beside the Chat, as here, or in the main area.</li>
       <li>Whether one agent can work in several Chats at once; in one folder this needs its own Git worktrees.</li>
     </ol>
   </section>
@@ -154,7 +154,7 @@ ${msg('Planner',AG,'Added “Day trip to Sintra” under Ideas, with the 9:11 tr
 frame('w-page',{h:560,side:{sel:'trip',chat:'page'},main:`<div style="display:flex;height:100%"><div style="flex:1;display:flex;flex-direction:column;min-width:0">${pageHead}<div class="pg"><div class="col" style="width:560px"><div class="ttl"><span class="tic">🧳</span>Trip to Lisbon</div><div class="prose"><p><b>Plan</b></p><p>Five days in Lisbon, one in Porto. We fly on 12 November.</p><p><b>Ideas</b></p><p style="background:var(--ws-accent-subtle);border-radius:4px;padding:0 4px">Day trip to Sintra, 9:11 from Rossio.</p></div></div></div></div>${pageChat}</div>`});
 const workMain=`<div class="chead">${AG}<b>Coder</b><span class="chip">${I.dir}acme-api</span><span class="cap">pi · sonnet</span><span class="end" style="margin-left:auto"><span class="ib">${I.more}</span></span></div>
 <div class="msgs">${msg('',avatar('me','B'),'Add a rate limit to /login and make the tests pass.',{mine:1,t:'11:02'})}
-${msg('Coder',AG,'Added a limiter of 5 attempts per minute to the login route and two tests.',{t:'11:06',extra:`<div class="turn"><span class="chip">3 files changed</span><span class="chip">Diff</span><span class="chip">Trajectory</span><span class="chip">Revert</span></div>`})}
+${msg('Coder',AG,'Added a limiter of 5 attempts per minute to the login route and two tests.',{t:'11:06',extra:`<div class="turn"><span class="chip">3 files changed</span><span class="chip">Diff</span><span class="chip">Revert</span></div>`})}
 <div class="msg">${AG}<div class="appr"><b style="font-weight:500">Run the login tests now?</b><div style="display:flex;gap:6px"><span class="btn pri">Yes <kbd>⏎</kbd></span><span class="btn">No</span><span class="sp"></span><span class="btn">Dismiss <kbd>esc</kbd></span></div></div></div></div>
 <div style="flex:1"></div><div class="comp2">Steer or queue a message…</div>`;
 frame('w-work',{h:620,side:{sel:'docs',chat:'coder'},main:`<div style="display:flex;flex-direction:column;height:100%">${workMain}</div>`});

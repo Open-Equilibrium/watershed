@@ -1,14 +1,20 @@
 use super::super::test_support::workspace_copy;
 use super::support::{
     DefinitiveFailureProvider, FailingRecoveryBoundary, FakeProvider, FakeToolExecutionFault,
-    FakeToolExecutor, MemoryAttempts, MemorySink, ScriptedProvider, UnsupportedToolExecutor,
-    disabled_smoke_productive_execution_fixture, execute_failing_recovery_case,
-    execute_scripted_productive_case, execute_scripted_productive_case_with_tools,
-    load_productive_execution_fixture_for_flow, smoke_productive_execution_fixture,
+    FakeToolExecutor, MemoryAttempts, MemorySink, ReplyInvalidProvider, ScriptedProvider,
+    UnsupportedToolExecutor, disabled_smoke_productive_execution_fixture,
+    execute_failing_recovery_case, execute_scripted_productive_case,
+    execute_scripted_productive_case_with_tools, load_productive_execution_fixture_for_flow,
+    smoke_productive_execution_fixture,
 };
 use crate::runtime::{
-    context::{CONTEXT_SAFETY_MARGIN, ContextHistory, ContextModelProfile},
-    openai_codex::{ProviderToolCall, ProviderTurn, derive_prompt_cache_key},
+    context::{
+        CONTEXT_SAFETY_MARGIN, ContextHistory, ContextManifestCheckpoint, ContextModelProfile,
+    },
+    event_writer::RuntimeEventSink,
+    openai_codex::{
+        ProviderToolCall, ProviderTurn, derive_prompt_cache_key, responses_request_input_bytes,
+    },
     productive::{
         MAX_ACCUMULATED_PROVIDER_INPUT_BYTES, ProductiveExecution, execute_productive_flow,
         execute_productive_flow_with_tool_executor, tool_result_value,
@@ -46,11 +52,11 @@ fn productive_tool_preflight_rejects_an_executor_that_cannot_honor_the_flow_poli
 
 #[test]
 fn productive_tool_preflight_rejects_fixture_only_commands_before_provider_dispatch() {
-    let workspace = workspace_copy("sandbox-negative");
-    let fixture = load_productive_execution_fixture_for_flow(&workspace, "sandbox-negative-write");
+    let workspace = workspace_copy("negative");
+    let fixture = load_productive_execution_fixture_for_flow(&workspace, "negative-write");
     let flow = fixture
         .registry
-        .flow_block("sandbox-negative-write")
+        .flow_block("negative-write")
         .expect("root Flow");
     let mut provider = FakeProvider::default();
     let mut attempts = MemoryAttempts::default();
@@ -438,6 +444,98 @@ fn productive_leaf_dispatches_once_and_commits_its_typed_result() {
     assert!(!durable_text.contains("secret-account"));
 }
 
+#[derive(Default)]
+struct ContextManifestSink {
+    manifest: String,
+}
+
+impl RuntimeEventSink for ContextManifestSink {
+    fn commit(
+        &mut self,
+        _event: &EventEnvelope,
+        _canonical_jsonl: &str,
+        context: Option<ContextManifestCheckpoint>,
+    ) -> Result<(), RuntimeError> {
+        if let Some(context) = context {
+            self.manifest = context.manifest.line;
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn leaf_turn_omits_recent_history_when_only_the_mandatory_request_fits() {
+    let (_workspace, fixture) = disabled_smoke_productive_execution_fixture();
+    let flow = fixture.smoke_flow();
+    let mut recent_history = ContextHistory::default();
+    recent_history.record(&EventEnvelope::new(
+        "prior-delta",
+        EventType::MessageDelta,
+        "prior-run",
+        1,
+        "2026-07-30T12:00:00Z",
+        "flow-agent-cli",
+        serde_json::json!({
+            "content_delta": "prior answer",
+            "message_id": "prior-message",
+            "role": "assistant",
+        }),
+    ));
+    recent_history.record(&EventEnvelope::new(
+        "prior-completed",
+        EventType::MessageCompleted,
+        "prior-run",
+        2,
+        "2026-07-30T12:00:01Z",
+        "flow-agent-cli",
+        serde_json::json!({"message_id": "prior-message", "role": "assistant"}),
+    ));
+
+    // The complete request with the recent interaction sets the budget one byte below it.
+    let mut complete = FakeProvider::default();
+    execute_productive_flow(
+        ProductiveExecution {
+            prior_history: recent_history.clone(),
+            ..fixture.execution(flow, "productive-fixture")
+        },
+        &mut complete,
+        &mut MemoryAttempts::default(),
+        &mut MemorySink::default(),
+    )
+    .expect("productive execution");
+    let complete_request_bytes =
+        responses_request_input_bytes(&complete.bodies[0]).expect("request size measures");
+
+    let mut provider = FakeProvider::default();
+    let mut sink = ContextManifestSink::default();
+    let execution = execute_productive_flow(
+        ProductiveExecution {
+            model_profile: ContextModelProfile {
+                context_limit: complete_request_bytes - 1,
+                id: "recent-history-budget-test-v0",
+                output_reserve: 0,
+                safety_margin: 0,
+            },
+            prior_history: recent_history,
+            ..fixture.execution(flow, "productive-fixture")
+        },
+        &mut provider,
+        &mut MemoryAttempts::default(),
+        &mut sink,
+    )
+    .expect("productive execution");
+
+    assert!(!execution.failed, "{:?}", execution.terminal_error);
+    assert_eq!(provider.bodies.len(), 1, "the mandatory request dispatches");
+    assert!(!provider.bodies[0].to_string().contains("prior answer"));
+    let manifest: serde_json::Value =
+        serde_json::from_str(sink.manifest.trim_end()).expect("manifest parses");
+    assert_eq!(
+        manifest["omitted_source_counts"]["recent_complete_interaction"],
+        1
+    );
+}
+
 #[test]
 fn productive_leaf_runs_only_provider_requested_phase_tools_and_returns_the_result() {
     let (_workspace, fixture) = smoke_productive_execution_fixture();
@@ -793,6 +891,7 @@ fn productive_failed_tool_closes_the_active_execution_without_another_provider_t
     let mut sink = MemorySink::default();
     let mut tools = FakeToolExecutor {
         cancel_before_outcome: false,
+        cleanup_unknown: false,
         error_after_interrupt: false,
         fault: Default::default(),
         invocations: Vec::new(),
@@ -850,6 +949,62 @@ fn productive_failed_tool_closes_the_active_execution_without_another_provider_t
             EventType::PhaseCompleted | EventType::FlowCompleted | EventType::SessionCompleted
         )
     }));
+}
+
+#[test]
+fn provider_reply_that_breaks_the_format_is_recorded_as_reply_invalid_and_never_retried() {
+    let (_workspace, fixture) = disabled_smoke_productive_execution_fixture();
+    let flow = fixture.smoke_flow();
+    let call = || {
+        serde_json::json!({
+            "type":"response.output_item.done",
+            "item":{"type":"function_call","call_id":"call-1","name":"inspect","arguments":"{}"}
+        })
+    };
+    let mut provider = ReplyInvalidProvider {
+        bodies: Vec::new(),
+        events: vec![
+            call(),
+            call(),
+            serde_json::json!({"type":"response.completed","response":{"id":"resp-1"}}),
+        ],
+    };
+    let mut attempts = MemoryAttempts::default();
+    let mut sink = MemorySink::default();
+
+    let execution = execute_productive_flow(
+        ProductiveExecution {
+            agent_instructions: "Agent guidance.",
+            ..fixture.execution(flow, "provider-reply-invalid-fixture")
+        },
+        &mut provider,
+        &mut attempts,
+        &mut sink,
+    )
+    .expect("a broken provider reply closes the session");
+
+    assert!(execution.failed);
+    assert_eq!(provider.bodies.len(), 1, "a broken reply is never retried");
+    assert_eq!(attempts.results.len(), 1);
+    assert_eq!(attempts.results[0].0, RunAttemptKind::Provider);
+    assert_eq!(attempts.results[0].2, "failed");
+    assert_eq!(
+        attempts.results[0].3.as_deref(),
+        Some("provider_reply_invalid")
+    );
+    assert_eq!(
+        attempts.durable_outputs,
+        vec![Some(serde_json::json!({
+            "message": "Flow Agent rejected the provider reply: response repeated function call id call-1",
+            "schema": "flow-provider-reply-invalid-v0",
+        }))]
+    );
+    let error_event = sink
+        .0
+        .iter()
+        .find(|event| event.event_type == EventType::Error)
+        .expect("reply failure is durable");
+    assert_eq!(error_event.payload["code"], "provider_reply_invalid");
 }
 
 #[test]

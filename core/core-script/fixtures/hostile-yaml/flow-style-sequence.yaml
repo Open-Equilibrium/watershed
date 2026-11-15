@@ -1,0 +1,4 @@
+flow:
+  id: flow-style
+  name: FlowStyle
+  phase_refs: [inspect, summarize]

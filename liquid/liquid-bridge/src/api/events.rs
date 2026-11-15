@@ -6,9 +6,9 @@
 pub enum BridgeEventKind {
     /// A turn started; no parts.
     TurnStarted,
-    /// A turn ended; no parts.
+    /// A turn ended; `checkpoint` with its checkpoint id, if it requested one.
     TurnCompleted,
-    /// A turn was stopped; no parts.
+    /// A turn was stopped; `checkpoint` with its checkpoint id, if it requested one.
     TurnAborted,
     /// `item` with kind, tool and target.
     ItemStarted,
@@ -38,6 +38,9 @@ pub enum BridgeEventKind {
     Exited,
     /// `queue` with the messages waiting for the running agent.
     QueueChanged,
+    /// No parts; the stream dropped partial output that Liquid could not keep up with, so Liquid
+    /// reloads the chat from the session file and continues live (ADR-0272).
+    FellBehind,
 }
 
 /// One session event for Dart.
@@ -59,6 +62,8 @@ pub struct BridgeEvent {
     pub success: Option<bool>,
     /// The messages waiting for the running agent.
     pub queue: Option<BridgeQueue>,
+    /// The turn's checkpoint id, the same id as its `BridgeTurn`.
+    pub checkpoint: Option<String>,
 }
 
 /// Messages waiting for a running agent, in order.

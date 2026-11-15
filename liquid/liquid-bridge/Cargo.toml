@@ -26,5 +26,9 @@ tokio = { workspace = true, features = ["test-util"] }
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
 
+# Crate-specific lints cannot be combined with `lints.workspace = true`.
+[lints.clippy]
+unwrap_used = "deny"
+
 [target.'cfg(unix)'.dependencies]
 rustix.workspace = true

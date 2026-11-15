@@ -14,7 +14,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 
 ## Milestones
 
-### M1.2 — Flow Agent OS isolation
+### M1.2 — Flow-owned write protection
 
 **Open:** verify the accepted boundary natively, prove the prebuilt installation contract and complete [repository review and closeout](AGENTS.md#session-workflow). [TESTING.md](TESTING.md#native-verification-status) owns native and downloaded-bundle acceptance results, [PERFORMANCE.md](PERFORMANCE.md#flow-agent) native measurements, [SECURITY.md](SECURITY.md#flow-agent-security-contract) the security and installation decisions and [PROTOCOL.md](PROTOCOL.md#m12-executor-protocol) the wire contract. Configuration administration stays manual for the first Flow Agent release; deferred work is in the [later roadmap](#later-flow-agent-roadmap).
 
@@ -29,17 +29,17 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 **Deliverables:**
 
 - Meta-Harness CLI (headless user/admin: run/session/config/metrics commands).
-- Local service in its own process, serving that API over both connections; who starts it is [D-074](docs/decisions/open-decisions.html#d-074). Liquid then connects to it like any client and drops its embedded core (ADR-0215).
+- Local service in its own process, serving that API over both connections; a login service starts it (ADR-0286). Liquid then connects to it like any client and drops its embedded core (ADR-0215).
 - API/protocol surface for Liquid and BYOA: session registry, live event and transcript streams, artifact/log/handoff queries, config read/write proposals, agent schedule/trigger control, answers to a harness's own approvals and questions, revert.
 - Central configuration model that resolves shared Watershed building blocks to each target's documented config surface. Flow Agent receives only its global authority and explicit Flows rather than a project-local config layer; device-local Runtime bindings remain owned by the execution host.
 - Control plane: session registry, routing, task state, attention state and agent schedule/trigger skeleton.
 - Reference scenario for schedules: a scheduled agent keeps a news feed as a database page in Liquid and changes it only with the approval its Workspace Role requires, as `disler/pi-durable-news-agent` does with its own app.
-- Host-local Meta-Harness agent executor that rejects cross-host agent-process control (backend integration: [D-048](docs/decisions/open-decisions.html#d-048)).
+- Host-local Meta-Harness agent executor that rejects cross-host agent-process control (on T3 Code: ADR-0280 to ADR-0290).
 - Adapters: Flow Agent (via its public runtime surfaces) + at least one external CLI adapter.
-- Orchestration tools for agents as MCP tools (ADR-0253, [V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration)): an agent starts, messages, reads, steers and stops subagents of any harness and model, on other agent hosts too, and hosts link by a pairing the person completes; Claude Code joins pi and Codex as an adapter.
+- Orchestration tools for agents: T3 Code's own, across hosts through its peer links (ADR-0253, ADR-0288, [V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration)): an agent starts, messages, reads, steers and stops subagents of any harness and model, on other agent hosts too, and hosts link through the Liquid account (ADR-0285); Claude Code joins Codex as a T3 provider.
 - Event/transcript ingestion from agents; artifact/log/handoff indexing (logs, structured summaries, host-provided diffs, handoff packs, checkpoints).
 - Policy-gated configuration writes with audit trail and review flow.
-- **No rich standalone GUI**; M2 packaging, including whether it adds a small status screen after the headless controller works, remains D-021.
+- **No rich standalone GUI**; Meta-Harness ships as CLI plus login service (ADR-0286).
 
 **DoD:** monitor, steer and configure at least two different CLI agents on one agent host from one control surface, with both represented through one normalized session/event model; reject attempts to claim or control a process on another host; run without Liquid; expose the public API/protocol over both connections; integrate Flow Agent through its public runtime surfaces (not its internals); resolve shared config without duplicated per-agent config directories for the same capability; require approval plus an audit record for every sensitive config change; and let a session on one host start, message, steer and stop a subagent of another harness on another agent host through the orchestration tools.
 
@@ -53,11 +53,8 @@ The target product is canonical in [`docs/concept/V-Spec_Liquid.html`](docs/conc
 
 The macOS Liquid app controls pi through an embedded Meta-Harness core (ADR-0184). Open:
 
-- Close the cheap record gaps (ADR-0222): show the nested tool calls pi records, and say in the Diff and Trajectory tabs exactly what they cover, after an approved mockup.
-- Show the context window's use in the status bar beside the session's tokens and cost, such as `Context 7.4k / 200k`.
-- The macOS app build on a macOS runner becomes a required CI check once it runs reliably.
+- Close the cheap record gaps (ADR-0222): show the nested tool calls pi records, and say in the Diff panel exactly what it covers, after an approved mockup.
 - Service mode, remote access and Android follow with multi-device (ADR-0195).
-- Trajectory search and attribution of entries to the extension that produced them stay out of scope.
 
 #### Liquid Git integration — next slice
 
@@ -72,6 +69,7 @@ Completes the Git integration for the agent's Git project (ADR-0190, ADR-0191, A
 - A missing replica file is reported, not opened as a new Workspace, after its mockup (ADR-0249); purge of deleted content comes with the History slice, before sync (ADR-0250); the core refuses writes past its size caps (ADR-0251).
 - Left from the Table View so far: keys to insert and delete rows on a selected cell follow with their own mockup (Keyboard first).
 - Left from the Explorer and Pages slice for later ones: toggles, inline marks and indentation in Text Blocks, the Section outline on hover, the Workspace switcher, Page icons, templates, the other Blocks, Existing Block… and Page templates in slash commands, Block handles that select, move and delete a whole Block, Liquid's own texts in the person's language (ADR-0246) and the device-local cache of View heights (client architecture rule 5).
+- A Page title keystroke rereads the area's whole Page tree; fixing it needs the bridge's change events to tell a rename apart (ADR-0216 rule 3), so it is decided together with a virtualized Explorer.
 - Tables (ADR-0244), after the Table View: finding a new field's kind from its first value, with a core mutation that changes a field's kind; with Formulas, calculated fields, the total row, live values in Text Blocks and the Calculation Block; with the Views slice, whether a row opens as a Page.
 - Database bounds (ADR-0243): sync must keep a Database's reads within 500 fields and options when replicas add them concurrently; loading fields in pages or asynchronously may replace the caps.
 - Date cells hold days only (ADR-0242); the Inbox and tasks slice decides how a time is stored, as the wall clock or as an instant with its zone, as Notion does.
@@ -142,7 +140,7 @@ Accepted targets ([Flow Agent V-Spec](docs/concept/V-Spec_FlowAgent.html#accepte
 
 ### Protection of other independent Flow installations
 
-**Discussion only; no feature commitment (ADR-0174).** The first release protects this installation's required objects under [SECURITY.md](SECURITY.md#native-self-protection-and-its-limits). Multiple Runs can share that home. Earlier discussion considered an administrator-listed set of other homes: it could protect deliberately separate installations from each other's Tools, but adds discovery, publication coordination and maintenance complexity. First establish whether users need separate homes instead of shared-home Runs; decide whether to add this protection before specifying it. No automatic whole-disk discovery or future delivery is approved.
+**Discussion only; no feature commitment (ADR-0174).** The first release protects this installation's required objects under [SECURITY.md](SECURITY.md#flow-owned-write-protection-and-its-limits). Multiple Runs can share that home. Earlier discussion considered an administrator-listed set of other homes: it could protect deliberately separate installations from each other's Tools, but adds discovery, publication coordination and maintenance complexity. First establish whether users need separate homes instead of shared-home Runs; decide whether to add this protection before specifying it. No automatic whole-disk discovery or future delivery is approved.
 
 ## AgentPulse — last roadmap item
 

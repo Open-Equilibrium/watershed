@@ -274,6 +274,47 @@ fn pull_reports_autostash_conflicts_after_advancing_the_branch() {
 }
 
 #[test]
+fn an_autostash_pull_keeps_ignored_files_where_a_tracked_file_returns() {
+    run(async {
+        // Git autostashes for `merge.autoStash` and for any spelling of `--autostash` in the
+        // branch's merge options, such as an unambiguous abbreviation or a quoted word.
+        for (index, (setting, value)) in [
+            ("merge.autoStash", "true"),
+            ("branch.main.mergeOptions", "--autostas"),
+            ("branch.main.mergeOptions", "'--autostash'"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let remote = Remote::new(&format!("pull-autostash-ignored-{index}"));
+            remote.repo.write(".gitignore", "slot/\n");
+            remote.repo.write("slot", "tracked\n");
+            remote.repo.git(&["add", "."]);
+            remote.repo.git(&["commit", "-qm", "track slot"]);
+            remote.repo.git(&["push", "-q", "origin", "main"]);
+            remote.other.git(&["pull", "-q", "origin", "main"]);
+            remote.advance();
+            remote.repo.git(&["config", setting, value]);
+            // Locally, the tracked file is replaced by a folder whose ignored contents autostash
+            // would reset away when the file returns.
+            std::fs::remove_file(remote.repo.path().join("slot")).unwrap();
+            std::fs::create_dir(remote.repo.path().join("slot")).unwrap();
+            remote.repo.write("slot/keep", "ignored\n");
+            let result = Checkpoints::new(remote.repo.path()).pull().await;
+            assert!(
+                matches!(result, Err(DiffError::WouldOverwrite(ref files)) if files == &["slot/"]),
+                "{setting} {value}: {result:?}"
+            );
+            assert_eq!(
+                std::fs::read_to_string(remote.repo.path().join("slot/keep")).unwrap(),
+                "ignored\n",
+                "{setting} {value}"
+            );
+        }
+    });
+}
+
+#[test]
 fn pull_refuses_a_running_agent_before_fetching() {
     run(async {
         let remote = Remote::new("pull-agent");
@@ -296,7 +337,7 @@ fn requested_fetch_uses_origin_without_upstream_and_checks_destinations() {
         remote.repo.git(&["switch", "-c", "feature/unpublished"]);
         remote.advance();
         let checkpoints = Checkpoints::new(remote.repo.path());
-        assert!(checkpoints.fetch().await.unwrap());
+        assert!(checkpoints.fetch().await.unwrap().is_some());
         assert_eq!(
             remote.repo.git(&["rev-parse", "origin/main"]),
             remote.bare.git(&["rev-parse", "main"])
@@ -463,6 +504,85 @@ fn push_confirms_a_destination_that_names_the_default_branch_symbolically() {
 }
 
 #[test]
+fn a_protocol_v0_destination_at_the_default_commit_asks_for_approval() {
+    run(async {
+        // Protocol v0 reports only HEAD's symbolic target, so `review` looks like a plain branch.
+        let remote = Remote::new("push-v0-alias");
+        remote
+            .bare
+            .git(&["symbolic-ref", "refs/heads/review", "refs/heads/main"]);
+        remote.repo.git(&["config", "protocol.version", "0"]);
+        remote.repo.git(&["switch", "-c", "feature"]);
+        remote
+            .repo
+            .git(&["config", "branch.feature.remote", "origin"]);
+        remote
+            .repo
+            .git(&["config", "branch.feature.merge", "refs/heads/review"]);
+        Remote::commit(&remote.repo, "local.txt");
+        let before = remote.bare.git(&["rev-parse", "main"]);
+        let tree = crate::diff::WorkingTree::open(remote.repo.path())
+            .await
+            .expect("repository");
+
+        let result = tree.prepare_push(None).await;
+
+        assert!(
+            matches!(result, Err(DiffError::PushDefault(_))),
+            "{result:?}"
+        );
+        assert_eq!(remote.bare.git(&["rev-parse", "main"]), before);
+    });
+}
+
+#[test]
+fn the_protocol_git_negotiates_decides_the_default_approval_at_head() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        // A server answering protocol v0 whatever the client asks for, as a proxy may, with no
+        // protocol setting in the project.
+        for (name, v0) in [("v0", true), ("v2", false)] {
+            let remote = Remote::new(&format!("push-negotiated-{name}"));
+            // A plain branch at the default commit, which protocol v0 cannot tell from the default.
+            remote.bare.git(&["branch", "review", "main"]);
+            if v0 {
+                let script = remote.repo.path().join(".git/v0-upload-pack");
+                std::fs::write(
+                    &script,
+                    "#!/bin/sh\nunset GIT_PROTOCOL\nexec git-upload-pack \"$@\"\n",
+                )
+                .unwrap();
+                std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+                remote.repo.git(&[
+                    "config",
+                    "remote.origin.uploadpack",
+                    script.to_str().unwrap(),
+                ]);
+            }
+            remote.repo.git(&["switch", "-c", "feature"]);
+            remote
+                .repo
+                .git(&["config", "branch.feature.remote", "origin"]);
+            remote
+                .repo
+                .git(&["config", "branch.feature.merge", "refs/heads/review"]);
+            Remote::commit(&remote.repo, "local.txt");
+            let tree = crate::diff::WorkingTree::open(remote.repo.path())
+                .await
+                .expect("repository");
+
+            let result = tree.prepare_push(None).await;
+
+            assert_eq!(
+                matches!(result, Err(DiffError::PushDefault(_))),
+                v0,
+                "{name}: {result:?}"
+            );
+        }
+    });
+}
+
+#[test]
 fn push_refuses_short_upstream_refs_and_confirms_the_cached_default() {
     run(async {
         for case in ["short", "cached"] {
@@ -614,12 +734,13 @@ fn a_turn_can_start_during_pull_fetch_and_pull_rechecks_its_lock() {
 #[test]
 fn pull_fetch_is_bounded_and_stops_when_the_session_closes() {
     run(async {
-        for closing in [false, true] {
+        // Closing must end the fetch alone, so its own deadline outlasts the wait below.
+        for (closing, deadline) in [(false, 2), (true, 60)] {
             let remote = Remote::new(&format!("pull-fetch-bounded-{closing}"));
             let (entered, release) = gated_fetch(&remote);
             let checkpoints = std::sync::Arc::new(Checkpoints::with_timeout(
                 remote.repo.path(),
-                std::time::Duration::from_secs(2),
+                std::time::Duration::from_secs(deadline),
             ));
             let mut pulling = tokio::spawn({
                 let checkpoints = checkpoints.clone();
@@ -637,10 +758,12 @@ fn pull_fetch_is_bounded_and_stops_when_the_session_closes() {
                 "network fetch must stop on deadline or close"
             );
             let error = result.unwrap().unwrap().unwrap_err();
-            assert!(
-                matches!(error, DiffError::TimedOut(_) | DiffError::Closed),
-                "{error:?}"
-            );
+            let expected = if closing {
+                matches!(error, DiffError::Closed)
+            } else {
+                matches!(error, DiffError::TimedOut(_))
+            };
+            assert!(expected, "{error:?}");
         }
     });
 }
@@ -667,7 +790,7 @@ fn pushes_use_the_only_remote_and_refuse_an_ambiguous_destination() {
         let status = checkpoints.status().await.unwrap();
         assert!(status.remote.is_none());
         assert!(status.has_remotes);
-        assert!(!checkpoints.fetch().await.unwrap());
+        assert!(checkpoints.fetch().await.unwrap().is_none());
         assert!(checkpoints.push(None).await.is_err());
         // A leftover remote setting alone does not configure an upstream.
         remote
@@ -806,6 +929,32 @@ fn push_refuses_other_or_multiple_repositories_before_hooks() {
             assert_eq!(remote.bare.git(&["show-ref"]), before_fetch, "{case}");
             assert_eq!(other.bare.git(&["show-ref"]), before_push, "{case}");
         }
+    });
+}
+
+#[test]
+fn a_remote_retargeted_after_preparation_is_not_pushed() {
+    run(async {
+        let remote = Remote::new("push-retargeted");
+        remote.repo.git(&["switch", "-c", "feature/topic"]);
+        Remote::commit(&remote.repo, "local.txt");
+        let tree = crate::diff::WorkingTree::open(remote.repo.path())
+            .await
+            .expect("repository");
+        let transfer = tree.prepare_push(None).await.expect("prepared");
+        let second = Repo::new("push-retargeted-second");
+        remote.repo.git(&[
+            "remote",
+            "set-url",
+            "origin",
+            second.path().to_str().unwrap(),
+        ]);
+        let pushed = tree.push(transfer).await;
+        assert!(
+            matches!(pushed, Err(DiffError::PushDestinations)),
+            "{pushed:?}"
+        );
+        assert_eq!(second.git(&["branch", "--list", "feature/topic"]), "");
     });
 }
 
@@ -1033,7 +1182,7 @@ fn fetches_serialize_across_instances_and_processes_after_remote_advances() {
             let second_result = if let Some(second) = second {
                 second.await.unwrap()
             } else {
-                Ok(true)
+                Ok(Some("origin".to_owned()))
             };
             let output = child.take().map(|child| child.wait_with_output().unwrap());
             assert!(

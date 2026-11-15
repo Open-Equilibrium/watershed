@@ -276,6 +276,40 @@ fn event_envelope_rejects_non_nfc_additional_fields() {
 }
 
 #[test]
+fn event_validation_rejects_nfc_colliding_payload_keys() {
+    let colliding = json!({"\u{e9}": true, "e\u{301}": false});
+    // Additional fields need no case: a collision always has a non-NFC key, which the
+    // NFC check rejects first.
+    for (payload, location) in [
+        (colliding.clone(), "payload."),
+        (json!({"future": colliding}), "payload.future."),
+    ] {
+        let event = test_event(payload.clone());
+        let error = event
+            .validate_v0()
+            .expect_err("NFC-colliding keys must be rejected by validation");
+        assert!(error.field().starts_with(location), "{error}");
+        assert_eq!(
+            error.requirement(),
+            "must not repeat after NFC normalization"
+        );
+
+        let wire = json!({
+            "event_id": "evt-001",
+            "event_type": "session.started",
+            "payload": payload,
+            "protocol_version": "0",
+            "sequence": 1,
+            "session_id": "smoke001",
+            "source": "flow-agent-cli",
+            "timestamp": "2026-01-01T00:00:00Z"
+        });
+        serde_json::from_value::<EventEnvelope>(wire)
+            .expect_err("NFC-colliding keys must be rejected by deserialization");
+    }
+}
+
+#[test]
 fn event_envelope_deserialization_rejects_non_object_payload() {
     let err = serde_json::from_str::<EventEnvelope>(
             "{\"event_id\":\"evt-001\",\"event_type\":\"session.started\",\"payload\":null,\"protocol_version\":\"0\",\"sequence\":1,\"session_id\":\"smoke001\",\"source\":\"flow-agent-cli\",\"timestamp\":\"2026-01-01T00:00:00Z\"}",

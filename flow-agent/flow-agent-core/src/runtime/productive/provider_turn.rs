@@ -4,7 +4,7 @@ use super::observe_productive_result_persist;
 use super::provider_result::{
     ProviderInput, durable_provider_error, durable_provider_output, parse_provider_result,
     provider_error_from_durable_output, provider_turn_from_durable_output,
-    verify_provider_result_session_objects,
+    verify_leaf_provider_result,
 };
 use super::tool::execute_productive_tool;
 use super::{
@@ -39,7 +39,13 @@ fn validate_recovered_provider_terminal(result: &RunAttemptResult) -> Result<(),
         && match result.outcome {
             RunAttemptOutcome::Completed => result.classification.is_none(),
             RunAttemptOutcome::Failed => {
-                classification == Some(ProviderTerminalClassification::ProviderError)
+                matches!(
+                    classification,
+                    Some(
+                        ProviderTerminalClassification::ProviderError
+                            | ProviderTerminalClassification::ProviderReplyInvalid
+                    )
+                )
             }
             RunAttemptOutcome::Cancelled => {
                 classification == Some(ProviderTerminalClassification::Cancelled)
@@ -175,7 +181,7 @@ where
             if matches!(&error, RuntimeError::Cancelled)
                 || (!error
                     .provider_failure()
-                    .is_some_and(|failure| failure.is_definitive())
+                    .is_some_and(|failure| failure.is_known_outcome())
                     && crate::runtime::cancellation::ensure_productive_dispatch_allowed()
                         .is_err()) =>
         {
@@ -190,17 +196,18 @@ where
         Err(error)
             if error
                 .provider_failure()
-                .is_some_and(|failure| failure.is_definitive()) =>
+                .is_some_and(|failure| failure.is_known_outcome()) =>
         {
+            let classification = error
+                .provider_failure()
+                .map_or(ProviderTerminalClassification::ProviderError, |failure| {
+                    ProviderTerminalClassification::for_failure(failure)
+                });
             let result = RunAttemptResult {
                 attempt_id: attempt_id.to_owned(),
                 attempt_kind: RunAttemptKind::Provider,
                 outcome: RunAttemptOutcome::Failed,
-                classification: Some(
-                    ProviderTerminalClassification::ProviderError
-                        .as_str()
-                        .to_owned(),
-                ),
+                classification: Some(classification.as_str().to_owned()),
                 exit_code: None,
                 timestamp: timestamp.to_owned(),
                 durable_output: Some(durable_provider_error(&error)?),
@@ -278,37 +285,49 @@ where
     let mut seen_call_ids = BTreeSet::new();
     loop {
         crate::runtime::cancellation::ensure_productive_dispatch_allowed()?;
-        let compiled = compile_provider_turn_context_with_agent_instructions(
-            &context.execution.model_profile,
-            context.execution.registry,
-            flow,
-            phase,
-            phase_execution_id,
-            input,
-            invocation,
-            context.execution.session_id,
-            &builder.history,
-            context.execution.agent_instructions,
-        )?;
-        let mut instructions =
-            String::from_utf8(compiled.provider_bytes.clone()).map_err(|_| {
-                RuntimeError::Protocol("compiled provider context is not UTF-8".to_owned())
-            })?;
-        instructions.push('\n');
-        instructions.push_str(&output_contract_instruction(&phase.output)?);
-        let prompt_cache_key =
-            derive_prompt_cache_key(context.execution.conversation_id, context.execution.model);
-        let body = build_responses_request_body(
-            context.execution.model,
-            &prompt_cache_key,
-            &instructions,
-            provider_input.items(),
-            &tools,
-        )?;
-        context
-            .execution
-            .model_profile
-            .ensure_input_budget(responses_request_input_bytes(&body)?)?;
+        let build_request =
+            |include_recent: bool| -> Result<(CompiledContext, serde_json::Value), RuntimeError> {
+                let compiled = compile_provider_turn_context_with_agent_instructions(
+                    &context.execution.model_profile,
+                    context.execution.registry,
+                    flow,
+                    phase,
+                    phase_execution_id,
+                    input,
+                    invocation,
+                    context.execution.session_id,
+                    &builder.history,
+                    context.execution.agent_instructions,
+                    include_recent,
+                )?;
+                let mut instructions =
+                    String::from_utf8(compiled.provider_bytes.clone()).map_err(|_| {
+                        RuntimeError::Protocol("compiled provider context is not UTF-8".to_owned())
+                    })?;
+                instructions.push('\n');
+                instructions.push_str(&output_contract_instruction(&phase.output)?);
+                let prompt_cache_key = derive_prompt_cache_key(
+                    context.execution.conversation_id,
+                    context.execution.model,
+                );
+                let body = build_responses_request_body(
+                    context.execution.model,
+                    &prompt_cache_key,
+                    &instructions,
+                    provider_input.items(),
+                    &tools,
+                )?;
+                context
+                    .execution
+                    .model_profile
+                    .ensure_input_budget(responses_request_input_bytes(&body)?)?;
+                Ok((compiled, body))
+            };
+        // WHY: optional history yields first; the retry still passes the whole-request check.
+        let (compiled, body) = match build_request(true) {
+            Err(RuntimeError::ContextBudgetExceeded { .. }) => build_request(false)?,
+            request => request?,
+        };
         let request_hash = canonical_request_hash(&body)?;
         context.provider_attempts = context.provider_attempts.saturating_add(1);
         let attempt_id = format!("provider-{:06}", context.provider_attempts);
@@ -378,7 +397,7 @@ where
 
         if turn.tool_calls.is_empty() {
             let result = parse_provider_result(phase, &turn.output_text)?;
-            verify_provider_result_session_objects(&result, context.recovery)?;
+            verify_leaf_provider_result(phase, &result, context.recovery)?;
             return Ok(result);
         }
         for item in turn.retained_items {

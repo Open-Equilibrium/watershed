@@ -2,8 +2,7 @@ use serde_json::{Map, Value};
 
 use crate::{
     AgentEvent, ChangedLines, EntryKind, History, ItemDetail, ItemId, ItemKind, ItemStatus,
-    NotificationLevel, PiAdapter, RecordKind, RequestId, SessionTree, TreeNode, TurnId, Usage,
-    UserInput,
+    NotificationLevel, PiAdapter, RequestId, SessionTree, TreeNode, TurnId, Usage, UserInput,
 };
 
 const TURN: TurnId = TurnId(1);
@@ -89,7 +88,10 @@ fn streams_a_turn_with_reasoning_and_text() {
                 stop_reason: String::new(),
                 error: None,
             },
-            AgentEvent::TurnCompleted { turn: TURN },
+            AgentEvent::TurnCompleted {
+                turn: TURN,
+                checkpoint: None
+            },
         ]
     );
 }
@@ -111,7 +113,10 @@ fn keeps_retries_in_one_turn_and_reports_aborts() {
         events,
         [
             AgentEvent::TurnStarted { turn: TURN },
-            AgentEvent::TurnAborted { turn: TURN },
+            AgentEvent::TurnAborted {
+                turn: TURN,
+                checkpoint: None
+            },
             AgentEvent::TurnStarted { turn: second },
             AgentEvent::ItemStarted {
                 turn: second,
@@ -129,6 +134,72 @@ fn keeps_retries_in_one_turn_and_reports_aborts() {
                 lines: None,
             },
         ]
+    );
+}
+
+#[test]
+fn a_turn_end_names_its_end_checkpoint_only_when_one_was_requested() {
+    let mut adapter = PiAdapter::new();
+    let mut events = Vec::new();
+    for record in [
+        r#"{"type":"extension_ui_request","id":"s1","method":"input","title":"watershed.checkpoint {\"session\":\"p1\",\"turn\":\"A\",\"phase\":\"start\"}"}"#,
+        r#"{"type":"agent_start"}"#,
+        r#"{"type":"agent_end","messages":[],"willRetry":false}"#,
+        r#"{"type":"extension_ui_request","id":"e1","method":"input","title":"watershed.checkpoint {\"session\":\"p1\",\"turn\":\"A\",\"phase\":\"end\"}"}"#,
+        r#"{"type":"agent_settled","aborted":false}"#,
+        r#"{"type":"agent_start"}"#,
+        r#"{"type":"agent_end","messages":[],"willRetry":false}"#,
+        r#"{"type":"agent_settled","aborted":true}"#,
+    ] {
+        let record: Map<String, Value> =
+            serde_json::from_str(record).expect("fixture records are JSON objects");
+        // The supervisor answers checkpoint dialogs itself and never translates them.
+        if adapter.checkpoint_request(&record).is_none() {
+            events.extend(adapter.translate(&record));
+        }
+    }
+    assert_eq!(
+        events,
+        [
+            AgentEvent::TurnStarted { turn: TurnId(1) },
+            AgentEvent::TurnCompleted {
+                turn: TurnId(1),
+                checkpoint: Some("A".to_owned()),
+            },
+            AgentEvent::TurnStarted { turn: TurnId(2) },
+            AgentEvent::TurnAborted {
+                turn: TurnId(2),
+                checkpoint: None,
+            },
+        ],
+        "a turn names the checkpoint its end was requested with; a turn without one names none"
+    );
+}
+
+#[test]
+fn a_late_end_checkpoint_is_not_named_by_the_next_turn() {
+    let mut adapter = PiAdapter::new();
+    let mut events = Vec::new();
+    for record in [
+        r#"{"type":"agent_start"}"#,
+        r#"{"type":"agent_settled","aborted":true}"#,
+        r#"{"type":"extension_ui_request","id":"e1","method":"input","title":"watershed.checkpoint {\"session\":\"p1\",\"turn\":\"A\",\"phase\":\"end\"}"}"#,
+        r#"{"type":"agent_start"}"#,
+        r#"{"type":"agent_settled","aborted":false}"#,
+    ] {
+        let record: Map<String, Value> =
+            serde_json::from_str(record).expect("fixture records are JSON objects");
+        if adapter.checkpoint_request(&record).is_none() {
+            events.extend(adapter.translate(&record));
+        }
+    }
+    assert_eq!(
+        events.last(),
+        Some(&AgentEvent::TurnCompleted {
+            turn: TurnId(2),
+            checkpoint: None,
+        }),
+        "an end checkpoint requested after its turn settled belongs to no later turn"
     );
 }
 
@@ -175,7 +246,10 @@ fn ends_a_failed_responses_open_text_before_its_retry_reuses_the_index() {
             delta(2, "Hi"),
             completed(2, ItemKind::AssistantMessage, "Hi"),
             request("stop", None),
-            AgentEvent::TurnCompleted { turn: TURN },
+            AgentEvent::TurnCompleted {
+                turn: TURN,
+                checkpoint: None
+            },
         ],
         "the failed response keeps its partial text and the retry's text is its own item"
     );
@@ -394,111 +468,23 @@ fn builds_the_session_tree_from_flat_entries() {
           "leafId":"l2"}"#,
     )
     .expect("JSON");
-    let node =
-        |id: &str, parent: Option<&str>, kind, preview: &str, label: Option<&str>| TreeNode {
-            id: id.to_owned(),
-            parent: parent.map(str::to_owned),
-            kind,
-            preview: preview.to_owned(),
-            label: label.map(str::to_owned),
-            at_ms: None,
-            failed: false,
-        };
+    let node = |id: &str, parent: Option<&str>, kind| TreeNode {
+        id: id.to_owned(),
+        parent: parent.map(str::to_owned),
+        kind,
+    };
     assert_eq!(
         History::from_entries(&data).tree(),
         SessionTree {
             nodes: vec![
-                TreeNode {
-                    at_ms: Some(1_792_836_000_250),
-                    ..node(
-                        "e1",
-                        None,
-                        EntryKind::User,
-                        "Add rate limiting to /login",
-                        None,
-                    )
-                },
-                node(
-                    "e2",
-                    Some("e1"),
-                    EntryKind::Assistant,
-                    "I'll look first.",
-                    Some("A2")
-                ),
-                node("e3", Some("e2"), EntryKind::ToolResult, "read", None),
-                node("e4", Some("e2"), EntryKind::Custom, "", None),
-                node("e5", Some("e4"), EntryKind::Other, "", None),
+                node("e1", None, EntryKind::User),
+                node("e2", Some("e1"), EntryKind::Assistant),
+                node("e3", Some("e2"), EntryKind::ToolResult),
+                node("e4", Some("e2"), EntryKind::Custom),
+                node("e5", Some("e4"), EntryKind::Other),
             ],
             leaf: Some("e4".to_owned()),
         }
-    );
-}
-
-#[test]
-fn names_what_a_tool_ran_on_and_whether_it_failed_in_the_tree() {
-    let data: Value = serde_json::from_str(
-        r#"{"entries":[
-          {"type":"message","id":"a1","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"bash","arguments":{"command":"npm test"}},{"type":"toolCall","id":"c2","name":"read","arguments":{"path":"a.ts"}}]}},
-          {"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"c1","toolName":"bash","isError":true,"content":[]}},
-          {"type":"message","id":"r2","parentId":"r1","message":{"role":"toolResult","toolCallId":"c2","toolName":"read","content":[]}},
-          {"type":"message","id":"a2","parentId":"r2","message":{"role":"assistant","stopReason":"error","content":[]}}],
-          "leafId":"a2"}"#,
-    )
-    .expect("JSON");
-    let nodes = History::from_entries(&data).tree().nodes;
-    assert_eq!(
-        nodes
-            .iter()
-            .map(|node| (node.id.as_str(), node.preview.as_str(), node.failed))
-            .collect::<Vec<_>>(),
-        [
-            ("a1", "", false),
-            ("r1", "bash npm test", true),
-            ("r2", "read a.ts", false),
-            ("a2", "", true),
-        ],
-        "a tool result names what its call ran on; a failed tool or response is marked"
-    );
-}
-
-#[test]
-fn names_what_each_result_ran_on_along_its_own_branch() {
-    // `s2` continues after `r1` and `s1` after the response, so each answers the earliest call
-    // its own branch left open; `r4` finds none open.
-    let data: Value = serde_json::from_str(
-        r#"{"entries":[
-          {"type":"message","id":"a1","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"","name":"bash","arguments":{"command":"ls"}},{"type":"toolCall","id":"","name":"bash","arguments":{"command":"make"}},{"type":"toolCall","id":"c3","name":"bash","arguments":{"command":"npm test"}}]}},
-          {"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
-          {"type":"custom","id":"t1","parentId":"r1","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"c3","durationMs":5}},
-          {"type":"message","id":"r2","parentId":"t1","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
-          {"type":"message","id":"r3","parentId":"r2","message":{"role":"toolResult","toolCallId":"c3","toolName":"bash","content":[]}},
-          {"type":"message","id":"s2","parentId":"r1","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
-          {"type":"message","id":"s1","parentId":"a1","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
-          {"type":"message","id":"a2","parentId":"r3","message":{"role":"assistant","content":[{"type":"toolCall","id":"","name":"bash","arguments":{"command":"cargo test"}}]}},
-          {"type":"message","id":"q1","parentId":"a2","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
-          {"type":"message","id":"r4","parentId":"r3","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}}],
-          "leafId":"q1"}"#,
-    )
-    .expect("JSON");
-    let previews: Vec<_> = History::from_entries(&data)
-        .tree()
-        .nodes
-        .into_iter()
-        .filter(|node| node.kind == EntryKind::ToolResult)
-        .map(|node| (node.id, node.preview))
-        .collect();
-    let preview = |id: &str, preview: &str| (id.to_owned(), preview.to_owned());
-    assert_eq!(
-        previews,
-        [
-            preview("r1", "bash ls"),
-            preview("r2", "bash make"),
-            preview("r3", "bash npm test"),
-            preview("s2", "bash make"),
-            preview("s1", "bash ls"),
-            preview("q1", "bash cargo test"),
-            preview("r4", "bash"),
-        ]
     );
 }
 
@@ -517,36 +503,20 @@ fn matches_each_result_to_its_own_call_when_ids_repeat() {
     )
     .expect("JSON");
     let history = History::from_entries(&data);
-    let previews: Vec<_> = history
-        .tree()
-        .nodes
-        .into_iter()
-        .filter(|node| node.kind == EntryKind::ToolResult)
-        .map(|node| node.preview)
-        .collect();
-    assert_eq!(previews, ["bash ls", "bash rm -rf build", "bash make"]);
-    let steps: Vec<_> = history
-        .trajectory(None)
-        .records
-        .into_iter()
-        .filter(|record| record.kind == RecordKind::Tool)
-        .map(|record| (record.target, record.failed))
-        .collect();
-    assert_eq!(
-        steps,
-        [
-            ("ls".to_owned(), false),
-            ("rm -rf build".to_owned(), true),
-            ("make".to_owned(), false)
-        ]
-    );
     let chat: Vec<_> = history
         .transcript(None, 10)
         .items
         .into_iter()
         .filter_map(|item| Some((item.target?, item.failed)))
         .collect();
-    assert_eq!(chat, steps, "the chat tells the same as the Trajectory");
+    assert_eq!(
+        chat,
+        [
+            ("ls".to_owned(), false),
+            ("rm -rf build".to_owned(), true),
+            ("make".to_owned(), false)
+        ]
+    );
 }
 
 #[test]
@@ -605,16 +575,16 @@ fn times_results_with_repeated_ids_only_when_their_calls_can_be_told_apart() {
     ))
     .expect("JSON");
     let history = History::from_entries(&data);
-    let steps: Vec<_> = history
-        .trajectory(None)
-        .records
+    let chat: Vec<_> = history
+        .transcript(None, 100)
+        .items
         .into_iter()
-        .filter(|record| record.kind == RecordKind::Tool)
-        .map(|record| (record.target, record.duration_ms))
+        .filter_map(|item| Some((item.target?, item.duration_ms)))
+        .filter(|(target, _)| target != "./deploy.sh")
         .collect();
     let step = |target: &str, duration: Option<u64>| (target.to_owned(), duration);
     assert_eq!(
-        steps,
+        chat,
         [
             step("ls", Some(10)),
             step("make", Some(20)),
@@ -624,14 +594,6 @@ fn times_results_with_repeated_ids_only_when_their_calls_can_be_told_apart() {
         ],
         "a parallel call's timing could be another's, so it is unknown"
     );
-    let chat: Vec<_> = history
-        .transcript(None, 100)
-        .items
-        .into_iter()
-        .filter_map(|item| Some((item.target?, item.duration_ms)))
-        .filter(|(target, _)| target != "./deploy.sh")
-        .collect();
-    assert_eq!(chat, steps, "the chat tells the same as the Trajectory");
 }
 
 #[test]
@@ -649,19 +611,13 @@ fn reports_extension_errors_as_notifications() {
 
 #[test]
 fn shows_invisible_and_reordering_characters_in_what_a_call_shows() {
-    use crate::pi::{call_target, changed_path};
+    use crate::pi::call_target;
     // Right-to-left override, zero-width space and carriage return; the target is the first
     // line.
     let command = r#"{"command":"rm -rf /\u202egnp.txt\u200b\r\n\techo\u0000"}"#;
     assert_eq!(
         call_target(command),
         "rm -rf /<U+202E>gnp.txt<U+200B><U+000D>"
-    );
-    // As the adapter receives them: parsed, with the characters themselves.
-    let edit = serde_json::json!({"path": "a\u{2066}b.rs", "oldText": "x\u{2028}y"}).to_string();
-    assert_eq!(
-        changed_path("edit", &edit).as_deref(),
-        Some("a<U+2066>b.rs")
     );
     // Characters Unicode lets renderers ignore: variation selectors, fillers, joiners and tags.
     let ignorable = r#"{"command":"rm\ufe0f \u3164-\u115f\u034f\u17b4\u180b\udb40\udd00"}"#;
@@ -703,14 +659,44 @@ fn shows_tool_names_with_hiding_characters_written_out() {
         .filter_map(|item| item.tool)
         .collect();
     assert_eq!(chat, ["lint<U+202E><U+000A>"]);
-    let steps: Vec<_> = history
-        .trajectory(None)
-        .records
-        .into_iter()
-        .filter(|record| record.label.starts_with("lint"))
-        .map(|record| record.label)
+}
+
+#[test]
+fn every_live_tool_call_with_a_repeated_id_completes() {
+    // Servers that send no call ids give every parallel call the same empty one; the earliest
+    // open call with an id gets the next end, as the stored history matches results.
+    let events = translate(&[
+        r#"{"type":"agent_start"}"#,
+        r#"{"type":"tool_execution_start","toolCallId":"","toolName":"bash","args":{"command":"ls"}}"#,
+        r#"{"type":"tool_execution_start","toolCallId":"","toolName":"bash","args":{"command":"make"}}"#,
+        r#"{"type":"tool_execution_end","toolCallId":"","toolName":"bash","result":{"content":[{"type":"text","text":"listed"}]},"isError":false}"#,
+        r#"{"type":"tool_execution_end","toolCallId":"","toolName":"bash","result":{"content":[{"type":"text","text":"built"}]},"isError":false}"#,
+        r#"{"type":"agent_settled"}"#,
+    ]);
+    let starts = events
+        .iter()
+        .filter(|event| matches!(event, AgentEvent::ItemStarted { .. }))
+        .count();
+    let completions: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::ItemCompleted {
+                item, status, text, ..
+            } => Some((item.0, *status, text.as_str())),
+            _ => None,
+        })
         .collect();
-    assert_eq!(steps, ["lint<U+202E><U+000A>"]);
+    assert_eq!(
+        (starts, completions),
+        (
+            2,
+            vec![
+                (1, ItemStatus::Completed, "listed"),
+                (2, ItemStatus::Completed, "built"),
+            ]
+        ),
+        "each started call completes once with its own result, none is left running"
+    );
 }
 
 #[test]
@@ -754,8 +740,49 @@ fn ends_the_items_an_abort_leaves_open() {
         [
             interrupted(1, ItemKind::AssistantMessage, "Running"),
             interrupted(2, ItemKind::CommandExecution, "waiting"),
-            AgentEvent::TurnAborted { turn: TURN },
+            AgentEvent::TurnAborted {
+                turn: TURN,
+                checkpoint: None
+            },
         ],
         "nothing stays running after the abort, and each keeps its partial output"
+    );
+}
+
+#[test]
+fn a_block_whose_index_is_reused_before_it_ends_completes_as_failed() {
+    let events = translate(&[
+        r#"{"type":"agent_start"}"#,
+        r#"{"type":"message_start","message":{"role":"assistant","content":[]}}"#,
+        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}"#,
+        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Partial"}}"#,
+        // pi skipped the end of the first block, then reused its content index.
+        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}"#,
+        r#"{"type":"agent_settled","aborted":false}"#,
+    ]);
+    let failed = |item: u64, text: &str| AgentEvent::ItemCompleted {
+        turn: TURN,
+        item: ItemId(item),
+        kind: ItemKind::AssistantMessage,
+        text: text.to_owned(),
+        status: ItemStatus::Failed,
+        duration_ms: None,
+        lines: None,
+    };
+    assert_eq!(
+        events,
+        [
+            AgentEvent::TurnStarted { turn: TURN },
+            started(1, ItemKind::AssistantMessage),
+            delta(1, "Partial"),
+            failed(1, "Partial"),
+            started(2, ItemKind::AssistantMessage),
+            failed(2, ""),
+            AgentEvent::TurnCompleted {
+                turn: TURN,
+                checkpoint: None
+            },
+        ],
+        "the displaced item ends as failed with its partial text before the new item starts, and each item completes once"
     );
 }

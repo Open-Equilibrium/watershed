@@ -12,6 +12,7 @@ use crate::runtime::{
 };
 use std::{
     fs,
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     thread,
     time::{Duration, Instant},
@@ -53,6 +54,25 @@ fn private_ownership_observer_tracks_the_canonical_workspace_path_after_replacem
         source_active.expect("source ownership reads"),
         "the canonical workspace path must keep one private ownership authority"
     );
+}
+
+#[test]
+fn observer_opened_before_first_lease_tracks_later_ownership() {
+    let workspace = empty_workspace("ownership-observer-before-first-lease");
+    let session_id = "ownershipobserverfirst001";
+    let observer = SessionOwnershipObserver::open(&workspace, session_id)
+        .expect("observer opens before any lease exists");
+    assert!(!observer.is_active().expect("absent authority reads"));
+
+    let marker = workspace.join("first.lock");
+    let lease = SessionOwnershipLease::acquire(&workspace, session_id, &marker)
+        .expect("first lease acquires");
+    assert!(
+        observer.is_active().expect("held lease reads"),
+        "an observer opened before the first lease must see it"
+    );
+    lease.release().expect("first lease releases");
+    assert!(!observer.is_active().expect("released lease reads"));
 }
 
 const OWNERSHIP_CHILD_WORKSPACE: &str = "WATERSHED_TEST_OWNERSHIP_CHILD_WORKSPACE";
@@ -249,23 +269,54 @@ fn session_authority_keys_preserve_native_unix_path_bytes() {
     assert_eq!(stable_native_path_bytes(&path), [b'a', 0xff, b'z']);
 }
 
-fn spawn_session_ownership_child(workspace: &Path, session_id: &str) -> std::process::Child {
-    session_ownership_child_command(workspace, session_id)
-        .spawn()
-        .expect("ownership child starts")
+/// Kills and reaps a helper that is still running when its test unwinds, so a failed
+/// assertion cannot leave a process holding ownership. Explicit waits leave nothing to kill.
+struct OwnershipChild(std::process::Child);
+
+impl Drop for OwnershipChild {
+    fn drop(&mut self) {
+        if matches!(self.0.try_wait(), Ok(None)) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+}
+
+impl Deref for OwnershipChild {
+    type Target = std::process::Child;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for OwnershipChild {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+fn spawn_session_ownership_child(workspace: &Path, session_id: &str) -> OwnershipChild {
+    OwnershipChild(
+        session_ownership_child_command(workspace, session_id)
+            .spawn()
+            .expect("ownership child starts"),
+    )
 }
 
 fn spawn_session_ownership_child_with_temp(
     workspace: &Path,
     session_id: &str,
     temp: &Path,
-) -> std::process::Child {
-    session_ownership_child_command(workspace, session_id)
-        .env("TMPDIR", temp)
-        .env("TMP", temp)
-        .env("TEMP", temp)
-        .spawn()
-        .expect("ownership child starts")
+) -> OwnershipChild {
+    OwnershipChild(
+        session_ownership_child_command(workspace, session_id)
+            .env("TMPDIR", temp)
+            .env("TMP", temp)
+            .env("TEMP", temp)
+            .spawn()
+            .expect("ownership child starts"),
+    )
 }
 
 fn session_ownership_child_command(workspace: &Path, session_id: &str) -> std::process::Command {
@@ -299,6 +350,16 @@ fn wait_for_ownership_child(workspace: &Path, child: &mut std::process::Child) {
 fn release_ownership_child(workspace: &Path, child: &mut std::process::Child) {
     fs::write(workspace.join("ownership-child-release"), b"release")
         .expect("ownership child release marker written");
-    let status = child.wait().expect("ownership child exits");
-    assert!(status.success(), "ownership child failed: {status}");
+    // Bounded like readiness, so a hung child fails this test instead of stalling it.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        if let Some(status) = child.try_wait().expect("ownership child status reads") {
+            assert!(status.success(), "ownership child failed: {status}");
+            return;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    child.kill().expect("timed-out ownership child terminates");
+    child.wait().expect("timed-out ownership child reaped");
+    panic!("ownership child did not exit after release");
 }

@@ -235,6 +235,7 @@ fn instruction_parameters_require_a_complete_typed_phase_input_map() {
             "context-parameter-001",
             &ContextHistory::default(),
             "Repository rules.",
+            true,
         )
     };
 

@@ -18,7 +18,7 @@ fn m11_runtime_values_are_bounded_typed_and_contract_checked() {
             ValueFieldContract {
                 name: "approved".to_owned(),
                 required: true,
-                value_contract: ValueContract::Boolean,
+                value_contract: ValueContract::Boolean {},
             },
             ValueFieldContract {
                 name: "score".to_owned(),
@@ -210,6 +210,12 @@ fn m11_runtime_value_contract_covers_every_recursive_shape_and_bound() {
         .to_string()
         .contains("canonical JSON")
     );
+    assert!(
+        validate_flow_value(&FlowValue::String("x".repeat(MAX_FLOW_VALUE_BYTES + 1)))
+            .expect_err("text beyond the whole byte limit is rejected")
+            .to_string()
+            .contains("canonical JSON")
+    );
 
     validate_flow_value(&FlowValue::Integer(i64::MAX.to_string()))
         .expect("exact signed integer limit is valid");
@@ -251,7 +257,7 @@ fn m11_runtime_value_contract_covers_every_recursive_shape_and_bound() {
             ValueFieldContract {
                 name: "object".to_owned(),
                 required: true,
-                value_contract: ValueContract::SessionObject,
+                value_contract: ValueContract::SessionObject {},
             },
         ],
     };
@@ -354,7 +360,7 @@ fn m11_value_contract_and_predicate_definitions_are_closed_and_finite() {
         ),
         (
             ValueContract::List {
-                items: Box::new(ValueContract::Boolean),
+                items: Box::new(ValueContract::Boolean {}),
                 max_items: Some(
                     u16::try_from(MAX_FLOW_VALUE_MEMBERS + 1).expect("fixture fits u16"),
                 ),
@@ -367,7 +373,7 @@ fn m11_value_contract_and_predicate_definitions_are_closed_and_finite() {
                     ValueFieldContract {
                         name: "duplicate".to_owned(),
                         required: true,
-                        value_contract: ValueContract::Boolean,
+                        value_contract: ValueContract::Boolean {},
                     };
                     2
                 ],
@@ -380,7 +386,7 @@ fn m11_value_contract_and_predicate_definitions_are_closed_and_finite() {
                     .map(|index| ValueFieldContract {
                         name: format!("field-{index}"),
                         required: false,
-                        value_contract: ValueContract::Boolean,
+                        value_contract: ValueContract::Boolean {},
                     })
                     .collect(),
             },
@@ -391,7 +397,7 @@ fn m11_value_contract_and_predicate_definitions_are_closed_and_finite() {
                 fields: vec![ValueFieldContract {
                     name: String::new(),
                     required: false,
-                    value_contract: ValueContract::Boolean,
+                    value_contract: ValueContract::Boolean {},
                 }],
             },
             "must contain 1 to",
@@ -405,7 +411,7 @@ fn m11_value_contract_and_predicate_definitions_are_closed_and_finite() {
             "expected {expected} for {contract:?}"
         );
     }
-    let mut too_deep = ValueContract::Boolean;
+    let mut too_deep = ValueContract::Boolean {};
     for _ in 0..MAX_FLOW_VALUE_DEPTH {
         too_deep = ValueContract::List {
             items: Box::new(too_deep),
@@ -428,7 +434,7 @@ fn m11_value_contract_and_predicate_definitions_are_closed_and_finite() {
                     fields: vec![ValueFieldContract {
                         name: "approved".to_owned(),
                         required: true,
-                        value_contract: ValueContract::Boolean,
+                        value_contract: ValueContract::Boolean {},
                     }],
                 }),
                 max_items: Some(2),
@@ -578,7 +584,7 @@ fn m11_predicates_and_composite_results_match_declared_output_contracts() {
             id: "source".to_owned(),
             name: "Source".to_owned(),
         },
-        output: ValueContract::Boolean,
+        output: ValueContract::Boolean {},
         ..test_phase()
     };
     let child = PhaseBlock {
@@ -586,7 +592,7 @@ fn m11_predicates_and_composite_results_match_declared_output_contracts() {
             id: "child".to_owned(),
             name: "Child".to_owned(),
         },
-        output: ValueContract::Boolean,
+        output: ValueContract::Boolean {},
         ..test_phase()
     };
     let composite = PhaseBlock {
@@ -595,7 +601,7 @@ fn m11_predicates_and_composite_results_match_declared_output_contracts() {
             name: "Composite".to_owned(),
         },
         phase_refs: vec!["child".to_owned()],
-        output: ValueContract::Boolean,
+        output: ValueContract::Boolean {},
         result_from: Some("child".to_owned()),
         ..test_phase()
     };

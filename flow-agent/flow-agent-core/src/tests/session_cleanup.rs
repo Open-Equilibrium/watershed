@@ -82,13 +82,13 @@ fn controlled_stage_failure_combinations_preserve_every_cause() {
 
 #[test]
 fn runtime_and_writer_finalization_failures_remain_visible() {
-    let workspace = workspace_copy("sandbox-negative");
-    let lock_path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("sandbox-negative-write.lock");
+    let workspace = workspace_copy("negative");
+    let lock_path =
+        crate::tests::helpers::workspace_session_dir(&workspace).join("negative-write.lock");
 
     let err = run_flow_internal_with_stage_observers(
         &workspace,
-        "sandbox-negative-write",
+        "negative-write",
         false,
         inject_runtime_operation_failure,
         |_| {
@@ -114,13 +114,13 @@ fn runtime_and_writer_finalization_failures_remain_visible() {
 
 #[test]
 fn runtime_finalization_and_real_cleanup_failures_remain_visible() {
-    let workspace = workspace_copy("sandbox-negative");
-    let lock_path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("sandbox-negative-write.lock");
+    let workspace = workspace_copy("negative");
+    let lock_path =
+        crate::tests::helpers::workspace_session_dir(&workspace).join("negative-write.lock");
 
     let err = run_flow_internal_with_stage_observers(
         &workspace,
-        "sandbox-negative-write",
+        "negative-write",
         false,
         inject_runtime_operation_failure,
         |_| {
@@ -143,17 +143,14 @@ fn runtime_finalization_and_real_cleanup_failures_remain_visible() {
             cleanup: Some(cleanup),
         } if operation.to_string().contains("injected runtime operation failure")
             && finalization.to_string().contains("injected writer finalization failure")
-            && cleanup.to_string().contains("sandbox-negative-write.lock")
+            && cleanup.to_string().contains("negative-write.lock")
     ));
     assert!(
         err.to_string()
             .contains("injected writer finalization failure"),
         "{err}"
     );
-    assert!(
-        err.to_string().contains("sandbox-negative-write.lock"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("negative-write.lock"), "{err}");
     assert!(
         std::error::Error::source(&err).is_some_and(|source| source
             .to_string()
@@ -262,13 +259,13 @@ fn controlled_run_cleanup_failure_is_returned_and_keeps_valid_artifacts() {
 
 #[test]
 fn controlled_run_operation_and_cleanup_failures_are_both_returned() {
-    let workspace = workspace_copy("sandbox-negative");
-    let lock_path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("sandbox-negative-write.lock");
+    let workspace = workspace_copy("negative");
+    let lock_path =
+        crate::tests::helpers::workspace_session_dir(&workspace).join("negative-write.lock");
 
     let err = run_flow_internal_with_stage_observers(
         &workspace,
-        "sandbox-negative-write",
+        "negative-write",
         false,
         inject_runtime_operation_failure,
         |result| result,
@@ -286,11 +283,11 @@ fn controlled_run_operation_and_cleanup_failures_are_both_returned() {
             finalization: None,
             cleanup: Some(cleanup),
         } if operation.to_string().contains("injected runtime operation failure")
-            && cleanup.to_string().contains("sandbox-negative-write.lock")
+            && cleanup.to_string().contains("negative-write.lock")
     ));
     assert!(
         crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("sandbox-negative-write.jsonl")
+            .join("negative-write.jsonl")
             .is_file()
     );
     assert!(lock_path.is_dir());

@@ -177,7 +177,7 @@ fn run_flow_preflights_outputs_even_when_later_phase_has_sandbox_denial() {
     fs::write(
         crate::tests::test_support::session_home_path()
             .join("registry/instructions/deny-attempt.yaml"),
-        "instruction:\n  id: deny-attempt\n  name: DenyAttempt\n  prompt: Attempt the sandbox-negative action selected by the fixture.\n",
+        "instruction:\n  id: deny-attempt\n  name: DenyAttempt\n  prompt: Attempt the negative action selected by the fixture.\n",
     )
     .expect("negative instruction written");
     fs::write(

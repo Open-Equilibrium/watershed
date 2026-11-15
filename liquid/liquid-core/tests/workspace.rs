@@ -1,6 +1,8 @@
 //! The mutation pipeline as its callers see it: every write is checked, applied and
 //! recorded as one Action, and a refused write changes nothing.
 
+#![allow(clippy::unwrap_used)]
+
 use liquid_core::{
     Action, Actor, Applied, AreaId, Error, MemoryStore, Mutation, Operation, Origin, PageId,
     Permission, PersonId, Request, TextStyle, ViewId,

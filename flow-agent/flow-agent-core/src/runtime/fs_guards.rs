@@ -55,7 +55,18 @@ pub(crate) use durability::{
     set_directory_sync_error_for_path_for_test, set_directory_sync_error_for_test,
     start_directory_sync_trace_for_test, take_directory_sync_trace_for_test,
 };
-pub(crate) use durability::{sync_directory, sync_retained_directory as sync_anchored_directory};
+pub(crate) use durability::{
+    sync_directory, sync_durable, sync_retained_directory as sync_anchored_directory,
+    truncate_durable, write_durable,
+};
+
+#[cfg(test)]
+mod durable_steps;
+#[cfg(test)]
+pub(crate) use durable_steps::{
+    CRASH_EXIT_CODE, CrashPoint, PowerLoss, apply_power_loss, durable_step, finish_durable_trace,
+    start_durable_trace, start_power_loss_trace,
+};
 
 #[cfg(test)]
 pub(crate) fn test_path_key(path: &Path) -> PathBuf {
@@ -87,8 +98,9 @@ pub use segmented_jsonl::with_segmented_jsonl_discovery_metrics_for_test;
 pub use segmented_jsonl::{SegmentedJsonlLeaf, parse_segmented_jsonl_leaf};
 pub use segmented_jsonl::{
     canonical_segmented_jsonl_sibling, for_each_segmented_jsonl_line,
-    for_each_segmented_jsonl_member, is_segmented_jsonl_ordinal, retry_event_segment_discovery,
-    segmented_jsonl_files, segmented_jsonl_leaf, segmented_jsonl_leaf_stem, segmented_jsonl_path,
+    for_each_segmented_jsonl_line_until, for_each_segmented_jsonl_member,
+    is_segmented_jsonl_ordinal, retry_event_segment_discovery, segmented_jsonl_files,
+    segmented_jsonl_leaf, segmented_jsonl_leaf_stem, segmented_jsonl_path,
     segmented_jsonl_segment_count,
 };
 
@@ -168,6 +180,8 @@ impl AnchoredDir {
             Ok(_) => false,
             Err(err) if err.kind() == io::ErrorKind::NotFound && !create => return Ok(None),
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                #[cfg(test)]
+                durable_step(&path, "mkdir");
                 let _publication = self
                     .publication_guard()
                     .map_err(|source| path_io_error(&path, source))?;
@@ -257,21 +271,29 @@ impl AnchoredDir {
     }
 
     pub(crate) fn create_dir(&self, leaf: impl AsRef<Path>) -> io::Result<()> {
+        #[cfg(test)]
+        durable_step(&self.path.join(leaf.as_ref()), "mkdir");
         let _publication = self.publication_guard()?;
         self.dir.create_dir(leaf)
     }
 
     pub(crate) fn remove_dir(&self, leaf: impl AsRef<Path>) -> io::Result<()> {
+        #[cfg(test)]
+        durable_step(&self.path.join(leaf.as_ref()), "rmdir");
         let _publication = self.publication_guard()?;
         self.dir.remove_dir(leaf)
     }
 
     pub(crate) fn remove_file(&self, leaf: impl AsRef<Path>) -> io::Result<()> {
+        #[cfg(test)]
+        durable_step(&self.path.join(leaf.as_ref()), "unlink");
         let _publication = self.publication_guard()?;
         self.dir.remove_file(leaf)
     }
 
     pub(crate) fn rename(&self, from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
+        #[cfg(test)]
+        durable_step(&self.path.join(to.as_ref()), "rename");
         let _publication = self.publication_guard()?;
         self.dir.rename(from, &self.dir, to)
     }

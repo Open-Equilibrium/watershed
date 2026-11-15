@@ -15,7 +15,6 @@ use tokio::time::Instant;
 
 use super::{CommandError, MAX_RECORD_BYTES, SessionEvent, State, Write, switched, ui_response};
 use crate::framing::keep_end;
-use crate::pi::checkpoint_request;
 use crate::{
     AgentEvent, Checkpoint, Checkpoints, Frame, LineFramer, NotificationLevel, PiAdapter, RequestId,
 };
@@ -220,27 +219,38 @@ impl Supervisor {
             return true;
         }
         // The core answers checkpoint requests itself; the user never sees them.
-        if let Some(request) = checkpoint_request(&record) {
+        if let Some(request) = self.adapter.checkpoint_request(&record) {
             let captures = self.captures.clone();
             return self.unless_killed(captures.send(request)).await.is_some();
         }
         for event in self.adapter.translate(&record) {
             let mut expiry = None;
+            let mut reporting = None;
             let forward = match &event {
                 AgentEvent::UserInputRequested { request, .. } => {
                     let stopping = {
                         let mut shared = self.state.lock();
                         if !shared.stopping {
                             shared.questions.insert(request.clone());
+                            shared.reporting = Some(request.clone());
                         }
                         shared.stopping
                     };
+                    #[cfg(test)]
+                    {
+                        let pause = self.state.lock().pause_after_insert.clone();
+                        if let Some((reached, resume)) = pause {
+                            reached.notify_one();
+                            resume.notified().await;
+                        }
+                    }
                     if stopping {
                         if !self.reply(request, json!({ "cancelled": true })).await {
                             return false;
                         }
                         continue;
                     }
+                    reporting = Some(request.clone());
                     // Counted from now: pi's timer runs while the event waits for room.
                     expiry = record
                         .get("timeout")
@@ -256,9 +266,7 @@ impl Supervisor {
                     true
                 }
                 AgentEvent::TurnStarted { .. } => {
-                    let mut shared = self.state.lock();
-                    shared.running = true;
-                    shared.stopping = false;
+                    self.state.lock().running = true;
                     true
                 }
                 AgentEvent::TurnCompleted { .. } | AgentEvent::TurnAborted { .. } => {
@@ -279,6 +287,30 @@ impl Supervisor {
                     return false;
                 }
             }
+            if let Some(request) = reporting {
+                let dismissed = {
+                    let mut shared = self.state.lock();
+                    shared.reporting = None;
+                    shared.stopping && shared.end_question(&request)
+                };
+                // An abort that came meanwhile left the question to this report, so its
+                // resolution follows the request.
+                if dismissed {
+                    if !self.reply(&request, json!({ "cancelled": true })).await {
+                        return false;
+                    }
+                    let events = self.events.clone();
+                    let resolved = AgentEvent::UserInputResolved { request };
+                    if self
+                        .unless_killed(events.send(SessionEvent::Agent(resolved)))
+                        .await
+                        .is_none()
+                    {
+                        return false;
+                    }
+                    continue;
+                }
+            }
             if let Some((request, deadline)) = expiry {
                 self.expire(request, deadline);
             }
@@ -297,9 +329,15 @@ impl Supervisor {
 
     /// Forgets a question at `deadline`: pi then answers it itself without telling. An
     /// answered question or the agent's exit ends the timer, so it keeps nothing alive.
-    fn expire(&self, request: RequestId, deadline: Instant) {
+    pub(super) fn expire(&self, request: RequestId, deadline: Instant) {
         let (state, events, ended) = (self.state.clone(), self.events.clone(), self.ended.clone());
         let expired = request.clone();
+        // Held until the timer's handle is registered, so the timer's own removal cannot run
+        // first and leave the handle behind; a question answered meanwhile gets no timer.
+        let mut shared = self.state.lock();
+        if !shared.questions.contains(&request) {
+            return;
+        }
         let timer = tokio::spawn(async move {
             tokio::time::sleep_until(deadline).await;
             // Like a user's answer, it never follows the exit.
@@ -315,10 +353,7 @@ impl Supervisor {
                 let _ = events.send(SessionEvent::Agent(resolved)).await;
             }
         });
-        self.state
-            .lock()
-            .expiries
-            .insert(request, timer.abort_handle());
+        shared.expiries.insert(request, timer.abort_handle());
     }
 
     /// Fails the command an oversized response answers, or reports a skipped event; returns
@@ -619,6 +654,76 @@ mod tests {
                 "pi answered it itself while it waited"
             );
             assert!(handled.await.expect("handled"));
+        });
+    }
+
+    #[test]
+    fn an_abort_racing_a_new_dialog_resolves_it_after_its_request() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime starts");
+        runtime.block_on(async {
+            let (events, mut received) = mpsc::channel(8);
+            let (writer, _writes) = mpsc::channel(8);
+            let (captures, _requests) = mpsc::channel(1);
+            let state = State(Arc::default());
+            let reached = Arc::new(tokio::sync::Notify::new());
+            let resume = Arc::new(tokio::sync::Notify::new());
+            {
+                let mut shared = state.lock();
+                shared.replies = Some(Default::default());
+                shared.pause_after_insert = Some((reached.clone(), resume.clone()));
+            }
+            let mut supervisor = Supervisor {
+                events: events.clone(),
+                ended: Arc::default(),
+                writer: writer.clone(),
+                state: state.clone(),
+                adapter: PiAdapter::new(),
+                killed: None,
+                kill_requested: false,
+                error_output: Arc::default(),
+                error_reader: tokio::spawn(async {}),
+                input_writer: tokio::spawn(async {}),
+                captures,
+                checkpoints: Arc::new(Checkpoints::new(&std::env::temp_dir())),
+            };
+            let Value::Object(record) = json!({
+                "type": "extension_ui_request",
+                "id": "q1",
+                "method": "confirm",
+                "title": "Sure?",
+                "message": "Really",
+            }) else {
+                unreachable!()
+            };
+            let handled = tokio::spawn(async move { supervisor.handle(record).await });
+            // The question is open, but the supervisor has not reported its request yet.
+            reached.notified().await;
+            let responder = crate::session::Responder {
+                writer,
+                events: events.downgrade(),
+                ended: Arc::default(),
+                state,
+                next_id: Arc::default(),
+            };
+            responder.abort().await.expect("aborted");
+            resume.notify_one();
+            assert!(handled.await.expect("handled"));
+            assert!(
+                matches!(
+                    received.recv().await,
+                    Some(SessionEvent::Agent(AgentEvent::UserInputRequested { .. }))
+                ),
+                "the dialog is reported before its resolution"
+            );
+            assert_eq!(
+                received.recv().await,
+                Some(SessionEvent::Agent(AgentEvent::UserInputResolved {
+                    request: RequestId("q1".to_owned())
+                }))
+            );
         });
     }
 }

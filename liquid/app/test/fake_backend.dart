@@ -3,8 +3,6 @@ import 'dart:async';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
     show Int64List;
 
-import 'dart:math' as math;
-
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/rust/api/worktrees.dart';
@@ -20,10 +18,19 @@ class FakeBackend implements SessionBackend {
   /// The files the shown turns changed; none outside Git.
   List<BridgeFileChange>? changed = const [];
   Map<String, String> patches = const {};
-  BridgeHistory stored = historyOf([]);
+  BridgeHistory stored = historyOf();
 
-  /// Histories by the requested leaves, joined by spaces; others get [stored].
-  final histories = <String, BridgeHistory>{};
+  /// What statistics() and context() return. Their reads are listed in `statisticsReads`, apart
+  /// from `calls`, which keeps the commands and the history reads.
+  BridgeStatistics stats = statisticsOf();
+  BridgeContext? contextWindow;
+  final statisticsReads = <String>[];
+  String? statisticsError;
+
+  /// What context() fails with, apart from the statistics.
+  String? contextError;
+  Completer<void>? statisticsGate;
+
   bool cancelled = false;
   final _stopped = Completer<void>();
 
@@ -37,6 +44,12 @@ class FakeBackend implements SessionBackend {
     };
     return controller.stream;
   }
+
+  /// The counts the stream's events were confirmed up to, in order.
+  final confirmed = <int>[];
+
+  @override
+  Future<void> confirmApplied(int applied) async => confirmed.add(applied);
 
   /// What the agent rejects sends with, like the bridge does.
   String? sendError;
@@ -55,12 +68,16 @@ class FakeBackend implements SessionBackend {
     if (sendError case final error?) throw error;
   }
 
-  /// What clear_queue returns.
+  /// What clear_queue returns, and what it fails with; it holds until `clearQueueGate` completes.
   BridgeQueue queued = const BridgeQueue(steering: [], followUp: []);
+  Object? clearQueueError;
+  Completer<void>? clearQueueGate;
 
   @override
   Future<BridgeQueue> clearQueue() async {
     calls.add('clear queue');
+    await clearQueueGate?.future;
+    if (clearQueueError case final error?) throw error;
     return queued;
   }
 
@@ -187,18 +204,29 @@ class FakeBackend implements SessionBackend {
   }
 
   @override
-  Future<BridgeHistory> history(List<String> leaves) async {
-    final key = leaves.join(' ');
-    calls.add('history $key'.trim());
+  Future<BridgeHistory> history() async {
+    calls.add('history');
     await gate?.future;
-    if (historyError case final error?) throw error;
-    return histories[key] ?? stored;
+    return stored;
   }
-
-  Object? historyError;
 
   /// Holds history reads until it completes.
   Completer<void>? gate;
+
+  @override
+  Future<BridgeStatistics> statistics() async {
+    statisticsReads.add('statistics');
+    await statisticsGate?.future;
+    if (statisticsError case final error?) throw error;
+    return stats;
+  }
+
+  @override
+  Future<BridgeContext?> context() async {
+    statisticsReads.add('context');
+    if (contextError case final error?) throw error;
+    return contextWindow;
+  }
 
   /// Whether [branch] moves the session's leaf, as a successful branch does.
   bool branchMoves = true;
@@ -212,8 +240,15 @@ class FakeBackend implements SessionBackend {
   /// Whether an extension cancels session switches.
   bool switchCancelled = false;
 
+  /// Holds the recent-sessions read until it completes, and the read answers the list it began with.
+  Completer<void>? recentGate;
+
   @override
-  Future<List<BridgeStoredSession>> recentSessions() async => storedSessions;
+  Future<List<BridgeStoredSession>> recentSessions() async {
+    final answer = storedSessions;
+    await recentGate?.future;
+    return answer;
+  }
 
   /// The open session's title, as pi stored it.
   String? sessionTitle;
@@ -259,24 +294,17 @@ class FakeBackend implements SessionBackend {
   /// Holds reads of earlier chat pages until it completes.
   Completer<void>? earlierGate;
 
+  /// Holds the newest chat page until it completes.
+  Completer<void>? newestGate;
+
   @override
   Future<BridgeTranscript> transcript(String? before) async {
     calls.add('transcript ${before ?? ''}'.trim());
+    if (before == null) await newestGate?.future;
     if (before != null) await earlierGate?.future;
     if (transcriptError case final error?) throw error;
     return transcripts[before ?? ''] ??
         const BridgeTranscript(items: [], more: false);
-  }
-
-  /// Context details by response entry.
-  final contexts = <String, BridgeContextDetail>{};
-  Object? contextError;
-
-  @override
-  Future<BridgeContextDetail?> context(String entry) async {
-    calls.add('context $entry');
-    if (contextError case final error?) throw error;
-    return contexts[entry];
   }
 
   /// The checkout's Git state; null outside Git.
@@ -299,6 +327,9 @@ class FakeBackend implements SessionBackend {
 
   /// What fetching fails with.
   Object? fetchError;
+
+  /// The remote a fetch reports it fetched, when it is not the checkout's.
+  String? fetchedRemote;
 
   int statusReads = 0;
 
@@ -347,9 +378,22 @@ class FakeBackend implements SessionBackend {
   @override
   Future<BridgeGitOutcome> createBranch(String name) async {
     calls.add('create $name');
+    // Git reports the branch checked out when it created the branch, unless a test says otherwise.
+    final from = createdFrom ?? git?.rawBranch;
     onCreateBranch?.call(name);
-    return outcome;
+    return BridgeGitOutcome(
+      kind: outcome.kind,
+      files: outcome.files,
+      running: outcome.running,
+      detail: outcome.detail,
+      commit: outcome.commit,
+      transfer: outcome.transfer,
+      createdFrom: from,
+    );
   }
+
+  /// The branch a created branch reports it was created from, when it is not the checkout's.
+  String? createdFrom;
 
   /// Runs when a branch is created, as Git would switch to it.
   void Function(String name)? onCreateBranch;
@@ -397,6 +441,8 @@ class FakeBackend implements SessionBackend {
               subject: message.split('\n').first,
               count: paths.length,
             ),
+            // Git creates a new branch from the one HEAD names.
+            createdFrom: branch == null ? null : git?.rawBranch,
           )
         : outcome;
   }
@@ -475,10 +521,10 @@ class FakeBackend implements SessionBackend {
   }
 
   @override
-  Future<bool> fetch() async {
+  Future<String?> fetch() async {
     calls.add('fetch');
     if (fetchError case final error?) throw error;
-    return true;
+    return fetchedRemote ?? git?.remote;
   }
 
   @override
@@ -585,6 +631,28 @@ class FakeBackend implements SessionBackend {
         pullRequestOutcomeOf(bases: baseBranches, moreBases: moreBases);
   }
 
+  /// What a base search answers, until set otherwise: the branches of [baseBranches] that
+  /// contain its text. [searchOutcome] replaces the answer and [searchGate] holds it.
+  BridgePullRequestOutcome? searchOutcome;
+  Completer<BridgePullRequestOutcome>? searchGate;
+
+  @override
+  Future<BridgePullRequestOutcome> pullRequestBaseSearch(
+    String host,
+    String target,
+    String query,
+  ) async {
+    calls.add('search $target $query');
+    if (searchGate case final gate?) return gate.future;
+    return searchOutcome ??
+        pullRequestOutcomeOf(
+          bases: [
+            for (final name in baseBranches)
+              if (name.shown.contains(query)) name,
+          ],
+        );
+  }
+
   /// What the Chat's model writes for a pull request, until set otherwise; [writeError] fails
   /// it and [writeGate] holds it.
   BridgePullRequestText written = const BridgePullRequestText(
@@ -683,9 +751,13 @@ class FakeBackend implements SessionBackend {
   /// Holds reverts until it completes.
   Completer<void>? revertGate;
 
+  /// Holds the revert plan until it completes.
+  Completer<void>? revertPlanGate;
+
   @override
   Future<BridgeRevertPlan> revertPlan(String turn) async {
     calls.add('revert plan $turn');
+    await revertPlanGate?.future;
     return revertPlanned;
   }
 
@@ -707,9 +779,14 @@ class FakeBackend implements SessionBackend {
   List<BridgeCheckpointSession> checkpointed = const [];
   Object? removeError;
 
+  /// Holds the checkpoint sessions read until it completes.
+  Completer<void>? checkpointGate;
+
   @override
-  Future<List<BridgeCheckpointSession>> checkpointSessions() async =>
-      checkpointed;
+  Future<List<BridgeCheckpointSession>> checkpointSessions() async {
+    await checkpointGate?.future;
+    return checkpointed;
+  }
 
   @override
   Future<void> removeAllCheckpoints() async {
@@ -734,8 +811,31 @@ class FakeBackend implements SessionBackend {
   /// Turns with checkpoints by session file.
   Map<String, int> turnCounts = const {};
 
+  /// Holds the turn counts read until it completes.
+  Completer<void>? storedTurnsGate;
+
   @override
-  Future<int> storedTurns(String path) async => turnCounts[path] ?? 0;
+  Future<int> storedTurns(String path) async {
+    await storedTurnsGate?.future;
+    return turnCounts[path] ?? 0;
+  }
+
+  /// The folder an export returns, or the error it throws.
+  String exportFolder =
+      '/Users/ana/Downloads/Rate limit for login – record 2026-11-11';
+  Object? exportError;
+
+  @override
+  Future<String> exportRecord({
+    required String path,
+    required String title,
+    required String host,
+    required String day,
+  }) async {
+    calls.add('export $path');
+    if (exportError case final error?) throw error;
+    return exportFolder;
+  }
 
   @override
   Future<void> deleteSession(String path) async {
@@ -757,7 +857,6 @@ class FakeBackend implements SessionBackend {
       stored = BridgeHistory(
         tree: stored.tree,
         leaf: node?.kind == BridgeEntryKind.user ? node?.parent : entry,
-        trajectories: stored.trajectories,
         usage: stored.usage,
       );
     }
@@ -780,6 +879,7 @@ BridgeEvent event(
   BridgeDisplay? display,
   bool? success,
   BridgeQueue? queue,
+  String? checkpoint,
 }) => BridgeEvent(
   kind: kind,
   item: item,
@@ -789,6 +889,7 @@ BridgeEvent event(
   display: display,
   success: success,
   queue: queue,
+  checkpoint: checkpoint,
 );
 
 BridgeItem item(
@@ -818,49 +919,25 @@ BridgeUsage usage(int input, int output, int cost) => BridgeUsage(
   costMicroUsd: cost,
 );
 
-BridgeRecord record(
-  String entry,
-  int turn,
-  BridgeRecordKind kind,
-  String label,
-  int start, {
-  int? duration,
-  int? firstToken,
-  String detail = '',
-  String target = '',
-  String? changedFile,
-  BridgeUsage? usage,
-  BridgeStepContext? context,
-  bool failed = false,
-  BridgeToolOutcome outcome = const BridgeToolOutcome(),
-  int added = 0,
-  String? model,
-}) => BridgeRecord(
-  entry: entry,
-  turn: turn,
-  kind: kind,
-  label: label,
-  detail: detail,
-  target: target,
-  changedFile: changedFile,
-  startMs: start,
-  durationMs: duration,
-  firstTokenMs: firstToken,
-  model: model ?? (kind == BridgeRecordKind.message ? 'faux-1' : ''),
-  usage: usage,
-  stopReason: '',
-  failed: failed,
-  context: context,
-  outcome: outcome,
-  addedChars: added,
+/// Statistics of the given models, tools and turns; the session's span is unknown by default.
+BridgeStatistics statisticsOf({
+  List<BridgeModelUsage> models = const [],
+  List<BridgeToolCalls> tools = const [],
+  List<BridgeTurnStatistics> turns = const [],
+  int? startedMs,
+  int? endedMs,
+}) => BridgeStatistics(
+  models: models,
+  tools: tools,
+  turns: turns,
+  startedMs: startedMs,
+  endedMs: endedMs,
 );
 
-/// A session whose current branch is `records`, as one tree path.
-BridgeHistory historyOf(
-  List<BridgeRecord> records, {
+/// A session with `tree` (by default a bare root) and the leaf `leaf`.
+BridgeHistory historyOf({
   List<BridgeTreeNode>? tree,
   String? leaf,
-  List<List<BridgeRecord>> others = const [],
   BridgeUsage usage = const BridgeUsage(
     input: 0,
     output: 0,
@@ -871,40 +948,8 @@ BridgeHistory historyOf(
   ),
 }) => BridgeHistory(
   usage: usage,
-  tree:
-      tree ??
-      [
-        const BridgeTreeNode(
-          failed: false,
-          id: 'root',
-          kind: BridgeEntryKind.other,
-          preview: '',
-        ),
-        for (final (index, record) in records.indexed)
-          BridgeTreeNode(
-            failed: record.failed,
-            id: record.entry,
-            parent: index == 0 ? 'root' : records[index - 1].entry,
-            kind: switch (record.kind) {
-              BridgeRecordKind.user => BridgeEntryKind.user,
-              BridgeRecordKind.message => BridgeEntryKind.assistant,
-              BridgeRecordKind.tool => BridgeEntryKind.toolResult,
-            },
-            preview: record.label,
-          ),
-      ],
-  leaf: leaf ?? records.lastOrNull?.entry ?? 'e1',
-  trajectories: [
-    for (final branch in [records, ...others])
-      BridgeTrajectory(
-        records: branch,
-        durationMs: branch.fold(
-          0,
-          (end, record) =>
-              math.max(end, record.startMs + (record.durationMs ?? 0)),
-        ),
-      ),
-  ],
+  tree: tree ?? const [BridgeTreeNode(id: 'root', kind: BridgeEntryKind.other)],
+  leaf: leaf ?? 'e1',
 );
 
 BridgeTranscriptItem chatItem(

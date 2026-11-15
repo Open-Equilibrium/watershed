@@ -260,11 +260,18 @@ fn a_caller_that_stops_waiting_lets_pi_end_by_itself() {
         )
         .unwrap();
 
-        let stopped =
-            tokio::time::timeout(Duration::from_millis(300), branch.write(&checkpoints)).await;
-        assert!(stopped.is_err());
-        let ended = branch.pi.join("ended");
+        // The caller stops waiting once pi runs; a fixed timeout could fire before pi starts.
+        let started = branch.pi.join("cwd");
         let waited = std::time::Instant::now();
+        {
+            let mut write = std::pin::pin!(branch.write(&checkpoints));
+            while !started.exists() && waited.elapsed() < Duration::from_secs(10) {
+                let stopped = tokio::time::timeout(Duration::from_millis(20), write.as_mut()).await;
+                assert!(stopped.is_err(), "the write ended before pi did");
+            }
+        }
+        assert!(started.exists(), "pi started");
+        let ended = branch.pi.join("ended");
         while !ended.exists() && waited.elapsed() < Duration::from_secs(10) {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
@@ -474,5 +481,31 @@ fn a_selection_longer_than_one_diff_reaches_the_model() {
         for part in ["+file 0", "+file 149", "f149.txt"] {
             assert!(input.contains(part), "{part} missing");
         }
+    });
+}
+
+#[test]
+fn a_draft_for_a_file_replaced_by_a_large_folder_still_succeeds() {
+    run(async {
+        let branch = Branch::new("replaced", "foo", "old file\n");
+        std::fs::remove_file(branch.repo.path().join("foo")).unwrap();
+        std::fs::create_dir(branch.repo.path().join("foo")).unwrap();
+        // Long names: the paths left out alone outgrow a command line.
+        let name = "n".repeat(200);
+        for n in 0..10_000 {
+            branch
+                .repo
+                .write(&format!("foo/{name}{n:05}"), "not selected\n");
+        }
+        let checkpoints = Checkpoints::new(branch.repo.path());
+        let snapshot = checkpoints.commit_plan(&[]).await.unwrap().snapshot;
+
+        draft(&branch, &checkpoints, None, &snapshot, &["foo".to_owned()])
+            .await
+            .expect("the draft is written");
+
+        let input = branch.read("input");
+        assert!(!input.contains("not selected"), "{input}");
+        assert!(!input.contains(&name), "a file left out names no path");
     });
 }

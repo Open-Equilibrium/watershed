@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -18,6 +19,8 @@ void main() {
   late PullRequests pulls;
 
   File basesFile() => File('${dir.path}/git-bases.json');
+  File deviceFile([String computer = 'computer']) =>
+      File('${dir.path}/$computer/device.json');
   BranchBases stored({String device = 'MacBook'}) =>
       BranchBases(file: SettingsFile(basesFile()), device: device);
 
@@ -47,6 +50,7 @@ void main() {
         running: [],
         detail: 'pre-commit refused',
         commit: BridgeCommit(branch: 'fix/typo', count: 0),
+        createdFrom: 'feature/retry-after',
       );
       await git.commit(['a.txt'], 'Fix', snapshot: 's', branch: 'fix/typo');
 
@@ -62,6 +66,119 @@ void main() {
       expect(await reloaded.baseOf('/other/.git', 'fix/typo'), isNull);
       await pulls.plan();
       expect(backend.calls.last, 'plan - main');
+    },
+  );
+
+  test(
+    'base records name this computer by a random id kept in its own folder',
+    () async {
+      BranchBases reopened() => BranchBases(
+        file: SettingsFile(basesFile()),
+        deviceFile: SettingsFile(deviceFile()),
+      );
+      await reopened().record('/work/api/.git', 'feature', 'main');
+      final id = (jsonDecode(deviceFile().readAsStringSync()) as Map)['device'];
+      expect(id, isA<String>());
+      expect(id, isNot(Platform.localHostname));
+      expect(
+        (jsonDecode(basesFile().readAsStringSync()) as Map).containsKey(
+          'device',
+        ),
+        isFalse,
+      );
+      // A later start finds the record under the same id.
+      expect(await reopened().baseOf('/work/api/.git', 'feature'), 'main');
+      expect(
+        (jsonDecode(deviceFile().readAsStringSync()) as Map)['device'],
+        id,
+      );
+    },
+  );
+
+  test(
+    'computers sharing one data folder keep their own ids and remembered bases',
+    () async {
+      BranchBases computer(String name) => BranchBases(
+        file: SettingsFile(basesFile()),
+        deviceFile: SettingsFile(deviceFile(name)),
+      );
+      await computer('mac-a').record('/work/api/.git', 'feature', 'main');
+      await computer('mac-b').record('/work/api/.git', 'feature', 'develop');
+      expect(
+        await computer('mac-a').baseOf('/work/api/.git', 'feature'),
+        'main',
+      );
+      expect(
+        await computer('mac-b').baseOf('/work/api/.git', 'feature'),
+        'develop',
+      );
+      final ids = {
+        for (final name in ['mac-a', 'mac-b'])
+          (jsonDecode(deviceFile(name).readAsStringSync()) as Map)['device'],
+      };
+      expect(ids, hasLength(2));
+    },
+  );
+
+  test(
+    'records that named the host name move to the device id on first start',
+    () async {
+      basesFile().writeAsStringSync(
+        jsonEncode({
+          'bases': [
+            {
+              'device': Platform.localHostname,
+              'repository': '/work/api/.git',
+              'branch': 'feature',
+              'base': 'main',
+            },
+          ],
+        }),
+      );
+      final migrated = BranchBases(
+        file: SettingsFile(basesFile()),
+        deviceFile: SettingsFile(deviceFile()),
+      );
+      expect(await migrated.baseOf('/work/api/.git', 'feature'), 'main');
+      final id = (jsonDecode(deviceFile().readAsStringSync()) as Map)['device'];
+      expect(id, isNot(Platform.localHostname));
+      expect(
+        ((jsonDecode(basesFile().readAsStringSync()) as Map)['bases'] as List)
+            .single,
+        containsPair('device', id),
+      );
+    },
+  );
+
+  test(
+    'records left under the host name by an interrupted start still move',
+    () async {
+      // A start stopped after it stored the device id, before it moved the records.
+      deviceFile()
+        ..createSync(recursive: true)
+        ..writeAsStringSync(jsonEncode({'device': 'kept-id'}));
+      basesFile().writeAsStringSync(
+        jsonEncode({
+          'bases': [
+            {
+              'device': Platform.localHostname,
+              'repository': '/work/api/.git',
+              'branch': 'feature',
+              'base': 'main',
+            },
+          ],
+        }),
+      );
+      final restarted = BranchBases(
+        file: SettingsFile(basesFile()),
+        deviceFile: SettingsFile(deviceFile()),
+      );
+      expect(await restarted.baseOf('/work/api/.git', 'feature'), 'main');
+      expect(
+        ((jsonDecode(basesFile().readAsStringSync()) as Map)['bases'] as List)
+            .single,
+        containsPair('device', 'kept-id'),
+      );
     },
   );
 

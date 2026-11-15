@@ -12,9 +12,9 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 import 'worktrees.dart';
 
-// These functions are ignored because they are not marked as `pub`: `answer`, `branch_turns`, `checkpoint_ids`, `checkpoint`, `checkpoints_of`, `left_unreverted`, `open`, `session_dir`, `shown`, `stored_session`, `turn_of`, `unread`, `whitespace`
+// These functions are ignored because they are not marked as `pub`: `answer`, `branch_turns`, `checkpoint_ids`, `checkpoint`, `checkpoints_of`, `export_into`, `left_unreverted`, `open`, `session_dir`, `shown`, `stored_session`, `turn_of`, `unread`, `whitespace`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Open`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `drop`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `forward`, `launch`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>>
@@ -52,9 +52,13 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Every uncommitted file with attribution from the current session branch's checkpoints.
   Future<BridgeCommitPlan> commitPlan();
 
-  /// Everything the model saw for the request behind the response `entry`; `None` unless
-  /// `entry` is a response.
-  Future<BridgeContextDetail?> context({required String entry});
+  /// Confirms that Liquid applied the stream's first `applied` events, which lets the stream
+  /// send that many more. Liquid calls it after applying each batch it received (ADR-0272).
+  Future<void> confirmApplied({required PlatformInt64 applied});
+
+  /// The context window the next request fills and when pi compacts it; `None` when the agent
+  /// reports no window.
+  Future<BridgeContext?> context();
 
   /// Creates the branch `name` at the current commit and switches to it.
   Future<BridgeGitOutcome> createBranch({required String name});
@@ -82,8 +86,19 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Streams the session's events; a session has one subscriber.
   Stream<BridgeEvent> events();
 
-  /// Fetches the upstream remote, origin or the sole remote through checked destinations.
-  Future<bool> fetch();
+  /// Writes the record of the session stored in `path` as a new folder in Downloads and returns
+  /// its path. `title` is the name Liquid shows, `host` the machine's name and `day` the local
+  /// date as `YYYY-MM-DD`. A failure writes nothing and says why.
+  Future<String> exportRecord({
+    required String path,
+    required String title,
+    required String host,
+    required String day,
+  });
+
+  /// Fetches the upstream remote, origin or the sole remote through checked destinations, and
+  /// returns the remote it fetched, as Liquid shows it; none when there is no remote.
+  Future<String?> fetch();
 
   /// The checkout's branches.
   Future<BridgeBranches> gitBranches();
@@ -94,9 +109,8 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// The checkout's branch, upstream and uncommitted files; none outside Git.
   Future<BridgeGitStatus?> gitStatus();
 
-  /// Reads the session's branch tree and the Trajectory of each branch ending at an entry in
-  /// `leaves`, or of the current branch when `leaves` is empty.
-  Future<BridgeHistory> history({required List<String> leaves});
+  /// Reads the session's branch tree and what its stored responses used.
+  Future<BridgeHistory> history();
 
   /// Whether the project is in a Git repository, so its turns can have checkpoints.
   Future<bool> inRepository();
@@ -115,6 +129,13 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// The branch's latest pull request on GitHub, open ones first; none without one.
   Future<BridgePullRequestOutcome> pullRequest();
+
+  /// The branches of `target` on `host` whose names contain `query`, as GitHub finds them.
+  Future<BridgePullRequestOutcome> pullRequestBaseSearch({
+    required String host,
+    required String target,
+    required String query,
+  });
 
   /// The branches of `target` on `host` GitHub lists, to choose a base from.
   Future<BridgePullRequestOutcome> pullRequestBases({
@@ -169,7 +190,7 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// Sends a message: an idle agent starts a run with it, a running one takes it before its
   /// next model request or, with `follow_up`, once it is done. Each run's start and end are
-  /// checkpointed, so the Diff tab shows what it changed.
+  /// checkpointed, so the Diff panel shows what it changed.
   Future<void> send({required String message, required bool followUp});
 
   /// The file pi stores the open session in, unless it keeps the session in memory.
@@ -199,6 +220,9 @@ abstract class AgentSession implements RustOpaqueInterface {
     required String path,
     required bool hideWhitespace,
   });
+
+  /// What the session's stored entries count to, on every branch (ADR-0279).
+  Future<BridgeStatistics> statistics();
 
   /// Stops waiting for the pull request text being written.
   Future<void> stopPullRequestText();
@@ -240,7 +264,7 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// The unified diff of one file from the start of turn `from` to the end of turn `to`;
   /// characters that could hide or reorder its lines are written out, as in the file's shown
-  /// name, but for the carriage returns of Windows line ends, which the Diff tab marks.
+  /// name, but for the carriage returns of Windows line ends, which the Diff panel marks.
   Future<String> turnPatch({
     required String from,
     required String to,

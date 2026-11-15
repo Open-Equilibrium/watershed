@@ -1,5 +1,5 @@
 //! The checkout's branches, commits, changes and pull requests for the session header and the
-//! Diff tab ([Git integration](../../../../docs/concept/V-Spec_MetaHarness.html#git-integration),
+//! Diff panel ([Git integration](../../../../docs/concept/V-Spec_MetaHarness.html#git-integration),
 //! [pull requests](../../../../docs/design/mockups/liquid-git-prs-worktrees.html)).
 
 use meta_harness_core::{
@@ -141,6 +141,9 @@ pub struct BridgeGitOutcome {
     pub commit: Option<BridgeCommit>,
     /// The destination and counts captured for this push or pull.
     pub transfer: Option<BridgeGitTransfer>,
+    /// For a created branch, the branch it was created from, exactly as Git names it, to record
+    /// and look up; never shown. None when HEAD was detached.
+    pub created_from: Option<String>,
 }
 
 /// A push or pull's display names, captured counts and opaque approval identities.
@@ -738,6 +741,7 @@ impl AgentSession {
                         subject: commit.subject.as_deref().map(visible_name),
                         count: i64::try_from(paths.len()).unwrap_or(i64::MAX),
                     });
+                    outcome.created_from = commit.created_from;
                     Ok(outcome)
                 }
                 Err(error) => self.outcome(Err(error)).await,
@@ -830,8 +834,17 @@ impl AgentSession {
     /// Creates the branch `name` at the current commit and switches to it.
     pub fn create_branch(&self, name: String) -> Result<BridgeGitOutcome, String> {
         RUNTIME.block_on(async {
-            self.outcome(self.checkpoints.create_branch(&name).await)
-                .await
+            match self.checkpoints.create_branch(&name).await {
+                Ok(from) => Ok(BridgeGitOutcome {
+                    created_from: from,
+                    ..self.outcome(Ok(())).await?
+                }),
+                Err(DiffError::CreatedBranchHookFailed { from, error }) => Ok(BridgeGitOutcome {
+                    created_from: from,
+                    ..self.outcome(Err(*error)).await?
+                }),
+                Err(error) => self.outcome(Err(error)).await,
+            }
         })
     }
 
@@ -895,9 +908,16 @@ impl AgentSession {
         })
     }
 
-    /// Fetches the upstream remote, origin or the sole remote through checked destinations.
-    pub fn fetch(&self) -> Result<bool, String> {
-        RUNTIME.block_on(async { self.checkpoints.fetch().await.map_err(shown) })
+    /// Fetches the upstream remote, origin or the sole remote through checked destinations, and
+    /// returns the remote it fetched, as Liquid shows it; none when there is no remote.
+    pub fn fetch(&self) -> Result<Option<String>, String> {
+        RUNTIME.block_on(async {
+            self.checkpoints
+                .fetch()
+                .await
+                .map(|remote| remote.map(|remote| visible_name(&without_credentials(&remote))))
+                .map_err(shown)
+        })
     }
 
     /// Pushes the branch through the user's Git and hooks, without a checkout lock.
@@ -1096,6 +1116,30 @@ impl AgentSession {
         })
     }
 
+    /// The branches of `target` on `host` whose names contain `query`, as GitHub finds them.
+    pub fn pull_request_base_search(
+        &self,
+        host: String,
+        target: String,
+        query: String,
+    ) -> Result<BridgePullRequestOutcome, String> {
+        RUNTIME.block_on(async {
+            Ok(
+                match self
+                    .checkpoints
+                    .pull_request_base_search(&host, &target, &query)
+                    .await
+                {
+                    Ok(names) => BridgePullRequestOutcome {
+                        bases: names.into_iter().map(BridgeName::of).collect(),
+                        ..BridgePullRequestOutcome::of(BridgePullRequestOutcomeKind::Done)
+                    },
+                    Err(error) => BridgePullRequestOutcome::failed(error),
+                },
+            )
+        })
+    }
+
     async fn transfer_outcome(
         &self,
         result: Result<meta_harness_core::GitTransfer, DiffError>,
@@ -1114,6 +1158,7 @@ impl AgentSession {
                     running: Vec::new(),
                     commit: None,
                     transfer: None,
+                    created_from: None,
                 }),
             },
         }
@@ -1128,6 +1173,7 @@ impl AgentSession {
             detail: String::new(),
             commit: None,
             transfer: None,
+            created_from: None,
         };
         match result {
             Ok(()) => Ok(outcome(BridgeGitOutcomeKind::Done, Vec::new())),
@@ -1169,7 +1215,12 @@ impl AgentSession {
             Err(DiffError::SubmoduleChanged(files)) => {
                 Ok(outcome(BridgeGitOutcomeKind::SubmoduleChanged, files))
             }
-            Err(DiffError::CommitOnBranchFailed { branch, error }) => Ok(BridgeGitOutcome {
+            Err(DiffError::CommitOnBranchFailed {
+                branch,
+                from,
+                error,
+            }) => Ok(BridgeGitOutcome {
+                created_from: from,
                 detail: visible_lines(&match *error {
                     DiffError::CommitFailed(output) | DiffError::HookFailed(output) => output,
                     error => error.to_string(),

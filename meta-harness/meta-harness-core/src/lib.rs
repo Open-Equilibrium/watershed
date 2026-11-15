@@ -5,11 +5,13 @@
 
 mod checkout;
 mod checkpoint;
+mod context;
 mod diff;
 mod event;
 mod framing;
 mod history;
 mod pi;
+mod record;
 mod session;
 mod stored;
 mod visible;
@@ -17,6 +19,7 @@ mod visible;
 pub use checkpoint::{
     Branches, Checkpoint, Checkpoints, CommitFile, CommitPlan, Phase, RevertFile, RevertPlan,
 };
+pub use context::Context;
 pub use diff::{
     Branch, BranchTarget, ChangeStatus, Changes, Commit, Comparison, DiffError, FileChange,
     GitStatus, GitTransfer, PullRequest, PullRequestDraft, PullRequestError, PullRequestPlan,
@@ -25,17 +28,17 @@ pub use diff::{
     without_credentials,
 };
 pub use event::{
-    AgentEvent, Answer, ChangedLines, Delivery, EntryKind, ItemDetail, ItemId, ItemKind,
-    ItemStatus, NotificationLevel, Queue, RequestId, SessionTree, TreeNode, TurnId, Usage,
-    UserInput,
+    AgentEvent, Answer, ChangedLines, CostByKind, Delivery, EntryKind, ItemDetail, ItemId,
+    ItemKind, ItemStatus, NotificationLevel, Queue, RequestId, SessionTree, TreeNode, TurnId,
+    Usage, UserInput,
 };
 pub(crate) use framing::{Frame, LineFramer};
 pub use history::{
-    ChangeCount, ContextDetail, ContextMessage, ContextPart, History, RecordKind, StepContext,
-    TestCount, ToolOutcome, Trajectory, TrajectoryRecord, Transcript, TranscriptItem,
-    TurnCheckpoints,
+    ChangeCount, History, ModelUsage, Statistics, ToolCalls, Transcript, TranscriptItem,
+    TurnCheckpoints, TurnStatistics,
 };
 pub(crate) use pi::PiAdapter;
+pub use record::session_record;
 pub use session::{
     AgentCommand, CommandError, MAX_RECORD_BYTES, Model, Pending, Responder, Session, SessionEvent,
     SessionState, Stopper,

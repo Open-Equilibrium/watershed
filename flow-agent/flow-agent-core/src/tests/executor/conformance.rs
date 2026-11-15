@@ -472,12 +472,12 @@ fn productive_session_uses_the_selected_executor_and_persists_its_receipt() {
     );
     assert_eq!(durable_output["enforcement"]["platform"], EXPECTED_PLATFORM);
     assert_eq!(
-        durable_output["enforcement"]["self_protection_active"],
+        durable_output["enforcement"]["flow_owned_write_protection_active"],
         true
     );
     let persisted_receipt: proto::EnforcementReceiptV0 =
         serde_json::from_value(durable_output["enforcement"].clone())
-            .expect("persisted receipt uses the closed self-protection contract");
+            .expect("persisted receipt uses the closed Flow-owned write protection contract");
     proto::validate_enforcement_receipt_v0(&persisted_receipt, &request.policy_digest)
         .expect("persisted receipt is bound to the dispatched request");
     assert_eq!(

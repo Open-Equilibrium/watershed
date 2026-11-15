@@ -12,7 +12,7 @@ use super::super::{
 use crate::runtime::{
     fs_guards::{
         AnchoredDir, DirectoryErrorMode, create_anchored_file, open_anchored_file_for_read,
-        path_io_error, sync_anchored_directory,
+        path_io_error, sync_anchored_directory, sync_durable,
     },
     types::{MAX_SESSION_OBJECTS, RuntimeError},
 };
@@ -57,8 +57,8 @@ pub(super) fn prepare_conversation_lifecycle_marker(
         Err(source) => return Err(path_io_error(&conversation.path.join(&marker), source)),
     }
     let path = conversation.file(&marker);
-    create_anchored_file(&path)?
-        .sync_all()
+    let file = create_anchored_file(&path)?;
+    sync_durable(&file, path.diagnostic_path())
         .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
     sync_anchored_directory(conversation)?;
     Ok(marker)

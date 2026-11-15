@@ -6,7 +6,7 @@ use super::{run_post_config_observer, run_pre_plan_observer};
 use crate::runtime::event_writer::post_writer_finish_observer;
 use crate::runtime::{
     apply::{FlowApplication, apply_flow_with_anchored_workspace, preflight_flow_execution_plan},
-    auth::resolve_openai_codex_credential,
+    auth::resolve_provider_credential,
     config_io::{ExecutionBackend, load_global_config_authority, require_execution_backend},
     event_writer::SerialSessionWriter,
     execution_plan::{FlowExecutionOptions, ToolSideEffectMode},
@@ -15,7 +15,7 @@ use crate::runtime::{
     live_events::LiveEventNotifier,
     planning::plan_flow_with_workspace,
     productive::{OpenAiCodexProvider, ensure_productive_execution_platform},
-    session_definition::session_definition_metadata,
+    session_definition::{SessionDefinitionMetadata, session_definition_metadata},
     session_reservation::{
         materialize_session_candidate, reserve_unique_session_candidate_with_anchored_workspace,
         write_reserved_session_metadata,
@@ -206,7 +206,10 @@ fn run_flow_internal_with_cleanup_observer_impl<G>(
     #[cfg(test)]
     run_post_config_observer();
     let backend = require_execution_backend(config)?;
-    let _activation = activate(matches!(&backend, ExecutionBackend::OpenAiCodex { .. }))?;
+    let _activation = activate(matches!(
+        &backend,
+        ExecutionBackend::OpenAiCodex { .. } | ExecutionBackend::OpenAiCompatible { .. }
+    ))?;
     let registry = reconcile_productive_preflight(core_script::load_flow_registry_from_root_dir(
         &authority.home.dir,
         &authority.home.path,
@@ -222,7 +225,12 @@ fn run_flow_internal_with_cleanup_observer_impl<G>(
         reconcile_productive_preflight(session_definition_metadata(&registry, flow_block))?;
     let policy =
         reconcile_productive_preflight(core_policy::compile_policy_artifact(&registry, flow_ref))?;
+    let credential_backend = backend.clone();
     if let ExecutionBackend::OpenAiCodex {
+        model,
+        model_profile,
+    }
+    | ExecutionBackend::OpenAiCompatible {
         model,
         model_profile,
     } = backend
@@ -243,7 +251,7 @@ fn run_flow_internal_with_cleanup_observer_impl<G>(
             &policy,
             root_input,
             capture_jsonl,
-            resolve_openai_codex_credential,
+            || resolve_provider_credential(&credential_backend),
             &agent_instructions,
             notifier,
             &mut provider,
@@ -276,6 +284,10 @@ fn run_flow_internal_with_cleanup_observer_impl<G>(
     let reservation = materialize_session_candidate(&execution_workspace, candidate)?;
     let mut finalization_result = Ok(());
     let operation_result = (|| {
+        let definition_metadata = SessionDefinitionMetadata {
+            root_input: root_input.is_some(),
+            ..definition_metadata
+        };
         write_reserved_session_metadata(&reservation, Some(&definition_metadata))?;
         let mut serial_writer = SerialSessionWriter::start(&reservation, notifier)?;
         if capture_jsonl {

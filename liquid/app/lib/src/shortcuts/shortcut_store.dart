@@ -7,6 +7,12 @@ import 'package:flutter/services.dart';
 import '../settings_file.dart';
 import 'keymap.dart';
 
+/// An XDG base folder from `environment`; an empty variable counts as unset.
+String? _xdg(Map<String, String> environment, String name) {
+  final value = environment[name];
+  return value == null || value.isEmpty ? null : value;
+}
+
 /// The folder for Liquid's settings in the platform's app data location.
 String settingsDirectory(
   Map<String, String> environment,
@@ -16,7 +22,20 @@ String settingsDirectory(
     '${environment['HOME']}/Library/Application Support/Liquid',
   TargetPlatform.windows => '${environment['APPDATA']}\\Liquid',
   _ =>
-    '${environment['XDG_CONFIG_HOME'] ?? '${environment['HOME']}/.config'}/liquid',
+    '${_xdg(environment, 'XDG_CONFIG_HOME') ?? '${environment['HOME']}/.config'}/liquid',
+};
+
+/// The folder for what belongs to this computer alone, such as its device id: a data folder
+/// another computer may share keeps none of it. macOS may purge it, which forgets only this
+/// computer's remembered bases.
+String computerDirectory(
+  Map<String, String> environment,
+  TargetPlatform platform,
+) => switch (platform) {
+  TargetPlatform.macOS => '${environment['HOME']}/Library/Caches/Liquid',
+  TargetPlatform.windows => '${environment['LOCALAPPDATA']}\\Liquid',
+  _ =>
+    '${_xdg(environment, 'XDG_STATE_HOME') ?? '${environment['HOME']}/.local/state'}/liquid',
 };
 
 /// Shortcut settings as a JSON file.
@@ -123,13 +142,16 @@ class ShortcutController extends SavedSettings<ShortcutSettings> {
   /// Whether this computer has the Liquid key on, as far as Liquid turned it.
   bool _applied = false;
 
-  /// The settings in effect before the latest change, which a failed one returns to.
+  /// The settings that match the computer's Liquid key, which a failed change returns to.
   ShortcutSettings _settled;
   Future<void> _pending = Future.value();
 
   @override
   Future<void> change(ShortcutSettings next) {
-    value = next;
+    // Where the Liquid key does not exist, a kept Custom profile with it stays off too.
+    value = liquidKeyAvailable || _host == null
+        ? next
+        : next.withoutLiquidKey();
     firstStart = false;
     liquidKeyProblem.value = null;
     return _sync(store: true);
@@ -143,17 +165,28 @@ class ShortcutController extends SavedSettings<ShortcutSettings> {
   /// no ordering here.
   Future<void> _sync({required bool store}) =>
       _pending = _pending.then((_) async {
-        final want = value.liquidKey;
+        final next = value;
+        final want = next.liquidKey;
         var changed = false;
         if (want != _applied) {
           if (await _apply(want)) {
             _applied = want;
           } else {
-            value = want ? _withoutLiquidKey(value) : _settled;
+            // Only the value this turn applied rolls back; a change made meanwhile settles on its own turn.
+            if (identical(value, next)) {
+              value = want ? _withoutLiquidKey(value) : _settled;
+            }
             changed = true;
           }
         }
-        _settled = value;
+        // A newer change may have replaced value meanwhile; what settled is what the computer
+        // has, and the newer change settles on its own turn. When neither matches, the computer
+        // still has the settings settled before.
+        if (value.liquidKey == _applied) {
+          _settled = value;
+        } else if (next.liquidKey == _applied) {
+          _settled = next;
+        }
         if (store || changed) await save();
       });
 

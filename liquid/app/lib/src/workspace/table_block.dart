@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../controls.dart';
 import '../rust/api/database.dart';
 import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
@@ -119,8 +120,11 @@ class _TableBlockState extends State<TableBlock> {
   StreamSubscription<BridgeChange>? _followed;
 
   /// The name as typed; a name changed elsewhere shows unless the person is typing one.
-  final _name = TextEditingController();
+  var _name = TextEditingController();
   final _nameFocus = FocusNode(debugLabel: 'Table name');
+
+  /// Whether a name Liquid wrote is waiting for the name field to take a fresh controller.
+  bool _replaced = false;
 
   /// Renames asked for, so only the latest refusal puts the stored name back.
   int _renames = 0;
@@ -624,9 +628,18 @@ class _TableBlockState extends State<TableBlock> {
     _show(_database?.name ?? '');
   }
 
+  /// Shows `name` as the stored one.
   void _show(String name) {
     _named = name;
-    if (_name.text != name) _name.text = name;
+    if (!writeText(_name, TextEditingValue(text: name))) return;
+    if (mounted) setState(() => _replaced = true);
+  }
+
+  /// The name field takes a fresh controller when it builds, so ⌘Z cannot bring back the name
+  /// Liquid replaced (see [_show]).
+  void _adopt() {
+    _replaced = false;
+    _name = adoptController(_name, listener: _typed);
   }
 
   /// Reads the name and fields, then the rows read so far.
@@ -676,6 +689,7 @@ class _TableBlockState extends State<TableBlock> {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
+    if (_replaced) _adopt();
     final database = _database;
     final locale = Localizations.localeOf(context);
     final numbers = intlLocale(locale, NumberFormat.localeExists);

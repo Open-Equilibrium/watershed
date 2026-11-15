@@ -92,6 +92,85 @@ impl Pushed {
         checkpoints.set_gh(&script);
         checkpoints
     }
+
+    /// Puts a fake `ssh` first on PATH, whose `-G` prints `config` and which logs its calls.
+    fn ssh_config(&self, config: &str) {
+        let dir = self.repo.path().with_extension("ssh");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("config"), config).unwrap();
+        let script = dir.join("ssh");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nd={}\nprintf '%s\\n' \"$*\" >> \"$d/log\"\ncat \"$d/config\"\n",
+                shell_word(dir.display())
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let path =
+            std::env::join_paths(std::iter::once(dir).chain(std::env::split_paths(&path))).unwrap();
+        // Each test runs in its own process under nextest, so its PATH stays its own.
+        unsafe { std::env::set_var("PATH", path) };
+    }
+
+    fn ssh_log(&self) -> String {
+        std::fs::read_to_string(self.repo.path().with_extension("ssh").join("log"))
+            .unwrap_or_default()
+    }
+}
+
+/// Whether `checkpoints` refuses its remote `myalias` as not GitHub.
+async fn refuses_alias(checkpoints: &Checkpoints) -> bool {
+    matches!(
+        checkpoints.pull_request().await,
+        Err(PullRequestError::NotGitHub { host: Some(host), .. }) if host == "myalias"
+    )
+}
+
+#[test]
+fn an_ssh_alias_names_github_when_plain_ssh_resolves_it_there() {
+    run(async {
+        let pushed = Pushed::new("alias", "git@myalias:bw/api.git");
+        pushed.ssh_config("hostname github.com\nport 22\n");
+        assert!(matches!(
+            pushed.checkpoints("").pull_request().await,
+            Ok(None)
+        ));
+        assert!(
+            pushed.ssh_log().contains("-G myalias"),
+            "{}",
+            pushed.ssh_log()
+        );
+    });
+}
+
+#[test]
+fn an_ssh_alias_stays_refused_unless_plain_ssh_names_github() {
+    run(async {
+        let pushed = Pushed::new("alias-refused", "git@myalias:bw/api.git");
+        pushed.ssh_config("hostname github.com\nport 22\n");
+        // Git's own ssh command decides what it reaches, so ssh -G is not asked about it.
+        unsafe { std::env::set_var("GIT_SSH_COMMAND", "ssh -o ProxyJump=elsewhere") };
+        assert!(refuses_alias(&pushed.checkpoints("")).await);
+        unsafe { std::env::remove_var("GIT_SSH_COMMAND") };
+        unsafe { std::env::set_var("GIT_SSH", "/opt/other-ssh") };
+        assert!(refuses_alias(&pushed.checkpoints("")).await);
+        unsafe { std::env::remove_var("GIT_SSH") };
+        pushed
+            .repo
+            .git(&["config", "core.sshCommand", "ssh -i /keys/work"]);
+        assert!(refuses_alias(&pushed.checkpoints("")).await);
+        assert!(pushed.ssh_log().is_empty(), "{}", pushed.ssh_log());
+        pushed.repo.git(&["config", "--unset", "core.sshCommand"]);
+        // Plain ssh resolves the alias elsewhere, or to GitHub on another port.
+        pushed.ssh_config("hostname gitlab.com\nport 22\n");
+        assert!(refuses_alias(&pushed.checkpoints("")).await);
+        pushed.ssh_config("hostname github.com\nport 2222\n");
+        assert!(refuses_alias(&pushed.checkpoints("")).await);
+    });
 }
 
 fn draft(plan: &crate::PullRequestPlan, base: &str) -> PullRequestDraft {
@@ -533,6 +612,12 @@ fn a_remote_gh_has_no_github_login_for_is_never_asked_about() {
             checkpoints.pull_request_bases("gitlab.com", "bw/api").await,
             Err(PullRequestError::SignIn { host }) if host == "gitlab.com"
         ));
+        assert!(matches!(
+            checkpoints
+                .pull_request_base_search("gitlab.com", "bw/api", "rel")
+                .await,
+            Err(PullRequestError::SignIn { host }) if host == "gitlab.com"
+        ));
         assert!(
             pushed
                 .read("log")
@@ -564,6 +649,48 @@ fn bases_are_read_page_by_page_up_to_a_bound() {
             .await
             .unwrap();
         assert_eq!((names.len(), more), (500, true));
+    });
+}
+
+#[test]
+fn a_base_search_asks_github_for_matching_branches_up_to_a_bound() {
+    run(async {
+        let pushed = Pushed::new("search", "https://github.com/bw/api.git");
+        let checkpoints = pushed.checkpoints(
+            "'api --hostname github.com graphql -f query=query('*'-f owner=acme -f name=api -f search=release/2019 -F first=100 --jq .data.repository.refs.nodes[].name') printf 'release/2019-q3\\nrelease/2019-q4\\n' ;;\n\
+             'api --hostname github.com graphql -f query=query('*'-f owner=acme -f name=api -f search=none -F first=100 --jq .data.repository.refs.nodes[].name') ;;\n\
+             'api --hostname github.com graphql -f query=query('*'-f owner=acme -f name=api -f search=many -F first=100 --jq .data.repository.refs.nodes[].name') seq -f 'b%g' 1 150 ;;\n\
+             'api --hostname github.com graphql -f query=query('*'-f owner=acme -f name=api -f search=broken -F first=100 --jq .data.repository.refs.nodes[].name') echo 'gh: Bad Gateway (HTTP 502)' >&2; exit 1 ;;",
+        );
+        assert_eq!(
+            checkpoints
+                .pull_request_base_search("github.com", "acme/api", "release/2019")
+                .await
+                .unwrap(),
+            ["release/2019-q3", "release/2019-q4"]
+        );
+        assert!(
+            checkpoints
+                .pull_request_base_search("github.com", "acme/api", "none")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        // GitHub's maximum per request bounds what a search returns, even if more came back.
+        assert_eq!(
+            checkpoints
+                .pull_request_base_search("github.com", "acme/api", "many")
+                .await
+                .unwrap()
+                .len(),
+            100
+        );
+        assert!(matches!(
+            checkpoints
+                .pull_request_base_search("github.com", "acme/api", "broken")
+                .await,
+            Err(PullRequestError::Unreachable { host, .. }) if host == "github.com"
+        ));
     });
 }
 

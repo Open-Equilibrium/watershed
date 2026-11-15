@@ -28,6 +28,14 @@ fn windows_console_device_paths_are_rejected() {
     }
 }
 
+#[test]
+fn windows_device_alias_with_padded_stem_is_rejected() {
+    for component in ["NUL .txt", "COM1 .log"] {
+        let path = format!("safe/{component}");
+        assert_eq!(normalize_safe_relative_path(&path), None, "{path:?}");
+    }
+}
+
 proptest! {
     #[test]
     fn safe_relative_paths_accept_generated_literal_segments(

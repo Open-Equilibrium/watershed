@@ -47,6 +47,15 @@ pub enum RegistryError {
         /// Block id.
         id: String,
     },
+    /// Block text was not Unicode NFC; it is refused rather than converted.
+    NonNfcDefinitionText {
+        /// Block kind.
+        kind: &'static str,
+        /// Block id.
+        id: String,
+        /// Innermost field that holds the text.
+        field: String,
+    },
     /// Source text could not be parsed.
     Parse {
         /// Source name used in diagnostics.
@@ -175,6 +184,9 @@ impl fmt::Display for RegistryError {
             Self::InvalidBlockName { kind, id } => {
                 write!(f, "{kind} {id} name must be non-empty")
             }
+            Self::NonNfcDefinitionText { kind, id, field } => {
+                write!(f, "{kind} {id} {field} must use NFC text")
+            }
             Self::Parse {
                 source_name,
                 message,
@@ -258,6 +270,7 @@ impl std::error::Error for RegistryError {
             | Self::TraversalLimitExceeded { .. }
             | Self::InvalidBlockId(_)
             | Self::InvalidBlockName { .. }
+            | Self::NonNfcDefinitionText { .. }
             | Self::Parse { .. }
             | Self::DuplicateId { .. }
             | Self::DuplicateName { .. }

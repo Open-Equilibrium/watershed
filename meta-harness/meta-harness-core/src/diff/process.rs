@@ -4,7 +4,9 @@
 use super::*;
 use std::future::{Future, poll_fn};
 use std::os::fd::AsFd;
+use std::os::unix::fs::DirBuilderExt;
 use std::pin::pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The one path a `git rev-parse` query in `dir` prints. A path may hold line breaks, so only
 /// the single trailing one is taken off; splitting the output into lines could name another
@@ -13,7 +15,14 @@ pub(super) async fn git_path(dir: &Path, args: &[&str]) -> Result<String, DiffEr
     let output = git_path_output(dir, &[], args)
         .await
         .map_err(|error| match error {
-            DiffError::Git(reason) if reason.contains("not a git repository") => {
+            // Git's discovery diagnostic is its first fatal line; a configuration error may quote
+            // the phrase, even on a line of its own, but only after its own fatal line.
+            DiffError::Git(reason)
+                if reason
+                    .lines()
+                    .find(|line| line.starts_with("fatal:"))
+                    .is_some_and(|line| line.starts_with("fatal: not a git repository")) =>
+            {
                 DiffError::NotARepository
             }
             error => error,
@@ -40,6 +49,51 @@ pub(super) async fn git_bytes(
     args: &[&str],
 ) -> Result<Vec<u8>, DiffError> {
     output(git_command(dir, env, args), false, None).await
+}
+
+/// Runs `git` like [`git`], and also reports whether every protocol version Git negotiated while
+/// it ran was 2. Git reports the version in its trace2 events, which go to a directory only this
+/// process can use. When Git reports none, the version is not 2.
+pub(super) async fn git_negotiating(
+    dir: &Path,
+    env: &[(&str, OsString)],
+    args: &[&str],
+) -> Result<(String, bool), DiffError> {
+    static RUNS: AtomicU64 = AtomicU64::new(0);
+    let private = std::env::temp_dir().join(format!(
+        "watershed-trace-{}-{}",
+        std::process::id(),
+        RUNS.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&private)
+        .map_err(unreadable)?;
+    let events = private.join("trace2.json");
+    let mut env = env.to_vec();
+    env.push(("GIT_TRACE2_EVENT", events.as_os_str().to_owned()));
+    let output = git(dir, &env, args).await;
+    let v2 = std::fs::read_to_string(&events).is_ok_and(|events| negotiated_v2(&events));
+    let _ = std::fs::remove_dir_all(&private);
+    Ok((output?, v2))
+}
+
+/// Whether Git's trace2 `events` report a negotiated protocol version, and only version 2.
+fn negotiated_v2(events: &str) -> bool {
+    let mut reported = false;
+    for line in events.lines() {
+        let Ok(event) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if event["key"] != "negotiated-version" {
+            continue;
+        }
+        reported = true;
+        if event["value"] != "2" {
+            return false;
+        }
+    }
+    reported
 }
 
 /// At most `limit` bytes from the start of Git's output in `dir`, and whether it went on; Git
@@ -76,12 +130,19 @@ pub(super) async fn git_config(dir: &Path, args: &[&str]) -> Result<String, Diff
 /// Whether the project's configuration enables sparse checkout. `git_command` pins
 /// `core.sparseCheckout` for the snapshot's reads, so this asks Git for the project's own value.
 pub(super) async fn sparse_checkout_enabled(dir: &Path) -> Result<bool, DiffError> {
+    Ok(project_bool(dir, "core.sparseCheckout").await? == Some(true))
+}
+
+/// The project's own value of the boolean `key`, or none when unset. `git_command` pins some keys
+/// for the snapshot's reads, so this asks Git for the project's value.
+pub(super) async fn project_bool(dir: &Path, key: &str) -> Result<Option<bool>, DiffError> {
     let mut command = Command::new("git");
     command
-        .args(["config", "--type=bool", "core.sparseCheckout"])
+        .args(["config", "--type=bool", key])
         .current_dir(dir);
     let value = output(piped(command, &[] as &[(&str, &str)]), true, None).await?;
-    Ok(value.trim_ascii() == b"true")
+    let value = value.trim_ascii();
+    Ok((!value.is_empty()).then_some(value == b"true"))
 }
 
 /// Reads pathname output without replacing bytes that the String-based path API cannot name.
@@ -206,6 +267,14 @@ pub(super) async fn gh(
     output(command, false, input).await
 }
 
+/// Runs the host's `ssh -G` for `alias` in `dir` and returns the configuration it resolves for
+/// that host, which Git's plain `ssh` reads too (ADR-0269).
+pub(super) async fn ssh_resolved(dir: &Path, alias: &str) -> Result<Vec<u8>, DiffError> {
+    let mut command = Command::new("ssh");
+    command.args(["-G", alias]).current_dir(dir);
+    output(piped(command, &NO_PROMPTS), false, None).await
+}
+
 /// Runs the host's pi (`program` with `args`) once in `dir` with `input` and returns what it
 /// printed; its login stays its own.
 pub(super) async fn pi_once(
@@ -326,9 +395,14 @@ async fn cut_output(
         if missing_config && status.code() == Some(1) && errors.is_empty() {
             return Ok((Vec::new(), false));
         }
-        return Err(DiffError::Git(
-            String::from_utf8_lossy(&errors).trim().to_owned(),
-        ));
+        let reason = String::from_utf8_lossy(&errors).trim().to_owned();
+        // An empty reason reads as a name that names nothing, which only Git's silent exit 1 means.
+        if reason.is_empty() && status.code() != Some(1) {
+            return Err(DiffError::Git(format!(
+                "Git ended without a reason: {status}"
+            )));
+        }
+        return Err(DiffError::Git(reason));
     }
     written?;
     Ok((output, false))
@@ -500,6 +574,24 @@ fn explicit_git_retains_output_when_the_child_exits_before_the_first_poll() {
                 ),
             }
         }
+    });
+}
+
+#[cfg(test)]
+#[test]
+fn a_git_ended_by_a_signal_without_output_is_an_error() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    runtime.block_on(async {
+        let mut command = Command::new("sh");
+        command.args(["-c", "kill -TERM $$"]);
+        let result = output(piped(command, &NO_PROMPTS), false, None).await;
+        assert!(
+            matches!(result, Err(DiffError::Git(ref reason)) if !reason.is_empty()),
+            "{result:?}"
+        );
     });
 }
 

@@ -9,14 +9,18 @@ use std::{
     env,
     error::Error,
     ffi::OsStr,
-    io::Write,
+    io::{Read, Write},
+    os::unix::process::CommandExt as _,
     path::Path,
-    process::{Command, Output},
+    process::{Command, Output, Stdio},
+    thread,
     time::Duration,
 };
 
 pub(crate) const FLOW_AGENT_HOME: (&str, &str) = ("FLOW_AGENT_HOME", ".flow");
 const MAX_SAMPLE_COUNT: usize = 1_000;
+/// Most bytes kept from each measurement child stream; a child that writes more is killed.
+const MAX_MEASUREMENT_CHILD_STREAM_BYTES: usize = 64 * 1024;
 
 pub(crate) type DynError = Box<dyn Error + Send + Sync>;
 
@@ -31,11 +35,64 @@ where
     S: AsRef<OsStr>,
 {
     let mut command = Command::new(executable);
-    command.args(args);
+    command
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0);
     for (variable, leaf) in isolated_homes {
         command.env(variable, session_root.path().join(leaf));
     }
-    Ok(command.output()?)
+    let mut child = command.spawn()?;
+    // The child leads its own process group, so a kill also reaches any grandchild holding a pipe.
+    let group = rustix::process::Pid::from_child(&child);
+    let stdout = child.stdout.take().expect("stdout is piped");
+    let stderr = child.stderr.take().expect("stderr is piped");
+    let stdout_reader = thread::spawn(move || read_bounded(stdout, group));
+    let stderr_reader = thread::spawn(move || read_bounded(stderr, group));
+    let stdout = join_reader(stdout_reader)?;
+    let stderr = join_reader(stderr_reader)?;
+    // Reaping happens only after both readers ended, so the leader's id cannot be reused while signalled.
+    let status = child.wait()?;
+    if stdout.overflowed || stderr.overflowed {
+        return Err(std::io::Error::other(format!(
+            "measurement child wrote more than {MAX_MEASUREMENT_CHILD_STREAM_BYTES} bytes to one stream"
+        ))
+        .into());
+    }
+    Ok(Output {
+        status,
+        stdout: stdout.bytes,
+        stderr: stderr.bytes,
+    })
+}
+
+struct BoundedStream {
+    bytes: Vec<u8>,
+    overflowed: bool,
+}
+
+/// Reads at most one byte past the bound, and kills the still-unreaped group on overflow.
+fn read_bounded(stream: impl Read, group: rustix::process::Pid) -> std::io::Result<BoundedStream> {
+    let mut bytes = Vec::new();
+    stream
+        .take(MAX_MEASUREMENT_CHILD_STREAM_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    let overflowed = bytes.len() > MAX_MEASUREMENT_CHILD_STREAM_BYTES;
+    if overflowed {
+        let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+    }
+    Ok(BoundedStream { bytes, overflowed })
+}
+
+fn join_reader(
+    reader: thread::JoinHandle<std::io::Result<BoundedStream>>,
+) -> Result<BoundedStream, DynError> {
+    reader
+        .join()
+        .map_err(|_| std::io::Error::other("measurement output reader panicked"))?
+        .map_err(Into::into)
 }
 
 pub(crate) fn duration_ns(duration: Duration) -> u64 {

@@ -36,6 +36,16 @@ class _ShortcutRevealState extends State<ShortcutReveal> {
   }
 
   @override
+  void didUpdateWidget(ShortcutReveal old) {
+    super.didUpdateWidget(old);
+    // Hints shown or pending for the other reveal key end with it.
+    if (old.liquid != widget.liquid) {
+      _timer?.cancel();
+      _shown.value = false;
+    }
+  }
+
+  @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_key);
     _timer?.cancel();

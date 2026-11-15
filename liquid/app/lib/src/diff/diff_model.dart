@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:isolate';
 import 'dart:math' as math;
 
 import '../rust/api/events.dart';
@@ -76,11 +78,11 @@ class DiffLine {
   final int? newNumber;
 }
 
-/// The characters of a line the Diff tab shows; a longer one, such as a minified bundle's,
+/// The characters of a line the Diff panel shows; a longer one, such as a minified bundle's,
 /// shows them and an ellipsis, so laying out one line stays cheap.
 const shownChars = 1000;
 
-/// The start of `text` the Diff tab shows, without a split character pair, and whether it is
+/// The start of `text` the Diff panel shows, without a split character pair, and whether it is
 /// cut.
 ({String text, bool cut}) shownText(String text) {
   if (text.length <= shownChars) return (text: text, cut: false);
@@ -90,9 +92,11 @@ const shownChars = 1000;
   return (text: text.substring(0, end), cut: true);
 }
 
-/// The shown text of the lines likely widest: the longest by a count that takes every
-/// non-ASCII character as two wide, so wide characters such as Chinese ones count as the
-/// width they take. The caller lays out only these few.
+/// The shown text of the lines likely widest, which the caller lays out: the longest by
+/// characters, which is their width when each takes one column, and the longest by a count
+/// that takes every non-ASCII character as two wide, so wide characters such as Chinese ones
+/// count as the width they take. Neither alone finds every widest line, since wide-scored
+/// lines of one script could crowd out a longer line of another.
 List<String> widestLines(List<DiffLine> lines, {int count = 8}) {
   int columns(String text) {
     var sum = 0;
@@ -102,17 +106,21 @@ List<String> widestLines(List<DiffLine> lines, {int count = 8}) {
     return sum;
   }
 
-  final widest = <({String text, int columns})>[];
-  for (final line in lines) {
-    final shown = shownText(line.text);
-    final text = shown.cut ? '${shown.text}…' : shown.text;
-    final width = columns(text);
-    if (widest.length == count && width <= widest.last.columns) continue;
-    final at = widest.indexWhere((wide) => wide.columns < width);
-    widest.insert(at < 0 ? widest.length : at, (text: text, columns: width));
-    if (widest.length > count) widest.removeLast();
+  List<String> longest(int Function(String text) measure) {
+    final widest = <({String text, int columns})>[];
+    for (final line in lines) {
+      final shown = shownText(line.text);
+      final text = shown.cut ? '${shown.text}…' : shown.text;
+      final width = measure(text);
+      if (widest.length == count && width <= widest.last.columns) continue;
+      final at = widest.indexWhere((wide) => wide.columns < width);
+      widest.insert(at < 0 ? widest.length : at, (text: text, columns: width));
+      if (widest.length > count) widest.removeLast();
+    }
+    return [for (final wide in widest) wide.text];
   }
-  return [for (final wide in widest) wide.text];
+
+  return {...longest((text) => text.length), ...longest(columns)}.toList();
 }
 
 final _hunk = RegExp(r'^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@');
@@ -158,6 +166,15 @@ List<DiffLine> parsePatch(String patch) {
   }
   return lines;
 }
+
+/// Reads a patch into lines. The window passes [parsePatchInBackground]; tests pass
+/// [parsePatch] itself, as fake time does not run isolates.
+typedef PatchParser = FutureOr<List<DiffLine>> Function(String patch);
+
+/// Parses [patch] on a background isolate, so a large patch (up to 4 MiB) does not stall the
+/// window.
+Future<List<DiffLine>> parsePatchInBackground(String patch) =>
+    Isolate.run(() => parsePatch(patch));
 
 /// One row of the split view: a hunk header across both sides, or a line of the file before
 /// the run beside its line after it.

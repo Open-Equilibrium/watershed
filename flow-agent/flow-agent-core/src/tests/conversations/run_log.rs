@@ -584,6 +584,30 @@ fn run_attempt_inspection_rejects_every_ambiguous_record_sequence() {
 }
 
 #[test]
+fn tool_projection_rejects_an_empty_run_log() {
+    let workspace = projection_workspace("run-log-projection-empty");
+    let path = crate::tests::helpers::workspace_session_dir(&workspace)
+        .join("review/runs/review-1/run-log.jsonl");
+    fs::write(&path, b"").expect("empty run log writes");
+
+    let inspection = inspect_run_attempts(&workspace, "review", "review-1")
+        .expect_err("inspection rejects an empty run log");
+    let page = project_tool_run_log_page(&workspace, "review", "review-1", "inspect", None)
+        .expect_err("page projection rejects an empty run log");
+    let text = project_tool_run_log(&workspace, "review", "review-1", "inspect", None)
+        .expect_err("string projection rejects an empty run log");
+
+    assert!(
+        inspection
+            .to_string()
+            .contains("must begin with a definition"),
+        "{inspection}"
+    );
+    assert_eq!(page.to_string(), inspection.to_string());
+    assert_eq!(text.to_string(), inspection.to_string());
+}
+
+#[test]
 fn run_log_append_durability() {
     let workspace = empty_workspace("run-log-append-durability");
     let path = workspace.join("run-log.jsonl");

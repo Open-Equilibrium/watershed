@@ -1,4 +1,6 @@
 use super::super::process::child_exited_without_reaping;
+#[cfg(target_os = "macos")]
+use super::super::process::force_cleanup_survivor_for_test;
 use super::tests::one_shot_request;
 use super::transport::{
     ExecutorPreflightProcess, WaitingExecutor, preflight_one_shot, preflight_one_shot_at_deadline,
@@ -161,7 +163,7 @@ fn waiting_executor(
                 executor: proto::EXECUTOR_NAME_V0.to_owned(),
                 executor_version: "test".to_owned(),
                 platform: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
-                self_protection_active: true,
+                flow_owned_write_protection_active: true,
             },
             request_id: request.request_id.clone(),
             schema: proto::EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
@@ -226,6 +228,30 @@ fn wait_until(mut condition: impl FnMut() -> bool, description: &str) {
         );
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+/// Keeps the Executor's valid answer when a process of its group outlives cleanup.
+#[cfg(target_os = "macos")]
+#[test]
+fn valid_answer_is_kept_when_a_group_outlives_cleanup() {
+    let workspace = crate::tests::empty_workspace();
+    let tool_started = workspace.join("tool-started");
+    let (request, protected_descriptors) = one_shot_request();
+    let waiting = waiting_executor(&request, &protected_descriptors, &tool_started);
+    force_cleanup_survivor_for_test();
+
+    let started =
+        super::transport::start_one_shot(waiting).expect("the valid Executor answer is kept");
+
+    assert!(
+        started.cleanup_unknown,
+        "a surviving group leaves its cleanup unknown"
+    );
+    let proto::ExecutorResponseV0::Completed { tool_result, .. } = started.response else {
+        panic!("the Executor's answer changed");
+    };
+    assert_eq!(tool_result.status, proto::ExecutorToolStatusV0::Completed);
+    assert_eq!(tool_result.exit_code, Some(0));
 }
 
 fn assert_executor_invalid<T>(outcome: Result<T, RuntimeError>) {

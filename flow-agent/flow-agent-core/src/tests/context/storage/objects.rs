@@ -491,6 +491,42 @@ fn session_object_writer_revalidates_published_objects() {
 }
 
 #[test]
+fn context_object_publication_syncs_the_retained_directory() {
+    let workspace = empty_workspace("session-object-retained-sync");
+    let reservation = reserve_session_log(&workspace, "objectsync001").expect("session reserved");
+    let sessions = crate::tests::helpers::workspace_session_dir(&workspace);
+    let moved = sessions.with_file_name("sessions-moved");
+    let mut writer = SessionObjectWriter::open(
+        reservation.session_path.parent.clone(),
+        &reservation.session_id,
+    )
+    .expect("writer opens");
+    // A same-user rename moves the retained directory away and a non-directory takes its path.
+    fs::rename(&sessions, &moved).expect("sessions directory moves");
+    fs::write(&sessions, b"replacement").expect("replacement takes the old path");
+    let object = ContextObject {
+        digest: sha256_hex(b"retained sync object"),
+        bytes: b"retained sync object".to_vec(),
+    };
+
+    writer
+        .persist(&object)
+        .expect("publication syncs the retained directory, not the pathname");
+
+    fs::remove_file(&sessions).expect("replacement removes");
+    fs::rename(&moved, &sessions).expect("sessions directory returns");
+    assert!(
+        sessions
+            .join(format!(
+                "{}.object.sha256-{}",
+                reservation.session_id, object.digest
+            ))
+            .is_file()
+    );
+    reservation.release_lock().expect("reservation rolls back");
+}
+
+#[test]
 fn invalid_context_checkpoint_does_not_persist_objects() {
     let bytes = b"unreferenced context object".to_vec();
     assert_invalid_context_checkpoint_preserves_objects(

@@ -12,7 +12,7 @@ use crate::runtime::{
         MAX_CONVERSATION_RECORD_BYTES, append_productive_run_checkpoint, canonical_json,
         reserve_conversation_continuation, reserve_conversation_run_recovery,
     },
-    digest::sha256_hex,
+    digest::{prefixed_sha256_hex, sha256_hex},
     types::MAX_SESSION_METADATA_BYTES,
 };
 use std::fs::{self, OpenOptions};
@@ -213,6 +213,55 @@ fn selected_continuation_rejects_every_incomplete_or_foreign_recovery_snapshot()
             Err(error) => error,
         };
         assert!(error.to_string().contains(expected), "{case}: {error}");
+    }
+}
+
+#[test]
+fn continuation_rejects_a_snapshot_header_that_conflicts_with_the_run_definition() {
+    for field in [
+        "flow_definition_id",
+        "registry_hash",
+        "flow_definition_hash",
+    ] {
+        let workspace = empty_workspace(&format!("conversation-continuation-definition-{field}"));
+        create_review_run(&workspace);
+        write_terminal_recovery_fixture(&workspace, "review", "review-1", "root");
+        write_terminal_run(&workspace, "review", "review-1");
+        let recovery_path = crate::tests::helpers::workspace_session_dir(&workspace)
+            .join("review/runs/review-1/recovery.jsonl");
+        let mut records = fs::read_to_string(&recovery_path)
+            .expect("recovery reads")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("recovery record parses"))
+            .collect::<Vec<serde_json::Value>>();
+        records[0][field] = if field == "flow_definition_id" {
+            serde_json::json!("other-flow")
+        } else {
+            serde_json::json!(prefixed_sha256_hex(b"other definition"))
+        };
+        replace_terminal_recovery_snapshot(&workspace, "review", "review-1", &records);
+
+        let error = match reserve_conversation_continuation(&workspace, "review", None) {
+            Ok(reservation) => {
+                reservation
+                    .release()
+                    .expect("unexpected reservation releases");
+                panic!("a snapshot that conflicts with its run definition must fail closed")
+            }
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("conflicts with the run definition"),
+            "{field}: {error}"
+        );
+        assert!(
+            !crate::tests::helpers::workspace_session_dir(&workspace)
+                .join("review/runs/review-2")
+                .exists(),
+            "{field}: no Run is allocated"
+        );
     }
 }
 

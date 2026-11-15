@@ -31,8 +31,18 @@ class SettingsFile {
   Future<void> save(Map<String, Object?> json) async {
     await file.parent.create(recursive: true);
     final pending = File('${file.path}.$pid.${_saves++}.pending');
-    await pending.writeAsString(jsonEncode(json), flush: true);
-    await pending.rename(file.path);
+    try {
+      await pending.writeAsString(jsonEncode(json), flush: true);
+      await pending.rename(file.path);
+    } on Object {
+      // A failed save leaves no temporary file; the save's own error still propagates.
+      try {
+        await pending.delete();
+      } on FileSystemException {
+        // Never created, or already gone.
+      }
+      rethrow;
+    }
   }
 
   static var _saves = 0;
@@ -66,6 +76,9 @@ class SettingsFile {
   }
 }
 
+/// A failed save of `settings` and the message that says so, as Settings show it.
+typedef SaveFailure = ({SavedSettings<Object?> settings, String text});
+
 /// Settings in use that a [SettingsFile] keeps: each change applies at once and is saved after
 /// the saves before it, so the last change is the one kept. A failed save goes to [report].
 class SavedSettings<T> extends ValueNotifier<T> {
@@ -78,6 +91,9 @@ class SavedSettings<T> extends ValueNotifier<T> {
   final String _name;
 
   Future<void> _saving = Future.value();
+
+  /// Receives each save's failure, or null once a save wrote the settings again.
+  void Function(String? failure)? saveOutcome;
 
   /// Uses `next` at once and saves it.
   Future<void> change(T next) {
@@ -94,8 +110,12 @@ class SavedSettings<T> extends ValueNotifier<T> {
     return _saving = _saving.then((_) async {
       try {
         await write(settings);
-      } on FileSystemException catch (error) {
-        problem('Could not save $_name: ${error.message}');
+        saveOutcome?.call(null);
+      } on Object catch (error) {
+        final detail = error is FileSystemException ? error.message : '$error';
+        final failure = 'Could not save $_name: $detail';
+        saveOutcome?.call(failure);
+        problem(failure);
       }
     });
   }

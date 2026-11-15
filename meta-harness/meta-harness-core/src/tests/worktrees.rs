@@ -317,6 +317,38 @@ fn a_turn_running_in_any_worktree_keeps_the_others_too() {
 }
 
 #[test]
+fn a_turn_starting_while_a_worktree_is_removed_does_not_hold_its_checkout() {
+    use crate::checkout::Checkout;
+    run(async {
+        let root =
+            std::env::temp_dir().join(format!("watershed-checkout-order-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let checkout = Checkout::new(root.join("checkout"), root.join("repository"));
+        // Removal holds the repository, then asks for the worktree's checkout.
+        let removal = checkout.repository_alone(Vec::new).await.unwrap();
+        let (waiting, started) = tokio::sync::oneshot::channel();
+        let turn = tokio::spawn({
+            let checkout = Checkout::new(root.join("checkout"), root.join("repository"));
+            async move {
+                checkout
+                    .run("busy", move || {
+                        let _ = waiting.send(());
+                    })
+                    .await
+            }
+        });
+        started.await.unwrap();
+        // The waiting turn must not keep the checkout that removal needs.
+        let alone = checkout.alone().await;
+        assert!(alone.is_ok(), "{:?}", alone.as_ref().err());
+        drop(alone);
+        drop(removal);
+        turn.await.unwrap().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    });
+}
+
+#[test]
 fn a_sparse_worktree_without_hidden_edits_can_be_removed() {
     run(async {
         let linked = Linked::new("sparse");

@@ -11,6 +11,7 @@ import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
+import 'focus_kit.dart';
 
 void main() {
   late FakeBackend backend;
@@ -33,11 +34,15 @@ void main() {
         home: Scaffold(
           body: Column(
             children: [
-              Row(
-                children: [
-                  PullRequestChip(state: state, device: 'MacBook'),
-                  GitActions(state: state, device: 'MacBook'),
-                ],
+              // The session card's column, which gives the Git action row its width.
+              SizedBox(
+                width: 280,
+                child: Column(
+                  children: [
+                    PullRequestRow(state: state, device: 'MacBook'),
+                    GitActions(state: state, device: 'MacBook'),
+                  ],
+                ),
               ),
               const Spacer(),
               PushedOffer(state: state, device: 'MacBook'),
@@ -108,7 +113,7 @@ void main() {
       expect(draft.identity.headCommit, 'c0ffee');
       expect(find.text('Create pull request'), findsNothing);
       expect(state.pulls.current.value?.number, 42);
-      expect(find.text('Open #42'), findsOneWidget);
+      expect(find.text('#42'), findsOneWidget);
       await tester.pump(const Duration(seconds: 7));
     },
   );
@@ -283,12 +288,13 @@ void main() {
       await tester.pumpAndSettle();
       final reads = backend.pullRequestReads;
 
-      await tester.tap(find.text('Open #42'));
+      await tester.tap(find.byKey(const Key('pull-request-chip')));
       await tester.pumpAndSettle();
       expect(backend.pullRequestReads, reads + 1);
+      // The row names the pull request too, beside the summary that opened.
       expect(
         find.text('Return 429 with Retry-After on /login'),
-        findsOneWidget,
+        findsNWidgets(2),
       );
       expect(find.text('feature/retry-after → main'), findsOneWidget);
       expect(
@@ -496,9 +502,118 @@ void main() {
       await tester.tap(find.text('Choose a branch…'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const Key('base-filter')), 'hotfix/9');
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pumpAndSettle();
       expect(
-        find.textContaining('No match among the first 2 branches.'),
+        find.text('No branch named “hotfix/9” in acme/api.'),
+        findsOneWidget,
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(backend.calls.last, 'search acme/api hotfix/9');
+      expect(find.text('Base branch'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'typing asks GitHub after a pause, says so while it runs, and its answer replaces the list',
+    (tester) async {
+      await show(tester);
+      backend.planned = pullRequestOutcomeOf(
+        plan: planOf(base: null, defaultBranch: null, comparison: null),
+      );
+      await openDialog(tester);
+      backend.baseBranches = [nameOf('main'), nameOf('release/1.2')];
+      backend.moreBases = true;
+      await tester.tap(find.text('Choose a branch…'));
+      await tester.pumpAndSettle();
+      final answer = Completer<BridgePullRequestOutcome>();
+      backend.searchGate = answer;
+      await tester.enterText(
+        find.byKey(const Key('base-filter')),
+        'release/2019',
+      );
+      await tester.pump(const Duration(milliseconds: 299));
+      expect(backend.calls.where((call) => call.startsWith('search')), isEmpty);
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(backend.calls.last, 'search acme/api release/2019');
+      expect(find.text('Searching acme/api…'), findsOneWidget);
+
+      answer.complete(
+        pullRequestOutcomeOf(
+          bases: [nameOf('release/2019-q3'), nameOf('release/2019-q4')],
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Searching acme/api…'), findsNothing);
+      expect(find.text('release/2019-q3'), findsOneWidget);
+      expect(find.text('release/2019-q4'), findsOneWidget);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(backend.calls.last, 'plan acme/api release/2019-q3');
+    },
+  );
+
+  testWidgets(
+    'one search runs at a time, and an answer for an older text is not shown',
+    (tester) async {
+      await show(tester);
+      backend.planned = pullRequestOutcomeOf(
+        plan: planOf(base: null, defaultBranch: null, comparison: null),
+      );
+      await openDialog(tester);
+      backend.baseBranches = [nameOf('main'), nameOf('release/1.2')];
+      backend.moreBases = true;
+      await tester.tap(find.text('Choose a branch…'));
+      await tester.pumpAndSettle();
+      final older = Completer<BridgePullRequestOutcome>();
+      backend.searchGate = older;
+      await tester.enterText(find.byKey(const Key('base-filter')), 'rel');
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.enterText(find.byKey(const Key('base-filter')), 'release');
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(backend.calls.where((call) => call.startsWith('search')), [
+        'search acme/api rel',
+      ]);
+
+      backend.searchGate = null;
+      older.complete(pullRequestOutcomeOf(bases: [nameOf('rel-old')]));
+      await tester.pumpAndSettle();
+      expect(backend.calls.last, 'search acme/api release');
+      expect(find.text('rel-old'), findsNothing);
+      expect(find.text('release/1.2'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'when GitHub cannot be asked, the first branches stay and Enter takes the typed name',
+    (tester) async {
+      await show(tester);
+      backend.planned = pullRequestOutcomeOf(
+        plan: planOf(base: null, defaultBranch: null, comparison: null),
+      );
+      await openDialog(tester);
+      backend.baseBranches = [nameOf('main'), nameOf('release/1.2')];
+      backend.moreBases = true;
+      backend.searchOutcome = pullRequestOutcomeOf(
+        kind: BridgePullRequestOutcomeKind.failed,
+        detail: 'gh: Bad Gateway (HTTP 502)',
+      );
+      await tester.tap(find.text('Choose a branch…'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('base-filter')), 'hotfix/9');
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pumpAndSettle();
+      expect(
+        find.text(
+          'Could not search GitHub: gh: Bad Gateway (HTTP 502). The list shows the first 2 branches.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining(
+          'No match among the first 2 branches. Press Enter to use the name as typed.',
+        ),
         findsOneWidget,
       );
       await tester.testTextInput.receiveAction(TextInputAction.done);
@@ -625,6 +740,28 @@ void main() {
         findsOneWidget,
       );
     });
+
+    testWidgets(
+      '⌘Z after the model writes the title does not bring back the title it replaced',
+      (tester) async {
+        await show(tester);
+        state.model.value = 'anthropic/claude-opus-5-5';
+        backend.writeGate = Completer();
+        await openDialog(tester);
+        await tester.pump(const Duration(milliseconds: 600));
+        backend.writeGate!.complete(backend.written);
+        await tester.pumpAndSettle();
+        await tester.pump(const Duration(milliseconds: 600));
+        final title = find.byKey(const Key('pull-request-title'));
+        await tester.tap(title);
+        await undo(tester);
+        expect(
+          field(tester, 'pull-request-title').controller!.text,
+          'Return 429 when logins are blocked',
+        );
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+    );
 
     testWidgets('keeps what the user typed while it wrote', (tester) async {
       await show(tester);

@@ -1,7 +1,7 @@
 use crate::runtime::fs_guards::{
     AnchoredDir, AnchoredFile, DirectoryErrorMode, ProtectedStateLock, ProtectedStateLockError,
-    canonical_decimal, open_anchored_file_for_read, sync_anchored_directory,
-    unix_access_is_private,
+    canonical_decimal, open_anchored_file_for_read, sync_anchored_directory, sync_durable,
+    unix_access_is_private, write_durable,
 };
 use crate::runtime::types::RuntimeError;
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt as _};
@@ -11,7 +11,7 @@ use std::{
     ffi::OsStr,
     fs,
     fs::File,
-    io::{self, Read as _, Write as _},
+    io::{self, Read as _},
     path::{Component, Path, PathBuf},
     sync::{
         OnceLock,
@@ -33,11 +33,19 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
     static READ_VALIDATED_OBSERVER: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
         const { std::cell::RefCell::new(None) };
+    static CONFIGURE_LOCK_OBSERVER: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
 fn set_parent_missing_observer(observer: impl FnOnce() + 'static) {
     PARENT_MISSING_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
+}
+
+/// Runs `observer` on the next `configure` call, just before it waits for the configuration lock.
+#[cfg(test)]
+pub(crate) fn set_configure_lock_observer(observer: impl FnOnce() + 'static) {
+    CONFIGURE_LOCK_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
 }
 
 #[cfg(test)]
@@ -135,6 +143,10 @@ impl ExecutorConfigStore {
             ));
         }
         let parent = self.ensure_parent()?;
+        #[cfg(test)]
+        if let Some(observer) = CONFIGURE_LOCK_OBSERVER.with_borrow_mut(Option::take) {
+            observer();
+        }
         let _lock = acquire_config_lock(&parent.file(".executor.lock"))?;
         recover_abandoned_stages(&parent)?;
         let document = ExecutorConfigDocument {
@@ -245,8 +257,8 @@ impl ExecutorConfigStore {
         ));
         let operation = (|| {
             let mut file = create_private_file(&stage)?;
-            file.write_all(bytes)
-                .and_then(|()| file.sync_all())
+            write_durable(&mut file, stage.diagnostic_path(), bytes)
+                .and_then(|()| sync_durable(&file, stage.diagnostic_path()))
                 .map_err(|error| config_io(stage.diagnostic_path(), error))?;
             stage.rename_to(&path.leaf)?;
             verify_anchored_file(&path)?;

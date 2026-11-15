@@ -22,7 +22,10 @@ use tokio::sync::Mutex;
 
 mod branches;
 mod commit;
+mod gh;
+mod github_remote;
 mod process;
+mod pull_error;
 mod pull_text;
 mod pulls;
 mod revert;
@@ -32,14 +35,16 @@ mod worktrees;
 
 pub use branches::{Branch, BranchTarget, Changes, GitStatus, without_credentials};
 pub use commit::Commit;
+pub use pull_error::PullRequestError;
 pub(crate) use pull_text::PiQuestion;
 pub use pull_text::PullRequestText;
 pub use pulls::{
-    Comparison, PullRequest, PullRequestDraft, PullRequestError, PullRequestPlan, PullRequestState,
-    ReviewDecision,
+    Comparison, PullRequest, PullRequestDraft, PullRequestPlan, PullRequestState, ReviewDecision,
 };
 pub use revert::RevertConfirmation;
 
+#[cfg(test)]
+pub(crate) use branches::before_create_base;
 pub use stash::Stash;
 #[cfg(test)]
 pub(crate) use stash::{before_drop, before_stash_identity};
@@ -53,7 +58,7 @@ use process::{
     unreadable,
 };
 #[cfg(test)]
-pub(crate) use revert::holds_repository;
+pub(crate) use revert::{hash_contents, holds_repository};
 
 /// Creates the repository only for the explicit Initialize Git action.
 pub(crate) async fn initialize(dir: &Path) -> Result<(), DiffError> {
@@ -144,6 +149,8 @@ pub enum DiffError {
     /// Agents of these sessions run in the checkout, so its files must not be reverted; none
     /// named while a turn starts or another revert runs.
     AgentRunning(Vec<String>),
+    /// A window shows the session, so it must not be deleted.
+    SessionShown,
     /// Git left these files below the working folder unreverted, such as one in a folder it
     /// may not write.
     NotReverted(Vec<String>),
@@ -180,7 +187,16 @@ pub enum DiffError {
     CommitOnBranchFailed {
         /// The branch now checked out.
         branch: String,
+        /// The branch it was created from, or none when HEAD was detached.
+        from: Option<String>,
         /// The failure after creating it.
+        error: Box<DiffError>,
+    },
+    /// A branch was created and switched to, but a hook failed after Git switched.
+    CreatedBranchHookFailed {
+        /// The branch it was created from, or none when HEAD was detached.
+        from: Option<String>,
+        /// The hook failure.
         error: Box<DiffError>,
     },
     /// Explicit commits do not finish merges.
@@ -223,6 +239,9 @@ impl fmt::Display for DiffError {
                 f.write_str("a turn or another revert is starting in this checkout")
             }
             Self::AgentRunning(_) => f.write_str("an agent runs in this checkout"),
+            Self::SessionShown => {
+                f.write_str("the session is open in a window; close it there before deleting it")
+            }
             Self::NotReverted(paths) => write!(f, "Git could not revert {}", paths.join(", ")),
             Self::PartlyReverted(error) => write!(f, "the files may be partly reverted: {error}"),
             Self::PlanChanged => f.write_str("files changed since you confirmed"),
@@ -252,9 +271,10 @@ impl fmt::Display for DiffError {
                 if *count == 1 { "" } else { "s" }
             ),
             Self::HookFailed(output) => write!(f, "Git switched, but a hook failed: {output}"),
-            Self::CommitOnBranchFailed { branch, error } => {
+            Self::CommitOnBranchFailed { branch, error, .. } => {
                 write!(f, "committing on {branch} failed: {error}")
             }
+            Self::CreatedBranchHookFailed { error, .. } => error.fmt(f),
             Self::MergeInProgress => f.write_str("A merge is in progress."),
             Self::PushDestinations => f.write_str(
                 "This remote pushes to other or several repositories. Push it with Git.",
@@ -535,6 +555,11 @@ impl WorkingTree {
             .resolve(&format!("{reference}^{{tree}}"))
             .await?
             .map(Snapshot))
+    }
+
+    /// The commit `reference` names, or none when it names nothing.
+    pub async fn checkpoint_commit(&self, reference: &str) -> Result<Option<String>, DiffError> {
+        self.resolve(&format!("{reference}^{{commit}}")).await
     }
 
     /// The object `name` names, or none when it names nothing.

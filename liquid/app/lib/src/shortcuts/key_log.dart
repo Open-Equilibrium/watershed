@@ -40,17 +40,68 @@ bool logsKey(KeyEvent event, Set<LogicalKeyboardKey> pressed) {
       !held(LogicalKeyboardKey.alt);
 }
 
-/// With `LIQUID_KEY_LOG=1`, writes the key events Flutter receives that [logsKey] takes to
+final _modifiers = LogicalKeyboardKey.expandSynonyms({
+  LogicalKeyboardKey.meta,
+  LogicalKeyboardKey.control,
+  LogicalKeyboardKey.alt,
+  LogicalKeyboardKey.shift,
+});
+
+/// The lines of the key log: [logsKey] takes a modifier or the Liquid key, and a typed key only
+/// with its key-down. A typed key's repeats and key-up follow that key-down, so a key typed
+/// alone stays out even when ⌘ or ⌃ is held after it. A line names only the modifiers, the
+/// Liquid key and the typed keys the log took.
+class KeyLog {
+  /// The typed keys whose key-down the log took and that are not released yet.
+  final _logged = <LogicalKeyboardKey>{};
+
+  /// The line for `event`, or null when the log leaves it out.
+  String? line(
+    KeyEvent event, {
+    required Set<LogicalKeyboardKey> pressed,
+    required String? focus,
+  }) {
+    final key = event.logicalKey;
+    final typed = !_modifiers.contains(key);
+    final bool logged;
+    if (typed && event is! KeyDownEvent) {
+      logged = event is KeyUpEvent
+          ? _logged.remove(key)
+          : _logged.contains(key);
+    } else {
+      logged = logsKey(event, pressed);
+      if (typed) {
+        if (logged) {
+          _logged.add(key);
+        } else {
+          _logged.remove(key);
+        }
+      }
+    }
+    if (!logged) return null;
+    final held = {
+      for (final pressedKey in pressed)
+        if (_modifiers.contains(pressedKey) ||
+            pressedKey == liquidKey ||
+            _logged.contains(pressedKey))
+          pressedKey,
+    };
+    return describeKeyEvent(event, pressed: held, focus: focus);
+  }
+}
+
+/// With `LIQUID_KEY_LOG=1`, writes the lines of [KeyLog] for the key events Flutter receives to
 /// stderr; the macOS runner logs the native events beside them.
 void logKeysIfAsked(Map<String, String> environment) {
   if (environment['LIQUID_KEY_LOG'] != '1') return;
+  final log = KeyLog();
   HardwareKeyboard.instance.addHandler((event) {
-    final pressed = HardwareKeyboard.instance.logicalKeysPressed;
-    if (logsKey(event, pressed)) {
-      stderr.writeln(
-        'flutter key: ${describeKeyEvent(event, pressed: pressed, focus: FocusManager.instance.primaryFocus?.debugLabel)}',
-      );
-    }
+    final line = log.line(
+      event,
+      pressed: HardwareKeyboard.instance.logicalKeysPressed,
+      focus: FocusManager.instance.primaryFocus?.debugLabel,
+    );
+    if (line != null) stderr.writeln('flutter key: $line');
     return false;
   });
 }

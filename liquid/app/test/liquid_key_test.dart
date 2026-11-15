@@ -69,7 +69,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(newSessions(), 2);
 
-      await liquid(tester, LogicalKeyboardKey.digit3);
+      await liquid(tester, LogicalKeyboardKey.keyD);
       expect(find.byType(DiffView), findsOneWidget);
     },
   );
@@ -117,13 +117,13 @@ void main() {
       tester,
       ShortcutSettings.liquidKey().change(
         Command.diff,
-        const Keys(LogicalKeyboardKey.keyD, liquid: true),
+        const Keys(LogicalKeyboardKey.keyE, liquid: true),
       ),
     );
 
-    await liquid(tester, LogicalKeyboardKey.digit3);
-    expect(find.byType(DiffView), findsNothing);
     await liquid(tester, LogicalKeyboardKey.keyD);
+    expect(find.byType(DiffView), findsNothing);
+    await liquid(tester, LogicalKeyboardKey.keyE);
     expect(find.byType(DiffView), findsOneWidget);
   });
 
@@ -222,22 +222,4 @@ void main() {
       ]);
     },
   );
-
-  testWidgets('the Trajectory keys in the status bar follow the shortcuts', (
-    tester,
-  ) async {
-    await show(
-      tester,
-      ShortcutSettings.standard().change(
-        Command.branch,
-        const Keys(LogicalKeyboardKey.keyX),
-      ),
-    );
-    await tester.tap(find.text('Trajectory'));
-    await tester.pumpAndSettle();
-
-    await hold(tester, LogicalKeyboardKey.metaLeft);
-    expect(find.textContaining('X branch'), findsOneWidget);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft, platform: 'macos');
-  });
 }

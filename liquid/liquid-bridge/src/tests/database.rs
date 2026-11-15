@@ -299,13 +299,6 @@ fn rows_come_in_filtered_and_sorted_windows() {
     let containing = filtered(BridgeMatch::Contains, &expenses.name, Some(text("E")));
     assert_eq!(expenses.names(containing.clone()), ["groceries", "Rent"]);
     assert_eq!(expenses.rows(containing).unwrap().count, 2);
-    let capped = expenses
-        .rows(BridgeQuery {
-            limit: i64::MAX,
-            ..query(BridgeQueryKind::Rows)
-        })
-        .unwrap();
-    assert!(capped.rows.len() as i64 <= MAX_WINDOW);
 }
 
 #[test]
@@ -472,4 +465,21 @@ fn a_view_names_its_block_s_kind() {
     let kinds: Vec<_> = views.iter().map(|view| view.kind).collect();
     // Lisbon's Text Block, then the Table after it.
     assert_eq!(kinds, [BridgeBlockKind::Text, BridgeBlockKind::Database]);
+}
+
+#[test]
+fn a_rows_window_never_exceeds_its_cap() {
+    let expenses = Expenses::new("database-rows-cap");
+    let mut last = None;
+    for _ in 0..MAX_WINDOW + 11 {
+        last = Some(expenses.row(last.as_deref()));
+    }
+    let window = expenses
+        .rows(BridgeQuery {
+            limit: i64::MAX,
+            ..query(BridgeQueryKind::Rows)
+        })
+        .unwrap();
+    assert_eq!(window.rows.len() as i64, MAX_WINDOW);
+    assert_eq!(window.count, MAX_WINDOW + 11);
 }
