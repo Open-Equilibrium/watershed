@@ -29,8 +29,10 @@ var plain: EventHotKeyRef?
 var shifted: EventHotKeyRef?
 var press: Press?
 var shiftedDown = false
-/// Whether this user's session is in front; the remapping holds for every user's keyboards.
-var sessionActive = true
+/// Whether this user's session is in front; the remapping holds for every user's keyboards. A
+/// helper started in a background session waits until its session comes to the front.
+var sessionActive = Mapping.initiallyActive(
+    session: CGSessionCopyCurrentDictionary() as? [String: Any])
 /// Whether this helper set the remapping, which only it gives back.
 var mapped = false
 
@@ -197,11 +199,7 @@ registered.wait()
 signal(SIGTERM, SIG_IGN)
 
 register(shiftKey, shiftedID, &shifted)
-follow(NSWorkspace.shared.frontmostApplication)
-remap()
-// Keyboards attached before the start may get their HID service later too.
-remapLater()
-startRecheck()
+// The observers come before the first remapping, so a session change during the start is heard.
 let workspace = NSWorkspace.shared.notificationCenter
 workspace.addObserver(
     forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
@@ -226,6 +224,11 @@ workspace.addObserver(
 NotificationCenter.default.addObserver(
     forName: NSApplication.willTerminateNotification, object: nil, queue: .main
 ) { _ in unmap() }
+follow(NSWorkspace.shared.frontmostApplication)
+remap()
+// Keyboards attached before the start may get their HID service later too.
+remapLater()
+startRecheck()
 
 NSApplication.shared.setActivationPolicy(.prohibited)
 NSApplication.shared.run()

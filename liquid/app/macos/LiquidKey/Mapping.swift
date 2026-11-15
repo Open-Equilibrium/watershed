@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import IOKit.hid
 import IOKit.hidsystem
@@ -38,6 +39,13 @@ enum Mapping {
     /// since another user's helper may hold the keyboards otherwise.
     static func givesBack(mapped: Bool, active: Bool) -> Bool {
         mapped && active
+    }
+
+    /// Whether the session a helper starts in is in front, from the session dictionary. One the
+    /// system does not report, or one in the background, leaves the keyboards to the session in
+    /// front.
+    static func initiallyActive(session: [String: Any]?) -> Bool {
+        (session?[kCGSessionOnConsoleKey as String] as? Bool) ?? false
     }
 
     /// Applies the Liquid key to every keyboard attached now; needs no permission. Returns

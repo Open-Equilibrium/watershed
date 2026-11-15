@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 // Checks the helper's pure decisions; `test.sh` runs it on the macOS CI host.
@@ -113,6 +114,17 @@ check(
 check(
     !Mapping.givesBack(mapped: true, active: false),
     "a helper whose session left gives nothing back")
+
+// A helper started in a session that is not in front leaves the keyboards to the session in front.
+check(
+    !Mapping.initiallyActive(session: nil),
+    "a helper without a session dictionary starts inactive")
+check(
+    !Mapping.initiallyActive(session: [kCGSessionOnConsoleKey as String: false]),
+    "a helper in a background session starts inactive")
+check(
+    Mapping.initiallyActive(session: [kCGSessionOnConsoleKey as String: true]),
+    "a helper in the session in front starts active")
 
 if failures > 0 { exit(1) }
 print("Liquid key helper checks passed")
