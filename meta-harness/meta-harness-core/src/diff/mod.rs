@@ -187,6 +187,8 @@ pub enum DiffError {
     CommitOnBranchFailed {
         /// The branch now checked out.
         branch: String,
+        /// The branch it was created from, or none when HEAD was detached.
+        from: Option<String>,
         /// The failure after creating it.
         error: Box<DiffError>,
     },
@@ -269,7 +271,7 @@ impl fmt::Display for DiffError {
                 if *count == 1 { "" } else { "s" }
             ),
             Self::HookFailed(output) => write!(f, "Git switched, but a hook failed: {output}"),
-            Self::CommitOnBranchFailed { branch, error } => {
+            Self::CommitOnBranchFailed { branch, error, .. } => {
                 write!(f, "committing on {branch} failed: {error}")
             }
             Self::CreatedBranchHookFailed { error, .. } => error.fmt(f),

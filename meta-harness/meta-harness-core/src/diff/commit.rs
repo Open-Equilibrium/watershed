@@ -12,6 +12,9 @@ use std::collections::BTreeMap;
 pub struct Commit {
     /// The branch committed on.
     pub branch: String,
+    /// The branch the new branch was created from, or none when HEAD was detached or no
+    /// branch was created.
+    pub created_from: Option<String>,
     /// The committed first line after hooks, when it could be read.
     pub subject: Option<String>,
     /// A failed read after Git confirmed the commit; the write still succeeded.
@@ -229,30 +232,32 @@ impl WorkingTree {
                     .to_owned(),
             ));
         }
-        if let Some(branch) = branch
-            && let Err(error) = self.create(branch).await
-        {
-            return Err(match error {
-                DiffError::CreatedBranchHookFailed { error, .. } => {
-                    DiffError::CommitOnBranchFailed {
+        let created_from = match branch {
+            Some(branch) => match self.create(branch).await {
+                Ok(from) => from,
+                Err(DiffError::CreatedBranchHookFailed { from, error }) => {
+                    return Err(DiffError::CommitOnBranchFailed {
                         branch: branch.to_owned(),
+                        from,
                         error,
-                    }
+                    });
                 }
-                error => error,
-            });
-        }
+                Err(error) => return Err(error),
+            },
+            None => None,
+        };
         let committed = self
             .commit_selected(&selected, &changes, &entries, &tracked, message)
             .await
             .map_err(|error| match branch {
                 Some(branch) => DiffError::CommitOnBranchFailed {
                     branch: branch.to_owned(),
+                    from: created_from.clone(),
                     error: Box::new(error),
                 },
                 None => error,
             })?;
-        Ok(self.inspect_commit(committed, &before).await)
+        Ok(self.inspect_commit(committed, created_from, &before).await)
     }
 
     /// The selected files whose mode changed, which Git's commit leaves out while the user's
@@ -419,7 +424,12 @@ impl WorkingTree {
 
     /// Reads the committed subject and the hook changes once the commit has succeeded. A failure
     /// here is reported in the Commit, not returned, as the write still succeeded.
-    async fn inspect_commit(&self, branch: String, before: &Snapshot) -> Commit {
+    async fn inspect_commit(
+        &self,
+        branch: String,
+        created_from: Option<String>,
+        before: &Snapshot,
+    ) -> Commit {
         let mut subject = None;
         let inspected: Result<Vec<String>, DiffError> = async {
             subject = Some(
@@ -446,6 +456,7 @@ impl WorkingTree {
         };
         Commit {
             branch,
+            created_from,
             subject,
             inspection_error,
             hook_changed,

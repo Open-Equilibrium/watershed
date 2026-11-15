@@ -362,13 +362,9 @@ class GitState {
     required String snapshot,
     String? branch,
   }) async {
-    BridgeGitStatus? from;
     final outcome = await _write(
       'commit',
-      () {
-        from = status.value;
-        return _backend.commitFiles(snapshot, paths, message, branch);
-      },
+      () => _backend.commitFiles(snapshot, paths, message, branch),
       done: (now, outcome) {
         final commit = outcome.commit!;
         final text =
@@ -383,7 +379,7 @@ class GitState {
           BridgeGitOutcomeKind.hookChanged,
           BridgeGitOutcomeKind.commitBranchFailed,
         }.contains(outcome?.kind)) {
-      await _recordBase(from?.repository, from?.rawBranch, branch);
+      await _recordBase(status.value?.repository, outcome!.createdFrom, branch);
     }
     return outcome;
   }

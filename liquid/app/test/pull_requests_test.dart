@@ -50,6 +50,7 @@ void main() {
         running: [],
         detail: 'pre-commit refused',
         commit: BridgeCommit(branch: 'fix/typo', count: 0),
+        createdFrom: 'feature/retry-after',
       );
       await git.commit(['a.txt'], 'Fix', snapshot: 's', branch: 'fix/typo');
 

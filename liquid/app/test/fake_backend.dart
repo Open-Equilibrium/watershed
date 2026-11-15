@@ -437,6 +437,8 @@ class FakeBackend implements SessionBackend {
               subject: message.split('\n').first,
               count: paths.length,
             ),
+            // Git creates a new branch from the one HEAD names.
+            createdFrom: branch == null ? null : git?.rawBranch,
           )
         : outcome;
   }

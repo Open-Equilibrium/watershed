@@ -2639,6 +2639,61 @@ fn commit_bridge_names_the_created_branch_when_either_hook_refuses() {
 }
 
 #[test]
+fn commit_bridge_reports_the_branch_a_new_branch_was_created_from() {
+    use crate::api::git::BridgeGitOutcomeKind;
+    use std::os::unix::fs::PermissionsExt;
+    for hook_name in [None, Some("pre-commit"), Some("post-checkout")] {
+        let repo = repository(&format!(
+            "commit-created-from-{}",
+            hook_name.unwrap_or("clean")
+        ));
+        git(&repo, &["branch", "-M", "main"]);
+        git(&repo, &["config", "user.name", "Test"]);
+        git(&repo, &["config", "user.email", "test@example.com"]);
+        git(&repo, &["config", "commit.gpgsign", "false"]);
+        git(&repo, &["branch", "other"]);
+        std::fs::write(repo.join("a.txt"), "changed\n").unwrap();
+        let script = [
+            no_session_file(2),
+            entries(3, ""),
+            no_session_file(4),
+            "IFS= read -r line || exit 0".to_owned(),
+        ]
+        .concat();
+        let session = launch(gated(&script), repo.display().to_string()).unwrap();
+        let plan = session.commit_plan().unwrap();
+        // Git moves HEAD to `other` at the same commit after the plan was read.
+        git(&repo, &["switch", "-q", "other"]);
+        if let Some(hook) = hook_name {
+            let path = repo.join(".git/hooks").join(hook);
+            std::fs::write(&path, "#!/bin/sh\nexit 1\n").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let result = session
+            .commit_files(
+                plan.snapshot,
+                vec!["a.txt".into()],
+                "Subject".into(),
+                Some("feat".into()),
+            )
+            .unwrap();
+        let expected = if hook_name.is_some() {
+            BridgeGitOutcomeKind::CommitBranchFailed
+        } else {
+            BridgeGitOutcomeKind::Done
+        };
+        assert_eq!(result.kind, expected, "{hook_name:?}");
+        assert_eq!(
+            result.created_from.as_deref(),
+            Some("other"),
+            "{hook_name:?}"
+        );
+        assert!(call(session.shutdown()));
+        let _ = std::fs::remove_dir_all(repo);
+    }
+}
+
+#[test]
 fn a_committed_bridge_outcome_survives_failed_inspection() {
     use crate::api::git::BridgeGitOutcomeKind;
     use std::os::unix::fs::PermissionsExt;

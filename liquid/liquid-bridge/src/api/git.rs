@@ -741,6 +741,7 @@ impl AgentSession {
                         subject: commit.subject.as_deref().map(visible_name),
                         count: i64::try_from(paths.len()).unwrap_or(i64::MAX),
                     });
+                    outcome.created_from = commit.created_from;
                     Ok(outcome)
                 }
                 Err(error) => self.outcome(Err(error)).await,
@@ -1214,7 +1215,12 @@ impl AgentSession {
             Err(DiffError::SubmoduleChanged(files)) => {
                 Ok(outcome(BridgeGitOutcomeKind::SubmoduleChanged, files))
             }
-            Err(DiffError::CommitOnBranchFailed { branch, error }) => Ok(BridgeGitOutcome {
+            Err(DiffError::CommitOnBranchFailed {
+                branch,
+                from,
+                error,
+            }) => Ok(BridgeGitOutcome {
+                created_from: from,
                 detail: visible_lines(&match *error {
                     DiffError::CommitFailed(output) | DiffError::HookFailed(output) => output,
                     error => error.to_string(),

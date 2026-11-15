@@ -263,6 +263,33 @@ fn commit_creates_and_switches_a_branch_and_commits_deletions() {
 }
 
 #[test]
+fn a_commit_onto_a_new_branch_reports_the_base_the_branch_started_from() {
+    run(async {
+        let repo = Repo::new("commit-created-from-race");
+        identity(&repo);
+        repo.git(&["branch", "-M", "main"]);
+        repo.git(&["branch", "other"]);
+        repo.write("a.txt", "changed\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        let root = repo.path().to_owned();
+        crate::diff::before_create_base(repo.path(), move || {
+            // Another Git checks out `other` after Liquid read main as the base.
+            let external = Repo(root);
+            external.git(&["switch", "-q", "other"]);
+            std::mem::forget(external);
+        });
+
+        let commit = checkpoints
+            .commit_current(&["a.txt".into()], "Message", Some("feature"))
+            .await
+            .unwrap();
+
+        assert_eq!(commit.created_from.as_deref(), Some("main"));
+        assert_eq!(repo.git(&["branch", "--show-current"]), "feature\n");
+    });
+}
+
+#[test]
 fn commit_staged_deletions_and_renames_preserve_excluded_staging() {
     run(async {
         for rename in [false, true] {
@@ -1068,14 +1095,21 @@ fn new_branch_commit_failure_reports_the_branch_after_either_hook() {
             std::fs::write(&hook, "#!/bin/sh\necho hook-refused >&2\nexit 1\n").unwrap();
             std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
             let head = repo.git(&["rev-parse", "HEAD"]);
+            let base = repo.git(&["branch", "--show-current"]);
             let error = checkpoints
                 .commit_current(&["a.txt".into()], "Message", Some("feat"))
                 .await
                 .unwrap_err();
-            let DiffError::CommitOnBranchFailed { branch, error } = error else {
+            let DiffError::CommitOnBranchFailed {
+                branch,
+                from,
+                error,
+            } = error
+            else {
                 panic!("missing created branch outcome: {error:?}");
             };
             assert_eq!(branch, "feat");
+            assert_eq!(from.as_deref(), Some(base.trim_end()));
             assert!(matches!(
                 error.as_ref(),
                 DiffError::HookFailed(_) | DiffError::CommitFailed(_)

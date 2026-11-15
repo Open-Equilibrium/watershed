@@ -147,6 +147,48 @@ void main() {
     expect(await bases.baseOf('/work/api/.git', 'feature'), 'other');
   });
 
+  test(
+    'a commit onto a new branch records the branch Git created it from',
+    () async {
+      // The cached status says main, but Git created the branch from other.
+      for (final kind in [
+        BridgeGitOutcomeKind.done,
+        BridgeGitOutcomeKind.commitBranchFailed,
+      ]) {
+        final bases = BranchBases();
+        final state = GitState(
+          backend,
+          notify: (level, text) => notices.add((level, text)),
+          bases: bases,
+        );
+        await state.refresh();
+        backend.outcome = BridgeGitOutcome(
+          kind: kind,
+          files: const [],
+          running: const [],
+          detail: '',
+          commit: const BridgeCommit(
+            branch: 'feature',
+            subject: null,
+            count: 1,
+          ),
+          createdFrom: 'other',
+        );
+        await state.commit(
+          ['a.txt'],
+          'Subject',
+          snapshot: 'snapshot',
+          branch: 'feature',
+        );
+        expect(
+          await bases.baseOf('/work/api/.git', 'feature'),
+          'other',
+          reason: '$kind',
+        );
+      }
+    },
+  );
+
   int fetches() => backend.calls.where((call) => call == 'fetch').length;
 
   test(
