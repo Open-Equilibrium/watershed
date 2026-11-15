@@ -90,6 +90,37 @@ void main() {
   });
 
   test(
+    'a refused new branch names the files and says nothing was created',
+    () async {
+      backend.outcome = outcomeOf(
+        BridgeGitOutcomeKind.wouldOverwrite,
+        files: const ['private.txt'],
+      );
+      await git.create('feature');
+      expect(notices.single.$2, contains('private.txt'));
+      expect(notices.single.$2, contains('Nothing was created.'));
+    },
+  );
+
+  test('a commit onto a refused new branch names the files and says nothing was created', () async {
+    backend.outcome = outcomeOf(
+      BridgeGitOutcomeKind.wouldOverwrite,
+      files: const ['private.txt'],
+    );
+    await git.commit(
+      ['a.txt'],
+      'Subject',
+      snapshot: 'snapshot',
+      branch: 'feature',
+    );
+    expect(notices.single.$2, contains('private.txt'));
+    expect(
+      notices.single.$2,
+      contains('No branch was created and nothing was committed.'),
+    );
+  });
+
+  test(
     'several hook-changed files stay uncommitted after the success notice',
     () async {
       backend.outcome = const BridgeGitOutcome(

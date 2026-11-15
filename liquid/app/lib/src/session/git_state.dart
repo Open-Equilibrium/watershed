@@ -593,6 +593,18 @@ class GitState {
             BridgeLevel.error,
             'Could not pull: Git would overwrite your uncommitted changes in $files. Commit them first. Nothing was pulled.',
           );
+        case BridgeGitOutcomeKind.wouldOverwrite
+            when action == 'create the branch':
+          notify(
+            BridgeLevel.error,
+            'Could not create the branch: Git would overwrite your uncommitted changes in $files. Nothing was created.',
+          );
+        // Only a commit that creates its branch switches, so only it can refuse here.
+        case BridgeGitOutcomeKind.wouldOverwrite when action == 'commit':
+          notify(
+            BridgeLevel.error,
+            'Could not commit on a new branch: Git would overwrite your uncommitted changes in $files. No branch was created and nothing was committed.',
+          );
         case BridgeGitOutcomeKind.wouldOverwrite:
       }
       if (_arrived case final arrived?) notify(BridgeLevel.info, arrived);
