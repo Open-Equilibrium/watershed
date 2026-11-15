@@ -128,6 +128,67 @@ void main() {
     expect(backend.calls, contains('revert T1'));
   });
 
+  testWidgets('Open diff for another turn switches the open Diff panel to it', (
+    tester,
+  ) async {
+    await show(tester);
+    BridgeTreeNode node(String id, String? parent, BridgeEntryKind kind) =>
+        BridgeTreeNode(id: id, parent: parent, kind: kind);
+    backend
+      ..stored = historyOf(
+        tree: [
+          node('c1', null, BridgeEntryKind.custom),
+          node('u1', 'c1', BridgeEntryKind.user),
+          node('a1', 'u1', BridgeEntryKind.assistant),
+          node('c2', 'a1', BridgeEntryKind.custom),
+          node('u2', 'c2', BridgeEntryKind.user),
+          node('a2', 'u2', BridgeEntryKind.assistant),
+          node('c3', 'a2', BridgeEntryKind.custom),
+        ],
+        leaf: 'c3',
+      )
+      ..transcripts[''] = BridgeTranscript(
+        items: [
+          chatItem('u1', BridgeItemKind.userMessage, text: 'First'),
+          chatItem('a1', BridgeItemKind.assistantMessage, text: 'One'),
+          chatItem('u2', BridgeItemKind.userMessage, text: 'Second'),
+          chatItem('a2', BridgeItemKind.assistantMessage, text: 'Two'),
+        ],
+        more: false,
+      )
+      ..turnList = [
+        turnOf(
+          'T1',
+          number: 1,
+          startEntry: 'c1',
+          endEntry: 'c2',
+          added: 2,
+          removed: 1,
+        ),
+        turnOf(
+          'T2',
+          number: 2,
+          startEntry: 'c2',
+          endEntry: 'c3',
+          added: 1,
+          removed: 0,
+        ),
+      ];
+    await state.loadChat();
+    await tester.pumpAndSettle();
+    Finder openDiffOf(String turn) => find.descendant(
+      of: find.byWidgetPredicate((w) => w is TurnChanges && w.turn.id == turn),
+      matching: find.text('Open diff'),
+    );
+    await tester.tap(openDiffOf('T1'));
+    await tester.pumpAndSettle();
+    expect(backend.compared.last, 'T1..T1');
+    await tester.tap(openDiffOf('T2'));
+    await tester.pumpAndSettle();
+    expect(backend.compared.last, 'T2..T2', reason: 'the open panel reads T2');
+    expect(find.text('Turn 2'), findsWidgets, reason: 'the panel shows T2');
+  });
+
   testWidgets(
     'a question that arrives while a revert is prepared keeps the keys',
     (tester) async {

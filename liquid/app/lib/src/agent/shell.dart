@@ -269,9 +269,9 @@ class _AgentShellState extends State<AgentShell> {
   }
 
   /// Opens the Diff panel beside the Chat, showing `scope`; the Changes row and a turn's Open diff
-  /// do.
+  /// do. An open panel switches to `scope` too.
   void _openDiff(DiffScope scope) {
-    widget.state!.diffScope.value = scope;
+    unawaited(widget.state!.showTurns(scope));
     _showSession();
     _diffOpen.value = true;
   }
