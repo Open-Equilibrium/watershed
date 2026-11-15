@@ -240,7 +240,11 @@ fn productive_response_rejects_empty_or_duplicate_tool_call_identities() {
                 "response":{"id":"resp_1"}
             })])
             .collect::<Vec<_>>();
-        assert!(decode_responses_turn(&events).is_err());
+        assert!(decode_responses_turn(&events).is_err_and(|error| {
+            error
+                .provider_failure()
+                .is_some_and(|failure| failure.is_reply_invalid())
+        }));
     }
 }
 

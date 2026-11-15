@@ -161,13 +161,7 @@ async fn send_responses_request(
             "Responses stream ended without terminal sentinel",
         ));
     }
-    decode_responses_turn(&parsed.values).map_err(|error| {
-        if error.provider_failure().is_some() {
-            error
-        } else {
-            RuntimeError::definitive_provider_error(None, error.to_string())
-        }
-    })
+    decode_responses_turn(&parsed.values)
 }
 
 fn routed_request(request: reqwest::RequestBuilder, is_fedramp: bool) -> reqwest::RequestBuilder {

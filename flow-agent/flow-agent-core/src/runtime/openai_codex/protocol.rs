@@ -106,9 +106,18 @@ pub(crate) fn responses_request_input_bytes(
         })
 }
 
+/// Decodes a reply's events. Every shape error is a reply that ended but broke the Responses
+/// format, so it is reply-invalid rather than a definitive provider error (PROTOCOL.md).
 pub(crate) fn decode_responses_turn(
     events: &[serde_json::Value],
 ) -> Result<ProviderTurn, RuntimeError> {
+    decode_reply_events(events).map_err(|error| match error {
+        RuntimeError::Protocol(message) => provider_reply_invalid(message),
+        error => error,
+    })
+}
+
+fn decode_reply_events(events: &[serde_json::Value]) -> Result<ProviderTurn, RuntimeError> {
     let mut created_id = None;
     let mut completed_id = None;
     let mut completed = 0usize;
