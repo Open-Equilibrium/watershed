@@ -56,6 +56,16 @@ impl Order {
         )
     }
 
+    /// The sort key for a View placed right before `before`.
+    pub(crate) fn key_before(&self, before: &ViewId) -> Result<String, Error> {
+        crate::sort_key::before(
+            &self.placed,
+            before,
+            |placed| &placed.view.id,
+            |placed| Some(&placed.sort),
+        )
+    }
+
     pub(crate) fn insert(&mut self, sort: String, view: View) {
         let index = self
             .placed

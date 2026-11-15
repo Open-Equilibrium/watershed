@@ -47,6 +47,27 @@ pub(crate) fn at<T, I: PartialEq + ?Sized>(
     ))
 }
 
+/// The key for an item placed right before `before` among `sorted`, as [at] reads them.
+/// Before an item whose key others share, it goes before them all.
+pub(crate) fn before<T, I: PartialEq + ?Sized>(
+    sorted: &[T],
+    before: &I,
+    id: impl Fn(&T) -> &I,
+    key: impl Fn(&T) -> Option<&str>,
+) -> Result<String, Error> {
+    let at = sorted
+        .iter()
+        .position(|item| id(item) == before)
+        .ok_or(Error::NotFound)?;
+    let tied = key(&sorted[at]);
+    let below = sorted[..at]
+        .iter()
+        .rev()
+        .map(&key)
+        .find(|other| *other != tied);
+    Ok(between(below.flatten(), tied))
+}
+
 /// A key after `before` and before `after`; `None` is the start or the end. Equal or
 /// misordered neighbors, from two devices placing objects at one spot concurrently, get a
 /// key after `before`; ties order by identity. A neighbor that is no valid key counts as

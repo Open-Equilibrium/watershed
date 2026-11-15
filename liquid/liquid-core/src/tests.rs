@@ -409,3 +409,77 @@ fn a_block_of_an_unknown_kind_is_neither_read_nor_changed_as_text() {
         );
     }
 }
+
+#[test]
+fn a_start_split_puts_the_new_text_block_above_a_view_whose_key_another_shares() {
+    use automerge::ObjType;
+    use automerge::transaction::Transactable;
+
+    use crate::model::{self, BLOCK, BLOCKS, KIND, SORT, STYLE, TEXT, VIEWS};
+    use crate::{BlockId, ViewId};
+
+    let owner = Actor::Person(PersonId::new("benni"));
+    let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
+    let apply = |workspace: &mut Workspace<MemoryStore>, mutation| {
+        workspace
+            .apply(Request {
+                actor: owner.clone(),
+                origin: Origin::Ui,
+                mutation,
+            })
+            .unwrap()
+            .created
+    };
+    let Some(Created::Area(area)) = apply(
+        &mut workspace,
+        Mutation::CreateArea {
+            name: "Trips".into(),
+        },
+    ) else {
+        panic!("an area")
+    };
+    let Some(Created::Page(page)) = apply(
+        &mut workspace,
+        Mutation::CreatePage {
+            area,
+            parent: None,
+            title: "Lisbon".into(),
+        },
+    ) else {
+        panic!("a Page")
+    };
+    // Two devices placed both Text Blocks at one spot, so their Views share a key.
+    let loaded = workspace
+        .docs
+        .get_mut(&Document::Page(page.clone()))
+        .unwrap();
+    for (block, text) in [("b1", "Plan"), ("b2", "Day one")] {
+        let fields = [(KIND, "text"), (STYLE, "paragraph")];
+        let entry = model::insert(&mut loaded.doc, BLOCKS, block, &fields).unwrap();
+        let content = loaded.doc.put_object(&entry, TEXT, ObjType::Text).unwrap();
+        loaded.doc.splice_text(&content, 0, 0, text).unwrap();
+        let view = format!("v-{block}");
+        model::insert(
+            &mut loaded.doc,
+            VIEWS,
+            &view,
+            &[(BLOCK, block), (SORT, "a0")],
+        )
+        .unwrap();
+    }
+    loaded.doc.commit();
+
+    let split = Mutation::SplitTextBlock {
+        page: page.clone(),
+        block: BlockId::stored("b2"),
+        view: ViewId::stored("v-b2"),
+        at: 0,
+        style: crate::TextStyle::Paragraph,
+    };
+    let Some(Created::Block { view: added, .. }) = apply(&mut workspace, split) else {
+        panic!("a Text Block")
+    };
+    let views = workspace.views(&page, 0, usize::MAX).unwrap();
+    let at = |view: &ViewId| views.iter().position(|shown| &shown.id == view);
+    assert!(at(&added) < at(&ViewId::stored("v-b2")), "{views:?}");
+}

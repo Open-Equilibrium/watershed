@@ -442,7 +442,8 @@ impl<S: Store> Workspace<S> {
         text: &str,
     ) -> Result<Written, Error> {
         let (doc, order) = self.page(page)?;
-        let (block, view) = add_text_block(doc, order, after, text, TextStyle::Paragraph)?;
+        let sort = order.key_after(after)?;
+        let (block, view) = add_text_block(doc, order, sort, text, TextStyle::Paragraph)?;
         let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
         written.created = Some(Created::Block { block, view });
         Ok(written)
@@ -467,9 +468,9 @@ impl<S: Store> Workspace<S> {
         let text = doc.text(&content)?;
         let tail = text[utf8_offset(&text, at)..].to_string();
         let (new_block, new_view) = if at == 0 {
-            let above = order.above(view).map(|above| above.id.clone());
             let starts_section = order.view(view).is_some_and(|shown| shown.boundary);
-            let added = add_text_block(doc, order, above.as_ref(), "", style)?;
+            let sort = order.key_before(view)?;
+            let added = add_text_block(doc, order, sort, "", style)?;
             // A Section that started here now starts at the new Text Block above.
             if starts_section {
                 move_boundary(doc, order, view, &added.1)?;
@@ -479,7 +480,8 @@ impl<S: Store> Workspace<S> {
             let length =
                 isize::try_from(doc.length(&content) - at).map_err(|_| Error::OutOfRange)?;
             doc.splice_text(&content, at, length, "")?;
-            add_text_block(doc, order, Some(view), &tail, style)?
+            let sort = order.key_after(Some(view))?;
+            add_text_block(doc, order, sort, &tail, style)?
         };
         let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
         written
@@ -584,7 +586,8 @@ impl<S: Store> Workspace<S> {
         let (doc, order) = self.page(page)?;
         let block = BlockId::new()?;
         database::create(doc, &block, name)?;
-        let view = add_view(doc, order, after, &block, BlockKind::Database)?;
+        let sort = order.key_after(after)?;
+        let view = add_view(doc, order, sort, &block, BlockKind::Database)?;
         let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
         written.created = Some(Created::Block { block, view });
         Ok(written)
@@ -768,7 +771,7 @@ impl<S: Store> Workspace<S> {
 fn add_text_block(
     doc: &mut AutoCommit,
     order: &mut Order,
-    after: Option<&ViewId>,
+    sort: String,
     text: &str,
     style: TextStyle,
 ) -> Result<(BlockId, ViewId), Error> {
@@ -782,7 +785,7 @@ fn add_text_block(
     )?;
     let content = doc.put_object(&entry, TEXT, ObjType::Text)?;
     doc.splice_text(&content, 0, 0, text)?;
-    let view = add_view(doc, order, after, &block, BlockKind::Text)?;
+    let view = add_view(doc, order, sort, &block, BlockKind::Text)?;
     Ok((block, view))
 }
 
@@ -796,15 +799,14 @@ fn database_changed(page: &PageId, block: &BlockId, created: Option<Created>) ->
     written
 }
 
-/// Adds a View of `block` after `after` or first.
+/// Adds a View of `block` at the sort key `sort`.
 fn add_view(
     doc: &mut AutoCommit,
     order: &mut Order,
-    after: Option<&ViewId>,
+    sort: String,
     block: &BlockId,
     kind: BlockKind,
 ) -> Result<ViewId, Error> {
-    let sort = order.key_after(after)?;
     let view = ViewId::new()?;
     model::insert(
         doc,
