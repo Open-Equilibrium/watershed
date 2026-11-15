@@ -4,7 +4,7 @@
 use meta_harness_core::{
     AgentEvent, ChatItem, Context, GitStatus, ItemDetail, ItemKind, ItemStatus, ModelChoice,
     PendingRequest, Provider, Request, Snapshot, Statistics, ThreadEvent, ThreadSummary, Turn,
-    TurnStatus, Usage, visible_name,
+    TurnStatus, Usage, visible_lines, visible_name,
 };
 
 use crate::api::events::{
@@ -378,16 +378,23 @@ pub(crate) fn git_status(status: GitStatus) -> BridgeGitStatus {
     }
 }
 
-/// Splits a unified diff into its files, each with its status, line counts and own patch.
+/// Splits a unified diff into its files, each with its status, line counts and own patch. A file
+/// starts only at a line that begins with a header, so patch text quoting one stays in its file.
 pub(crate) fn diff_files(diff: &str) -> Vec<(BridgeFileChange, String)> {
-    diff.split("diff --git ")
-        .skip(1)
-        .map(|section| {
+    let starts: Vec<usize> = diff
+        .match_indices("diff --git ")
+        .map(|(at, _)| at)
+        .filter(|&at| at == 0 || diff.as_bytes()[at - 1] == b'\n')
+        .collect();
+    starts
+        .iter()
+        .enumerate()
+        .map(|(index, &start)| {
+            let end = starts.get(index + 1).copied().unwrap_or(diff.len());
+            let patch = &diff[start..end];
+            let section = &patch["diff --git ".len()..];
             let header = section.lines().next().unwrap_or_default();
-            let path = header
-                .rsplit_once(" b/")
-                .map(|(_, b)| b.to_owned())
-                .unwrap_or_default();
+            let path = path_of(header, section);
             let status = if section.contains("\nnew file mode") {
                 BridgeChangeStatus::Added
             } else if section.contains("\ndeleted file mode") {
@@ -414,8 +421,27 @@ pub(crate) fn diff_files(diff: &str) -> Vec<(BridgeFileChange, String)> {
                     added,
                     removed,
                 },
-                format!("diff --git {section}"),
+                // SECURITY.md: the Diff panel writes out what could hide a change.
+                visible_lines(patch),
             )
         })
         .collect()
+}
+
+/// The changed file's path: a rename's new name, else the second half of `a/<path> b/<path>`,
+/// which also holds for a path with ` b/` in it.
+fn path_of(header: &str, section: &str) -> String {
+    if let Some(to) = section.lines().find_map(|l| l.strip_prefix("rename to ")) {
+        return to.to_owned();
+    }
+    let half = header.len().saturating_sub(1) / 2;
+    match (header.get(..half), header.get(half + 1..)) {
+        (Some(a), Some(b)) if a.strip_prefix("a/") == b.strip_prefix("b/") => {
+            b.get(2..).unwrap_or_default().to_owned()
+        }
+        _ => header
+            .rsplit_once(" b/")
+            .map(|(_, b)| b.to_owned())
+            .unwrap_or_default(),
+    }
 }

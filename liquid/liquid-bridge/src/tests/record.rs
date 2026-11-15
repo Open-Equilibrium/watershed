@@ -84,3 +84,41 @@ fn downloads_go_to_the_folder_the_system_names_or_to_downloads() {
         "the shell reads the file in order, so the last assignment is the one in effect"
     );
 }
+
+#[test]
+fn a_record_of_an_untitled_session_is_named_for_its_day() {
+    assert_eq!(
+        crate::api::record::record_name(" . ", "2026-11-15"),
+        "Untitled session – record 2026-11-15"
+    );
+}
+
+#[test]
+fn a_second_export_of_the_same_name_keeps_the_first_folder() {
+    let downloads =
+        std::env::temp_dir().join(format!("liquid-bridge-twice-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&downloads);
+    std::fs::create_dir_all(&downloads).expect("downloads");
+    let write = |folder: &std::path::Path| {
+        std::fs::write(folder.join("thread.json"), "copy").map_err(|error| error.to_string())
+    };
+    let first = crate::api::record::write_folder(&downloads, "Demo", write).expect("first");
+    let second = crate::api::record::write_folder(&downloads, "Demo", write).expect("second");
+    assert_eq!(first.file_name().unwrap(), "Demo");
+    assert_eq!(second.file_name().unwrap(), "Demo 2");
+    assert!(first.join("thread.json").is_file() && second.join("thread.json").is_file());
+    let _ = std::fs::remove_dir_all(&downloads);
+}
+
+#[test]
+fn an_export_without_a_downloads_folder_says_so_and_writes_nothing() {
+    let missing =
+        std::env::temp_dir().join(format!("liquid-bridge-missing-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&missing);
+    let failed = crate::api::record::write_folder(&missing, "Demo", |_| Ok(()));
+    assert!(
+        failed.is_err_and(|error| error.starts_with("could not create ")),
+        "the export names the folder it could not create"
+    );
+    assert!(!missing.exists());
+}
