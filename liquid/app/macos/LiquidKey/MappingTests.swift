@@ -126,5 +126,18 @@ check(
     Mapping.initiallyActive(session: [kCGSessionOnConsoleKey as String: true]),
     "a helper in the session in front starts active")
 
+// The helper reads the session after registering its observers, so a session that resigns during
+// the start is no longer in front when it is read: it ends with no remapping applied.
+var remapped = 0
+var session: [String: Any] = [kCGSessionOnConsoleKey as String: true]
+Mapping.start(
+    readSession: { session }, observe: { session[kCGSessionOnConsoleKey as String] = false },
+    remap: { remapped += 1 })
+check(remapped == 0, "a session that resigns during the start ends with no remapping applied")
+Mapping.start(
+    readSession: { [kCGSessionOnConsoleKey as String: true] }, observe: {},
+    remap: { remapped += 1 })
+check(remapped == 1, "a session in front at the start is remapped")
+
 if failures > 0 { exit(1) }
 print("Liquid key helper checks passed")

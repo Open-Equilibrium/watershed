@@ -48,6 +48,16 @@ enum Mapping {
         (session?[kCGSessionOnConsoleKey as String] as? Bool) ?? false
     }
 
+    /// The helper's start: its observers are registered first and the session is read only then,
+    /// so a session that changes during the start is heard by them or shows in the read. `remap`
+    /// runs only while that session is in front.
+    static func start(
+        readSession: () -> [String: Any]?, observe: () -> Void, remap: () -> Void
+    ) {
+        observe()
+        if initiallyActive(session: readSession()) { remap() }
+    }
+
     /// Applies the Liquid key to every keyboard attached now; needs no permission. Returns
     /// whether macOS listed the keyboards and each one took it.
     @discardableResult
