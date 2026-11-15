@@ -208,17 +208,19 @@ class SessionState {
     required String busy,
   }) async {
     if (_switching != null) return;
-    if (status.value case RunStatus.running || RunStatus.waitingForYou) {
-      notify(BridgeLevel.info, busy);
-      return;
-    }
     final switching = _switching = Completer<void>();
-    // Extension displays belong to their session. The new session's extensions may set theirs
-    // before pi confirms the switch, so the old ones go now and come back if it does not happen.
-    final (shownWidgets, shownStatuses) = (widgets.value, statuses.value);
-    widgets.value = const {};
-    statuses.value = const {};
     try {
+      // A queue change in progress re-sends waiting messages, which may start a run.
+      await _queueChange;
+      if (status.value case RunStatus.running || RunStatus.waitingForYou) {
+        notify(BridgeLevel.info, busy);
+        return;
+      }
+      // Extension displays belong to their session. The new session's extensions may set theirs
+      // before pi confirms the switch, so the old ones go now and come back if it does not happen.
+      final (shownWidgets, shownStatuses) = (widgets.value, statuses.value);
+      widgets.value = const {};
+      statuses.value = const {};
       if (!await _replace(switchTo)) {
         widgets.value = shownWidgets;
         statuses.value = shownStatuses;

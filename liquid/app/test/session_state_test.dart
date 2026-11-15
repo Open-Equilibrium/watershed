@@ -1438,6 +1438,50 @@ void main() {
     expect(backend.calls, ['clear queue', 'send Keep', 'clear queue', 'abort']);
   });
 
+  test('a switch waits for a queue change, so a message it re-sends stays '
+      'in the session it was queued in', () async {
+    backend
+      ..queued = const BridgeQueue(steering: ['a', 'b'], followUp: [])
+      ..clearQueueGate = Completer();
+    await emit(event(BridgeEventKind.turnStarted));
+    final removing = state.unqueue('a', followUp: false);
+    await pumpEventQueue();
+    await emit(event(BridgeEventKind.turnCompleted));
+    final switching = state.newSession();
+    await pumpEventQueue();
+    backend.clearQueueGate!.complete();
+    await Future.wait([removing, switching]);
+    expect(
+      backend.calls,
+      containsAllInOrder(['clear queue', 'send b', 'new session']),
+      reason: 'the re-sent message goes out before the switch',
+    );
+  });
+
+  test('a run that a re-sent message starts makes the switch refuse', () async {
+    backend
+      ..queued = const BridgeQueue(steering: ['a', 'b'], followUp: [])
+      ..clearQueueGate = Completer()
+      ..onSend = (message) {
+        if (message == 'b') {
+          backend.controller.add(event(BridgeEventKind.turnStarted));
+        }
+      };
+    await emit(event(BridgeEventKind.turnStarted));
+    final removing = state.unqueue('a', followUp: false);
+    await pumpEventQueue();
+    await emit(event(BridgeEventKind.turnCompleted));
+    final switching = state.newSession();
+    await pumpEventQueue();
+    backend.clearQueueGate!.complete();
+    await Future.wait([removing, switching]);
+    expect(backend.calls, ['clear queue', 'send b']);
+    expect(
+      state.notice.value?.text,
+      'Stop the agent before starting a new session.',
+    );
+  });
+
   test('pages past entries that show nothing in the chat', () async {
     backend.transcripts[''] = const BridgeTranscript(
       items: [],
