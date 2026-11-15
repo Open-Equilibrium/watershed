@@ -96,6 +96,50 @@
         <p><strong>Recommendation:</strong> C, because it closes the gap without slowing every open.</p>
         <p><strong>Acceptance criterion:</strong> an entry planted right after the folder is created makes creation fail, and the shared-workspace concurrency test passes 50 of 50 runs on macOS.</p>
       </details>
+      <details id="d-107" class="decision wide">
+        <summary><h3>D-107 - How Meta-Harness Speaks T3's Client Protocol</h3></summary>
+        <p><strong>Status:</strong> Open; needed before step 2 of the T3 track (ADR-0281). The spike on branch <code>spike/t3-engine</code> used <code>tokio-tungstenite</code> 0.30.</p>
+        <p><strong>Problem:</strong> Chat, Diff, revert, Git actions and statistics exist only in T3's WebSocket protocol on <code>/ws</code> (JSON messages, one acknowledgement per streamed message). T3's command line and its MCP tools cover starting, messaging and reading threads, but not turn diffs, revert, usage per turn or Git actions. Rust has no WebSocket client in the workspace today, so step 2 needs a new dependency or another route.</p>
+        <p><strong>Question:</strong> Which route should Meta-Harness use to talk to its T3 server?</p>
+        <div class="dia">
+          <div class="opt rec"><h4>A: tokio-tungstenite <span class="tag">Recommended</span></h4>
+            <div class="b ws">Meta-Harness (Rust)</div><div class="a">WebSocket, Bearer token</div><div class="b t3">T3 <code>/ws</code></div>
+            <ul><li>Pro: the spike runs on it; small, widely used, on the tokio runtime the workspace already has; covers every call Liquid needs.</li><li>Con: one new dependency with its <code>tungstenite</code> core, to check with <code>cargo deny</code>.</li></ul>
+          </div>
+          <div class="opt"><h4>B: Command line and MCP only</h4>
+            <div class="b ws">Meta-Harness</div><div class="a">runs <code>t3 thread …</code> or calls <code>/mcp</code></div><div class="b t3">T3</div>
+            <ul><li>Pro: no new dependency.</li><li>Con: no Diff, revert, statistics or Git actions, so Liquid's agent surface cannot move to T3.</li></ul>
+          </div>
+          <div class="opt"><h4>C: A Node helper with T3's own client library</h4>
+            <div class="b ws">Meta-Harness</div><div class="a">pipe</div><div class="b t3">helper using <code>@t3tools/client-runtime</code></div>
+            <ul><li>Pro: T3's own reducer and types.</li><li>Con: a second runtime and process per host, a JavaScript build in Watershed, and a library T3 does not publish as stable.</li></ul>
+          </div>
+        </div>
+        <p><strong>Recommendation:</strong> A, because only the WebSocket protocol carries what Liquid shows, and Rust stays the only language on Meta-Harness's side.</p>
+        <p><strong>Acceptance criterion:</strong> the contract tests start the pinned T3 and pass a thread's start, live events, turn diff and revert through the chosen route.</p>
+      </details>
+      <details id="d-108" class="decision wide">
+        <summary><h3>D-108 - Cost And Model Time In The Statistics Once T3 Runs The Harnesses</h3></summary>
+        <p><strong>Status:</strong> Open; affects the session card and statistics panel (ADR-0279, ADR-0287) in step 2.</p>
+        <p><strong>Problem:</strong> The spike shows that T3 0.1.9 gives per turn the tokens (input, output, cache reads and writes, reasoning), the models, the context window, every tool call with its start and end, and the turn's start and end. It gives no cost per turn: only some providers report a cost for a whole thread, and T3's Usage page prices tokens per day or hour from its own price table. It also has no timing of single model requests, which pi's extension used to split working time into model and tool time.</p>
+        <p><strong>Question:</strong> What should the Cost row and the model-and-tools time show for T3 sessions?</p>
+        <div class="dia">
+          <div class="opt rec"><h4>A: Only what T3 reports <span class="tag">Recommended</span></h4>
+            <div class="b t3">Tokens, tool calls, tool time, working time per turn</div>
+            <ul><li>Pro: exact, as ADR-0279 asks; nothing of Watershed's own to maintain.</li><li>Con: no cost in Liquid; the Cost row says the provider reports none, and model time shows a dash.</li></ul>
+          </div>
+          <div class="opt"><h4>B: Price tokens like T3's Usage page</h4>
+            <div class="b ws">Meta-Harness multiplies each turn's tokens by T3's model prices</div>
+            <ul><li>Pro: a cost per turn, as pi showed it.</li><li>Con: list prices, not what the account pays (subscriptions, discounts); a price table to keep current.</li></ul>
+          </div>
+          <div class="opt"><h4>C: Provider-reported cost where present</h4>
+            <div class="b t3">The thread's reported cost, split per turn by its change at each turn's end</div>
+            <ul><li>Pro: the provider's own number.</li><li>Con: only some providers report it; the others still need A or B.</li></ul>
+          </div>
+        </div>
+        <p><strong>Recommendation:</strong> A, because ADR-0279 shows exact numbers only and T3 is the source; B can follow if people miss the cost.</p>
+        <p><strong>Acceptance criterion:</strong> for a finished Claude Code turn the statistics panel's tokens and tool calls equal T3's <code>providerTurns</code> and <code>turnItems</code> for that run.</p>
+      </details>
     </div>
   </section>
 
