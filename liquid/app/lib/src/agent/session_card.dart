@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../diff/turn_scope.dart';
@@ -299,7 +297,11 @@ class _SessionCardState extends State<SessionCard> {
           Theme.of(context).colorScheme.surface,
         ),
       ),
-      menuChildren: _menuChildren(context),
+      menuChildren: threadDetailsMenuItems(
+        context,
+        widget.settings,
+        first: _menuFirst,
+      ),
       builder: (context, controller, child) => GestureDetector(
         onSecondaryTapUp: (details) => _openMenu(details.localPosition),
         child: child,
@@ -337,41 +339,6 @@ class _SessionCardState extends State<SessionCard> {
         _heights = {...current, density: height};
       });
     });
-  }
-
-  /// The rows menu: a checkbox per row, which a click shows or hides and leaves the menu open,
-  /// then Reset to default, which is off while every row has its default and closes the menu.
-  List<Widget> _menuChildren(BuildContext context) {
-    final settings = widget.settings;
-    return [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
-        child: Text(
-          'Show in thread details',
-          style: TextStyle(
-            fontSize: WsMetrics.fsSmall,
-            color: context.ws.textFaint,
-          ),
-        ),
-      ),
-      for (final item in CardItem.values)
-        CheckboxMenuButton(
-          focusNode: item == CardItem.values.first ? _menuFirst : null,
-          value: settings.value.shows(item),
-          closeOnActivate: false,
-          onChanged: (shown) => unawaited(
-            settings.change(settings.value.withItem(item, shown ?? true)),
-          ),
-          child: Text(item.label),
-        ),
-      const Divider(),
-      MenuItemButton(
-        onPressed: settings.value.isDefault
-            ? null
-            : () => unawaited(settings.change(const SessionCardSettings())),
-        child: const Text('Reset to default'),
-      ),
-    ];
   }
 
   /// Opens the rows menu at `position`, in the card's coordinates, and moves focus into it.

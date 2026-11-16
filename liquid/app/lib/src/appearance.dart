@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'agent/session_card_rows.dart';
+import 'agent/session_card_settings.dart';
 import 'controls.dart';
 import 'settings_file.dart';
 import 'theme/theme.dart';
@@ -117,11 +119,19 @@ class UiScale extends StatelessWidget {
   }
 }
 
-/// Settings → Appearance: the theme and the text size, applied at once.
+/// Settings → Appearance: the theme, the text size and the session card's thread details, applied
+/// at once.
 class AppearancePane extends StatelessWidget {
-  const AppearancePane({super.key, required this.appearance});
+  const AppearancePane({
+    super.key,
+    required this.appearance,
+    this.cardSettings,
+  });
 
   final AppearanceController appearance;
+
+  /// The session card's rows, which Thread details sets; none leaves that row out.
+  final SessionCardSettingsController? cardSettings;
 
   /// Changes the appearance in use now, so two choices before the next frame both apply.
   void _change(Appearance Function(Appearance appearance) change) =>
@@ -131,12 +141,28 @@ class AppearancePane extends StatelessWidget {
   Widget build(BuildContext context) {
     final ws = context.ws;
     final label = TextStyle(color: ws.textMuted, fontSize: WsMetrics.fsCompact);
-    Widget row(String title, Widget control) => Padding(
+    Widget row(String title, Widget control, {String? note}) => Padding(
       padding: const EdgeInsets.only(bottom: WsMetrics.space4),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(width: 120, child: Text(title, style: label)),
-          control,
+          Row(
+            children: [
+              SizedBox(width: 120, child: Text(title, style: label)),
+              control,
+            ],
+          ),
+          if (note case final text?)
+            Padding(
+              padding: const EdgeInsets.only(left: 120, top: WsMetrics.space2),
+              child: Text(
+                text,
+                style: TextStyle(
+                  color: ws.textFaint,
+                  fontSize: WsMetrics.fsSmall,
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -183,9 +209,75 @@ class AppearancePane extends StatelessWidget {
                     _change((it) => it.copyWith(textSize: size)),
               ),
             ),
+            if (cardSettings case final cards?)
+              row(
+                'Thread details',
+                _ThreadDetailsMenu(settings: cards),
+                note: 'Choose what the thread details card shows. You can also right-click the card.',
+              ),
           ],
         ),
       ),
     );
   }
+}
+
+/// The thread details menu: how many of the session card's rows show, and the rows menu the card's
+/// right-click opens, which sets the same settings.
+class _ThreadDetailsMenu extends StatefulWidget {
+  const _ThreadDetailsMenu({required this.settings});
+
+  final SessionCardSettingsController settings;
+
+  @override
+  State<_ThreadDetailsMenu> createState() => _ThreadDetailsMenuState();
+}
+
+class _ThreadDetailsMenuState extends State<_ThreadDetailsMenu> {
+  final _menu = MenuController();
+  final _button = FocusNode(debugLabel: 'thread details');
+  final _first = FocusNode(debugLabel: 'thread details menu');
+
+  @override
+  void dispose() {
+    _button.dispose();
+    _first.dispose();
+    super.dispose();
+  }
+
+  /// Opens the menu and moves the focus into it, so its keys work.
+  void _open() {
+    _menu.open();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_menu.isOpen) _first.requestFocus();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.settings,
+    builder: (context, _) {
+      final shown = CardItem.values.where(widget.settings.value.shows).length;
+      final count = '$shown of ${CardItem.values.length} on';
+      return MenuAnchor(
+        controller: _menu,
+        style: MenuStyle(
+          backgroundColor: WidgetStatePropertyAll(
+            Theme.of(context).colorScheme.surface,
+          ),
+        ),
+        menuChildren: threadDetailsMenuItems(
+          context,
+          widget.settings,
+          first: _first,
+        ),
+        builder: (context, controller, _) => SecondaryButton(
+          label: count,
+          semanticsLabel: 'Thread details: $count',
+          focusNode: _button,
+          onPressed: _open,
+        ),
+      );
+    },
+  );
 }

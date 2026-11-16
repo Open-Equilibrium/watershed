@@ -88,6 +88,7 @@ class _ServerRow extends StatelessWidget {
             CardIconButton(
               icon: LucideIcons.square,
               tooltip: 'Stop server',
+              label: 'Stop localhost:${server.port}',
               onPressed: () => unawaited(state.stopServer(pid, server.port)),
             ),
         ],

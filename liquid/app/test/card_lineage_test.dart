@@ -130,6 +130,7 @@ void main() {
           canMerge: true,
         );
       await pumpCard(tester, session: session);
+      expect(find.bySemanticsLabel('Merge back to Main'), findsOneWidget);
       await tester.tap(
         find.byTooltip('Merge this conversation back into Main'),
       );
@@ -155,6 +156,7 @@ void main() {
         rowOf('sub-1', title: 'Scout', stopSubagent: 'sub-1'),
       ], running: 1);
     await pumpCard(tester, session: session);
+    expect(find.bySemanticsLabel('Stop subagent Scout'), findsOneWidget);
     await tester.tap(find.byTooltip('Stop subagent'));
     await tester.pumpAndSettle();
     expect(session.calls, contains('stop subagent sub-1'));

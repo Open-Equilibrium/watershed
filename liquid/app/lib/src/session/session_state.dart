@@ -211,8 +211,10 @@ class SessionState {
   Future<void> setBranch(String branch, {String? worktree}) async {
     final session = _session;
     if (session == null) return;
+    final generation = _generation;
     await session.setBranch(branch, worktree: worktree);
-    _setGit(session.git());
+    // A switch meanwhile released this session; the session it went to brings its own Git.
+    if (generation == _generation) _setGit(session.git());
   }
 
   /// Opens the start page on a checked-out pull request, as T3 drafts a thread for it.
@@ -357,13 +359,15 @@ class SessionState {
         .where((row) => row.mergeTarget)
         .firstOrNull
         ?.threadId;
+    final generation = _generation;
     try {
       await _session!.mergeBack();
     } on Object catch (error) {
       notify(NoticeLevel.error, 'Could not merge back: $error');
       return;
     }
-    if (target != null) await open(target);
+    // Only a session still open is switched to the target; the user may have left it meanwhile.
+    if (target != null && generation == _generation) await open(target);
   }
 
   /// Disconnects the agent session, from the card's Lineage.

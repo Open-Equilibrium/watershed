@@ -226,6 +226,7 @@ class _LineageRow extends StatelessWidget {
             CardIconButton(
               icon: LucideIcons.gitMerge,
               tooltip: _mergeTip(lineage),
+              label: _mergeLabel(lineage),
               onPressed: lineage.canMerge
                   ? () => unawaited(state.mergeBack())
                   : null,
@@ -234,6 +235,7 @@ class _LineageRow extends StatelessWidget {
             CardIconButton(
               icon: LucideIcons.square,
               tooltip: 'Stop subagent',
+              label: 'Stop subagent ${row.title}',
               onPressed: () => unawaited(state.stopSubagent(stop)),
             ),
         ],
@@ -251,6 +253,14 @@ class _LineageRow extends StatelessWidget {
     }
     final ended = row.endedMs ?? DateTime.now().millisecondsSinceEpoch;
     return formatDuration(ended - started);
+  }
+
+  /// The merge button's name, which T3 Code gives the merge target's title.
+  static String _mergeLabel(BridgeLineage lineage) {
+    final target = lineage.mergeTargetTitle;
+    return target == null
+        ? 'Merge back to source conversation'
+        : 'Merge back to $target';
   }
 
   /// The merge button's tooltip, which says what merging needs or does.

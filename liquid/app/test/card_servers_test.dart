@@ -61,6 +61,7 @@ void main() {
   testWidgets('Stop ends the server it names', (tester) async {
     final session = FakeSession()..serverList = [serverOf(3000)];
     await pumpCard(tester, session: session);
+    expect(find.bySemanticsLabel('Stop localhost:3000'), findsOneWidget);
     await tester.tap(find.byTooltip('Stop server'));
     await tester.pumpAndSettle();
     expect(session.calls, contains('stop server 4242 3000'));

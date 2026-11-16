@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid/src/agent/session_card_settings.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/app.dart';
 import 'package:liquid/src/appearance.dart';
@@ -89,6 +90,44 @@ void main() {
         reason: 'text and rows grow together',
       );
       expect(appearance.value.textSize, TextSize.large);
+    },
+  );
+
+  testWidgets(
+    'Settings → Appearance sets the thread details rows the card menu sets',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1600, 900));
+      final cards = SessionCardSettingsController();
+      await tester.pumpWidget(
+        LiquidApp(
+          launch: Launch.session(SessionState(FakeProject()), info, null),
+          appearance: AppearanceController(),
+          cardSettings: cards,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Thread details'), findsOneWidget);
+      expect(
+        find.text(
+          'Choose what the thread details card shows. You can also right-click the card.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.bySemanticsLabel('Thread details: 9 of 11 on'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('9 of 11 on'));
+      await tester.pumpAndSettle();
+      expect(find.text('Show in thread details'), findsOneWidget);
+      await tester.tap(find.widgetWithText(CheckboxMenuButton, 'Usage limits'));
+      await tester.pumpAndSettle();
+
+      expect(cards.value.shows(CardItem.usage), isTrue);
+      expect(find.text('10 of 11 on'), findsOneWidget);
     },
   );
 

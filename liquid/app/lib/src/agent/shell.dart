@@ -453,6 +453,7 @@ class _AgentShellState extends State<AgentShell> {
                           return SettingsPage(
                             shortcuts: _shortcuts,
                             appearance: widget.appearance,
+                            cardSettings: _cardSettings,
                             onClose: _toggleSettings,
                             saveFailure: _saveFailure,
                             onDismissSaveFailure: () =>

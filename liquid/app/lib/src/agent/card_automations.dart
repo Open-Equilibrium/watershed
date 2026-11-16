@@ -159,13 +159,16 @@ class _AutomationRow extends StatelessWidget {
             ],
           ),
         ),
-        CardIconButton(
-          icon: LucideIcons.play,
-          tooltip: 'Run now',
-          onPressed: running
-              ? null
-              : () => unawaited(state.runAutomation(task.id)),
-        ),
+        // Webhook tasks need a request from their URL.
+        if (task.schedule.kind != BridgeScheduleKind.webhook)
+          CardIconButton(
+            icon: LucideIcons.play,
+            tooltip: 'Run now',
+            label: 'Run ${task.title} now',
+            onPressed: running
+                ? null
+                : () => unawaited(state.runAutomation(task.id)),
+          ),
         SizedBox(
           width: 36,
           height: 24,

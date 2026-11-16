@@ -20,10 +20,11 @@ BridgeAutomation taskOf({
   String title = 'Nightly check',
   BridgeRunStatus lastRun = BridgeRunStatus.never,
   int? nextRunMs,
+  BridgeSchedule? schedule,
 }) => BridgeAutomation(
   id: id,
   title: title,
-  schedule: daily('09:30'),
+  schedule: schedule ?? daily('09:30'),
   enabled: true,
   nextRunMs: nextRunMs,
   lastRun: lastRun,
@@ -85,9 +86,29 @@ void main() {
   testWidgets('Run now runs the task through the session', (tester) async {
     final session = FakeSession()..automationList = [taskOf()];
     await pumpCard(tester, session: session);
+    expect(find.bySemanticsLabel('Run Nightly check now'), findsOneWidget);
     await tester.tap(find.byTooltip('Run now'));
     await tester.pumpAndSettle();
     expect(session.calls, contains('run automation a1'));
+  });
+
+  testWidgets('a webhook task has no Run now, as T3 Code leaves it out', (
+    tester,
+  ) async {
+    await pumpCard(
+      tester,
+      session: FakeSession()
+        ..automationList = [
+          taskOf(
+            schedule: BridgeSchedule(
+              kind: BridgeScheduleKind.webhook,
+              weekdays: Int64List(0),
+            ),
+          ),
+        ],
+    );
+    expect(find.text('Nightly check'), findsOneWidget);
+    expect(find.byTooltip('Run now'), findsNothing);
   });
 
   testWidgets('Run now is off while the task runs', (tester) async {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'session_card_settings.dart';
 
 /// A row of the session card: 32 px high with 13 px medium text and a hover fill, as the rows of
 /// T3 Code's thread details card.
@@ -97,31 +99,77 @@ class CardHeading extends StatelessWidget {
   );
 }
 
-/// A row's small icon button, named by its tooltip; it is off when `onPressed` is null.
+/// A row's small icon button, shown with its `tooltip` and announced as `label`, as T3 Code names
+/// it; it is off when `onPressed` is null.
 class CardIconButton extends StatelessWidget {
   const CardIconButton({
     super.key,
     required this.icon,
     required this.tooltip,
+    required this.label,
     this.onPressed,
     this.color,
   });
 
   final IconData icon;
   final String tooltip;
+  final String label;
   final VoidCallback? onPressed;
   final Color? color;
 
   @override
-  Widget build(BuildContext context) => IconButton(
-    icon: Icon(icon, size: 16, color: color ?? context.ws.textMuted),
-    tooltip: tooltip,
-    onPressed: onPressed,
-    visualDensity: VisualDensity.compact,
-    padding: EdgeInsets.zero,
-    constraints: const BoxConstraints.tightFor(width: 24, height: 24),
+  Widget build(BuildContext context) => MergeSemantics(
+    child: Semantics(
+      label: label,
+      child: IconButton(
+        icon: Icon(icon, size: 16, color: color ?? context.ws.textMuted),
+        tooltip: tooltip,
+        onPressed: onPressed,
+        visualDensity: VisualDensity.compact,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints.tightFor(width: 24, height: 24),
+      ),
+    ),
   );
 }
+
+/// The thread details items: the heading, a checkbox per row, which a click shows or hides and
+/// leaves the menu open, then Reset to default, which is off while every row has its default. The
+/// session card's rows menu and Settings → Appearance both show them, so both set the same
+/// settings; `first` takes the focus when the menu opens.
+List<Widget> threadDetailsMenuItems(
+  BuildContext context,
+  SessionCardSettingsController settings, {
+  FocusNode? first,
+}) => [
+  Padding(
+    padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
+    child: Text(
+      'Show in thread details',
+      style: TextStyle(
+        fontSize: WsMetrics.fsSmall,
+        color: context.ws.textFaint,
+      ),
+    ),
+  ),
+  for (final item in CardItem.values)
+    CheckboxMenuButton(
+      focusNode: item == CardItem.values.first ? first : null,
+      value: settings.value.shows(item),
+      closeOnActivate: false,
+      onChanged: (shown) => unawaited(
+        settings.change(settings.value.withItem(item, shown ?? true)),
+      ),
+      child: Text(item.label),
+    ),
+  const Divider(),
+  MenuItemButton(
+    onPressed: settings.value.isDefault
+        ? null
+        : () => unawaited(settings.change(const SessionCardSettings())),
+    child: const Text('Reset to default'),
+  ),
+];
 
 /// Rows that show `initial` at first. "Show N more" reveals `page` more at a time, or all the rest
 /// when `page` is null; a `collapsible` list also offers "Show less" once it shows more.

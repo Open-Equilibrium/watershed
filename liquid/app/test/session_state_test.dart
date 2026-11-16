@@ -70,6 +70,24 @@ class GatedTitle extends FakeSession {
   }
 }
 
+/// A session whose branch change and merge back wait for `gate`, so a switch can happen while one
+/// is in flight.
+class GatedActions extends FakeSession {
+  Completer<void>? gate;
+
+  @override
+  Future<void> setBranch(String branch, {String? worktree}) async {
+    await gate?.future;
+    await super.setBranch(branch, worktree: worktree);
+  }
+
+  @override
+  Future<void> mergeBack() async {
+    await gate?.future;
+    await super.mergeBack();
+  }
+}
+
 /// A session whose stream cannot be subscribed to.
 class UnsubscribableSession extends FakeSession {
   @override
@@ -574,6 +592,26 @@ void main() {
       expect(moving.calls, ['branch feature worktree=/worktrees/feature']);
       expect(state.git.value.backend, same(moving.moved));
     });
+
+    test(
+      'a switch during setBranch keeps Git on the session the user chose',
+      () async {
+        final gate = Completer<void>();
+        project.session = GatedActions()..gate = gate;
+        await open();
+        unawaited(state.setBranch('feature'));
+        await pumpEventQueue();
+
+        final next = FakeSession(id: 'thread-2');
+        project.session = next;
+        await state.open('thread-2');
+        await pumpEventQueue();
+        gate.complete();
+        await pumpEventQueue();
+
+        expect(state.git.value.backend, same(next.gitBackend));
+      },
+    );
   });
 
   group('the Diff panel', () {
@@ -924,6 +962,38 @@ void main() {
       expect(session.calls, contains('merge back'));
       expect(project.calls, contains('open thread-parent'));
       expect(state.session?.id, 'thread-parent');
+    });
+
+    test('a switch during a merge back keeps the session the user chose, not the merge target', () async {
+      final gate = Completer<void>();
+      final merging = GatedActions()
+        ..gate = gate
+        ..family = lineageOf(
+          rows: [
+            BridgeLineageRow(
+              threadId: 'thread-parent',
+              relation: BridgeLineageRelation.fork,
+              group: BridgeLineageGroup.related,
+              title: 'Parent',
+              statusLabel: 'Idle',
+              failed: false,
+              mergeTarget: true,
+            ),
+          ],
+        );
+      project.session = merging;
+      await open();
+      unawaited(state.mergeBack());
+      await pumpEventQueue();
+
+      project.session = FakeSession(id: 'thread-2');
+      await state.open('thread-2');
+      await pumpEventQueue();
+      gate.complete();
+      await pumpEventQueue();
+
+      expect(project.calls, isNot(contains('open thread-parent')));
+      expect(state.session?.id, 'thread-2');
     });
 
     test('the card actions run on the open session', () async {

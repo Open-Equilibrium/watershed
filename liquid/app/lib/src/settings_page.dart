@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'agent/session_card_settings.dart';
 import 'agent/start_page.dart';
 import 'appearance.dart';
 import 'controls.dart';
@@ -19,9 +20,9 @@ import 'theme/tokens.g.dart';
 /// A section of Settings.
 enum _Section { appearance, shortcuts, writer }
 
-/// Settings: Appearance with theme and text size, Shortcuts with the profile, every action's keys
-/// and recording new ones, and the Writer model with a project. It replaces the main area; esc
-/// closes it, or first dismisses a failed save's notice.
+/// Settings: Appearance with theme, text size and thread details, Shortcuts with the profile, every
+/// action's keys and recording new ones, and the Writer model with a project. It replaces the main
+/// area; esc closes it, or first dismisses a failed save's notice.
 class SettingsPage extends StatefulWidget {
   const SettingsPage({
     super.key,
@@ -30,6 +31,7 @@ class SettingsPage extends StatefulWidget {
     required this.saveFailure,
     required this.onDismissSaveFailure,
     this.appearance,
+    this.cardSettings,
     this.writer,
   });
 
@@ -42,6 +44,9 @@ class SettingsPage extends StatefulWidget {
 
   /// Theme and text size; without them Settings show only Shortcuts.
   final AppearanceController? appearance;
+
+  /// The session card's rows, which Appearance sets as Thread details.
+  final SessionCardSettingsController? cardSettings;
 
   /// The Writer model section; none without the project's backend.
   final Widget? writer;
@@ -176,7 +181,10 @@ class _SettingsPageState extends State<SettingsPage> {
                       widget.writer,
                     )) {
                       (_Section.appearance, final appearance?, _) =>
-                        AppearancePane(appearance: appearance),
+                        AppearancePane(
+                          appearance: appearance,
+                          cardSettings: widget.cardSettings,
+                        ),
                       (_Section.writer, _, final writer?) => writer,
                       _ => ShortcutsPane(shortcuts: widget.shortcuts),
                     },
