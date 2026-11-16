@@ -12,6 +12,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'anchored_menu.dart';
 import 'cell_pickers.dart';
+import 'explorer.dart' show untitled;
 import 'field_menu.dart';
 import 'field_panel.dart';
 import 'row_menu.dart';
@@ -665,7 +666,7 @@ class _TableBlockState extends State<TableBlock> {
                             color: ws.text,
                           ),
                           decoration: InputDecoration.collapsed(
-                            hintText: 'Untitled',
+                            hintText: untitled,
                             hintStyle: TextStyle(color: ws.textFaint),
                           ),
                         ),
