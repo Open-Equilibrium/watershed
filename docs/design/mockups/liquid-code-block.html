@@ -74,7 +74,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   </div>
   <section>
     <h1>Liquid Workspace: Code Block</h1>
-    <p class="sub">Mockups for the Code Block, the first of the other built-in Blocks in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>. They detail the Code Block of the approved <a href="liquid-workspace-pages.html">Pages mockups</a> (sections 4, 6 and 7): <code>```</code> starts it, it ends a Section like any other Block type, and it shows code but never runs it; Apps that run code come with M3b. The frame and the slash commands follow the <a href="liquid-database-table.html">Table View mockups</a>. Proposed for approval; the open questions are at the end.</p>
+    <p class="sub">Mockups for the Code Block, the first of the other built-in Blocks in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>. They detail the Code Block of the approved <a href="liquid-workspace-pages.html">Pages mockups</a> (sections 4, 6 and 7): <code>```</code> starts it, it ends a Section like any other Block type, and it shows code but never runs it; Apps that run code come with M3b. The frame and the slash commands follow the <a href="liquid-database-table.html">Table View mockups</a>. Approved by the maintainer on 2026-11-16.</p>
   </section>
   <section>
     <h3 class="sec">1 · Code on a Page</h3>
@@ -88,7 +88,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   </section>
   <section>
     <h3 class="sec">3 · Choosing the language</h3>
-    <p class="sub">The language in the header opens a picker with a search field, as Notion's does: typing filters, ↑↓ choose, ⏎ takes the language and esc closes it. The chosen one has a check. The language is stored with the Block, so Markdown export writes it after the <code>```</code>. Which languages the list offers depends on the highlighter (open question 1).</p>
+    <p class="sub">The language in the header opens a picker with a search field, as Notion's does: typing filters, ↑↓ choose, ⏎ takes the language and esc closes it. The chosen one has a check. The language is stored with the Block, so Markdown export writes it after the <code>```</code>. The list offers common languages; Liquid's highlighter colors them all alike (decision 6).</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-lang" data-w="1040"></div></div></div>
   </section>
   <section>
@@ -116,25 +116,15 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   </section>
   <section>
     <h3 class="sec">Decisions</h3>
-    <h4 class="qh">Proposed with these mockups</h4>
+    <h4 class="qh">Approved (2026-11-16)</h4>
     <ol class="notes">
       <li>The core stores a Code Block's text and its language name, Plain text when none; a Code Block's text has the Text Block's cap of 1,000,000 characters (ADR-0251), and each edit is one write, as a Text Block's is.</li>
       <li>The header, the picker, Copy and the keys as sections 1 to 6 show; no line numbers, no wrapping and no running.</li>
       <li><b>/</b> lists Code under Blocks beside Table; <code>```</code> at a Text Block's start turns it into a Code Block, as in Notion.</li>
       <li>Pasted code arrives as text, as today; recognizing code on the clipboard (Pages mockups, section 4) follows later, since Flutter's clipboard reads plain text only and telling code apart needs a native clipboard package.</li>
       <li>On a phone, a Code Block shows a preview that opens a focused full-screen surface, as already approved; that comes with the phone client.</li>
-    </ol>
-    <h4 class="qh">Open questions</h4>
-    <ol class="qs">
-      <li><b>Highlighter.</b> Which code colors the code?
-        <span class="opt">A · Liquid's own highlighter, which the Diff panel uses today (<code>diff_lines.dart</code>). Pro: no new dependency; one look for code across Liquid. Con: the same few rules for every language (comments, strings, keywords, numbers); the language picker only labels the code and sets the export's language.</span>
-        <span class="opt">B · re_highlight or flutter_highlighting, Dart ports of highlight.js. Pro: rules for about 190 languages. Con: a new dependency; re_highlight has had no release in about two years.</span>
-        <span class="opt">C · shiki_flutter, a Dart port of Shiki, which T3 Code uses. Pro: TextMate grammars, the same as VS Code and T3 Code. Con: a new, younger dependency, and grammars to ship in the app.</span>
-        <span class="opt">Recommendation: A now, since the stored language lets B or C follow without changing any data; the Diff panel would then gain from the same choice.</span></li>
-      <li><b>Long code.</b> How tall is a Code Block with many lines?
-        <span class="opt">A · As tall as its code, as in Notion and on GitHub. Pro: the code reads as part of the Page. Con: a very long Block lays out every line, and long Pages slow down.</span>
-        <span class="opt">B · Up to 24 lines, then it scrolls inside, as a table keeps a fixed height (section 4). Pro: one bounded height, as the Table View decided; scrolling stays with the Page. Con: a long listing needs scrolling in two places.</span>
-        <span class="opt">Recommendation: B, for the same reason the Table View chose a fixed height; Arrange mode can change it later.</span></li>
+      <li>Liquid's own highlighter, which the Diff panel uses today (<code>diff_lines.dart</code>), colors comments, strings, keywords and numbers alike in every language; the language picker labels the code and sets the export's language. A highlighting package can follow without changing any stored data.</li>
+      <li>A Code Block is as tall as its code up to 24 lines, then scrolls inside, as a table keeps a fixed height; Arrange mode can change it later.</li>
     </ol>
   </section>
 </div>
@@ -191,7 +181,7 @@ const many=Array.from({length:12},(_,i)=>`<span class="kw">export const</span> r
 document.getElementById('g-edit').innerHTML=[
 ['Indenting',code(indented,{foc:true}),'⇥ indents both selected lines by two spaces; ⇧⇥ takes them back.'],
 ['A long line',code(longLine,{extra:'<div class="hscroll"><i></i></div>'}),'The code scrolls sideways inside the Block; the header stays.'],
-['Long code',code(many,{fix:200,extra:'<div class="vscroll"><i></i></div>'}),'With a fixed height (open question 2, option B): 24 lines, then the code scrolls inside.'],
+['Long code',code(many,{fix:200,extra:'<div class="vscroll"><i></i></div>'}),'Up to 24 lines, then the code scrolls inside (decision 7).'],
 ['Copied',code(src,{copied:true}),'Copy turns into a check for a moment; the code is on the clipboard.'],
 ].map(c=>`<div class="gcell"><h4>${c[0]}</h4>${c[1]}<div class="cap">${c[2]}</div></div>`).join('');
 
