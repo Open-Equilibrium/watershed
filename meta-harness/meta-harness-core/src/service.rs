@@ -49,6 +49,9 @@ const REFUSED_CALL: &str = "This client may not make that call.";
 const LINKS_OFF: &str =
     "Agents from other hosts are off here. Turn them on first: meta host agents on.";
 
+/// Revocations a connection may still be behind on; one behind further ends (see [`revoked`]).
+const REVOKED: usize = 64;
+
 /// How often linked hosts are checked for links that are due (ADR-0288).
 const RELINK_EVERY: std::time::Duration = std::time::Duration::from_secs(3600);
 
@@ -100,6 +103,8 @@ struct Shared {
     stopping: tokio::sync::watch::Receiver<bool>,
     /// Held until the last connection and call ends; a new service on the folder fails until then.
     _lock: std::fs::File,
+    /// The name of each client revoked; its open connections end (ADR-0299).
+    revoked: tokio::sync::broadcast::Sender<String>,
     /// This host's name for other hosts: T3's name for it, in lower case.
     name: String,
     /// Where the remote listener binds; `None` for the Tailscale addresses.
@@ -170,6 +175,7 @@ impl Service {
             &json!({"url": url, "token": token, "pid": std::process::id()}).to_string(),
         )?;
         let (stopping, stopped) = tokio::sync::watch::channel(false);
+        let (revoked, _) = tokio::sync::broadcast::channel(REVOKED);
         let shared = Arc::new(Shared {
             host: host.clone(),
             store,
@@ -178,6 +184,7 @@ impl Service {
             token: token.clone(),
             stopping: stopped,
             _lock: lock,
+            revoked,
             name,
             remote_bind,
             t3: config.t3,
@@ -321,10 +328,10 @@ impl Caller {
 
 /// What a handshake admits a connection to.
 enum Admission {
-    /// Calls and streams, as this caller.
-    Session(Caller),
-    /// A host's tunnel to its T3 server (ADR-0288).
-    Tunnel,
+    /// Calls and streams, as this caller, for the client named if it is one.
+    Session(Caller, Option<String>),
+    /// A host's tunnel to its T3 server (ADR-0288), for the host named.
+    Tunnel(String),
     /// A new client, which receives its token once before the connection closes.
     Paired(String),
 }
@@ -376,7 +383,7 @@ fn admit(
                 ));
             }
             check_version(request)?;
-            Ok(Admission::Session(Caller::Local))
+            Ok(Admission::Session(Caller::Local, None))
         }
         Listener::Remote => {
             check_version(request)?;
@@ -387,20 +394,20 @@ fn admit(
                     .map_err(|reason| refuse(StatusCode::FORBIDDEN, reason))?;
                 return Ok(Admission::Paired(token));
             }
-            let kind = match bearer {
-                Some(token) => hosts::client_kind(&db, token)
+            let client = match bearer {
+                Some(token) => hosts::client(&db, token)
                     .map_err(|error| refuse(StatusCode::INTERNAL_SERVER_ERROR, error))?,
                 None => None,
             };
             let tunnel = header(request, api::TUNNEL_HEADER).is_some();
-            match kind {
-                Some(Kind::Device) if tunnel => Err(refuse(
+            match client {
+                Some((Kind::Device, _)) if tunnel => Err(refuse(
                     StatusCode::FORBIDDEN,
                     "Only another host may tunnel to this computer's T3 Code.",
                 )),
-                Some(Kind::Host) if tunnel => Ok(Admission::Tunnel),
-                Some(Kind::Device) => Ok(Admission::Session(Caller::Device)),
-                Some(Kind::Host) => Ok(Admission::Session(Caller::Host)),
+                Some((Kind::Host, name)) if tunnel => Ok(Admission::Tunnel(name)),
+                Some((Kind::Device, name)) => Ok(Admission::Session(Caller::Device, Some(name))),
+                Some((Kind::Host, name)) => Ok(Admission::Session(Caller::Host, Some(name))),
                 None => Err(refuse(
                     StatusCode::UNAUTHORIZED,
                     "Meta-Harness needs a token of a paired client.",
@@ -415,6 +422,25 @@ async fn relink(shared: Arc<Shared>) {
     loop {
         shared.links.relink_due(&shared.store).await;
         tokio::time::sleep(RELINK_EVERY).await;
+    }
+}
+
+/// Resolves when the client named `owner` is revoked, and never for a connection with no client.
+/// A connection that fell more than [`REVOKED`] revocations behind ends, so that it cannot miss
+/// one; a client still paired comes back with its token.
+async fn revoked(events: &mut tokio::sync::broadcast::Receiver<String>, owner: Option<&str>) {
+    let Some(owner) = owner else {
+        return std::future::pending::<()>().await;
+    };
+    loop {
+        match events.recv().await {
+            Ok(name) if name == owner => return,
+            Ok(_) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => return,
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                return std::future::pending::<()>().await;
+            }
+        }
     }
 }
 
@@ -454,11 +480,17 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream, listener: Listener) {
     else {
         return;
     };
-    let caller = match admission {
-        Some(Admission::Session(caller)) => caller,
-        Some(Admission::Tunnel) => {
+    let (caller, owner) = match admission {
+        Some(Admission::Session(caller, owner)) => (caller, owner),
+        Some(Admission::Tunnel(owner)) => {
+            let mut revocations = shared.revoked.subscribe();
+            let mut stopping = shared.stopping.clone();
             if let Ok(t3) = TcpStream::connect(shared.host.t3_address()).await {
-                tunnel::relay(t3, socket).await;
+                tokio::select! {
+                    () = tunnel::relay(t3, socket) => {}
+                    () = revoked(&mut revocations, Some(&owner)) => {}
+                    _ = stopping.wait_for(|stopped| *stopped) => {}
+                }
             }
             return;
         }
@@ -480,6 +512,7 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream, listener: Listener) {
         }
     });
     let mut stopping = shared.stopping.clone();
+    let mut revocations = shared.revoked.subscribe();
     let session = Arc::new(Session {
         shared,
         client,
@@ -492,6 +525,7 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream, listener: Listener) {
         let frame = tokio::select! {
             frame = frames.next() => frame,
             _ = stopping.wait_for(|stopped| *stopped) => break,
+            () = revoked(&mut revocations, owner.as_deref()) => break,
         };
         let Some(Ok(frame)) = frame else { break };
         let Message::Text(text) = frame else { continue };
@@ -661,7 +695,12 @@ impl Session {
         let shared = &self.shared;
         match call {
             HostsCall::T3Pairing => to(pairing_code(&shared.t3, &shared.t3_home).await?),
-            HostsCall::Revoke(name) => to(hosts::revoke(&shared.store.db(), &name)?),
+            HostsCall::Revoke(name) => {
+                hosts::revoke(&shared.store.db(), &name)?;
+                // The client's open connections end with its token (ADR-0299).
+                let _ = shared.revoked.send(name);
+                to(())
+            }
             HostsCall::Add {
                 address,
                 code,

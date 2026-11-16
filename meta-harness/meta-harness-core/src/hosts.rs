@@ -181,22 +181,26 @@ pub(crate) fn pair(db: &Connection, code: &str, name: &str, now: u64) -> Result<
     Ok(token)
 }
 
-/// The kind of client that `token` belongs to, if a client holds it.
-pub(crate) fn client_kind(db: &Connection, token: &str) -> Result<Option<Kind>, String> {
+/// The kind of client that `token` belongs to and the name it paired with, if a client holds it.
+pub(crate) fn client(db: &Connection, token: &str) -> Result<Option<(Kind, String)>, String> {
     let wanted = digest(token);
     let mut statement = db
-        .prepare("SELECT token_hash, kind FROM client")
+        .prepare("SELECT token_hash, kind, name FROM client")
         .map_err(failed)?;
     let rows = statement
         .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })
         .map_err(failed)?;
     let mut found = None;
     for row in rows {
-        let (hash, kind) = row.map_err(failed)?;
+        let (hash, kind, name) = row.map_err(failed)?;
         if same(hash.as_bytes(), wanted.as_bytes()) {
-            found = Kind::parse(&kind);
+            found = Kind::parse(&kind).map(|kind| (kind, name));
         }
     }
     Ok(found)
@@ -490,7 +494,8 @@ impl Links {
     }
 
     /// Links the host at `address` (`ws://…`), which `code` pairs with, at `access`: its tunnel
-    /// starts, and its T3 links this one. A link that fails leaves nothing behind here.
+    /// starts, and its T3 links this one. A link that fails leaves nothing behind here, but the
+    /// other host may keep the pairing, which its `meta host revoke` removes.
     pub(crate) async fn add(
         &self,
         store: &Store,
@@ -499,6 +504,25 @@ impl Links {
         access: Access,
     ) -> Result<String, String> {
         let (name, token) = remote::pair(address, code, &self.name).await?;
+        match self.link_paired(store, address, &name, token, access).await {
+            Ok(()) => Ok(name),
+            Err(error) => Err(format!(
+                "{error} The other host, {name}, may keep a paired entry for this host; \
+                 `meta host revoke {}` there removes it.",
+                self.name
+            )),
+        }
+    }
+
+    /// Stores the host `name` that paired with `token`, starts its tunnel and has T3 link to it.
+    async fn link_paired(
+        &self,
+        store: &Store,
+        address: &str,
+        name: &str,
+        token: String,
+        access: Access,
+    ) -> Result<(), String> {
         let socket = TcpListener::bind("127.0.0.1:0")
             .await
             .map_err(|e| format!("Could not listen on the loopback: {e}"))?;
@@ -507,7 +531,7 @@ impl Links {
             .map_err(|e| format!("Could not listen on the loopback: {e}"))?
             .port();
         let peer = Peer {
-            name: name.clone(),
+            name: name.to_owned(),
             address: address.to_owned(),
             token,
             access,
@@ -516,16 +540,11 @@ impl Links {
         };
         insert_peer(&store.db(), &peer)?;
         self.tunnel(socket, &peer);
-        match self.link_t3(&peer).await {
-            Ok(()) => {
-                set_linked(&store.db(), &name, now_ms())?;
-                Ok(name)
-            }
-            Err(error) => {
-                self.forget(store, &name)?;
-                Err(error)
-            }
+        if let Err(error) = self.link_t3(&peer).await {
+            self.forget(store, name)?;
+            return Err(error);
         }
+        set_linked(&store.db(), name, now_ms())
     }
 
     /// Unlinks the host `name`: its T3 forgets the link, its tunnel stops and it is removed.

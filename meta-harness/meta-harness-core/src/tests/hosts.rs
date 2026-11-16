@@ -50,17 +50,31 @@ fn a_token_admits_the_kind_of_client_that_paired_with_it_until_revoked() {
     let host_token = hosts::pair(&db, &host, "other", 0).unwrap();
     assert_eq!(device_token.len(), 64, "256 bits in hex");
     assert_eq!(
-        hosts::client_kind(&db, &device_token).unwrap(),
+        hosts::client(&db, &device_token)
+            .unwrap()
+            .map(|(kind, _)| kind),
         Some(Kind::Device)
     );
     assert_eq!(
-        hosts::client_kind(&db, &host_token).unwrap(),
+        hosts::client(&db, &host_token)
+            .unwrap()
+            .map(|(kind, _)| kind),
         Some(Kind::Host)
     );
-    assert_eq!(hosts::client_kind(&db, &device_token[..63]).unwrap(), None);
+    assert_eq!(
+        hosts::client(&db, &device_token[..63])
+            .unwrap()
+            .map(|(kind, _)| kind),
+        None
+    );
 
     hosts::revoke(&db, "phone").unwrap();
-    assert_eq!(hosts::client_kind(&db, &device_token).unwrap(), None);
+    assert_eq!(
+        hosts::client(&db, &device_token)
+            .unwrap()
+            .map(|(kind, _)| kind),
+        None
+    );
     assert!(
         hosts::revoke(&db, "phone").is_err(),
         "nothing left to revoke"

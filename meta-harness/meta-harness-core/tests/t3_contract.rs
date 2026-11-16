@@ -8,6 +8,8 @@ use std::process::Command;
 use std::time::Duration;
 
 use futures_util::FutureExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
 use meta_harness_core::{
     Access, CONNECTION_FILE, Change, Kind, Service, ServiceConfig, remote, t3_version,
 };
@@ -983,6 +985,11 @@ async fn a_device_pairs_once_and_calls_the_api_remotely_while_a_host_only_asks_f
         "remote access is set here only"
     );
     assert!(device.invite(Kind::Device).await.is_err());
+    assert!(device.hosts().await.is_err(), "host list stays here");
+    assert!(
+        device.host_agents(true).await.is_err(),
+        "host agents stay here"
+    );
     assert!(!may_tunnel(&url, &token).await, "a device is no tunnel");
     local.revoke_client("phone").await.unwrap();
     assert!(
@@ -1182,4 +1189,182 @@ async fn may_tunnel(url: &str, token: &str) -> bool {
         .headers_mut()
         .insert("meta-harness-tunnel", "t3".parse().unwrap());
     tokio_tungstenite::connect_async(request).await.is_ok()
+}
+
+/// Two services, each with its remote listener on loopback and agents from other hosts on, where
+/// `a` has linked `b` at the default access.
+struct Linked {
+    a: (Service, remote::Host),
+    b: (Service, remote::Host),
+    name: String,
+    url_b: String,
+}
+
+async fn linked(dir: &Path) -> Linked {
+    let (home_a, home_b) = (dir.join("a"), dir.join("b"));
+    let (a_service, a) = start_service(&home_a).await;
+    let (b_service, b) = start_service(&home_b).await;
+    let port_b = free_port();
+    a.remote_on(free_port()).await.unwrap();
+    b.remote_on(port_b).await.unwrap();
+    a.host_agents(true).await.unwrap();
+    b.host_agents(true).await.unwrap();
+    let url_b = format!("ws://127.0.0.1:{port_b}");
+    let code = b.invite(Kind::Host).await.unwrap();
+    let name = a.host_add(&url_b, &code, Access::Auto).await.unwrap();
+    Linked {
+        a: (a_service, a),
+        b: (b_service, b),
+        name,
+        url_b,
+    }
+}
+
+/// Sends one HTTP/1.1 request to `addr` and answers everything sent back, the connection closing
+/// after the answer.
+fn http(addr: &str, method: &str, path: &str, body: &str) -> String {
+    let mut stream = std::net::TcpStream::connect(addr).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+    let request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\
+         Content-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    std::io::Write::write_all(&mut stream, request.as_bytes()).unwrap();
+    let mut answer = String::new();
+    let _ = std::io::Read::read_to_string(&mut stream, &mut answer);
+    answer
+}
+
+/// The status code of an HTTP answer.
+fn status_of(answer: &str) -> u16 {
+    answer
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .unwrap_or(0)
+}
+
+/// The address T3 in `home` listens on, from the runtime record it writes.
+fn t3_address(home: &Path) -> String {
+    let text = std::fs::read_to_string(home.join("t3/userdata/server-runtime.json")).unwrap();
+    let origin = serde_json::from_str::<serde_json::Value>(&text).unwrap()["origin"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    origin.trim_start_matches("http://").to_owned()
+}
+
+/// The form body that exchanges a bootstrap pairing `credential` for a bearer token, asking for
+/// `scope` when given.
+fn exchange_form(credential: &str, scope: Option<&str>) -> String {
+    let mut form = format!(
+        "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange\
+         &subject_token={credential}\
+         &subject_token_type=urn%3At3%3Aparams%3Aoauth%3Atoken-type%3Aenvironment-bootstrap\
+         &requested_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aaccess_token"
+    );
+    if let Some(scope) = scope {
+        form.push_str(&format!("&scope={scope}"));
+    }
+    form
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pairing_code_from_a_host_token_redeems_only_orchestration_scopes() {
+    let (dir, _repo, _home) = fixture();
+    let (home_b, port_b) = (dir.path().join("b"), free_port());
+    let (_b, b) = start_service(&home_b).await;
+    b.remote_on(port_b).await.unwrap();
+    let url = format!("ws://127.0.0.1:{port_b}");
+    let code = b.invite(Kind::Host).await.unwrap();
+    let (_, token) = remote::pair(&url, &code, "other").await.unwrap();
+    let host = remote::Host::connect_to(&url, &token, "other")
+        .await
+        .unwrap();
+    let origin = t3_address(&home_b);
+    // Each exchange spends its code, so each one takes a new code from the host token.
+    for scope in ["terminal:operate", "filesystem:write", "settings:write"] {
+        let credential = host.t3_pairing().await.unwrap();
+        let answer = http(
+            &origin,
+            "POST",
+            "/oauth/token",
+            &exchange_form(&credential, Some(scope)),
+        );
+        assert_ne!(status_of(&answer), 200, "{scope} is refused: {answer}");
+    }
+    let credential = host.t3_pairing().await.unwrap();
+    let answer = http(
+        &origin,
+        "POST",
+        "/oauth/token",
+        &exchange_form(&credential, None),
+    );
+    assert_eq!(status_of(&answer), 200, "{answer}");
+    let body = &answer[answer.find('{').unwrap()..=answer.rfind('}').unwrap()];
+    let granted = serde_json::from_str::<serde_json::Value>(body).unwrap();
+    assert_eq!(granted["scope"], "orchestration:read orchestration:operate");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn revoking_a_client_closes_the_connections_it_has_open() {
+    let (dir, _repo, _home) = fixture();
+    let link = linked(dir.path()).await;
+    let (_a, a) = &link.a;
+    let (_b, b) = &link.b;
+    let code = b.invite(Kind::Device).await.unwrap();
+    let (_, token) = remote::pair(&link.url_b, &code, "phone").await.unwrap();
+    let device = remote::Host::connect_to(&link.url_b, &token, "phone")
+        .await
+        .unwrap();
+    device.status().await.unwrap();
+    // A connection through a's tunnel to b's T3 stays open between requests.
+    let port = peer_row(&dir.path().join("a"), &link.name).0;
+    let mut tunnel = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    tunnel
+        .write_all(
+            format!("GET /.well-known/t3/environment HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n")
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut answer = [0u8; 12];
+    tunnel.read_exact(&mut answer).await.unwrap();
+    assert_eq!(&answer, b"HTTP/1.1 200");
+
+    b.revoke_client("phone").await.unwrap();
+    b.revoke_client(&a.environment_name().await.unwrap().to_lowercase())
+        .await
+        .unwrap();
+    assert!(
+        device.status().await.is_err(),
+        "the device's connection ended"
+    );
+    let ended = tokio::time::timeout(Duration::from_secs(20), async {
+        let mut rest = Vec::new();
+        tunnel.read_to_end(&mut rest).await
+    })
+    .await;
+    assert!(ended.is_ok(), "the tunnel's connection ended");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_add_says_the_other_host_may_keep_a_paired_entry() {
+    let (dir, _repo, _home) = fixture();
+    let link = linked(dir.path()).await;
+    let (_a, a) = &link.a;
+    let (_b, b) = &link.b;
+    // The name is already linked, which fails after the other host has paired with this one.
+    let code = b.invite(Kind::Host).await.unwrap();
+    let error = a
+        .host_add(&link.url_b, &code, Access::Auto)
+        .await
+        .unwrap_err();
+    let me = a.environment_name().await.unwrap().to_lowercase();
+    assert!(error.contains(&format!("meta host revoke {me}")), "{error}");
 }

@@ -52,6 +52,12 @@ pub(crate) async fn pairing_code(binary: &Path, home: &Path) -> Result<String, S
             "5m",
             "--label",
             "meta-harness",
+            // A host's code opens T3's orchestration only, which is the scope set a link at the
+            // default access needs (ADR-0301).
+            "--scope",
+            "orchestration:read",
+            "--scope",
+            "orchestration:operate",
         ],
     )
     .await?;
