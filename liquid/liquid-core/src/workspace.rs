@@ -11,14 +11,14 @@ use crate::database;
 use crate::history::Header;
 use crate::id::random_bytes;
 use crate::model::{
-    self, AREAS, BLOCK, BLOCKS, BOUNDARY, KIND, NAME, OWNER, PAGES, PARENT, SORT, STYLE, TEXT,
-    TITLE, VIEWS,
+    self, AREAS, BLOCK, BLOCKS, BOUNDARY, KIND, LANGUAGE, NAME, OWNER, PAGES, PARENT, SORT, STYLE,
+    TEXT, TITLE, VIEWS,
 };
 use crate::order::Order;
 use crate::store::{Commit, Store, Write};
 use crate::{
-    Action, ActionId, Actor, Applied, Area, AreaId, BlockId, BlockKind, Cell, Changed, Created,
-    Document, Error, FieldId, FieldKind, Mutation, Operation, Origin, PageEntry, PageId,
+    Action, ActionId, Actor, Applied, Area, AreaId, BlockId, BlockKind, Cell, Changed, Code,
+    Created, Document, Error, FieldId, FieldKind, Mutation, Operation, Origin, PageEntry, PageId,
     Permission, PersonId, Place, Request, RowId, TextStyle, View, ViewId,
 };
 
@@ -195,6 +195,14 @@ impl<S: Store> Workspace<S> {
         ))
     }
 
+    /// A live Code Block's code and language, from the document of its home `page`.
+    pub fn code(&mut self, page: &PageId, block: &BlockId) -> Result<Option<Code>, Error> {
+        Ok(model::code(
+            self.doc(&Document::Page(page.clone()))?,
+            block.as_str(),
+        ))
+    }
+
     /// A live Database Block's name and fields, from the document of its home `page`; none
     /// if `block` is no live Database Block.
     pub fn database(
@@ -327,6 +335,17 @@ impl<S: Store> Workspace<S> {
                 delete,
                 insert,
             } => self.write_edit_text(page, block, *at, *delete, insert),
+            Mutation::TurnIntoCode { page, block } => {
+                self.write_turn_into(page, block, BlockKind::Text, (BlockKind::Code, "code"))
+            }
+            Mutation::TurnIntoText { page, block } => {
+                self.write_turn_into(page, block, BlockKind::Code, (BlockKind::Text, "text"))
+            }
+            Mutation::SetCodeLanguage {
+                page,
+                block,
+                language,
+            } => self.write_set_code_language(page, block, language),
             Mutation::AddDatabaseBlock { page, after, name } => {
                 self.write_add_database_block(page, after.as_ref(), name)
             }
@@ -564,13 +583,59 @@ impl<S: Store> Workspace<S> {
         insert: &str,
     ) -> Result<Written, Error> {
         let doc = self.doc(&Document::Page(page.clone()))?;
-        let content = text_of(doc, block)?;
+        let entry = model::of_kind(doc, block.as_str(), BlockKind::Text)
+            .or_else(|| model::of_kind(doc, block.as_str(), BlockKind::Code))
+            .ok_or(Error::NotFound)?;
+        let content = model::child(doc, &entry, TEXT).ok_or(Error::NotFound)?;
         let end = at.checked_add(delete).ok_or(Error::OutOfRange)?;
         if !model::on_boundary(doc, &content, at) || !model::on_boundary(doc, &content, end) {
             return Err(Error::OutOfRange);
         }
         let delete = isize::try_from(delete).map_err(|_| Error::OutOfRange)?;
         doc.splice_text(&content, at, delete, insert)?;
+        Ok(Written::new(
+            Document::Page(page.clone()),
+            Changed::Block(page.clone(), block.clone()),
+        ))
+    }
+
+    /// Turns a Block of kind `from` into one of kind `to`, stored as its name, with the same
+    /// text and Views; a Text Block reads as a paragraph and a Code Block as plain text.
+    fn write_turn_into(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+        from: BlockKind,
+        (to, name): (BlockKind, &str),
+    ) -> Result<Written, Error> {
+        let (doc, order) = self.page(page)?;
+        let entry = model::of_kind(doc, block.as_str(), from).ok_or(Error::NotFound)?;
+        doc.put(&entry, KIND, name)?;
+        match to {
+            BlockKind::Text => doc.put(&entry, STYLE, model::style_name(TextStyle::Paragraph)?)?,
+            _ => doc.delete(&entry, LANGUAGE)?,
+        }
+        order.set_kind(block, to);
+        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+        written
+            .changed
+            .push(Changed::Block(page.clone(), block.clone()));
+        Ok(written)
+    }
+
+    fn write_set_code_language(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+        language: &str,
+    ) -> Result<Written, Error> {
+        let doc = self.doc(&Document::Page(page.clone()))?;
+        let entry = model::of_kind(doc, block.as_str(), BlockKind::Code).ok_or(Error::NotFound)?;
+        if language.is_empty() {
+            doc.delete(&entry, LANGUAGE)?;
+        } else {
+            doc.put(&entry, LANGUAGE, language)?;
+        }
         Ok(Written::new(
             Document::Page(page.clone()),
             Changed::Block(page.clone(), block.clone()),
@@ -833,8 +898,7 @@ fn add_view(
 
 /// A live Text Block's entry; none for a Block of another type.
 fn text_block(doc: &AutoCommit, block: &BlockId) -> Option<automerge::ObjId> {
-    let entry = model::live(doc, BLOCKS, block.as_str())?;
-    (model::string(doc, &entry, KIND).as_deref() == Some("text")).then_some(entry)
+    model::of_kind(doc, block.as_str(), BlockKind::Text)
 }
 
 /// A live Text Block's text object; none for a Block of another kind.
