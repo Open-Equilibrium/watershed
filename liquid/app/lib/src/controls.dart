@@ -177,12 +177,19 @@ class _Button extends StatelessWidget {
     if (hint == null || hint.isEmpty || !ShortcutReveal.shown(context)) {
       return button;
     }
-    // The hint sits on the button's corner, so the button keeps its size.
+    // The hint sits on the button's corner, so the button keeps its size and the taps under the
+    // hint still press it. The stack passes the layout's constraints to the button, so a stretched
+    // button stays stretched.
     return Stack(
       clipBehavior: Clip.none,
+      fit: StackFit.passthrough,
       children: [
         button,
-        Positioned(top: -9, right: -6, child: KeyBadge(hint)),
+        Positioned(
+          top: -9,
+          right: -6,
+          child: IgnorePointer(child: KeyBadge(hint)),
+        ),
       ],
     );
   }
