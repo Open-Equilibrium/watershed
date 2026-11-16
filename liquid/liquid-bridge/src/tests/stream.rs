@@ -513,6 +513,39 @@ fn a_thread_that_ended_ends_its_stream_without_a_reload() {
 }
 
 #[test]
+fn what_waits_when_the_thread_ended_is_sent_once_liquid_confirms() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let (events, receiver) = tokio::sync::mpsc::channel(4096);
+        let (delivered, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
+        let forwarding = tokio::spawn(forward(
+            receiver,
+            // The thread ended for good, so no subscription comes.
+            || std::future::ready(None),
+            credit.clone(),
+            move |event| delivered.send(event).is_ok(),
+        ));
+        for item in 1..=WINDOW as u64 + 1 {
+            events.send(started(item)).await.expect("sent");
+        }
+        // The source ends with the event past the window still waiting for Liquid.
+        drop(events);
+        settle().await;
+        assert!(
+            !forwarding.is_finished(),
+            "the forwarder waits for Liquid while an event waits"
+        );
+        assert_eq!(taken(&mut deliveries).len(), WINDOW);
+        credit.confirm(WINDOW as u64);
+        tokio::time::timeout(Duration::from_secs(1), forwarding)
+            .await
+            .expect("forward ends once what waits is sent")
+            .expect("forward completes");
+        assert_eq!(taken(&mut deliveries).len(), 1, "the waiting event is sent");
+    });
+}
+
+#[test]
 fn an_idle_thread_stays_live_across_two_restores_without_an_event_between() {
     paused_runtime().block_on(async {
         let (live, receiver) = tokio::sync::mpsc::channel(16);

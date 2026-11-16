@@ -230,7 +230,7 @@ pub(crate) async fn follow_watch<T: Clone, Fut: Future<Output = Result<Watch<T>,
 /// merges, and an overflow ends in one fell-behind event (ADR-0272). When the core drops this
 /// subscriber, which fell too far behind, or a reconnect restored the thread, the stream takes
 /// `resubscribe`'s events after a fell-behind event; `resubscribe` gives none once the thread
-/// ended for good, and the stream ends.
+/// ended for good, and the stream ends once what waits is sent.
 pub(crate) async fn forward<Next: Future<Output = Option<mpsc::Receiver<ThreadEvent>>>>(
     mut receiver: mpsc::Receiver<ThreadEvent>,
     mut resubscribe: impl FnMut() -> Next,
@@ -270,8 +270,8 @@ pub(crate) async fn forward<Next: Future<Output = Option<mpsc::Receiver<ThreadEv
             }
             Some(None) => {
                 let Some(next) = resubscribe().await else {
-                    // T3 ended the thread for good: no event comes, so the stream ends.
-                    return;
+                    // T3 ended the thread for good: no event comes, but what waits still goes.
+                    return send_waiting(&mut outbox, &credit, &mut deliver).await;
                 };
                 receiver = next;
                 if !outbox.behind {
@@ -280,6 +280,21 @@ pub(crate) async fn forward<Next: Future<Output = Option<mpsc::Receiver<ThreadEv
             }
             None => {}
         }
+    }
+}
+
+/// Sends what waits once no event comes, as each confirmation reopens room for it. Returns once
+/// nothing waits, the session was dropped or `deliver` refused an event.
+async fn send_waiting(
+    outbox: &mut Outbox,
+    credit: &Credit,
+    deliver: &mut impl FnMut(BridgeEvent) -> bool,
+) {
+    while !credit.is_closed()
+        && outbox.send(credit.applied(), deliver)
+        && !outbox.pending.is_empty()
+    {
+        credit.wait().await;
     }
 }
 
