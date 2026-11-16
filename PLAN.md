@@ -30,7 +30,6 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 
 - Meta-Harness CLI run, session, schedule and metrics commands.
 - Host links through the Liquid account and an end-to-end relay (ADR-0285); Tailscale carries them until then (ADR-0299).
-- The host tunnel's filter to the paths a link uses, with its HTTP endpoint (ADR-0301), blocked on D-112.
 - API/protocol surface for Liquid and BYOA: session registry, live event and transcript streams, artifact/log/handoff queries, config read/write proposals, agent schedule/trigger control, answers to a harness's own approvals and questions, revert.
 - Central configuration for Flow Agent, which receives only its global authority and explicit Flows rather than a project-local config layer; device-local Runtime bindings remain owned by the execution host. Liquid edits the configuration across devices after sync and approved mockups.
 - Control plane: session registry, routing, task state, attention state and agent schedule/trigger skeleton.

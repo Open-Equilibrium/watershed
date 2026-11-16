@@ -96,28 +96,6 @@
         <p><strong>Recommendation:</strong> C, because it closes the gap without slowing every open.</p>
         <p><strong>Acceptance criterion:</strong> an entry planted right after the folder is created makes creation fail, and the shared-workspace concurrency test passes 50 of 50 runs on macOS.</p>
       </details>
-      <details id="d-112" class="decision wide">
-        <summary><h3>D-112 - Adding httpdate For The Host Tunnel's HTTP Server</h3></summary>
-        <p><strong>Status:</strong> Open; blocks the tunnel filter that the maintainer chose (ADR-0301). The code is <code>meta-harness/meta-harness-core/src/tunnel.rs</code>, which is not written yet, and <code>Cargo.toml</code>.</p>
-        <p><strong>Problem:</strong> The filter reads each HTTP request on the receiving host, with hyper, at the lockfile's version (1.11.1). hyper's HTTP/1 server sits behind its <code>server</code> feature, and that feature adds one new lock entry, <code>httpdate</code> 1.0.3, which hyper uses for the Date header. hyper's client adds none. The maintainer's rule is no new crates in <code>Cargo.lock</code>.</p>
-        <p><strong>Question:</strong> How should the receiving host read the HTTP requests of a tunnel?</p>
-        <div class="dia">
-          <div class="opt rec"><h4>A: Accept httpdate <span class="tag">Recommended</span></h4>
-            <div class="b ws">One new lock entry, <code>httpdate</code> 1.0.3, MIT or Apache-2.0</div>
-            <ul><li>Pro: hyper's own server does the parsing, as ADR-0301 says.</li><li>Con: breaks the rule of no new crates; <code>cargo deny</code> and <code>cargo audit</code> must pass with it.</li></ul>
-          </div>
-          <div class="opt"><h4>B: Parse the request head ourselves</h4>
-            <div class="b ws">Read request heads with <code>httparse</code>, already locked, and forward with hyper's client</div>
-            <ul><li>Pro: no new crate.</li><li>Con: our own code frames request bodies (length and chunked) on the trust path, and needs its own tests.</li></ul>
-          </div>
-          <div class="opt"><h4>C: Keep the byte tunnel</h4>
-            <div class="b ws">Only the orchestration scopes limit a host token</div>
-            <ul><li>Pro: nothing more to build.</li><li>Con: a host token reaches every path of the linked T3, which ADR-0301 rejects.</li></ul>
-          </div>
-        </div>
-        <p><strong>Recommendation:</strong> A, because hyper's server is the parser ADR-0301 names, and <code>httpdate</code> is a small crate that hyper already depends on for this job.</p>
-        <p><strong>Acceptance criterion:</strong> the lockfile gains only the entries of the chosen option, the non-link paths of the contract test answer 403 in three of three runs, and <code>cargo deny check</code> and <code>cargo audit</code> pass.</p>
-      </details>
     </div>
   </section>
 
