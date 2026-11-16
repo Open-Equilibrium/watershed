@@ -158,6 +158,9 @@ impl LiquidWorkspace {
             | Mutation::JoinTextBlock { page, .. }
             | Mutation::SetTextStyle { page, .. }
             | Mutation::SetSectionBoundary { page, .. }
+            | Mutation::TurnIntoCode { page, .. }
+            | Mutation::TurnIntoText { page, .. }
+            | Mutation::SetCodeLanguage { page, .. }
             | Mutation::AddDatabaseBlock { page, .. }
             | Mutation::RenameDatabase { page, .. }
             | Mutation::AddField { page, .. }
@@ -245,6 +248,7 @@ impl LiquidWorkspace {
             count: 0,
             text: None,
             style: None,
+            language: None,
             database: None,
             rows: Vec::new(),
         };
@@ -293,6 +297,7 @@ impl LiquidWorkspace {
                         kind: match view.kind {
                             BlockKind::Text => BridgeBlockKind::Text,
                             BlockKind::Database => BridgeBlockKind::Database,
+                            BlockKind::Code => BridgeBlockKind::Code,
                             BlockKind::Unknown => BridgeBlockKind::Unknown,
                         },
                     })
@@ -307,6 +312,15 @@ impl LiquidWorkspace {
                     .style(&page, &block)
                     .map_err(message)?
                     .map(BridgeTextStyle::of);
+            }
+            BridgeQueryKind::Code => {
+                let page = id(&query.page, PageId::parse, "page")?;
+                *read = Some(page.clone());
+                let block = id(&query.block, BlockId::parse, "block")?;
+                if let Some(code) = workspace.code(&page, &block).map_err(message)? {
+                    answer.text = Some(code.text);
+                    answer.language = Some(code.language);
+                }
             }
             BridgeQueryKind::Database => {
                 let page = id(&query.page, PageId::parse, "page")?;

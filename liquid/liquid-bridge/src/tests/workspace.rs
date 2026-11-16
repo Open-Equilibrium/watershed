@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::api::replica::LiquidWorkspace;
 use crate::api::workspace::{
-    BridgeChange, BridgeMutation, BridgeMutationKind, BridgeQuery, BridgeQueryKind, BridgeResource,
-    BridgeResourceKind, BridgeTextStyle, MAX_WINDOW,
+    BridgeBlockKind, BridgeChange, BridgeMutation, BridgeMutationKind, BridgeQuery,
+    BridgeQueryKind, BridgeResource, BridgeResourceKind, BridgeTextStyle, MAX_WINDOW,
 };
 use crate::keys::{KEY_NAME_FILE, Keys, path_name};
 
@@ -871,4 +871,51 @@ fn a_workspace_whose_call_failed_midway_refuses_every_later_call() {
     );
     let watched = workspace.watch(2, resource(BridgeResourceKind::Areas), |_| true);
     assert_eq!(watched.err().unwrap(), stopped);
+}
+
+#[test]
+fn a_text_block_turns_into_code_with_a_language_through_the_bridge() {
+    let folder = Folder::new("code");
+    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_, page, block, _) = lisbon(&workspace);
+    let write = |kind, text: Option<&str>| {
+        workspace
+            .apply(BridgeMutation {
+                page: Some(page.clone()),
+                block: Some(block.clone()),
+                text: text.map(str::to_string),
+                ..mutation(kind)
+            })
+            .unwrap();
+    };
+    let read = || {
+        let answer = workspace
+            .query(BridgeQuery {
+                page: Some(page.clone()),
+                block: Some(block.clone()),
+                ..query(BridgeQueryKind::Code)
+            })
+            .unwrap();
+        (answer.text, answer.language)
+    };
+    let kind = || {
+        workspace
+            .query(BridgeQuery {
+                page: Some(page.clone()),
+                ..query(BridgeQueryKind::Views)
+            })
+            .unwrap()
+            .views[0]
+            .kind
+    };
+
+    write(BridgeMutationKind::TurnIntoCode, None);
+    write(BridgeMutationKind::SetCodeLanguage, Some("rust"));
+    assert_eq!(kind(), BridgeBlockKind::Code);
+    assert_eq!(read(), (Some("Five days".into()), Some("rust".into())));
+    assert_eq!(text(&workspace, &page, &block), None);
+
+    write(BridgeMutationKind::TurnIntoText, None);
+    assert_eq!(kind(), BridgeBlockKind::Text);
+    assert_eq!(read(), (None, None));
 }
