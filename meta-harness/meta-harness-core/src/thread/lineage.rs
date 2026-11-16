@@ -655,10 +655,14 @@ impl LineageChanges {
     /// Waits for a change, then says whether one came: `false` once the stream behind it ended,
     /// such as when the connection to Meta-Harness was lost. Read the lineage again after each.
     pub async fn changed(&self) -> bool {
+        // Registered before the check, so an end that comes in between still wakes it.
+        let notified = self.wake.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
         if self.ended.load(std::sync::atomic::Ordering::SeqCst) {
             return false;
         }
-        self.wake.notified().await;
+        notified.await;
         !self.ended.load(std::sync::atomic::Ordering::SeqCst)
     }
 }

@@ -203,10 +203,12 @@ fn remove_login_service() -> Result<(), String> {
 /// Whether uninstalling `prefix` removes the data folder `home`, both resolved: `home` lies in
 /// a folder uninstall removes, or is the prefix itself.
 fn removes_data(prefix: &Path, home: &Path) -> bool {
+    // A folder reached through a link is removed where the link points.
+    let resolved = |path: PathBuf| path.canonicalize().unwrap_or(path);
     home == prefix
         || ["lib/meta-harness", "share/meta-harness"]
             .iter()
-            .any(|folder| home.starts_with(prefix.join(folder)))
+            .any(|folder| home.starts_with(resolved(prefix.join(folder))))
 }
 
 fn uninstall() -> Result<(), String> {
