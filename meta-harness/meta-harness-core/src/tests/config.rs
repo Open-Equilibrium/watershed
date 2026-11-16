@@ -324,3 +324,38 @@ fn a_revision_the_homes_cannot_take_is_not_approved() {
     );
     assert_eq!(store.log().unwrap().len(), 1, "only the proposal is logged");
 }
+
+#[test]
+fn a_failure_after_the_homes_took_the_revision_puts_the_current_one_back() {
+    // Each fault strikes after the homes took the proposed blocks: the revision row, the log row
+    // or the commit, which a reader holding its snapshot blocks.
+    for fault in ["revision", "log", "commit"] {
+        let fixture = Fixture::new();
+        let store = &fixture.store;
+        let number = propose(store, vec![instruction("rules", "x")]);
+        let raw = rusqlite::Connection::open(fixture.dir.join("meta-harness.sqlite")).unwrap();
+        match fault {
+            "commit" => raw
+                .execute_batch("BEGIN; SELECT count(*) FROM revision;")
+                .unwrap(),
+            table => raw
+                .execute_batch(&format!(
+                    "CREATE TRIGGER refuse BEFORE INSERT ON {table} \
+                     BEGIN SELECT RAISE(ABORT, 'refused'); END;"
+                ))
+                .unwrap(),
+        }
+        let before = store.current().unwrap();
+        let written = std::cell::RefCell::new(Vec::new());
+        let result = store.approve("cli", number, |blocks| {
+            written.borrow_mut().push(blocks.clone());
+            Ok(())
+        });
+        assert!(result.is_err(), "{fault}");
+        let written = written.into_inner();
+        assert_eq!(written.len(), 2, "{fault}");
+        assert_eq!(written.last(), Some(&before.blocks), "{fault}");
+        assert_eq!(store.current().unwrap(), before, "{fault}");
+        assert_eq!(store.pending().unwrap().len(), 1, "{fault}");
+    }
+}

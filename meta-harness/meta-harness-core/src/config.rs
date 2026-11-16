@@ -277,27 +277,27 @@ impl Store {
                 blocks_of(&tx, revision)?.ok_or("The revision to restore is gone.")?
             }
         };
-        if let Err(error) = write(&blocks) {
+        let revision = base.revision + 1;
+        // Any failure after `write` took the blocks, the commit included, puts the current ones back.
+        let recorded = write(&blocks).and_then(|()| {
+            tx.execute(
+                "INSERT INTO revision (number, blocks) VALUES (?1, ?2)",
+                params![sql(revision), json(&blocks)],
+            )
+            .map_err(failed)?;
+            log(
+                &tx,
+                now_ms(),
+                client,
+                Action::Approved,
+                number,
+                Some(revision),
+            )?;
+            tx.commit().map_err(failed)
+        });
+        if let Err(error) = recorded {
             let _ = write(&base.blocks);
             return Err(error);
-        }
-        let revision = base.revision + 1;
-        tx.execute(
-            "INSERT INTO revision (number, blocks) VALUES (?1, ?2)",
-            params![sql(revision), json(&blocks)],
-        )
-        .map_err(failed)?;
-        log(
-            &tx,
-            now_ms(),
-            client,
-            Action::Approved,
-            number,
-            Some(revision),
-        )?;
-        if let Err(error) = tx.commit() {
-            let _ = write(&base.blocks);
-            return Err(failed(error));
         }
         Ok(Current { revision, blocks })
     }
