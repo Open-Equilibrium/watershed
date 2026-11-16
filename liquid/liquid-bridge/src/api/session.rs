@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use meta_harness_core::remote::{Host, Project, Stream, Thread};
 use meta_harness_core::{
-    Automation, CONNECTION_FILE, LineageChanges, LocalServer, Permissions, StartThread,
-    ThreadEvent, ThreadSummary, TurnStatus, Watch, Workspace, default_home, visible_name,
+    Automation, LineageChanges, LocalServer, Permissions, StartThread, ThreadEvent, ThreadSummary,
+    TurnStatus, Watch, Workspace, default_home, visible_name,
 };
 use tokio::runtime::Runtime;
 
@@ -146,14 +146,8 @@ impl AgentHost {
                 "from the default folder",
             ),
         };
-        let host = run(Host::connect(&folder, "liquid")).map_err(|error| {
-            let looked = format!("Liquid looked in {} ({found}).", folder.display());
-            if not_running(&folder) {
-                format!("Meta-Harness is not running. {looked} {error}")
-            } else {
-                format!("{error} {looked}")
-            }
-        })?;
+        let host = run(Host::connect(&folder, "liquid"))
+            .map_err(|error| format!("{error} Liquid looked in {} ({found}).", folder.display()))?;
         Ok(Self { host })
     }
 
@@ -306,27 +300,6 @@ fn pump(mut events: Stream<ThreadEvent>) -> tokio::sync::mpsc::Receiver<ThreadEv
         }
     });
     receiver
-}
-
-/// Whether no service runs for the data folder `home`: its connection file is missing, or the
-/// address it names refuses connections, as after a service stopped without removing the file.
-fn not_running(home: &Path) -> bool {
-    let text = match std::fs::read_to_string(home.join(CONNECTION_FILE)) {
-        Ok(text) => text,
-        Err(error) => return error.kind() == std::io::ErrorKind::NotFound,
-    };
-    let address = serde_json::from_str::<serde_json::Value>(&text)
-        .ok()
-        .and_then(|value| {
-            value["url"]
-                .as_str()?
-                .strip_prefix("ws://")
-                .map(str::to_owned)
-        });
-    address.is_some_and(|address| {
-        std::net::TcpStream::connect(address)
-            .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionRefused)
-    })
 }
 
 /// One attempt at the subscription that replaces a lost one; `None` once the thread ended for good.

@@ -49,7 +49,7 @@ impl Endpoint {
             Self::File(path) => {
                 let text = std::fs::read_to_string(path).map_err(|_| {
                     format!(
-                        "No Meta-Harness service runs: {} is missing. Install Meta-Harness or \
+                        "Meta-Harness is not running: {} is missing. Install Meta-Harness or \
                          start it with `meta serve`.",
                         path.display()
                     )
@@ -161,7 +161,15 @@ impl Host {
         );
         let (socket, _) = tokio_tungstenite::connect_async(request)
             .await
-            .map_err(|e| format!("Could not reach Meta-Harness at {url}: {e}"))?;
+            .map_err(|e| match e {
+                // A service that stopped without removing its connection file.
+                tokio_tungstenite::tungstenite::Error::Io(io)
+                    if io.kind() == std::io::ErrorKind::ConnectionRefused =>
+                {
+                    format!("Meta-Harness is not running: nothing answers at {url}.")
+                }
+                e => format!("Could not reach Meta-Harness at {url}: {e}"),
+            })?;
         let (mut sink, mut frames) = socket.split();
         let (out, mut outgoing) = mpsc::unbounded_channel::<Message>();
         let waiters: Arc<Mutex<Option<HashMap<u64, Waiter>>>> =
