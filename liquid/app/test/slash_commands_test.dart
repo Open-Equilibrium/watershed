@@ -3,56 +3,18 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
-import 'package:liquid/src/theme/theme.dart';
 import 'package:liquid/src/workspace/table_block.dart';
-import 'package:liquid/src/workspace/text_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
-import 'fake_workspace.dart';
+import 'page_kit.dart';
 
 void main() {
-  late FakeWorkspace fake;
-  late WorkspaceState workspace;
-  late String page;
+  final kit = PageKit();
 
   /// Opens a Page of paragraphs holding `texts`.
-  Future<void> show(WidgetTester tester, List<String> texts) async {
-    await tester.binding.setSurfaceSize(const Size(1400, 900));
-    fake = FakeWorkspace();
-    workspace = WorkspaceState(fake);
-    await workspace.start();
-    page = workspace.open.value!.page;
-    String? after;
-    for (final text in texts) {
-      final added = await workspace.apply(
-        mutation(
-          BridgeMutationKind.addTextBlock,
-          page: page,
-          after: after,
-          text: text,
-        ),
-      );
-      after = added.view;
-    }
-    workspace.open.value = OpenPage(workspace.open.value!.area, page);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: AgentShell(workspace: workspace),
-      ),
-    );
-    await tester.pumpAndSettle();
-    addTearDown(workspace.dispose);
-  }
-
-  Finder block(int index) => find.descendant(
-    of: find.byType(TextBlock).at(index),
-    matching: find.byType(TextField),
-  );
-  TextField field(WidgetTester tester, int index) =>
-      tester.widget<TextField>(block(index));
+  Future<void> show(WidgetTester tester, List<String> texts) =>
+      kit.show(tester, [for (final text in texts) TextPart(text)]);
 
   /// Types `typed` at the end of the Text Block at `index`, as the text input does.
   Future<void> type(WidgetTester tester, int index, String typed) async {
@@ -70,11 +32,6 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> key(WidgetTester tester, LogicalKeyboardKey key) async {
-    await tester.sendKeyEvent(key);
-    await tester.pumpAndSettle();
-  }
-
   final menu = find.byKey(const Key('slash commands'));
   Finder item(String label) => find.descendant(
     of: menu,
@@ -82,7 +39,7 @@ void main() {
   );
 
   BridgeTextStyle? styleOf(int index) =>
-      fake.styles[fake.views[page]![index].block];
+      kit.fake.styles[kit.fake.views[kit.page]![index].block];
 
   testWidgets(
     '/ in an empty Text Block opens the slash command menu, typing filters it',
@@ -110,8 +67,8 @@ void main() {
       await key(tester, LogicalKeyboardKey.enter);
       expect(menu, findsNothing);
       expect(styleOf(1), BridgeTextStyle.quote);
-      expect(fake.textsOf(page), ['Intro', '']);
-      expect(fake.views[page], hasLength(2), reason: '⏎ split nothing');
+      expect(kit.fake.textsOf(kit.page), ['Intro', '']);
+      expect(kit.fake.views[kit.page], hasLength(2), reason: '⏎ split nothing');
     },
   );
 
@@ -123,7 +80,7 @@ void main() {
     await key(tester, LogicalKeyboardKey.arrowUp);
     await key(tester, LogicalKeyboardKey.enter);
     expect(styleOf(0), BridgeTextStyle.heading1);
-    expect(fake.textsOf(page), ['']);
+    expect(kit.fake.textsOf(kit.page), ['']);
 
     await type(tester, 0, '/');
     await tester.tap(item('Numbered list'));
@@ -139,12 +96,12 @@ void main() {
       await type(tester, 1, '/');
       await type(tester, 1, 'tab');
       await key(tester, LogicalKeyboardKey.enter);
-      expect(fake.views[page]!.map((view) => view.kind), [
+      expect(kit.fake.views[kit.page]!.map((view) => view.kind), [
         BridgeBlockKind.text,
         BridgeBlockKind.database,
         BridgeBlockKind.text,
       ]);
-      expect(fake.textsOf(page), ['Intro', 'After']);
+      expect(kit.fake.textsOf(kit.page), ['Intro', 'After']);
       final name = find.descendant(
         of: find.byType(TableBlock),
         matching: find.byType(TextField),
@@ -175,8 +132,8 @@ void main() {
 
       await tester.enterText(name, 'Expenses');
       await tester.pumpAndSettle();
-      final table = fake.views[page]![1].block;
-      expect(fake.databases[table]!.name, 'Expenses');
+      final table = kit.fake.views[kit.page]![1].block;
+      expect(kit.fake.databases[table]!.name, 'Expenses');
     },
   );
 
@@ -187,12 +144,12 @@ void main() {
     await type(tester, 1, '/');
     await tester.tap(item('Table'));
     await tester.pumpAndSettle();
-    expect(fake.views[page]!.map((view) => view.kind), [
+    expect(kit.fake.views[kit.page]!.map((view) => view.kind), [
       BridgeBlockKind.text,
       BridgeBlockKind.database,
       BridgeBlockKind.text,
     ]);
-    expect(fake.textsOf(page), ['Intro', '']);
+    expect(kit.fake.textsOf(kit.page), ['Intro', '']);
   });
 
   testWidgets('esc closes the slash command menu and keeps what was typed', (
@@ -203,7 +160,7 @@ void main() {
     await type(tester, 0, 'x');
     await key(tester, LogicalKeyboardKey.escape);
     expect(menu, findsNothing);
-    expect(fake.textsOf(page), ['/x']);
+    expect(kit.fake.textsOf(kit.page), ['/x']);
     expect(field(tester, 0).focusNode!.hasFocus, isTrue);
   });
 
@@ -218,7 +175,7 @@ void main() {
       await type(tester, 1, 'zzz');
       expect(menu, findsNothing);
       await key(tester, LogicalKeyboardKey.enter);
-      expect(fake.textsOf(page), [
+      expect(kit.fake.textsOf(kit.page), [
         'Lisbon/',
         '/zzz',
         '',
@@ -234,11 +191,11 @@ void main() {
     // The caret leaves the name for the line below.
     await tester.tap(block(0));
     await tester.pumpAndSettle();
-    final table = fake.views[page]![0].block;
-    await workspace.apply(
+    final table = kit.fake.views[kit.page]![0].block;
+    await kit.workspace.apply(
       mutation(
         BridgeMutationKind.renameDatabase,
-        page: page,
+        page: kit.page,
         block: table,
         text: 'Trips',
       ),
@@ -260,11 +217,11 @@ void main() {
       (tester) async {
         await show(tester, ['Intro', '', if (!last) 'After']);
         await type(tester, 1, '---');
-        expect(fake.views[page]![1].boundary, isTrue);
+        expect(kit.fake.views[kit.page]![1].boundary, isTrue);
         await type(tester, 1, '/');
         await type(tester, 1, 'table');
         await key(tester, LogicalKeyboardKey.enter);
-        final views = fake.views[page]!;
+        final views = kit.fake.views[kit.page]!;
         expect(views[1].kind, BridgeBlockKind.database);
         expect(views[1].boundary, isTrue);
         expect(views.where((view) => view.boundary), hasLength(1));
@@ -279,7 +236,7 @@ void main() {
     await type(tester, 0, '/');
     await type(tester, 0, 'table');
     await key(tester, LogicalKeyboardKey.enter);
-    int renames() => fake.applied
+    int renames() => kit.fake.applied
         .where((applied) => applied.kind == BridgeMutationKind.renameDatabase)
         .length;
     for (final typed in ['n', 'ni', 'nih']) {
@@ -301,7 +258,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(renames(), 1);
-    expect(fake.databases[fake.views[page]![0].block]!.name, '你好');
+    expect(kit.fake.databases[kit.fake.views[kit.page]![0].block]!.name, '你好');
   });
 
   testWidgets('the slash command menu opens in a list item too', (
@@ -332,9 +289,9 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await workspace.drain();
+    await kit.workspace.drain();
     await tester.pumpAndSettle();
-    expect(fake.databases[fake.views[page]![0].block]!.name, 'ni');
+    expect(kit.fake.databases[kit.fake.views[kit.page]![0].block]!.name, 'ni');
   });
 
   testWidgets(
@@ -344,11 +301,11 @@ void main() {
       await type(tester, 0, '/');
       await type(tester, 0, 'table');
       await key(tester, LogicalKeyboardKey.enter);
-      final table = fake.views[page]![0].block;
-      await workspace.apply(
+      final table = kit.fake.views[kit.page]![0].block;
+      await kit.workspace.apply(
         mutation(
           BridgeMutationKind.renameDatabase,
-          page: page,
+          page: kit.page,
           block: table,
           text: 'Trips',
         ),
@@ -383,7 +340,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(block(0));
     await tester.pumpAndSettle();
-    expect(fake.databases[fake.views[page]![0].block]!.name, 'ni');
+    expect(kit.fake.databases[kit.fake.views[kit.page]![0].block]!.name, 'ni');
     expect(
       find.descendant(of: find.byType(TableBlock), matching: find.text('ni')),
       findsOneWidget,
@@ -396,22 +353,22 @@ void main() {
     await show(tester, ['Intro', '', 'After']);
     await type(tester, 1, '/');
     await type(tester, 1, 'table');
-    final gate = fake.gate = Completer<void>();
+    final gate = kit.fake.gate = Completer<void>();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     await type(tester, 1, 'Ex');
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
-    fake.gate = null;
+    kit.fake.gate = null;
     gate.complete();
     await tester.pumpAndSettle();
-    expect(fake.views[page]!.map((view) => view.kind), [
+    expect(kit.fake.views[kit.page]!.map((view) => view.kind), [
       BridgeBlockKind.text,
       BridgeBlockKind.database,
       BridgeBlockKind.text,
     ]);
-    expect(fake.textsOf(page), ['Intro', 'After']);
-    expect(fake.databases[fake.views[page]![1].block]!.name, 'Ex');
+    expect(kit.fake.textsOf(kit.page), ['Intro', 'After']);
+    expect(kit.fake.databases[kit.fake.views[kit.page]![1].block]!.name, 'Ex');
     final name = tester.widget<TextField>(
       find.descendant(
         of: find.byType(TableBlock),
@@ -429,8 +386,8 @@ void main() {
     await type(tester, 0, '/');
     await type(tester, 0, 'table');
     await key(tester, LogicalKeyboardKey.enter);
-    final reads = fake.deferred = [];
-    fake.deferredKinds = {BridgeQueryKind.database};
+    final reads = kit.fake.deferred = [];
+    kit.fake.deferredKinds = {BridgeQueryKind.database};
     for (final typed in ['A', 'AB']) {
       tester.testTextInput.updateEditingValue(
         TextEditingValue(
@@ -454,7 +411,7 @@ void main() {
       await tester.pump();
       expect(name.controller!.text, 'AB');
     }
-    fake.deferred = null;
+    kit.fake.deferred = null;
     await tester.pumpAndSettle();
     expect(name.controller!.text, 'AB');
   });
@@ -465,10 +422,10 @@ void main() {
     await show(tester, ['Intro', '', 'After']);
     await type(tester, 1, '/');
     await type(tester, 1, 'table');
-    fake.refuseKinds = {BridgeMutationKind.removeView};
+    kit.fake.refuseKinds = {BridgeMutationKind.removeView};
     await key(tester, LogicalKeyboardKey.enter);
-    expect(fake.views[page]![2].kind, BridgeBlockKind.database);
-    expect(fake.textsOf(page), ['Intro', '', 'After']);
+    expect(kit.fake.views[kit.page]![2].kind, BridgeBlockKind.database);
+    expect(kit.fake.textsOf(kit.page), ['Intro', '', 'After']);
     final name = tester.widget<TextField>(
       find.descendant(
         of: find.byType(TableBlock),
@@ -476,7 +433,7 @@ void main() {
       ),
     );
     expect(name.focusNode!.hasFocus, isTrue);
-    expect(workspace.problem.value, isNotNull);
+    expect(kit.workspace.problem.value, isNotNull);
   });
 
   testWidgets('what is typed while a Table is added in the last line becomes '
@@ -484,24 +441,24 @@ void main() {
     await show(tester, ['Intro', '']);
     await type(tester, 1, '/');
     await type(tester, 1, 'table');
-    final gate = fake.gate = Completer<void>();
-    fake.gatedKinds = {BridgeMutationKind.addDatabaseBlock};
+    final gate = kit.fake.gate = Completer<void>();
+    kit.fake.gatedKinds = {BridgeMutationKind.addDatabaseBlock};
     // The line's read after its cleared text arrived answers once typing went on.
-    final reads = fake.deferred = [];
-    fake.deferredKinds = {BridgeQueryKind.text};
+    final reads = kit.fake.deferred = [];
+    kit.fake.deferredKinds = {BridgeQueryKind.text};
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     await type(tester, 1, 'Ex');
-    fake.deferred = null;
+    kit.fake.deferred = null;
     for (final read in reads) {
       read.complete();
     }
     await tester.pumpAndSettle();
-    fake.gate = null;
+    kit.fake.gate = null;
     gate.complete();
     await tester.pumpAndSettle();
-    expect(fake.databases[fake.views[page]![1].block]!.name, 'Ex');
-    expect(fake.textsOf(page), ['Intro', '']);
+    expect(kit.fake.databases[kit.fake.views[kit.page]![1].block]!.name, 'Ex');
+    expect(kit.fake.textsOf(kit.page), ['Intro', '']);
   });
 
   testWidgets('a person who moved on while a Table is added keeps the caret', (
@@ -510,18 +467,18 @@ void main() {
     await show(tester, ['Intro', '', 'After']);
     await type(tester, 1, '/');
     await type(tester, 1, 'table');
-    final gate = fake.gate = Completer<void>();
-    fake.gatedKinds = {BridgeMutationKind.addDatabaseBlock};
+    final gate = kit.fake.gate = Completer<void>();
+    kit.fake.gatedKinds = {BridgeMutationKind.addDatabaseBlock};
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     await type(tester, 1, 'Ex');
     await tester.tap(block(0));
     await tester.pump();
-    fake.gate = null;
+    kit.fake.gate = null;
     gate.complete();
     await tester.pumpAndSettle();
     expect(field(tester, 0).focusNode!.hasFocus, isTrue);
-    expect(fake.databases[fake.views[page]![1].block]!.name, 'Ex');
+    expect(kit.fake.databases[kit.fake.views[kit.page]![1].block]!.name, 'Ex');
   });
 
   testWidgets('the last line takes no keys until its Table took the caret', (
@@ -530,27 +487,27 @@ void main() {
     await show(tester, ['Intro', '']);
     await type(tester, 1, '/');
     await type(tester, 1, 'table');
-    final gate = fake.gate = Completer<void>();
-    fake.gatedKinds = {BridgeMutationKind.addDatabaseBlock};
+    final gate = kit.fake.gate = Completer<void>();
+    kit.fake.gatedKinds = {BridgeMutationKind.addDatabaseBlock};
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     await type(tester, 1, 'E');
     // The Page reads its Views again only after the next keys.
-    final reads = fake.deferred = [];
-    fake.deferredKinds = {BridgeQueryKind.views};
-    fake.gate = null;
+    final reads = kit.fake.deferred = [];
+    kit.fake.deferredKinds = {BridgeQueryKind.views};
+    kit.fake.gate = null;
     gate.complete();
     await tester.pump();
     await type(tester, 1, 'x');
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
-    fake.deferred = null;
+    kit.fake.deferred = null;
     for (final read in reads) {
       read.complete();
     }
     await tester.pumpAndSettle();
-    expect(fake.databases[fake.views[page]![1].block]!.name, 'Ex');
-    expect(fake.textsOf(page), ['Intro', '']);
+    expect(kit.fake.databases[kit.fake.views[kit.page]![1].block]!.name, 'Ex');
+    expect(kit.fake.textsOf(kit.page), ['Intro', '']);
   });
 
   testWidgets('a name typed while a Table is added survives the Page closing', (
@@ -559,19 +516,19 @@ void main() {
     await show(tester, ['Intro', '']);
     await type(tester, 1, '/');
     await type(tester, 1, 'table');
-    final gate = fake.gate = Completer<void>();
-    fake.gatedKinds = {BridgeMutationKind.addDatabaseBlock};
+    final gate = kit.fake.gate = Completer<void>();
+    kit.fake.gatedKinds = {BridgeMutationKind.addDatabaseBlock};
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     await type(tester, 1, 'Ex');
-    final area = workspace.open.value!.area;
-    unawaited(workspace.newPage(area));
+    final area = kit.workspace.open.value!.area;
+    unawaited(kit.workspace.newPage(area));
     await tester.pump();
     await tester.pump();
-    fake.gate = null;
+    kit.fake.gate = null;
     gate.complete();
     await tester.pumpAndSettle();
-    expect(fake.databases[fake.views[page]![1].block]!.name, 'Ex');
+    expect(kit.fake.databases[kit.fake.views[kit.page]![1].block]!.name, 'Ex');
   });
 
   for (final held in [true, false]) {
@@ -582,31 +539,31 @@ void main() {
         await show(tester, ['Intro', '', 'After']);
         await type(tester, 1, '/');
         await type(tester, 1, 'table');
-        final gate = fake.gate = Completer<void>();
-        fake.gatedKinds = {BridgeMutationKind.addDatabaseBlock};
-        final reads = fake.deferred = [];
-        fake.deferredKinds = {BridgeQueryKind.views};
+        final gate = kit.fake.gate = Completer<void>();
+        kit.fake.gatedKinds = {BridgeMutationKind.addDatabaseBlock};
+        final reads = kit.fake.deferred = [];
+        kit.fake.deferredKinds = {BridgeQueryKind.views};
         await tester.sendKeyEvent(LogicalKeyboardKey.enter);
         await tester.pump();
         await type(tester, 1, 'Ex');
         if (!held) {
-          fake.gate = null;
+          kit.fake.gate = null;
           gate.complete();
           await tester.pump();
         }
-        final draining = workspace.drain();
+        final draining = kit.workspace.drain();
         if (held) {
-          fake.gate = null;
+          kit.fake.gate = null;
           gate.complete();
         }
         await tester.pump();
         await draining;
         // Liquid exits now, before the Table is built.
-        final table = fake.views[page]!.firstWhere(
+        final table = kit.fake.views[kit.page]!.firstWhere(
           (view) => view.kind == BridgeBlockKind.database,
         );
-        expect(fake.databases[table.block]!.name, 'Ex');
-        fake.deferred = null;
+        expect(kit.fake.databases[table.block]!.name, 'Ex');
+        kit.fake.deferred = null;
         for (final read in reads) {
           read.complete();
         }
@@ -621,28 +578,28 @@ void main() {
     await show(tester, ['Intro', '', 'After']);
     await type(tester, 1, '/');
     await type(tester, 1, 'table');
-    final gate = fake.gate = Completer<void>();
-    fake.gatedKinds = {BridgeMutationKind.addDatabaseBlock};
-    final reads = fake.deferred = [];
-    fake.deferredKinds = {BridgeQueryKind.views};
+    final gate = kit.fake.gate = Completer<void>();
+    kit.fake.gatedKinds = {BridgeMutationKind.addDatabaseBlock};
+    final reads = kit.fake.deferred = [];
+    kit.fake.deferredKinds = {BridgeQueryKind.views};
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     await type(tester, 1, 'Ex');
-    fake.gate = null;
+    kit.fake.gate = null;
     gate.complete();
     await tester.pump();
-    fake.deferred = null;
+    kit.fake.deferred = null;
     for (final read in reads) {
       read.complete();
     }
     await tester.pumpAndSettle();
     expect(
-      fake.applied.where(
+      kit.fake.applied.where(
         (applied) => applied.kind == BridgeMutationKind.renameDatabase,
       ),
       hasLength(1),
     );
-    expect(fake.databases[fake.views[page]![1].block]!.name, 'Ex');
+    expect(kit.fake.databases[kit.fake.views[kit.page]![1].block]!.name, 'Ex');
   });
 
   testWidgets('/ on a blank Page opens the slash command menu', (tester) async {
@@ -653,14 +610,14 @@ void main() {
     await type(tester, 0, 'h');
     await key(tester, LogicalKeyboardKey.enter);
     expect(styleOf(0), BridgeTextStyle.heading1);
-    expect(fake.textsOf(page), ['']);
+    expect(kit.fake.textsOf(kit.page), ['']);
   });
 
   testWidgets('a quickly typed /ta on a blank Page opens the menu filtered', (
     tester,
   ) async {
     await show(tester, []);
-    fake
+    kit.fake
       ..gate = Completer()
       ..gatedKinds = {BridgeMutationKind.addTextBlock};
     final first = find.byKey(const Key('first-line'));
@@ -669,12 +626,12 @@ void main() {
     // Keys typed while the first Text Block is made arrive with it.
     await tester.enterText(first, '/ta');
     await tester.pump();
-    fake.gate!.complete();
+    kit.fake.gate!.complete();
     await tester.pumpAndSettle();
     expect(item('Table'), findsOneWidget);
     expect(item('Text'), findsNothing);
     await key(tester, LogicalKeyboardKey.enter);
-    expect(fake.views[page]!.first.kind, BridgeBlockKind.database);
+    expect(kit.fake.views[kit.page]!.first.kind, BridgeBlockKind.database);
   });
 
   testWidgets('text pasted on a blank Page opens no menu', (tester) async {
@@ -682,7 +639,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('first-line')), '/quote');
     await tester.pumpAndSettle();
     expect(menu, findsNothing);
-    expect(fake.textsOf(page), ['/quote']);
+    expect(kit.fake.textsOf(kit.page), ['/quote']);
   });
 
   testWidgets('a line left alone by a join opens no menu', (tester) async {
@@ -691,7 +648,7 @@ void main() {
     await tester.pump();
     // ⌫ at the empty line's start joins it to the line above, the Page's only one.
     await key(tester, LogicalKeyboardKey.backspace);
-    expect(fake.textsOf(page), ['/text']);
+    expect(kit.fake.textsOf(kit.page), ['/text']);
     expect(menu, findsNothing);
   });
 
@@ -708,6 +665,43 @@ void main() {
     expect(line.top, greaterThan(450), reason: 'the line is low');
     expect(shown.bottom, lessThanOrEqualTo(line.top));
     expect(shown.top, greaterThanOrEqualTo(0));
+  });
+
+  testWidgets('scrolling the Page chooses the menu\'s side again', (
+    tester,
+  ) async {
+    await show(tester, [
+      for (var line = 0; line < 20; line++) 'Line $line',
+      '',
+      for (var line = 21; line < 50; line++) 'Line $line',
+    ]);
+    await type(tester, 20, '/');
+    // Only the Views in view are built, so the line is found by its text.
+    final slash = find.byWidgetPredicate(
+      (widget) => widget is TextField && widget.controller?.text == '/',
+    );
+    expect(
+      tester.getRect(menu).bottom,
+      lessThanOrEqualTo(tester.getRect(slash).top),
+    );
+    // The line scrolls up near the window's top, where the menu no longer fits above it.
+    final scroll = tester.state<ScrollableState>(
+      find
+          .descendant(
+            of: find.byType(CustomScrollView),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    scroll.position.jumpTo(
+      scroll.position.pixels + tester.getRect(slash).top - 40,
+    );
+    await tester.pumpAndSettle();
+    final line = tester.getRect(slash);
+    final shown = tester.getRect(menu);
+    expect(line.top, lessThan(100), reason: 'the line is high');
+    expect(shown.top, greaterThanOrEqualTo(line.bottom));
+    expect(shown.bottom, lessThanOrEqualTo(900));
   });
 
   testWidgets('in a low window, the menu scrolls to the chosen command', (

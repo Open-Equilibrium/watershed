@@ -242,22 +242,12 @@ pub(crate) fn sort_after(siblings: &[Entry], after: Option<&str>) -> Result<Stri
 
 /// The sort key for an entry placed at `place` among `siblings`.
 pub(crate) fn sort_at(siblings: &[Entry], place: Place<&str>) -> Result<String, Error> {
-    let index = match place {
-        Place::First => 0,
-        Place::After(after) => {
-            siblings
-                .iter()
-                .position(|entry| entry.id == after)
-                .ok_or(Error::NotFound)?
-                + 1
-        }
-        Place::Last => siblings.len(),
-    };
-    let key = |i: usize| siblings.get(i).and_then(|entry| entry.get(SORT));
-    Ok(crate::sort_key::between(
-        index.checked_sub(1).and_then(key),
-        key(index),
-    ))
+    crate::sort_key::at(
+        siblings,
+        place,
+        |entry| entry.id.as_str(),
+        |entry| entry.get(SORT),
+    )
 }
 
 pub(crate) fn areas(doc: &AutoCommit) -> Vec<Area> {

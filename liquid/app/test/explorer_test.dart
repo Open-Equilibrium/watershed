@@ -13,39 +13,28 @@ import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
 import 'package:liquid/src/theme/tokens.g.dart';
 import 'package:liquid/src/workspace/page_view.dart';
-import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'fake_backend.dart';
-import 'fake_workspace.dart';
 import 'focus_kit.dart';
+import 'page_kit.dart';
 
 const info = SessionInfo(project: 'acme-api');
 
 void main() {
-  late FakeWorkspace fake;
-  late WorkspaceState workspace;
+  final kit = PageKit();
 
   Future<void> show(WidgetTester tester, {SessionState? session}) async {
-    await tester.binding.setSurfaceSize(const Size(1400, 900));
-    fake = FakeWorkspace();
-    workspace = WorkspaceState(fake);
-    await workspace.start(show: session == null);
     if (session != null) {
       await session.loadStart();
       await session.open('thread-1');
     }
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: AgentShell(
-          state: session,
-          info: session == null ? null : info,
-          workspace: workspace,
-        ),
-      ),
+    await kit.show(
+      tester,
+      const [],
+      fresh: true,
+      session: session,
+      info: session == null ? null : info,
     );
-    await tester.pumpAndSettle();
-    addTearDown(workspace.dispose);
   }
 
   /// The project behind an agent session, which records what the app asks of it.
@@ -58,7 +47,7 @@ void main() {
 
   Finder title() => find.byKey(const Key('page-title'));
   List<String?> renames() => [
-    for (final mutation in fake.applied)
+    for (final mutation in kit.fake.applied)
       if (mutation.kind == BridgeMutationKind.renamePage) mutation.text,
   ];
   Finder inSidebar(String text) =>
@@ -82,7 +71,7 @@ void main() {
     await tester.enterText(title(), 'Trip to Lisbon');
     await tester.pumpAndSettle();
     await tester.pumpAndSettle();
-    expect(fake.pages.values.single.single.title, 'Trip to Lisbon');
+    expect(kit.fake.pages.values.single.single.title, 'Trip to Lisbon');
     expect(inSidebar('Trip to Lisbon'), findsOneWidget);
     expect(header('Trip to Lisbon'), findsOneWidget);
     expect(header('Private'), findsOneWidget);
@@ -94,9 +83,9 @@ void main() {
     await show(tester);
     await tester.enterText(title(), 'Plan\nnow');
     await tester.pumpAndSettle();
-    expect(fake.pages.values.single.single.title, 'Plan now');
+    expect(kit.fake.pages.values.single.single.title, 'Plan now');
 
-    fake.refuse = 'the replica is read-only';
+    kit.fake.refuse = 'the replica is read-only';
     await tester.enterText(title(), 'Plan now!');
     await tester.pumpAndSettle();
     await tester.pumpAndSettle();
@@ -115,7 +104,10 @@ void main() {
       // A title Liquid assigns while the person is not typing in the field.
       FocusManager.instance.primaryFocus?.unfocus();
       await tester.pumpAndSettle();
-      await workspace.rename(fake.pages.values.single.single.id, 'Porto');
+      await kit.workspace.rename(
+        kit.fake.pages.values.single.single.id,
+        'Porto',
+      );
       await tester.pumpAndSettle();
       expect(tester.widget<TextField>(title()).controller!.text, 'Porto');
 
@@ -126,7 +118,7 @@ void main() {
       await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
       await tester.pumpAndSettle();
       expect(tester.widget<TextField>(title()).controller!.text, 'Porto');
-      expect(fake.pages.values.single.single.title, 'Porto');
+      expect(kit.fake.pages.values.single.single.title, 'Porto');
     },
     variant: TargetPlatformVariant.only(TargetPlatform.macOS),
   );
@@ -152,8 +144,12 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
     await tester.pumpAndSettle();
-    final area = fake.areas.single.id;
-    expect(fake.pages[area]!.map((page) => page.title), ['Trip', 'Budget', '']);
+    final area = kit.fake.areas.single.id;
+    expect(kit.fake.pages[area]!.map((page) => page.title), [
+      'Trip',
+      'Budget',
+      '',
+    ]);
 
     // Notion's "Add a page inside", from the row's menu.
     await tester.tapAt(
@@ -164,9 +160,9 @@ void main() {
     await tester.tap(find.text('Add a page inside'));
     await tester.pumpAndSettle();
     await tester.pumpAndSettle();
-    final trip = fake.pages[area]!.first.id;
-    expect(fake.pages[area]![1].parent, trip);
-    expect(workspace.open.value?.page, fake.pages[area]![1].id);
+    final trip = kit.fake.pages[area]!.first.id;
+    expect(kit.fake.pages[area]![1].parent, trip);
+    expect(kit.workspace.open.value?.page, kit.fake.pages[area]![1].id);
     expect(find.bySemanticsLabel('Collapse'), findsOneWidget);
 
     await tester.tap(find.bySemanticsLabel('Collapse'));
@@ -270,7 +266,7 @@ void main() {
     'a Workspace problem shows in the sidebar while no Page is open',
     (tester) async {
       await show(tester, session: agent());
-      fake.refuse = 'the replica is read-only';
+      kit.fake.refuse = 'the replica is read-only';
       await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
       await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
@@ -287,7 +283,7 @@ void main() {
     await show(tester);
     await tester.tap(title());
     await tester.pump();
-    fake.applied.clear();
+    kit.fake.applied.clear();
     tester.testTextInput.updateEditingValue(
       const TextEditingValue(
         text: 'nihon',
@@ -313,7 +309,7 @@ void main() {
     await show(tester);
     await tester.tap(title());
     await tester.pump();
-    fake.applied.clear();
+    kit.fake.applied.clear();
     tester.testTextInput.updateEditingValue(
       const TextEditingValue(
         text: 'nihon',
@@ -323,7 +319,7 @@ void main() {
     );
     await tester.pump();
     var drained = false;
-    unawaited(workspace.drain().then((_) => drained = true));
+    unawaited(kit.workspace.drain().then((_) => drained = true));
     await tester.pump();
     expect(drained, isTrue);
     expect(renames(), ['nihon']);
@@ -335,7 +331,7 @@ void main() {
     await show(tester);
     await tester.tap(title());
     await tester.pump();
-    fake.applied.clear();
+    kit.fake.applied.clear();
     tester.testTextInput.updateEditingValue(
       const TextEditingValue(
         text: 'nihon',
@@ -391,13 +387,13 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    fake.gate = Completer();
+    kit.fake.gate = Completer();
     await tester.enterText(title(), 'P');
     await tester.enterText(title(), 'Pl');
-    fake.refuseNext = 1;
-    fake.gate!.complete();
+    kit.fake.refuseNext = 1;
+    kit.fake.gate!.complete();
     await tester.pumpAndSettle();
-    expect(fake.pages.values.single.single.title, 'Pl');
+    expect(kit.fake.pages.values.single.single.title, 'Pl');
     expect(tester.widget<TextField>(title()).controller!.text, 'Pl');
   });
 
@@ -406,19 +402,19 @@ void main() {
   ) async {
     await show(tester);
     // The tree is not read again yet, so it still holds the title before 'P'.
-    fake.deferredKinds = {BridgeQueryKind.pages};
-    fake.deferred = [];
+    kit.fake.deferredKinds = {BridgeQueryKind.pages};
+    kit.fake.deferred = [];
     await tester.enterText(title(), 'P');
     await tester.pumpAndSettle();
-    fake.refuseNext = 1;
+    kit.fake.refuseNext = 1;
     await tester.enterText(title(), 'Pl');
     await tester.pumpAndSettle();
-    fake.deferredKinds = {};
-    for (final release in [...fake.deferred!]) {
+    kit.fake.deferredKinds = {};
+    for (final release in [...kit.fake.deferred!]) {
       release.complete();
     }
     await tester.pumpAndSettle();
-    expect(fake.pages.values.single.single.title, 'P');
+    expect(kit.fake.pages.values.single.single.title, 'P');
     expect(tester.widget<TextField>(title()).controller!.text, 'P');
   });
 

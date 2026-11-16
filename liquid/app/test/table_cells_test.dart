@@ -7,10 +7,10 @@ import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/table_cells.dart';
 import 'package:liquid/src/workspace/text_block.dart';
 
-import 'table_kit.dart';
+import 'page_kit.dart';
 
 void main() {
-  final kit = TableKit();
+  final kit = PageKit();
 
   Finder cell(String row, String field) =>
       kit.inTable(find.byKey(ValueKey('cell $row $field')));

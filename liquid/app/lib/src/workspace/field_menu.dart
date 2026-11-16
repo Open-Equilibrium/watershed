@@ -234,9 +234,6 @@ class FieldMenus extends ChangeNotifier {
   /// Asks before a field and its values go.
   final Future<bool> Function(BridgeField field) confirm;
 
-  final overlay = OverlayPortalController();
-  final anchor = LayerLink();
-
   /// The field whose menu is open.
   String? open;
 
@@ -262,7 +259,6 @@ class FieldMenus extends ChangeNotifier {
     );
     _opened = field.name;
     open = field.id;
-    overlay.show();
     notifyListeners();
   }
 
@@ -271,7 +267,6 @@ class FieldMenus extends ChangeNotifier {
     if (open == null) return;
     if (!drop) renameTyped();
     open = null;
-    overlay.hide();
     notifyListeners();
   }
 
@@ -315,31 +310,15 @@ class FieldMenus extends ChangeNotifier {
     if (open != null && fieldOf(open) == null) close(drop: true);
   }
 
-  /// The open menu, under its field's header.
+  /// The open menu, which hangs under its field's header.
   Widget view(BuildContext context) {
     final field = fieldOf(open);
     if (field == null) return const SizedBox.shrink();
-    return Align(
-      alignment: Alignment.topLeft,
-      child: CompositedTransformFollower(
-        link: anchor,
-        showWhenUnlinked: false,
-        targetAnchor: Alignment.bottomLeft,
-        offset: const Offset(0, WsMetrics.space1),
-        child: TapRegion(
-          groupId: overlay,
-          onTapOutside: (_) => close(),
-          // A click in the menu beside its name keeps the name's keys.
-          child: TextFieldTapRegion(
-            child: FieldMenu(
-              field: field,
-              name: name,
-              onClose: close,
-              onDelete: () => unawaited(delete()),
-            ),
-          ),
-        ),
-      ),
+    return FieldMenu(
+      field: field,
+      name: name,
+      onClose: close,
+      onDelete: () => unawaited(delete()),
     );
   }
 

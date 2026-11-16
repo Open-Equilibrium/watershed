@@ -3,11 +3,8 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:liquid/src/agent/shell.dart';
-import 'package:liquid/src/theme/theme.dart';
-import 'package:liquid/src/workspace/workspace_state.dart';
 
-import 'fake_workspace.dart';
+import 'page_kit.dart';
 
 /// What a person typed, as plain lines with a caret: the editor must store exactly this,
 /// however late the core answers (ADR-0240).
@@ -50,20 +47,11 @@ void main() {
     testWidgets('typing with slow answers stores what was typed, seed $seed, '
         '${end.name}', (tester) async {
       final random = Random(seed);
-      await tester.binding.setSurfaceSize(const Size(1400, 900));
-      final fake = FakeWorkspace();
-      final workspace = WorkspaceState(fake);
-      await workspace.start();
-      final page = workspace.open.value!.page;
-      workspace.open.value = OpenPage(workspace.open.value!.area, page);
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: liquidTheme(Brightness.light),
-          home: AgentShell(workspace: workspace),
-        ),
-      );
-      await tester.pumpAndSettle();
-      addTearDown(workspace.dispose);
+      final kit = PageKit();
+      await kit.show(tester, const []);
+      final fake = kit.fake;
+      final workspace = kit.workspace;
+      final page = kit.page;
       fake.delay = () => Duration(milliseconds: random.nextInt(20));
 
       EditableTextState focused() => tester.state<EditableTextState>(

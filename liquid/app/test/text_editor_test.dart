@@ -3,21 +3,17 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/shortcuts/keymap.dart';
 import 'package:liquid/src/shortcuts/shortcut_store.dart';
-import 'package:liquid/src/theme/theme.dart';
 import 'package:liquid/src/workspace/text_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
-import 'fake_workspace.dart';
 import 'focus_kit.dart';
+import 'page_kit.dart';
 
 void main() {
-  late FakeWorkspace fake;
-  late WorkspaceState workspace;
-  late String page;
+  final kit = PageKit();
 
   /// Opens a Page holding `texts`, as paragraphs unless `style` says otherwise.
   Future<void> show(
@@ -25,46 +21,9 @@ void main() {
     List<String> texts = const [],
     BridgeTextStyle style = BridgeTextStyle.paragraph,
     ShortcutSettings? settings,
-  ]) async {
-    await tester.binding.setSurfaceSize(const Size(1400, 900));
-    fake = FakeWorkspace();
-    workspace = WorkspaceState(fake);
-    await workspace.start();
-    page = workspace.open.value!.page;
-    String? after;
-    for (final text in texts) {
-      final added = await workspace.apply(
-        mutation(
-          BridgeMutationKind.addTextBlock,
-          page: page,
-          after: after,
-          text: text,
-        ),
-      );
-      after = added.view;
-      fake.styles[added.block!] = style;
-    }
-    // Opened afresh, not as the new Page that takes the keys in its title.
-    workspace.open.value = OpenPage(workspace.open.value!.area, page);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: AgentShell(
-          workspace: workspace,
-          shortcuts: ShortcutController.memory(settings),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    addTearDown(workspace.dispose);
-  }
-
-  Finder block(int index) => find.descendant(
-    of: find.byType(TextBlock).at(index),
-    matching: find.byType(TextField),
-  );
-  TextField field(WidgetTester tester, int index) =>
-      tester.widget<TextField>(block(index));
+  ]) => kit.show(tester, [
+    for (final text in texts) TextPart(text, style),
+  ], shortcuts: ShortcutController.memory(settings));
 
   /// Puts the caret at `offset` in the Text Block at `index`.
   Future<void> caret(WidgetTester tester, int index, int offset) async {
@@ -74,11 +33,6 @@ void main() {
       offset: offset,
     );
     await tester.pump();
-  }
-
-  Future<void> key(WidgetTester tester, LogicalKeyboardKey key) async {
-    await tester.sendKeyEvent(key);
-    await tester.pumpAndSettle();
   }
 
   /// Presses `key` while `modifier` is held, as the macOS keyboard sends it.
@@ -112,9 +66,9 @@ void main() {
     WidgetTester tester, [
     Set<BridgeQueryKind> kinds = const {},
   ]) async {
-    fake.deferredKinds = kinds;
-    final held = [...fake.deferred!];
-    fake.deferred!.clear();
+    kit.fake.deferredKinds = kinds;
+    final held = [...kit.fake.deferred!];
+    kit.fake.deferred!.clear();
     for (final query in held) {
       query.complete();
     }
@@ -125,13 +79,13 @@ void main() {
       field(tester, index).focusNode!.hasFocus;
 
   BridgeTextStyle styleOf(int index) =>
-      fake.styles[fake.views[page]![index].block]!;
+      kit.fake.styles[kit.fake.views[kit.page]![index].block]!;
 
   /// The styles written to the Text Block at `index`, in order.
   List<BridgeTextStyle> written(int index) {
-    final block = fake.views[page]![index].block;
+    final block = kit.fake.views[kit.page]![index].block;
     return [
-      for (final change in fake.applied)
+      for (final change in kit.fake.applied)
         if (change.kind == BridgeMutationKind.setTextStyle &&
             change.block == block)
           change.style,
@@ -145,11 +99,11 @@ void main() {
     expect(find.text('Type to write.'), findsOneWidget);
     await tester.enterText(find.byKey(const Key('first-line')), 'F');
     await tester.pumpAndSettle();
-    expect(fake.textsOf(page), ['F']);
+    expect(kit.fake.textsOf(kit.page), ['F']);
     expect(focused(tester, 0), isTrue);
 
     await type(tester, 0, 'ive days');
-    expect(fake.textsOf(page), ['Five days']);
+    expect(kit.fake.textsOf(kit.page), ['Five days']);
     expect(field(tester, 0).controller!.text, 'Five days');
   });
 
@@ -159,13 +113,13 @@ void main() {
     await show(tester, ['Lisbon Porto']);
     await caret(tester, 0, 6);
     await key(tester, LogicalKeyboardKey.enter);
-    expect(fake.textsOf(page), ['Lisbon', ' Porto']);
+    expect(kit.fake.textsOf(kit.page), ['Lisbon', ' Porto']);
     expect(focused(tester, 1), isTrue);
     expect(field(tester, 1).controller!.selection.baseOffset, 0);
 
     // At the start an empty Text Block goes above and the caret stays.
     await key(tester, LogicalKeyboardKey.enter);
-    expect(fake.textsOf(page), ['Lisbon', '', ' Porto']);
+    expect(kit.fake.textsOf(kit.page), ['Lisbon', '', ' Porto']);
     expect(focused(tester, 2), isTrue);
   });
 
@@ -175,7 +129,7 @@ void main() {
     await show(tester, ['Five days', ' in Lisbon']);
     await caret(tester, 1, 0);
     await key(tester, LogicalKeyboardKey.backspace);
-    expect(fake.textsOf(page), ['Five days in Lisbon']);
+    expect(kit.fake.textsOf(kit.page), ['Five days in Lisbon']);
     expect(focused(tester, 0), isTrue);
     expect(field(tester, 0).controller!.selection.baseOffset, 9);
   });
@@ -187,10 +141,10 @@ void main() {
       await caret(tester, 1, 0);
       await tester.pump(const Duration(milliseconds: 600));
       await key(tester, LogicalKeyboardKey.backspace);
-      expect(fake.textsOf(page), ['Hello world']);
+      expect(kit.fake.textsOf(kit.page), ['Hello world']);
       await tester.pump(const Duration(milliseconds: 600));
       await undo(tester);
-      expect(fake.textsOf(page), ['Hello world']);
+      expect(kit.fake.textsOf(kit.page), ['Hello world']);
       expect(field(tester, 0).controller!.text, 'Hello world');
     },
     variant: TargetPlatformVariant.only(TargetPlatform.macOS),
@@ -203,12 +157,12 @@ void main() {
       await caret(tester, 0, 5);
       await tester.pump(const Duration(milliseconds: 600));
       await key(tester, LogicalKeyboardKey.enter);
-      expect(fake.textsOf(page), ['Hello', ' world']);
+      expect(kit.fake.textsOf(kit.page), ['Hello', ' world']);
       await tester.pump(const Duration(milliseconds: 600));
       await key(tester, LogicalKeyboardKey.arrowUp);
       expect(focused(tester, 0), isTrue);
       await undo(tester);
-      expect(fake.textsOf(page), ['Hello', ' world']);
+      expect(kit.fake.textsOf(kit.page), ['Hello', ' world']);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.macOS),
   );
@@ -226,7 +180,7 @@ void main() {
     expect(styleOf(0), BridgeTextStyle.heading1);
     await undo(tester);
     expect(styleOf(0), BridgeTextStyle.heading1);
-    expect(fake.textsOf(page), ['Title']);
+    expect(kit.fake.textsOf(kit.page), ['Title']);
     expect(field(tester, 0).controller!.text, 'Title');
   }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
@@ -241,35 +195,36 @@ void main() {
     await type(tester, 0, 'x');
     await tester.pump(const Duration(milliseconds: 600));
     await undo(tester);
-    expect(fake.textsOf(page), ['Hello world']);
+    expect(kit.fake.textsOf(kit.page), ['Hello world']);
     await undo(tester);
-    expect(fake.textsOf(page), ['Hello world']);
+    expect(kit.fake.textsOf(kit.page), ['Hello world']);
   }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
-  testWidgets('typing before the next frame after a shortcut keeps what is typed', (
-    tester,
-  ) async {
-    await show(tester, ['']);
-    await caret(tester, 0, 0);
-    // The shortcut takes its marker out, which is a write Liquid makes; the next keys follow it
-    // before any frame is drawn.
-    tester.testTextInput.updateEditingValue(
-      const TextEditingValue(
-        text: '- ',
-        selection: TextSelection.collapsed(offset: 2),
-      ),
-    );
-    tester.testTextInput.updateEditingValue(
-      const TextEditingValue(
-        text: 'P',
-        selection: TextSelection.collapsed(offset: 1),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(styleOf(0), BridgeTextStyle.bullet);
-    expect(fake.textsOf(page), ['P']);
-    expect(field(tester, 0).controller!.text, 'P');
-  });
+  testWidgets(
+    'typing before the next frame after a shortcut keeps what is typed',
+    (tester) async {
+      await show(tester, ['']);
+      await caret(tester, 0, 0);
+      // The shortcut takes its marker out, which is a write Liquid makes; the next keys follow it
+      // before any frame is drawn.
+      tester.testTextInput.updateEditingValue(
+        const TextEditingValue(
+          text: '- ',
+          selection: TextSelection.collapsed(offset: 2),
+        ),
+      );
+      tester.testTextInput.updateEditingValue(
+        const TextEditingValue(
+          text: 'P',
+          selection: TextSelection.collapsed(offset: 1),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(styleOf(0), BridgeTextStyle.bullet);
+      expect(kit.fake.textsOf(kit.page), ['P']);
+      expect(field(tester, 0).controller!.text, 'P');
+    },
+  );
 
   testWidgets('⌘Z still undoes typing with no replacement in between', (
     tester,
@@ -281,7 +236,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 600));
     }
     await undo(tester);
-    expect(fake.textsOf(page), ['ab']);
+    expect(kit.fake.textsOf(kit.page), ['ab']);
     expect(field(tester, 0).controller!.text, 'ab');
   }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
@@ -293,7 +248,7 @@ void main() {
     await type(tester, 0, '#');
     await type(tester, 0, ' ');
     expect(styleOf(0), BridgeTextStyle.heading1);
-    expect(fake.textsOf(page), ['']);
+    expect(kit.fake.textsOf(kit.page), ['']);
     await type(tester, 0, 'Plan');
     await key(tester, LogicalKeyboardKey.enter);
     expect(styleOf(1), BridgeTextStyle.paragraph);
@@ -306,13 +261,13 @@ void main() {
     // ⏎ in an empty item ends the list, as in Notion.
     await key(tester, LogicalKeyboardKey.enter);
     expect(styleOf(2), BridgeTextStyle.paragraph);
-    expect(fake.textsOf(page), ['Plan', 'Passport', '']);
+    expect(kit.fake.textsOf(kit.page), ['Plan', 'Passport', '']);
 
     // ⌫ at the start of a formatted Text Block first makes it a paragraph.
     await caret(tester, 1, 0);
     await key(tester, LogicalKeyboardKey.backspace);
     expect(styleOf(1), BridgeTextStyle.paragraph);
-    expect(fake.textsOf(page), ['Plan', 'Passport', '']);
+    expect(kit.fake.textsOf(kit.page), ['Plan', 'Passport', '']);
   });
 
   testWidgets('numbered items count, and a to-do is ticked by its box', (
@@ -344,7 +299,10 @@ void main() {
 
     await chord(tester, LogicalKeyboardKey.metaLeft, LogicalKeyboardKey.enter);
     expect(styleOf(0), BridgeTextStyle.done);
-    expect(fake.textsOf(page), ['Pack', 'Fly'], reason: 'nothing is split');
+    expect(kit.fake.textsOf(kit.page), [
+      'Pack',
+      'Fly',
+    ], reason: 'nothing is split');
 
     await chord(tester, LogicalKeyboardKey.metaLeft, LogicalKeyboardKey.enter);
     expect(styleOf(0), BridgeTextStyle.todo);
@@ -366,7 +324,7 @@ void main() {
 
     await chord(tester, liquidKey, LogicalKeyboardKey.enter);
     expect(styleOf(0), BridgeTextStyle.done);
-    expect(fake.textsOf(page), ['Pack']);
+    expect(kit.fake.textsOf(kit.page), ['Pack']);
   });
 
   testWidgets('--- starts a Section below a divider, and ⌫ there removes it', (
@@ -375,22 +333,22 @@ void main() {
     await show(tester, ['Plan', '']);
     await caret(tester, 1, 0);
     await type(tester, 1, '---');
-    expect(fake.views[page]![1].boundary, isTrue);
-    expect(fake.textsOf(page), ['Plan', '']);
+    expect(kit.fake.views[kit.page]![1].boundary, isTrue);
+    expect(kit.fake.textsOf(kit.page), ['Plan', '']);
     expect(find.byKey(const Key('section-divider')), findsOneWidget);
 
     await key(tester, LogicalKeyboardKey.backspace);
-    expect(fake.views[page]![1].boundary, isFalse);
+    expect(kit.fake.views[kit.page]![1].boundary, isFalse);
     expect(find.byKey(const Key('section-divider')), findsNothing);
-    expect(fake.textsOf(page), ['Plan', '']);
+    expect(kit.fake.textsOf(kit.page), ['Plan', '']);
   });
 
   testWidgets('--- at the Page’s start stays text', (tester) async {
     await show(tester, ['']);
     await caret(tester, 0, 0);
     await type(tester, 0, '---');
-    expect(fake.views[page]![0].boundary, isFalse);
-    expect(fake.textsOf(page), ['---']);
+    expect(kit.fake.views[kit.page]![0].boundary, isFalse);
+    expect(kit.fake.textsOf(kit.page), ['---']);
   });
 
   testWidgets('⏎ in the title and arrows at the edges move between Blocks', (
@@ -414,7 +372,7 @@ void main() {
   testWidgets('a refused edit shows the stored text again', (tester) async {
     await show(tester, ['Lisbon']);
     await caret(tester, 0, 6);
-    fake.refuse = 'the replica is read-only';
+    kit.fake.refuse = 'the replica is read-only';
     await type(tester, 0, '!');
     expect(field(tester, 0).controller!.text, 'Lisbon');
     expect(find.text('the replica is read-only'), findsOneWidget);
@@ -425,14 +383,14 @@ void main() {
   ) async {
     await show(tester, ['One']);
     await caret(tester, 0, 3);
-    fake.gate = Completer();
+    kit.fake.gate = Completer();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     // The split still waits, so the caret is still in the first Text Block.
     await type(tester, 0, 'Two');
-    fake.gate!.complete();
+    kit.fake.gate!.complete();
     await tester.pumpAndSettle();
-    expect(fake.textsOf(page), ['One', 'Two']);
+    expect(kit.fake.textsOf(kit.page), ['One', 'Two']);
     expect(focused(tester, 1), isTrue);
     expect(field(tester, 1).controller!.text, 'Two');
     expect(field(tester, 0).controller!.text, 'One');
@@ -442,12 +400,12 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    fake.gate = Completer();
+    kit.fake.gate = Completer();
     await tester.enterText(find.byKey(const Key('first-line')), 'a');
     await tester.enterText(find.byKey(const Key('first-line')), 'b');
-    fake.gate!.complete();
+    kit.fake.gate!.complete();
     await tester.pumpAndSettle();
-    expect(fake.textsOf(page), ['b']);
+    expect(kit.fake.textsOf(kit.page), ['b']);
     expect(field(tester, 0).controller!.text, 'b');
   });
 
@@ -463,7 +421,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(fake.textsOf(page), isEmpty);
+    expect(kit.fake.textsOf(kit.page), isEmpty);
     tester.testTextInput.updateEditingValue(
       const TextEditingValue(
         text: '你',
@@ -471,7 +429,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(fake.textsOf(page), ['你']);
+    expect(kit.fake.textsOf(kit.page), ['你']);
   });
 
   testWidgets('a read that crossed an edit never shows older text', (
@@ -479,23 +437,23 @@ void main() {
   ) async {
     await show(tester, ['']);
     await caret(tester, 0, 0);
-    fake.gate = Completer();
-    fake.deferredKinds = {BridgeQueryKind.text};
-    fake.deferred = [];
+    kit.fake.gate = Completer();
+    kit.fake.deferredKinds = {BridgeQueryKind.text};
+    kit.fake.deferred = [];
     await type(tester, 0, 'a');
     await type(tester, 0, 'b');
-    fake.gate!.complete();
+    kit.fake.gate!.complete();
     await tester.pump();
     await tester.pump();
-    final held = fake.deferred!;
-    fake.deferred = null;
+    final held = kit.fake.deferred!;
+    kit.fake.deferred = null;
     // The newest reads answer first, the oldest last.
     for (final release in held.reversed) {
       release.complete();
       await tester.pump();
     }
     await tester.pumpAndSettle();
-    expect(fake.textsOf(page), ['ab']);
+    expect(kit.fake.textsOf(kit.page), ['ab']);
     expect(field(tester, 0).controller!.text, 'ab');
   });
 
@@ -503,20 +461,20 @@ void main() {
     tester,
   ) async {
     await show(tester, ['One']);
-    fake.deferredKinds = {BridgeQueryKind.text};
-    fake.deferred = [];
-    await workspace.apply(
+    kit.fake.deferredKinds = {BridgeQueryKind.text};
+    kit.fake.deferred = [];
+    await kit.workspace.apply(
       mutation(
         BridgeMutationKind.addTextBlock,
-        page: page,
-        after: fake.views[page]!.first.id,
+        page: kit.page,
+        after: kit.fake.views[kit.page]!.first.id,
         text: 'Two',
       ),
     );
     await tester.pumpAndSettle();
     expect(field(tester, 1).readOnly, isTrue);
-    final held = fake.deferred!;
-    fake.deferred = null;
+    final held = kit.fake.deferred!;
+    kit.fake.deferred = null;
     for (final release in held) {
       release.complete();
     }
@@ -551,13 +509,13 @@ void main() {
   ) async {
     await show(tester, ['Five days', ' in Lisbon']);
     await caret(tester, 1, 0);
-    fake.gate = Completer();
+    kit.fake.gate = Completer();
     await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
     await tester.pump();
     await type(tester, 1, '!');
-    fake.gate!.complete();
+    kit.fake.gate!.complete();
     await tester.pumpAndSettle();
-    expect(fake.textsOf(page), ['Five days! in Lisbon']);
+    expect(kit.fake.textsOf(kit.page), ['Five days! in Lisbon']);
     expect(focused(tester, 0), isTrue);
     expect(field(tester, 0).controller!.selection.baseOffset, 10);
   });
@@ -567,27 +525,27 @@ void main() {
   ) async {
     await show(tester, ['One']);
     await caret(tester, 0, 3);
-    fake.gate = Completer();
+    kit.fake.gate = Completer();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     await type(tester, 0, 'Two');
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-    fake.gate!.complete();
+    kit.fake.gate!.complete();
     await tester.pumpAndSettle();
-    expect(fake.textsOf(page), ['One', 'Two']);
+    expect(kit.fake.textsOf(kit.page), ['One', 'Two']);
   });
 
   testWidgets('the first line keeps typing while its text is handed over', (
     tester,
   ) async {
     await show(tester);
-    final made = fake.gate = Completer();
+    final made = kit.fake.gate = Completer();
     await tester.enterText(find.byKey(const Key('first-line')), 'a');
     await tester.enterText(find.byKey(const Key('first-line')), 'ab');
     final handed = Completer<void>();
     made.complete();
-    fake.gate = handed;
+    kit.fake.gate = handed;
     await tester.pump();
     // Its Text Block exists, so the line is out of sight but still takes the keys.
     await tester.enterText(
@@ -596,19 +554,19 @@ void main() {
     );
     handed.complete();
     await tester.pumpAndSettle();
-    expect(fake.textsOf(page), ['abc']);
+    expect(kit.fake.textsOf(kit.page), ['abc']);
     expect(field(tester, 0).controller!.text, 'abc');
   });
 
   testWidgets('a shortcut typed in the first line formats it', (tester) async {
     await show(tester);
-    fake.gate = Completer();
+    kit.fake.gate = Completer();
     await tester.enterText(find.byKey(const Key('first-line')), '-');
     await tester.enterText(find.byKey(const Key('first-line')), '- ');
-    fake.gate!.complete();
+    kit.fake.gate!.complete();
     await tester.pumpAndSettle();
     expect(styleOf(0), BridgeTextStyle.bullet);
-    expect(fake.textsOf(page), ['']);
+    expect(kit.fake.textsOf(kit.page), ['']);
   });
 
   testWidgets('⏎ in the title confirms a composition there', (tester) async {
@@ -638,7 +596,7 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    fake.gate = Completer();
+    kit.fake.gate = Completer();
     await tester.enterText(find.byKey(const Key('first-line')), 'abc');
     tester.testTextInput.updateEditingValue(
       const TextEditingValue(
@@ -648,9 +606,9 @@ void main() {
     );
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
-    fake.gate!.complete();
+    kit.fake.gate!.complete();
     await tester.pumpAndSettle();
-    expect(fake.textsOf(page), ['']);
+    expect(kit.fake.textsOf(kit.page), ['']);
   });
 
   testWidgets('a shortcut typed while ⏎ waits formats the new Text Block', (
@@ -658,14 +616,14 @@ void main() {
   ) async {
     await show(tester, ['One']);
     await caret(tester, 0, 3);
-    fake.gate = Completer();
+    kit.fake.gate = Completer();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     await type(tester, 0, '-');
     await type(tester, 0, ' ');
-    fake.gate!.complete();
+    kit.fake.gate!.complete();
     await tester.pumpAndSettle();
-    expect(fake.textsOf(page), ['One', '']);
+    expect(kit.fake.textsOf(kit.page), ['One', '']);
     expect(styleOf(1), BridgeTextStyle.bullet);
   });
 
@@ -673,7 +631,7 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    fake.gate = Completer();
+    kit.fake.gate = Completer();
     await tester.enterText(find.byKey(const Key('first-line')), 'a');
     tester.testTextInput.updateEditingValue(
       const TextEditingValue(
@@ -690,9 +648,9 @@ void main() {
         selection: TextSelection.collapsed(offset: 2),
       ),
     );
-    fake.gate!.complete();
+    kit.fake.gate!.complete();
     await tester.pumpAndSettle();
-    expect(fake.textsOf(page), ['a你']);
+    expect(kit.fake.textsOf(kit.page), ['a你']);
   });
 
   testWidgets('quitting takes a composition still open as it stands', (
@@ -700,7 +658,7 @@ void main() {
   ) async {
     await show(tester, ['One']);
     await caret(tester, 0, 3);
-    fake.gate = Completer();
+    kit.fake.gate = Completer();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     final at = field(tester, 0).controller!.selection.baseOffset;
@@ -713,12 +671,12 @@ void main() {
     );
     await tester.pump();
     var drained = false;
-    unawaited(workspace.drain().then((_) => drained = true));
-    fake.gate!.complete();
+    unawaited(kit.workspace.drain().then((_) => drained = true));
+    kit.fake.gate!.complete();
     await tester.pump();
     await tester.pump();
     expect(drained, isTrue);
-    expect(fake.textsOf(page), ['One', 'ni']);
+    expect(kit.fake.textsOf(kit.page), ['One', 'ni']);
   });
 
   testWidgets('⏎ near the start of a long paragraph moves the caret down', (
@@ -732,14 +690,14 @@ void main() {
       offset: 6,
     );
     await tester.pump();
-    fake.gate = Completer();
+    kit.fake.gate = Completer();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
-    fake.gate!.complete();
+    kit.fake.gate!.complete();
     for (var frame = 0; frame < 30; frame++) {
       await tester.pump(const Duration(milliseconds: 16));
     }
-    expect(fake.textsOf(page).first, 'Lisbon');
+    expect(kit.fake.textsOf(kit.page).first, 'Lisbon');
     expect(focused(tester, 1), isTrue);
   });
 
@@ -747,17 +705,17 @@ void main() {
     tester,
   ) async {
     await show(tester, ['Plan', 'Before we go']);
-    await workspace.apply(
+    await kit.workspace.apply(
       mutation(
         BridgeMutationKind.setTextStyle,
-        page: page,
-        block: fake.views[page]![1].block,
+        page: kit.page,
+        block: kit.fake.views[kit.page]![1].block,
         style: BridgeTextStyle.heading2,
       ),
     );
     await tester.pumpAndSettle();
     await caret(tester, 1, 0);
-    fake.delay = () => const Duration(milliseconds: 30);
+    kit.fake.delay = () => const Duration(milliseconds: 30);
     await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
     for (var frame = 0; frame < 30; frame++) {
       await tester.pump(const Duration(milliseconds: 16));
@@ -767,7 +725,7 @@ void main() {
     for (var frame = 0; frame < 30; frame++) {
       await tester.pump(const Duration(milliseconds: 16));
     }
-    expect(fake.textsOf(page), ['PlanBefore we go']);
+    expect(kit.fake.textsOf(kit.page), ['PlanBefore we go']);
   });
 
   testWidgets('quitting writes a composition still open in a Text Block', (
@@ -784,10 +742,10 @@ void main() {
     );
     await tester.pump();
     var drained = false;
-    unawaited(workspace.drain().then((_) => drained = true));
+    unawaited(kit.workspace.drain().then((_) => drained = true));
     await tester.pump();
     expect(drained, isTrue);
-    expect(fake.textsOf(page), ['Oneni']);
+    expect(kit.fake.textsOf(kit.page), ['Oneni']);
   });
 
   testWidgets('quitting writes a composition still open in the first line', (
@@ -805,38 +763,38 @@ void main() {
     );
     await tester.pump();
     var drained = false;
-    unawaited(workspace.drain().then((_) => drained = true));
+    unawaited(kit.workspace.drain().then((_) => drained = true));
     await tester.pump();
     await tester.pump();
     expect(drained, isTrue);
-    expect(fake.textsOf(page), ['ni']);
+    expect(kit.fake.textsOf(kit.page), ['ni']);
   });
 
   testWidgets('⌫ replayed after ⏎ deletes a whole character', (tester) async {
     await show(tester, ['One']);
     await caret(tester, 0, 3);
-    fake.gate = Completer();
+    kit.fake.gate = Completer();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     await type(tester, 0, 'e\u0301');
     await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
-    fake.gate!.complete();
+    kit.fake.gate!.complete();
     await tester.pumpAndSettle();
-    expect(fake.textsOf(page), ['One', '']);
+    expect(kit.fake.textsOf(kit.page), ['One', '']);
   });
 
   testWidgets(
     '⌘⌫ in the first line deletes as the field does while its Block is made',
     (tester) async {
       await show(tester);
-      fake.gate = Completer();
+      kit.fake.gate = Completer();
       await tester.enterText(find.byKey(const Key('first-line')), 'abc');
       await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-      fake.gate!.complete();
+      kit.fake.gate!.complete();
       await tester.pumpAndSettle();
-      expect(fake.textsOf(page), ['']);
+      expect(kit.fake.textsOf(kit.page), ['']);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.macOS),
   );
@@ -856,7 +814,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-    expect(fake.textsOf(page), ['Oneni']);
+    expect(kit.fake.textsOf(kit.page), ['Oneni']);
   });
 
   testWidgets('leaving an empty Page writes its first line', (tester) async {
@@ -873,7 +831,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-    expect(fake.textsOf(page), ['ni']);
+    expect(kit.fake.textsOf(kit.page), ['ni']);
   });
 
   testWidgets('another Text Block edits as usual while ⏎ waits', (
@@ -881,7 +839,7 @@ void main() {
   ) async {
     await show(tester, ['A', 'Bc']);
     await caret(tester, 0, 1);
-    fake.gate = Completer();
+    kit.fake.gate = Completer();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     await caret(tester, 1, 2);
@@ -889,11 +847,11 @@ void main() {
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
-    fake.gate!.complete();
+    kit.fake.gate!.complete();
     for (var frame = 0; frame < 60; frame++) {
       await tester.pump(const Duration(milliseconds: 16));
     }
-    expect(fake.textsOf(page), ['A', '', 'B', '']);
+    expect(kit.fake.textsOf(kit.page), ['A', '', 'B', '']);
   });
 
   testWidgets('the new Text Block keeps its list style before it reads it', (
@@ -901,8 +859,8 @@ void main() {
   ) async {
     await show(tester, ['Pack'], BridgeTextStyle.bullet);
     await caret(tester, 0, 4);
-    fake.deferredKinds = {BridgeQueryKind.text};
-    fake.deferred = [];
+    kit.fake.deferredKinds = {BridgeQueryKind.text};
+    kit.fake.deferred = [];
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     for (var frame = 0; frame < 10; frame++) {
       await tester.pump(const Duration(milliseconds: 16));
@@ -913,13 +871,13 @@ void main() {
     for (var frame = 0; frame < 10; frame++) {
       await tester.pump(const Duration(milliseconds: 16));
     }
-    final held = fake.deferred!;
-    fake.deferred = null;
+    final held = kit.fake.deferred!;
+    kit.fake.deferred = null;
     for (final release in held) {
       release.complete();
     }
     await tester.pumpAndSettle();
-    expect(fake.textsOf(page), ['Pack', '']);
+    expect(kit.fake.textsOf(kit.page), ['Pack', '']);
     expect(styleOf(1), BridgeTextStyle.paragraph);
   });
 
@@ -928,7 +886,7 @@ void main() {
   ) async {
     await show(tester, ['A', 'B']);
     await caret(tester, 0, 1);
-    fake.gate = Completer();
+    kit.fake.gate = Completer();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     await caret(tester, 1, 1);
@@ -936,9 +894,9 @@ void main() {
     await tester.pump();
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-    fake.gate!.complete();
+    kit.fake.gate!.complete();
     await tester.pumpAndSettle();
-    expect(fake.textsOf(page), ['A', '', 'B', '']);
+    expect(kit.fake.textsOf(kit.page), ['A', '', 'B', '']);
   });
 
   testWidgets('typing after ⏎ in another Text Block lands after its split', (
@@ -946,18 +904,18 @@ void main() {
   ) async {
     await show(tester, ['A', 'BC']);
     await caret(tester, 0, 1);
-    fake.gate = Completer();
+    kit.fake.gate = Completer();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     await caret(tester, 1, 1);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     await type(tester, 1, 'x');
-    fake.gate!.complete();
+    kit.fake.gate!.complete();
     for (var frame = 0; frame < 60; frame++) {
       await tester.pump(const Duration(milliseconds: 16));
     }
-    expect(fake.textsOf(page), ['A', '', 'B', 'xC']);
+    expect(kit.fake.textsOf(kit.page), ['A', '', 'B', 'xC']);
   });
 
   testWidgets('--- typed in a list item while ⏎ waits starts a Section', (
@@ -965,14 +923,14 @@ void main() {
   ) async {
     await show(tester, ['Item'], BridgeTextStyle.bullet);
     await caret(tester, 0, 4);
-    fake.gate = Completer();
+    kit.fake.gate = Completer();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     await type(tester, 0, '---');
-    fake.gate!.complete();
+    kit.fake.gate!.complete();
     await tester.pumpAndSettle();
-    expect(fake.textsOf(page), ['Item', '']);
-    expect(fake.views[page]![1].boundary, isTrue);
+    expect(kit.fake.textsOf(kit.page), ['Item', '']);
+    expect(kit.fake.views[kit.page]![1].boundary, isTrue);
   });
 
   testWidgets('a Page reopened while its queue writes waits for it', (
@@ -980,19 +938,22 @@ void main() {
   ) async {
     await show(tester, ['ABC']);
     await caret(tester, 0, 1);
-    fake.gate = Completer();
+    kit.fake.gate = Completer();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-    workspace.open.value = OpenPage(workspace.open.value?.area ?? '', page);
+    kit.workspace.open.value = OpenPage(
+      kit.workspace.open.value?.area ?? '',
+      kit.page,
+    );
     await tester.pumpAndSettle();
     expect(field(tester, 0).readOnly, isTrue);
-    fake.deferredKinds = {BridgeQueryKind.views};
-    fake.deferred = [];
-    fake.gate!.complete();
+    kit.fake.deferredKinds = {BridgeQueryKind.views};
+    kit.fake.deferred = [];
+    kit.fake.gate!.complete();
     await tester.pumpAndSettle();
-    expect(fake.textsOf(page), ['A', 'BC']);
+    expect(kit.fake.textsOf(kit.page), ['A', 'BC']);
     expect(
       field(tester, 0).readOnly,
       isTrue,
@@ -1009,8 +970,8 @@ void main() {
   testWidgets('a refused edit drops the edits typed after it', (tester) async {
     await show(tester, ['abcd']);
     await caret(tester, 0, 1);
-    fake.gate = Completer();
-    fake.refuseNext = 1;
+    kit.fake.gate = Completer();
+    kit.fake.refuseNext = 1;
     tester.testTextInput.updateEditingValue(
       const TextEditingValue(
         text: 'bcd',
@@ -1022,16 +983,16 @@ void main() {
       offset: 3,
     );
     await type(tester, 0, 'X');
-    fake.gate!.complete();
+    kit.fake.gate!.complete();
     await tester.pumpAndSettle();
-    expect(fake.textsOf(page), [
+    expect(kit.fake.textsOf(kit.page), [
       'abcd',
     ], reason: 'the X assumed the refused deletion');
     expect(field(tester, 0).controller!.text, 'abcd');
 
     await caret(tester, 0, 4);
     await type(tester, 0, 'e');
-    expect(fake.textsOf(page), ['abcde'], reason: 'later edits go on');
+    expect(kit.fake.textsOf(kit.page), ['abcde'], reason: 'later edits go on');
   });
 
   testWidgets('a refused edit is read again after a read that failed', (
@@ -1039,8 +1000,8 @@ void main() {
   ) async {
     await show(tester, ['abcd']);
     await caret(tester, 0, 1);
-    fake.gate = Completer();
-    fake.refuseNext = 1;
+    kit.fake.gate = Completer();
+    kit.fake.refuseNext = 1;
     tester.testTextInput.updateEditingValue(
       const TextEditingValue(
         text: 'bcd',
@@ -1052,13 +1013,13 @@ void main() {
       offset: 3,
     );
     await type(tester, 0, 'X');
-    fake.refuseNextQuery = BridgeQueryKind.text;
-    fake.gate!.complete();
+    kit.fake.refuseNextQuery = BridgeQueryKind.text;
+    kit.fake.gate!.complete();
     await tester.pumpAndSettle();
 
     await type(tester, 0, 'Y');
     await type(tester, 0, 'Z');
-    expect(fake.textsOf(page), [
+    expect(kit.fake.textsOf(kit.page), [
       'abcdZ',
     ], reason: 'a key after a refused edit reads the text again');
     expect(field(tester, 0).controller!.text, 'abcdZ');
@@ -1069,16 +1030,16 @@ void main() {
   ) async {
     await show(tester, ['A', 'B']);
     await caret(tester, 0, 1);
-    fake.gate = Completer();
+    kit.fake.gate = Completer();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     await caret(tester, 1, 1);
     await type(tester, 1, 'x');
-    fake.gate!.complete();
+    kit.fake.gate!.complete();
     for (var frame = 0; frame < 60; frame++) {
       await tester.pump(const Duration(milliseconds: 16));
     }
-    expect(fake.textsOf(page), ['A', '', 'Bx']);
+    expect(kit.fake.textsOf(kit.page), ['A', '', 'Bx']);
     expect(focused(tester, 2), isTrue);
   });
 
@@ -1087,18 +1048,18 @@ void main() {
   ) async {
     await show(tester, ['A', 'C']);
     await caret(tester, 0, 1);
-    fake.gate = Completer();
+    kit.fake.gate = Completer();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     await type(tester, 0, '- ');
     await caret(tester, 1, 1);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
-    fake.gate!.complete();
+    kit.fake.gate!.complete();
     for (var frame = 0; frame < 60; frame++) {
       await tester.pump(const Duration(milliseconds: 16));
     }
-    expect(fake.textsOf(page), ['A', '', 'C', '']);
+    expect(kit.fake.textsOf(kit.page), ['A', '', 'C', '']);
     expect(styleOf(1), BridgeTextStyle.bullet);
   });
 
@@ -1120,7 +1081,7 @@ void main() {
   ) async {
     await show(tester, ['A', 'B']);
     await caret(tester, 0, 1);
-    fake.gate = Completer();
+    kit.fake.gate = Completer();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     await type(tester, 0, 'x');
@@ -1129,9 +1090,9 @@ void main() {
     await tester.pump();
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-    fake.gate!.complete();
+    kit.fake.gate!.complete();
     await tester.pumpAndSettle();
-    expect(fake.textsOf(page), ['A', 'x', 'B', '']);
+    expect(kit.fake.textsOf(kit.page), ['A', 'x', 'B', '']);
   });
 
   testWidgets('a numbered list of 600 items counts to its end', (tester) async {

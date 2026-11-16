@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -11,10 +10,11 @@ import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
-import 'slash_commands.dart';
+import 'anchored_menu.dart';
 import 'follow.dart';
 import 'page_editor.dart';
 import 'page_views.dart';
+import 'slash_commands.dart';
 import 'workspace_state.dart';
 
 /// A caret offset that means a Text Block's end.
@@ -80,8 +80,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   /// The slash command menu `/` opens, its commands for what follows `/` and the one ⏎
   /// takes.
   final _menu = OverlayPortalController();
-  final _menuAnchor = LayerLink();
-  final _line = GlobalKey();
   var _choices = const <SlashCommand>[];
   var _chosen = 0;
 
@@ -332,43 +330,15 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (mounted) _set('', 0);
   }
 
-  /// The slash command menu, under the line `/` was typed in, or above it when all its
-  /// commands do not fit under it and there is more room above; they scroll in the room
-  /// it has. Clicking it keeps the field's focus.
-  Widget _menuView(BuildContext context) {
-    final line = _line.currentContext?.findRenderObject() as RenderBox?;
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox?;
-    if (line == null || !line.hasSize || overlay == null) {
-      return const SizedBox.shrink();
-    }
-    final top = line.localToGlobal(Offset.zero, ancestor: overlay).dy;
-    final below =
-        overlay.size.height - top - line.size.height - WsMetrics.space1;
-    final above = top - WsMetrics.space1;
-    final up = SlashCommands.heightFor(_choices) > below && above > below;
-    return Align(
-      alignment: Alignment.topLeft,
-      child: CompositedTransformFollower(
-        link: _menuAnchor,
-        targetAnchor: up ? Alignment.topLeft : Alignment.bottomLeft,
-        followerAnchor: up ? Alignment.bottomLeft : Alignment.topLeft,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: math.max(0, up ? above : below),
-          ),
-          child: TextFieldTapRegion(
-            child: SlashCommands(
-              choices: _choices,
-              chosen: _chosen,
-              onChoose: _take,
-              onHover: (index) => setState(() => _chosen = index),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  /// The slash command menu, under the line `/` was typed in or above it (see
+  /// [AnchoredMenu]); its commands scroll in the room it has. Clicking it keeps the
+  /// field's focus.
+  Widget _menuView(BuildContext context) => SlashCommands(
+    choices: _choices,
+    chosen: _chosen,
+    onChoose: _take,
+    onHover: (index) => setState(() => _chosen = index),
+  );
 
   /// ↑↓ choose in the open slash command menu, ⏎ takes the choice and esc closes it.
   KeyEventResult _menuKey(LogicalKeyboardKey key) {
@@ -839,22 +809,20 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       child: text,
     );
     // The slash command menu sits above the style's frame, which a restyle rebuilds.
-    return CompositedTransformTarget(
-      link: _menuAnchor,
-      child: OverlayPortal(
-        controller: _menu,
-        overlayChildBuilder: _menuView,
-        child: Padding(
-          key: _line,
-          padding: EdgeInsets.only(top: top, bottom: WsMetrics.space1),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (widget.view.boundary && widget.index > 0)
-                const SectionDivider(),
-              text,
-            ],
-          ),
+    return AnchoredMenu(
+      controller: _menu,
+      height: SlashCommands.heightFor(_choices),
+      gap: 0,
+      menu: _menuView,
+      child: Padding(
+        padding: EdgeInsets.only(top: top, bottom: WsMetrics.space1),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (widget.view.boundary && widget.index > 0)
+              const SectionDivider(),
+            text,
+          ],
         ),
       ),
     );
