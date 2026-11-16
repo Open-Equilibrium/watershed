@@ -80,7 +80,7 @@ struct Shared {
     token: String,
     /// Turns true when the service stops, which ends every connection.
     stopping: tokio::sync::watch::Receiver<bool>,
-    /// Held until the last connection and call ends, so a new service waits for them.
+    /// Held until the last connection and call ends; a new service on the folder fails until then.
     _lock: std::fs::File,
 }
 
