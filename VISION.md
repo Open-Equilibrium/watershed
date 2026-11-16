@@ -32,7 +32,7 @@ Watershed is AGPL/free software: users can inspect, run, self-host, fork and ver
 
 ## Integration and ownership
 
-Watershed is a monorepo, **not** a monolith. The products share `core` libraries and the versioned `proto` contract, but own separate state and, as the target, separate processes; today the Meta-Harness core still runs inside the Liquid app (ADR-0184).
+Watershed is a monorepo, **not** a monolith. The products share `core` libraries and the versioned `proto` contract, but own separate state and separate processes: Liquid reaches the Meta-Harness service as a client (ADR-0215).
 
 - **Flow Agent** is CLI-only and host-local. Humans, scripts, CI or a Meta-Harness on the same host use its public CLI/event surfaces. It has one global configuration authority and no project-local configuration discovery; project-specific behavior is an explicit Flow. Nothing reads its private session store.
 - **Meta-Harness** is a headless, host-scoped controller. It starts and controls only CLI agents on its own host, while authenticated clients and other agent hosts may reach its public API remotely, and it leaves each harness's behavior and governance unchanged (ADR-0252). Each instance materializes the agent configurations Liquid stores and edits (ADR-0225, ADR-0227) and owns its sessions, transcripts, agent schedules and AgentPulse metrics.
