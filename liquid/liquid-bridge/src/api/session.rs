@@ -13,7 +13,7 @@ use meta_harness_core::{
     Automation, LineageChanges, LocalServer, Permissions, StartThread, ThreadEvent, ThreadSummary,
     TurnStatus, Watch, Workspace, default_home, visible_name,
 };
-use tokio::runtime::Runtime;
+use tokio::runtime::{Runtime, RuntimeFlavor};
 
 use crate::api::details::{BridgeAutomation, BridgeLineage, BridgeLocalServer, BridgeUsageLimits};
 use crate::api::events::{BridgeEvent, BridgeFileChange};
@@ -128,13 +128,21 @@ pub struct BridgeQuestionAnswer {
     pub values: Vec<String>,
 }
 
-/// Runs `future` for a synchronous bridge call. Inside the runtime, such as in a Rust consumer's
-/// callback, `block_on` would panic, so the worker blocks in place instead.
-pub(crate) fn run<T>(future: impl Future<Output = T>) -> T {
-    if tokio::runtime::Handle::try_current().is_ok() {
-        tokio::task::block_in_place(|| RUNTIME.handle().block_on(future))
-    } else {
-        RUNTIME.block_on(future)
+/// Runs `future` for a synchronous bridge call. Inside a multi-thread runtime, such as in a Rust
+/// consumer's callback, `block_on` would panic, so the worker blocks in place instead. A
+/// current-thread runtime cannot block in place, so the future runs on a thread of its own.
+pub(crate) fn run<T: Send>(future: impl Future<Output = T> + Send) -> T {
+    match tokio::runtime::Handle::try_current() {
+        Ok(current) if current.runtime_flavor() == RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(|| RUNTIME.handle().block_on(future))
+        }
+        Ok(_) => std::thread::scope(|scope| {
+            scope
+                .spawn(|| RUNTIME.block_on(future))
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+        }),
+        Err(_) => RUNTIME.block_on(future),
     }
 }
 
