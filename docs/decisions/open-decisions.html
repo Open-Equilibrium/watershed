@@ -102,50 +102,29 @@
   <section id="m3">
     <h2>M3 - Liquid</h2>
     <div class="grid">
-      <details id="d-108" class="decision wide">
-        <summary><h3>D-108 - A New Line Above A Line That Shares Its Place</h3></summary>
-        <p><strong>Status:</strong> Open; from the review of the shared placement routine in <code>liquid/liquid-core/src/sort_key.rs</code>. It matters once sync (M3c) lets two devices place a line at one spot; today one device never makes such a pair.</p>
-        <p><strong>Problem:</strong> Each line on a Page carries a sort key, and placing a line writes only that line (ADR-0238). Two devices that add lines A and B at one spot give both the same key; their identities then decide that A shows above B. Pressing ⏎ at the start of B should put an empty line right between A and B. No key fits between two equal keys, so today the empty line goes above A. If B starts a Section, the Section then starts at the empty line, and A, which belonged to the Section above, moves into B's Section.</p>
-        <p><strong>Question:</strong> Where should the empty line go when B shares its key with the line above?</p>
+      <details id="d-110" class="decision wide">
+        <summary><h3>D-110 - Checking Liquid's Test Workspace Against The Real Core</h3></summary>
+        <p><strong>Status:</strong> Open; a Minor from the second M3a KPI review (PLAN.md).</p>
+        <p><strong>Problem:</strong> Liquid's Flutter tests run against <code>FakeWorkspace</code> (<code>liquid/app/test/fake_workspace.dart</code>), a second, Dart-side copy of what the core does when Text Blocks split or join, Sections start, rows, fields and options are placed or a cell is set. No test compares the two, so the fake can drift from the core and every app test still passes. Each later slice (Views with sort and filter, the deletion cascade, other Blocks) adds more to copy. The real Workspace opens only with a key from the operating system's keychain, and Flutter tests load no Rust code today.</p>
+        <p><strong>Question:</strong> How should the app's tests be tied to the real core?</p>
         <div class="dia">
-          <div class="opt rec"><h4>A: Give B a new key <span class="tag">Recommended</span></h4>
-            <div class="b ws">B moves right below A's group</div>
-            <div class="a">the empty line takes a key between them</div>
-            <ul><li>Pro: the empty line lands exactly where the person pressed ⏎, and Sections stay as they were.</li><li>Con: placing also writes B's key, so a move of B on another device at the same time keeps only one of the two keys, as any two moves of one line do.</li></ul>
+          <div class="opt rec"><h4>A: Shared scenarios <span class="tag">Recommended</span></h4>
+            <div class="b ws">Scenario files: changes, then the answers expected</div>
+            <div class="a">a Rust test plays them on the real Workspace, a Dart test on the fake</div>
+            <ul><li>Pro: a fake that differs from the core fails a test; no new way to open a Workspace; Flutter tests stay fast and need no Rust build.</li><li>Con: only what a scenario covers is checked, and scenarios are one more file format to keep.</li></ul>
           </div>
-          <div class="opt"><h4>B: Keep it above both</h4>
-            <div class="b ws">Empty line, A, B, as today</div>
-            <ul><li>Pro: no further work; placing writes only the new line.</li><li>Con: the empty line shows above A, and a Section starting at B swallows A.</li></ul>
+          <div class="opt"><h4>B: The real bridge in Flutter tests</h4>
+            <div class="b ws">Flutter tests load the Rust library</div>
+            <div class="a">a test-only entry, behind a Cargo feature, opens a Workspace with a given key</div>
+            <ul><li>Pro: the app's tests run on the real core end to end.</li><li>Con: a second way to open the encrypted replica, which must never reach a release build; the Dart CI job builds Rust and gets slower.</li></ul>
           </div>
-          <div class="opt"><h4>C: Refuse</h4>
-            <div class="b ws">⏎ does nothing and the Page says why</div>
-            <ul><li>Pro: no line ever lands in the wrong place.</li><li>Con: a key the person presses daily fails without a reason they can see or fix.</li></ul>
+          <div class="opt"><h4>C: App tests on macOS</h4>
+            <div class="b ws">Flutter integration tests drive the built app with a test keychain</div>
+            <ul><li>Pro: the shipped app, keychain included, is what runs.</li><li>Con: slow, macOS runners only, and the fake stays for the fast tests, so drift stays possible there.</li></ul>
           </div>
         </div>
-        <p><strong>Recommendation:</strong> A, built with the sync slice, when such pairs first arise.</p>
-        <p><strong>Acceptance criterion:</strong> with A and B sharing a key and B starting a Section, ⏎ at B's start puts the empty line between them, the Section starts at the empty line, A stays in the Section above, and all of this holds after the Page reloads.</p>
-      </details>
-      <details id="d-109" class="decision wide">
-        <summary><h3>D-109 - A Limit On A Sort Key's Length</h3></summary>
-        <p><strong>Status:</strong> Open; the last part of a Minor from the M3a KPI review (PLAN.md).</p>
-        <p><strong>Problem:</strong> A sort key grows by about one character for every six new lines placed at the very same spot, and nothing limits its length. A key that sync brings from another device may also be of any length. The core reads keys without recursion, so a long key costs time and memory but no crash; ADR-0251 caps every other size the core stores.</p>
-        <p><strong>Question:</strong> How long may a sort key be, and what happens at the limit?</p>
-        <div class="dia">
-          <div class="opt rec"><h4>A: Cap and refuse <span class="tag">Recommended</span></h4>
-            <div class="b ws">1,000 characters, as names and titles (ADR-0251)</div>
-            <div class="a">a placement needing a longer key is refused with the reason; a longer stored key reads as no key</div>
-            <ul><li>Pro: matches ADR-0251; the limit takes about 6,000 lines placed at one spot, which real use never meets.</li><li>Con: a person who reaches it cannot place a line at that spot until a line there moves.</li></ul>
-          </div>
-          <div class="opt"><h4>B: Cap and respace</h4>
-            <div class="b ws">At the limit, new keys are written for the neighboring lines</div>
-            <ul><li>Pro: placing never fails.</li><li>Con: placing writes other lines, which ADR-0238 avoids, and two devices respacing at once can collide.</li></ul>
-          </div>
-          <div class="opt"><h4>C: No cap</h4>
-            <ul><li>Pro: no work.</li><li>Con: the one stored size ADR-0251 leaves open.</li></ul>
-          </div>
-        </div>
-        <p><strong>Recommendation:</strong> A.</p>
-        <p><strong>Acceptance criterion:</strong> the core never writes a key past the cap, refuses that placement with its reason, and orders a stored key past the cap as it orders a key that is no key.</p>
+        <p><strong>Recommendation:</strong> A; the fake keeps the app's tests fast, and the scenarios keep it honest.</p>
+        <p><strong>Acceptance criterion:</strong> a change to the fake that makes it answer a covered scenario differently from the core fails a test in CI, and every mutation kind the fake handles is covered by a scenario.</p>
       </details>
       <details id="d-027" class="decision">
         <summary><h3>D-027 - Liquid CLI/API Surface</h3></summary>
