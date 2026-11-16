@@ -65,7 +65,7 @@ async fn run(args: &[&str]) -> Result<(), String> {
         }
         ["config", rest @ ..] => config(&connect(&home).await?, rest).await,
         ["service", "install"] => install(home),
-        ["service", "uninstall"] => login::Manager::current()?.uninstall(run_step),
+        ["service", "uninstall"] => remove_login_service(),
         ["uninstall"] => uninstall(),
         _ => Err(format!("unknown command \"{}\"\n{USAGE}", args.join(" "))),
     }
@@ -192,9 +192,37 @@ fn lingering() -> bool {
         .is_ok_and(|out| String::from_utf8_lossy(&out.stdout).trim() == "Linger=yes")
 }
 
+/// Stops and removes the login service; a stop step that failed is printed as a warning.
+fn remove_login_service() -> Result<(), String> {
+    for failure in login::Manager::current()?.uninstall(run_step)? {
+        eprintln!("meta: warning: {failure}");
+    }
+    Ok(())
+}
+
+/// Whether uninstalling `prefix` removes the data folder `home`, both resolved: `home` lies in
+/// a folder uninstall removes, or is the prefix itself.
+fn removes_data(prefix: &Path, home: &Path) -> bool {
+    home == prefix
+        || ["lib/meta-harness", "share/meta-harness"]
+            .iter()
+            .any(|folder| home.starts_with(prefix.join(folder)))
+}
+
 fn uninstall() -> Result<(), String> {
     let prefix = prefix()?;
-    login::Manager::current()?.uninstall(run_step)?;
+    let home = default_home()?;
+    // Checked before anything is removed; a link to the data folder counts as its target.
+    let target = home.canonicalize().unwrap_or_else(|_| home.clone());
+    if removes_data(&prefix, &target) {
+        return Err(format!(
+            "The data folder {} lies in the installation that uninstall removes; set \
+             META_HARNESS_HOME to a folder outside {}.",
+            home.display(),
+            prefix.display()
+        ));
+    }
+    remove_login_service()?;
     for path in [
         prefix.join("lib/meta-harness"),
         prefix.join("share/meta-harness"),
@@ -223,7 +251,7 @@ fn uninstall() -> Result<(), String> {
     }
     println!(
         "Meta-Harness is uninstalled; its data stays in {}.",
-        default_home().unwrap_or_default().display()
+        home.display()
     );
     Ok(())
 }
@@ -242,5 +270,25 @@ fn run_step(step: &login::Step) -> Result<(), String> {
             step.args.join(" "),
             String::from_utf8_lossy(&output.stderr).trim()
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn uninstall_refuses_a_data_folder_inside_what_it_removes() {
+        let prefix = Path::new("/opt/mh");
+        for (home, refused) in [
+            ("/opt/mh/lib/meta-harness/data", true),
+            ("/opt/mh/share/meta-harness", true),
+            ("/opt/mh", true),
+            ("/opt/mh/lib/meta-harness-data", false),
+            ("/opt/mh/bin/meta-data", false),
+            ("/home/p/.meta-harness", false),
+        ] {
+            assert_eq!(removes_data(prefix, Path::new(home)), refused, "{home}");
+        }
     }
 }

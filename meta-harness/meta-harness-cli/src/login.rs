@@ -31,12 +31,16 @@ impl Plan {
         home: PathBuf,
         var: impl Fn(&str) -> Option<String>,
     ) -> Result<Self, String> {
-        let path: Vec<String> = var("PATH")
+        let mut path: Vec<String> = var("PATH")
             .unwrap_or_default()
             .split(':')
             .filter(|folder| folder.starts_with('/'))
             .map(str::to_owned)
             .collect();
+        // An empty PATH makes some programs search the working folder, so the system folders stand in.
+        if path.is_empty() {
+            path = vec!["/usr/bin".to_owned(), "/bin".to_owned()];
+        }
         let mut environment = vec![
             ("PATH", path.join(":")),
             ("META_HARNESS_HOME", home.to_string_lossy().into_owned()),
@@ -165,36 +169,39 @@ impl Manager {
             .map_err(|e| format!("Could not create {}: {e}", folder.display()))?;
         std::fs::write(&self.file, (self.render)(plan))
             .map_err(|e| format!("Could not write {}: {e}", self.file.display()))?;
-        run_all(&self.start, &mut run)
+        run_all(&self.start, &mut run).map(|_| ())
     }
 
-    /// Stops the service and removes its file; the data folder stays.
+    /// Stops the service and removes its file; the data folder stays. Returns the failures of
+    /// the stop steps, which do not stop the removal.
     pub fn uninstall(
         &self,
         mut run: impl FnMut(&Step) -> Result<(), String>,
-    ) -> Result<(), String> {
-        run_all(&self.stop, &mut run)?;
+    ) -> Result<Vec<String>, String> {
+        let failures = run_all(&self.stop, &mut run)?;
         match std::fs::remove_file(&self.file) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
                 Err(format!("Could not remove {}: {e}", self.file.display()))
             }
-            _ => Ok(()),
+            _ => Ok(failures),
         }
     }
 }
 
+/// Runs `steps` in order. A failed step that is not required is returned, not acted on.
 fn run_all(
     steps: &[Step],
     run: &mut impl FnMut(&Step) -> Result<(), String>,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
+    let mut failures = Vec::new();
     for step in steps {
-        if let Err(error) = run(step)
-            && step.required
-        {
-            return Err(error);
+        match run(step) {
+            Ok(()) => {}
+            Err(error) if step.required => return Err(error),
+            Err(error) => failures.push(error),
         }
     }
-    Ok(())
+    Ok(failures)
 }
 
 fn xml(value: &str) -> String {
@@ -253,13 +260,12 @@ fn plist_of(plan: &Plan) -> String {
     )
 }
 
-/// A systemd value: quoted, with `\`, `"`, `%` (specifiers) and `$` (variables) escaped.
+/// A systemd value: quoted, with `\`, `"` and `%` (specifiers) escaped.
 fn systemd_value(value: &str) -> String {
     let escaped = value
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
-        .replace('%', "%%")
-        .replace('$', "$$");
+        .replace('%', "%%");
     format!("\"{escaped}\"")
 }
 
@@ -286,7 +292,8 @@ fn unit_of(plan: &Plan) -> String {
          \n\
          [Install]\n\
          WantedBy=default.target\n",
-        systemd_value(&plan.program.to_string_lossy()),
+        // ExecStart= expands `$` variables, which Environment= does not.
+        systemd_value(&plan.program.to_string_lossy().replace('$', "$$")),
         plan.environment
             .iter()
             .map(|(name, value)| format!(
@@ -352,6 +359,15 @@ mod tests {
         );
         let broken = Plan::new(dir.0.join("meta"), dir.0.join("da\nta"), |_| None);
         assert!(broken.is_err_and(|e| e.contains("control character")));
+        // Without an absolute folder, PATH names the system folders, never none.
+        let relative = Plan::new(dir.0.join("meta"), dir.0.join("data"), |name| {
+            (name == "PATH").then(|| ".:bin".to_owned())
+        })
+        .unwrap();
+        assert_eq!(
+            relative.environment[0],
+            ("PATH", "/usr/bin:/bin".to_owned())
+        );
     }
 
     fn installed(manager: &Manager, plan: &Plan) -> (String, Vec<String>) {
@@ -427,6 +443,21 @@ mod tests {
     }
 
     #[test]
+    fn a_systemd_unit_expands_dollar_signs_only_in_exec_start() {
+        let dir = Dir::new();
+        let manager = Manager::systemd(&dir.0.join("config"));
+        let plan = Plan::new(dir.0.join("$bin/meta"), dir.0.join("data$"), |name| {
+            (name == "PATH").then(|| "/usr/bin".to_owned())
+        })
+        .unwrap();
+        let (unit, _) = installed(&manager, &plan);
+        let root = dir.0.display();
+        // systemd expands `$` in ExecStart= only; a `$` in Environment= is literal.
+        assert!(unit.contains(&format!("ExecStart=\"{root}/$$bin/meta\" serve\n")));
+        assert!(unit.contains(&format!("Environment=\"META_HARNESS_HOME={root}/data$\"\n")));
+    }
+
+    #[test]
     fn a_failed_start_fails_the_install_and_uninstall_keeps_the_data() {
         let dir = Dir::new();
         let manager = Manager::launchd(&dir.0, 501);
@@ -442,9 +473,11 @@ mod tests {
         );
 
         std::fs::write(plan.home.join("meta-harness.sqlite"), "").unwrap();
-        manager.uninstall(|_| Err("not loaded".to_owned())).unwrap();
+        // A failed stop is reported, and the file goes anyway.
+        let warnings = manager.uninstall(|_| Err("not loaded".to_owned()));
+        assert_eq!(warnings, Ok(vec!["not loaded".to_owned()]));
         assert!(!manager.file.exists());
         assert!(plan.home.join("meta-harness.sqlite").exists());
-        manager.uninstall(|_| Ok(())).unwrap();
+        assert_eq!(manager.uninstall(|_| Ok(())), Ok(Vec::new()));
     }
 }
