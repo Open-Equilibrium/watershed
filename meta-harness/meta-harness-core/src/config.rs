@@ -295,7 +295,10 @@ impl Store {
             number,
             Some(revision),
         )?;
-        tx.commit().map_err(failed)?;
+        if let Err(error) = tx.commit() {
+            let _ = write(&base.blocks);
+            return Err(failed(error));
+        }
         Ok(Current { revision, blocks })
     }
 
@@ -575,6 +578,15 @@ fn check_size(blocks: &Blocks) -> Result<(), String> {
         return Err(format!(
             "A revision holds at most {MAX_ENTRIES} blocks of each kind and {MAX_TOTAL} bytes."
         ));
+    }
+    // Each skill is a folder, which case-insensitive file systems would share.
+    let folded: std::collections::BTreeSet<String> = blocks
+        .skills
+        .keys()
+        .map(|n| n.to_ascii_lowercase())
+        .collect();
+    if folded.len() < blocks.skills.len() {
+        return Err("Two skills differ only in case, so they would share one folder.".to_owned());
     }
     Ok(())
 }

@@ -290,6 +290,11 @@ fn an_invalid_change_is_refused_with_its_reason() {
         assert!(error.contains(reason), "{error} lacks {reason}");
     }
     assert!(fixture.store.pending().unwrap().is_empty());
+
+    // Skills that differ only in case would share a folder on macOS's default file system.
+    let both = propose(&fixture.store, vec![skill("review"), skill("Review")]);
+    let error = fixture.store.approve("cli", both, |_| Ok(())).unwrap_err();
+    assert!(error.contains("only in case"), "{error}");
 }
 
 #[test]
