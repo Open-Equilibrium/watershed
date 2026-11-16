@@ -7,6 +7,7 @@ import 'api/database.dart';
 import 'api/details.dart';
 import 'api/events.dart';
 import 'api/git.dart';
+import 'api/hosts.dart';
 import 'api/replica.dart';
 import 'api/session.dart';
 import 'api/thread.dart';
@@ -390,6 +391,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeQuestionAnswer dco_decode_bridge_question_answer(dynamic raw);
+
+  @protected
+  BridgeReach dco_decode_bridge_reach(dynamic raw);
 
   @protected
   BridgeRef dco_decode_bridge_ref(dynamic raw);
@@ -1041,6 +1045,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeQuestionAnswer sse_decode_bridge_question_answer(
     SseDeserializer deserializer,
   );
+
+  @protected
+  BridgeReach sse_decode_bridge_reach(SseDeserializer deserializer);
 
   @protected
   BridgeRef sse_decode_bridge_ref(SseDeserializer deserializer);
@@ -1893,6 +1900,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     BridgeQuestionAnswer self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_bridge_reach(BridgeReach self, SseSerializer serializer);
 
   @protected
   void sse_encode_bridge_ref(BridgeRef self, SseSerializer serializer);
