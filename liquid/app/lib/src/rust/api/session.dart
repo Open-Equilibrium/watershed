@@ -81,6 +81,9 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// [`AgentSession::automations_subscribe`].
   Stream<List<BridgeAutomation>> automationsEvents();
 
+  /// Ends the scheduled tasks stream now, without waiting for its next change.
+  Future<void> automationsStop();
+
   /// The scheduled tasks bound to this session now; their changes then stream from
   /// [`AgentSession::automations_events`].
   Future<List<BridgeAutomation>> automationsSubscribe();
@@ -154,6 +157,9 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// Streams each change of the servers after the latest [`AgentSession::servers_subscribe`].
   Stream<List<BridgeLocalServer>> serversEvents();
+
+  /// Ends the servers stream now, without waiting for its next change.
+  Future<void> serversStop();
 
   /// The local servers this session's terminals and agent started now; the servers' changes
   /// then stream from [`AgentSession::servers_events`].

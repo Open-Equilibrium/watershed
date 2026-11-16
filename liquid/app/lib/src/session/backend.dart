@@ -309,7 +309,8 @@ class RustSessionBackend implements SessionBackend {
   @override
   Future<List<BridgeLocalServer>> servers() => _session.serversSubscribe();
   @override
-  Stream<List<BridgeLocalServer>> serverChanges() => _session.serversEvents();
+  Stream<List<BridgeLocalServer>> serverChanges() =>
+      stopOnCancel(_session.serversEvents(), _session.serversStop);
   @override
   Future<void> stopServer(int pid, int port) =>
       _session.stopServer(pid: pid, port: port);
@@ -318,7 +319,7 @@ class RustSessionBackend implements SessionBackend {
       _session.automationsSubscribe();
   @override
   Stream<List<BridgeAutomation>> automationChanges() =>
-      _session.automationsEvents();
+      stopOnCancel(_session.automationsEvents(), _session.automationsStop);
   @override
   Future<void> setAutomationEnabled(String id, {required bool enabled}) =>
       _session.setAutomationEnabled(id: id, enabled: enabled);
@@ -349,8 +350,10 @@ class RustGitBackend implements GitBackend {
   @override
   Future<BridgeGitStatus> status() async => (await _git).status();
   @override
-  Stream<BridgeGitStatus> watch() =>
-      Stream.fromFuture(_git).asyncExpand((git) => git.watch());
+  Stream<BridgeGitStatus> watch() => stopOnCancel(
+    Stream.fromFuture(_git).asyncExpand((git) => git.watch()),
+    () async => (await _git).watchStop(),
+  );
   @override
   Future<BridgeRefs> refs(
     String query, {
@@ -444,4 +447,20 @@ class RustGitBackend implements GitBackend {
       (await _git).pullRequestWorktree(url: url);
   @override
   void close() => unawaited(_git.then((git) => git.dispose()));
+}
+
+/// [changes], which calls [stop] as its listener cancels. The bridge notices a cancel only at its
+/// next change, so [stop] ends the bridge's follow at once. It is called within the cancel, ahead
+/// of anything the cancel then releases.
+Stream<T> stopOnCancel<T>(Stream<T> changes, Future<void> Function() stop) {
+  late final StreamSubscription<T> subscription;
+  final controller = StreamController<T>(
+    onCancel: () => Future.wait([subscription.cancel(), stop()]),
+  );
+  subscription = changes.listen(
+    controller.add,
+    onError: controller.addError,
+    onDone: controller.close,
+  );
+  return controller.stream;
 }

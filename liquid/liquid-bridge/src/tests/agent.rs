@@ -759,6 +759,55 @@ fn dropping_the_session_or_checkout_ends_its_live_follows() {
     stop(service);
 }
 
+#[test]
+fn a_stopped_or_replaced_follow_ends_its_task_while_the_session_stays_open() {
+    let fixture = Fixture::new();
+    let (service, host) = host(&fixture);
+    let project = project_at(&host, &fixture.repo());
+    let session = project
+        .start(
+            "append first".to_owned(),
+            scripted(),
+            Some("main".to_owned()),
+            None,
+            BridgePermissions::FullAccess,
+        )
+        .expect("session starts");
+    follow_turns(&session, 1);
+    let git = project.git();
+    let (sender, ended) = mpsc::channel();
+    session.servers_subscribe().expect("the servers");
+    session
+        .servers_with(holding(Ends(sender.clone())))
+        .expect("the servers follow");
+    // A newer follow of the same kind replaces the one before it, which ends before anything stops.
+    session.servers_subscribe().expect("the servers");
+    session
+        .servers_with(holding(Ends(sender.clone())))
+        .expect("the servers follow");
+    ended
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the replaced servers follow ends");
+    session
+        .automations_subscribe()
+        .expect("the scheduled tasks");
+    session
+        .automations_with(holding(Ends(sender.clone())))
+        .expect("the scheduled tasks follow");
+    git.watch_with(holding(Ends(sender)))
+        .expect("the status watch");
+    // Nothing changes, yet each stop ends its task while the session and checkout stay open.
+    session.servers_stop();
+    session.automations_stop();
+    git.watch_stop();
+    for _ in 0..3 {
+        ended
+            .recv_timeout(Duration::from_secs(10))
+            .expect("a stopped follow ends");
+    }
+    stop(service);
+}
+
 /// Starts a session that runs until stopped and queues one follow-up behind it.
 fn queued_behind_a_running_turn(project: &AgentProject, prompt: &str) -> AgentSession {
     let session = project

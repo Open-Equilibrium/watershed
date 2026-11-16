@@ -99,6 +99,9 @@ abstract class GitCheckout implements RustOpaqueInterface {
 
   /// Streams the status, then each change, including T3's background fetch.
   Stream<BridgeGitStatus> watch();
+
+  /// Ends the status watch now, without waiting for its next change.
+  Future<void> watchStop();
 }
 
 /// The branch's pull request.

@@ -8,7 +8,7 @@ use crate::api::events::BridgeFileChange;
 use crate::api::session::{RUNTIME, run};
 use crate::convert;
 use crate::frb_generated::StreamSink;
-use crate::stream::until_ended;
+use crate::stream::{Generation, until_ended};
 
 /// The branch's pull request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -221,15 +221,15 @@ pub struct BridgeCheckedOut {
 #[flutter_rust_bridge::frb(opaque)]
 pub struct GitCheckout {
     git: Git,
-    /// Dropped with the checkout, which ends its status watch (see [`until_ended`]).
-    ended: tokio::sync::watch::Sender<()>,
+    /// The status watch; a newer watch or a stop ends it (see [`Generation`]).
+    status: Generation,
 }
 
 impl GitCheckout {
     pub(crate) fn new(git: Git) -> Self {
         Self {
             git,
-            ended: tokio::sync::watch::channel(()).0,
+            status: Generation::default(),
         }
     }
 
@@ -250,7 +250,7 @@ impl GitCheckout {
         mut deliver: impl FnMut(BridgeGitStatus) -> bool + Send + 'static,
     ) -> Result<(), String> {
         let mut statuses = run(self.git.watch())?;
-        let mut ended = self.ended.subscribe();
+        let mut ended = self.status.replace();
         RUNTIME.spawn(async move {
             while let Some(Some(status)) = until_ended(&mut ended, statuses.recv()).await {
                 if !deliver(convert::git_status(status)) {
@@ -259,6 +259,11 @@ impl GitCheckout {
             }
         });
         Ok(())
+    }
+
+    /// Ends the status watch now, without waiting for its next change.
+    pub fn watch_stop(&self) {
+        self.status.stop();
     }
 
     /// Refs whose names contain `query`.

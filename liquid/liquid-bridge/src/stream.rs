@@ -1,8 +1,8 @@
 //! How streams cross to Dart: how the event forwarder batches them and how far ahead of Liquid it
 //! sends (ADR-0272), and when the follows of a session or checkout end (`until_ended`).
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use meta_harness_core::{ThreadEvent, Watch};
 use tokio::sync::{Notify, mpsc, watch};
@@ -159,11 +159,41 @@ async fn next_or_wake(
     .await
 }
 
-/// Waits for `next` unless the owner of the stream drops first, which gives `None`. The owner
-/// holds the sender of `ended` and never sends on it, so its drop ends the wait at once; the
-/// stream then ends with its owner instead of at its next change.
-pub(crate) async fn until_ended<T>(
-    ended: &mut watch::Receiver<()>,
+/// The counter of the current stream of one kind. A new stream or a stop bumps it, which ends the
+/// stream before it (see [`until_ended`]).
+pub(crate) struct Generation(Mutex<watch::Sender<u64>>);
+
+impl Default for Generation {
+    fn default() -> Self {
+        Self(Mutex::new(watch::channel(0).0))
+    }
+}
+
+impl Generation {
+    /// Ends the current stream and gives the new one's end signal. The bump and the subscription
+    /// share one lock, so a concurrent replacement cannot slip in between them.
+    pub(crate) fn replace(&self) -> watch::Receiver<u64> {
+        let sender = self.lock();
+        sender.send_modify(|generation| *generation += 1);
+        sender.subscribe()
+    }
+
+    /// Ends the current stream.
+    pub(crate) fn stop(&self) {
+        self.lock().send_modify(|generation| *generation += 1);
+    }
+
+    fn lock(&self) -> MutexGuard<'_, watch::Sender<u64>> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// Waits for `next` unless `ended` ends first, which gives `None`. The owner of the stream holds
+/// the sender of `ended`: its drop ends the wait at once, and so does a change of a [`Generation`],
+/// which a newer stream of its kind or a stop makes. The stream then ends at once, not at its
+/// next change.
+pub(crate) async fn until_ended<S, T>(
+    ended: &mut watch::Receiver<S>,
     next: impl Future<Output = T>,
 ) -> Option<T> {
     tokio::select! {
@@ -180,9 +210,9 @@ const RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Asks Meta-Harness through `attempt` until it answers. A failed attempt means Meta-Harness cannot
 /// be reached now, such as while it restarts, so the next comes after a pause. Gives `None` once
-/// the session is dropped.
-pub(crate) async fn reconnect<T, E, Fut: Future<Output = Result<T, E>>>(
-    ended: &mut watch::Receiver<()>,
+/// `ended` ends (see [`until_ended`]).
+pub(crate) async fn reconnect<S, T, E, Fut: Future<Output = Result<T, E>>>(
+    ended: &mut watch::Receiver<S>,
     mut attempt: impl FnMut() -> Fut,
 ) -> Option<T> {
     let mut pause = RETRY_FIRST;
@@ -195,12 +225,12 @@ pub(crate) async fn reconnect<T, E, Fut: Future<Output = Result<T, E>>>(
     }
 }
 
-/// Forwards each change of `watch` to `deliver` until `deliver` refuses one or the session is
-/// dropped. Once the watch's stream ended, `open` reopens it (see [`reconnect`]), and its current
-/// value goes out, since changes may have been missed meanwhile.
-pub(crate) async fn follow_watch<T: Clone, Fut: Future<Output = Result<Watch<T>, String>>>(
+/// Forwards each change of `watch` to `deliver` until `deliver` refuses one or `ended` ends (see
+/// [`until_ended`]). Once the watch's stream ended, `open` reopens it (see [`reconnect`]), and its
+/// current value goes out, since changes may have been missed meanwhile.
+pub(crate) async fn follow_watch<S, T: Clone, Fut: Future<Output = Result<Watch<T>, String>>>(
     mut watch: Watch<T>,
-    ended: &mut watch::Receiver<()>,
+    ended: &mut watch::Receiver<S>,
     mut open: impl FnMut() -> Fut,
     mut deliver: impl FnMut(T) -> bool,
 ) {

@@ -336,6 +336,9 @@ pub struct AgentSession {
     /// The details card's live reads, each held until its events are streamed or the session drops.
     servers: Mutex<Option<Watch<Vec<LocalServer>>>>,
     automations: Mutex<Option<Watch<Vec<Automation>>>>,
+    /// The current servers and scheduled tasks streams, each ended by its next one or its stop.
+    servers_generation: stream::Generation,
+    automations_generation: stream::Generation,
     lineage: Mutex<Option<LineageChanges>>,
 }
 
@@ -362,6 +365,8 @@ impl AgentSession {
             ended: tokio::sync::watch::channel(()).0,
             servers: Mutex::default(),
             automations: Mutex::default(),
+            servers_generation: stream::Generation::default(),
+            automations_generation: stream::Generation::default(),
             lineage: Mutex::default(),
         }
     }
@@ -640,7 +645,7 @@ impl AgentSession {
             .take()
             .ok_or_else(|| "Subscribe to the servers before streaming them.".to_owned())?;
         let thread = self.thread.clone();
-        let mut ended = self.ended.subscribe();
+        let mut ended = self.servers_generation.replace();
         RUNTIME.spawn(async move {
             stream::follow_watch(
                 watch,
@@ -651,6 +656,11 @@ impl AgentSession {
             .await;
         });
         Ok(())
+    }
+
+    /// Ends the servers stream now, without waiting for its next change.
+    pub fn servers_stop(&self) {
+        self.servers_generation.stop();
     }
 
     /// Stops the local server `pid` on `port`.
@@ -695,7 +705,7 @@ impl AgentSession {
             .take()
             .ok_or_else(|| "Subscribe to the automations before streaming them.".to_owned())?;
         let thread = self.thread.clone();
-        let mut ended = self.ended.subscribe();
+        let mut ended = self.automations_generation.replace();
         RUNTIME.spawn(async move {
             stream::follow_watch(
                 watch,
@@ -706,6 +716,11 @@ impl AgentSession {
             .await;
         });
         Ok(())
+    }
+
+    /// Ends the scheduled tasks stream now, without waiting for its next change.
+    pub fn automations_stop(&self) {
+        self.automations_generation.stop();
     }
 
     /// Pauses or resumes the scheduled task `id`.
