@@ -35,6 +35,22 @@ const BACKLOG: usize = 4096;
 const LOST_CALL: &str =
     "Meta-Harness closed the connection before it answered; the call was not sent again";
 
+/// How the errors of a lost or missing connection start (see [`connection_lost`]).
+const CONNECTION_ERRORS: [&str; 3] = [
+    "Meta-Harness closed the connection",
+    "Meta-Harness is not running",
+    "Could not reach Meta-Harness",
+];
+
+/// Whether `error`, from a call or a stream of this client, says the connection to Meta-Harness is
+/// lost or missing, so that a later attempt may succeed. Any other error came from Meta-Harness
+/// itself or from its connection file, and a later attempt would get it again.
+pub fn connection_lost(error: &str) -> bool {
+    CONNECTION_ERRORS
+        .iter()
+        .any(|start| error.starts_with(start))
+}
+
 /// Where the service is.
 #[derive(Clone)]
 enum Endpoint {

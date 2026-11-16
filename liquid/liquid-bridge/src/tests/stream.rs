@@ -546,6 +546,34 @@ fn what_waits_when_the_thread_ended_is_sent_once_liquid_confirms() {
 }
 
 #[test]
+fn reconnect_retries_a_lost_connection_and_returns_any_other_error_at_once() {
+    paused_runtime().block_on(async {
+        let (_sender, mut ended) = tokio::sync::watch::channel(());
+        let lost = "Meta-Harness is not running: nothing answers at ws://127.0.0.1:1.";
+        // Two lost connections, then the answer on the third attempt. The replies are popped from
+        // the end, so the list runs backwards.
+        let mut replies = vec![Ok(7), Err(lost.to_owned()), Err(lost.to_owned())];
+        let answer = crate::stream::reconnect(&mut ended, || {
+            std::future::ready(replies.pop().expect("no attempt after the answer"))
+        })
+        .await;
+        assert_eq!(answer, Some(Ok(7)));
+        assert!(replies.is_empty(), "every lost connection was retried");
+
+        // Any other error is the answer, given at the first attempt.
+        let mut replies = vec![Err::<u8, _>("This session no longer exists.".to_owned())];
+        let answer = crate::stream::reconnect(&mut ended, || {
+            std::future::ready(replies.pop().expect("no attempt after the error"))
+        })
+        .await;
+        assert_eq!(
+            answer,
+            Some(Err("This session no longer exists.".to_owned()))
+        );
+    });
+}
+
+#[test]
 fn an_idle_thread_stays_live_across_two_restores_without_an_event_between() {
     paused_runtime().block_on(async {
         let (live, receiver) = tokio::sync::mpsc::channel(16);

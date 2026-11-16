@@ -310,15 +310,17 @@ async fn subscribe_again(
     Ok(Some(pump(events)))
 }
 
-/// The subscription that replaces a lost one. It gives `None` once the thread ended for good or the
-/// session was dropped. While Meta-Harness cannot be reached, it is asked again (see
-/// [`stream::reconnect`]), since it restarts after an update, a crash or `meta service install`.
+/// The subscription that replaces a lost one. It gives `None` once the thread ended for good, the
+/// session was dropped, or the error is not a lost connection, which the stream cannot report. While
+/// Meta-Harness cannot be reached, it is asked again (see [`stream::reconnect`]), since it restarts
+/// after an update, a crash or `meta service install`.
 async fn resubscribe(
     thread: Thread,
     mut ended: tokio::sync::watch::Receiver<()>,
 ) -> Option<tokio::sync::mpsc::Receiver<ThreadEvent>> {
     stream::reconnect(&mut ended, || subscribe_again(&thread))
-        .await
+        .await?
+        .ok()
         .flatten()
 }
 
@@ -780,12 +782,15 @@ impl AgentSession {
                     // The changes' stream ended, such as when Meta-Harness restarted: they are
                     // opened again, and the lineage read below catches up with what was missed.
                     Some(false) => {
-                        let Some(reopened) =
-                            stream::reconnect(&mut ended, || thread.lineage_changes()).await
-                        else {
-                            break;
-                        };
-                        changes = reopened;
+                        match stream::reconnect(&mut ended, || thread.lineage_changes()).await {
+                            None => break,
+                            Some(Ok(reopened)) => changes = reopened,
+                            // Another error ends the lineage, which reports it once.
+                            Some(Err(error)) => {
+                                deliver(Err(error));
+                                break;
+                            }
+                        }
                     }
                 }
                 let delivered = match until_ended(&mut ended, thread.lineage()).await {
