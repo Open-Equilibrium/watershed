@@ -3,6 +3,7 @@ import os
 import pathlib
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import tarfile
@@ -44,6 +45,8 @@ def run_packager(root, target, output, t3_version=T3_VERSION):
     meta = write(root / "fixtures" / "meta", b"synthetic meta program", 0o755)
     t3 = root / "fixtures" / f"t3-{t3_version}-{target}"
     write(t3 / "t3", b"synthetic T3 program", 0o755)
+    # A relative link inside T3's folder, which the download must keep relative.
+    (t3 / "helper").symlink_to("t3")
     return subprocess.run(
         ["node", str(PACKAGER), "--meta", str(meta), "--t3", str(t3), "--platform", target,
          "--output", str(output)],
@@ -66,7 +69,8 @@ class InstallerTest(unittest.TestCase):
         """An unpacked download laid out as the packager writes it; its meta logs its arguments."""
         folder = self.root / f"bundle-{generation}"
         write(folder / "bin" / "meta",
-              f"#!/bin/sh\n# {generation}\nprintf '%s %s\\n' \"$0\" \"$*\" >> '{self.log}'\n", 0o755)
+              f"#!/bin/sh\n# {generation}\nprintf '%s %s\\n' \"$0\" \"$*\" >> {shlex.quote(str(self.log))}\n",
+              0o755)
         write(folder / "lib" / "meta-harness" / f"t3-{t3_version}-{target}" / "t3",
               f"#!/bin/sh\n# {generation}\n", 0o755)
         write(folder / "install.sh", INSTALLER.read_bytes(), 0o755)
@@ -122,7 +126,8 @@ class InstallerTest(unittest.TestCase):
     def test_failed_service_install_keeps_the_files_and_exits_non_zero(self):
         prefix = self.root / "prefix"
         bundle = self.bundle("0.0.1", HOST, "0.1.9", "first")
-        write(bundle / "bin" / "meta", f"#!/bin/sh\necho \"$*\" >> '{self.log}'\nexit 1\n", 0o755)
+        write(bundle / "bin" / "meta",
+              f"#!/bin/sh\necho \"$*\" >> {shlex.quote(str(self.log))}\nexit 1\n", 0o755)
         result = self.install(bundle, "--prefix", str(prefix))
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(str(prefix), result.stderr)
@@ -147,6 +152,23 @@ class InstallerTest(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("meta-install:", result.stderr)
                 self.assertEqual(snapshot(self.root), before)
+
+    @unittest.skipUnless(shutil.which("node"), "the packager runs on Node, which is not on PATH")
+    def test_a_packaged_download_installs_an_executable_t3_with_its_relative_links(self):
+        output = self.root / "download"
+        result = run_packager(self.root, HOST, output)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        unpacked = self.root / "unpacked"
+        with tarfile.open(output / f"meta-harness-{META_VERSION}-{HOST}.tar.gz") as archive:
+            archive.extractall(unpacked, filter="data")
+        bundle = unpacked / f"meta-harness-{META_VERSION}-{HOST}"
+        t3_name = f"t3-{T3_VERSION}-{HOST}"
+        self.assertEqual(os.readlink(bundle / "lib" / "meta-harness" / t3_name / "helper"), "t3")
+        result = self.install(bundle, "--prefix", str(self.root / "prefix"), "--no-service")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        installed = self.root / "prefix" / "lib" / "meta-harness" / t3_name
+        self.assertTrue(os.access(installed / "t3", os.X_OK))
+        self.assertEqual(os.readlink(installed / "helper"), "t3")
 
     @unittest.skipIf(ROOT_USER, "root ignores directory permissions")
     def test_failed_install_keeps_the_previous_installation_and_leaves_no_temporary_file(self):
@@ -196,6 +218,9 @@ class PackagerTest(unittest.TestCase):
                         self.assertEqual(bundle.extractfile(files[relative]).read(), contents, relative)
                     for relative in ("bin/meta", "install.sh"):
                         self.assertEqual(files[relative].mode & 0o755, 0o755, relative)
+                    links = {member.name.removeprefix(f"{name}/"): member.linkname
+                             for member in bundle.getmembers() if member.issym()}
+                    self.assertEqual(links, {f"lib/meta-harness/t3-{T3_VERSION}-{target}/helper": "t3"})
 
     def test_refuses_an_existing_output_and_another_t3_version(self):
         for target in PLATFORMS:

@@ -89,7 +89,8 @@ async function main(argv) {
     }
     const t3Destination = join(stage, "lib", "meta-harness", t3Name);
     mkdirSync(dirname(t3Destination), { recursive: true });
-    cpSync(t3, t3Destination, { recursive: true });
+    // Relative links stay relative: without verbatimSymlinks they name this machine's folders.
+    cpSync(t3, t3Destination, { recursive: true, verbatimSymlinks: true });
     writeFileSync(join(stage, "bundle-info"), `${version}\n${platform}\n`);
 
     const archive = join(output, `${name}.tar.gz`);
