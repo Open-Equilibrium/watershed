@@ -20,7 +20,9 @@ pub(super) async fn checkout_in(
     thread: Option<&str>,
 ) -> (Fake, Git) {
     let fake = Fake::start(answer).await;
-    let client = Client::connect(&fake.origin, "token").await.unwrap();
+    let client = Client::connect(&fake.origin, || Ok("token".to_owned()))
+        .await
+        .unwrap();
     (
         fake,
         Git::new(client, CWD.to_owned(), thread.map(str::to_owned)),
@@ -399,7 +401,9 @@ async fn a_pull_request_reference_resolves_and_checks_out_in_the_thread_or_local
         vec![ok(id, reply)]
     })
     .await;
-    let client = Client::connect(&fake.origin, "token").await.unwrap();
+    let client = Client::connect(&fake.origin, || Ok("token".to_owned()))
+        .await
+        .unwrap();
     let git = Git::new(client.clone(), CWD.to_owned(), Some("thread-1".to_owned()));
     assert_eq!(
         git.resolve_pull_request("#42").await.unwrap(),

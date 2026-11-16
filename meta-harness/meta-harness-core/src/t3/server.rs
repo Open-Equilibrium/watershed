@@ -57,37 +57,16 @@ impl Server {
         })
     }
 
-    /// A new owner bearer token; `t3 auth session issue` needs no person. Never logged.
-    pub fn token(&self) -> Result<String, String> {
-        let args = [
-            "auth",
-            "session",
-            "issue",
-            "--label",
-            "meta-harness",
-            "--ttl",
-            "1h",
-            "--token-only",
-        ];
-        let output = std::process::Command::new(&self.binary)
-            .args(args)
-            .env("T3CODE_HOME", &self.home)
-            .envs(QUIET_ENV)
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|e| format!("Could not run T3: {e}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "T3 issued no session: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
-        }
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    /// Issues owner bearer tokens with `t3 auth session issue`, which needs no person. A socket
+    /// closes when its session expires, so each connection asks for a new token. Never logged.
+    pub fn issuer(&self) -> impl Fn() -> Result<String, String> + Send + Sync + 'static {
+        let (binary, home) = (self.binary.clone(), self.home.clone());
+        move || issue(&binary, &home)
     }
 
     /// Stops the server as `stop_left_behind` does: TERM, then KILL if it has not exited after
     /// five seconds. T3 stops its runs and their provider processes on TERM.
-    pub async fn stop(mut self) {
+    pub async fn stop(&mut self) {
         if let Some(pid) = self
             .child
             .id()
@@ -102,6 +81,37 @@ impl Server {
             let _ = self.child.kill().await;
         }
     }
+}
+
+/// The lifetime of an owner token: as long as the desktop app's own bootstrap grant (T3's
+/// `DESKTOP_BOOTSTRAP_TTL_HOURS`).
+const OWNER_TTL: &str = "24h";
+
+/// Issues one owner token from the T3 server in `home`, run by `binary`.
+fn issue(binary: &Path, home: &Path) -> Result<String, String> {
+    let output = std::process::Command::new(binary)
+        .args([
+            "auth",
+            "session",
+            "issue",
+            "--label",
+            "meta-harness",
+            "--ttl",
+            OWNER_TTL,
+            "--token-only",
+        ])
+        .env("T3CODE_HOME", home)
+        .envs(QUIET_ENV)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("Could not run T3: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "T3 issued no session: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
 /// Stops the `t3 serve` whose pid `runtime` records, if it still runs `binary`.

@@ -1,6 +1,7 @@
 //! A followed thread as Liquid sees it: T3's snapshot, the agent events its changes mean, and the
 //! commands it sends back (ADR-0290).
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -65,7 +66,9 @@ pub(super) async fn follow_answering(
         _ => answer(tag, payload, id),
     })
     .await;
-    let client = Client::connect(&fake.origin, "token").await.unwrap();
+    let client = Client::connect(&fake.origin, || Ok("token".to_owned()))
+        .await
+        .unwrap();
     let thread = Thread::follow(client, "thread-1".to_owned(), "/repo".to_owned())
         .await
         .unwrap();
@@ -773,6 +776,77 @@ async fn dropping_a_followed_thread_interrupts_its_stream_on_t3() {
     tokio::time::timeout(WAIT, fake.interrupted(&id))
         .await
         .expect("T3 receives the interrupt");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_thread_restarts_from_the_snapshot_t3_sends_on_a_new_connection() {
+    let snapshot = |sequence: u64, runs: Value| {
+        json!({"kind": "snapshot", "snapshotSequence": sequence,
+            "projection": projection(json!({"runs": runs}))})
+    };
+    let snapshots = [
+        snapshot(1, json!([run("r1", 1, "running", "m1")])),
+        snapshot(
+            10,
+            json!([
+                run("r1", 1, "completed", "m1"),
+                run("r2", 2, "running", "m2")
+            ]),
+        ),
+    ];
+    let sent = AtomicUsize::new(0);
+    let fake = Fake::start(move |tag, _, id| match tag {
+        // The first connection gets the first snapshot; the stream sent again gets the second.
+        SUBSCRIBE => {
+            let n = sent.fetch_add(1, Ordering::SeqCst).min(1);
+            vec![chunk(id, vec![snapshots[n].clone()])]
+        }
+        _ => vec![ok(id, json!({}))],
+    })
+    .await;
+    let client = Client::connect(&fake.origin, || Ok("token".to_owned()))
+        .await
+        .unwrap();
+    let thread = Thread::follow(client, "thread-1".to_owned(), "/repo".to_owned())
+        .await
+        .unwrap();
+    let (first, mut events) = thread.subscribe();
+    assert_eq!(first.sequence, 1);
+    fake.drop_connection();
+    // The subscriber ends: its stream resubscribes behind a fell-behind event, and Liquid reloads.
+    let ended = tokio::time::timeout(WAIT, events.recv())
+        .await
+        .expect("the subscriber ends");
+    assert!(ended.is_none());
+    let (restarted, mut events) = thread.subscribe();
+    assert_eq!(restarted.sequence, 10);
+    assert_eq!(
+        restarted.turns.iter().map(|t| t.number).collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    // The snapshot holds events up to 10, so the stale 10 changes nothing; 11 applies on top.
+    fake.push(
+        SUBSCRIBE,
+        vec![
+            event(
+                10,
+                "run.updated",
+                json!({"id": "r2", "ordinal": 2, "status": "interrupted"}),
+            ),
+            event(
+                11,
+                "run.updated",
+                json!({"id": "r2", "ordinal": 2, "status": "completed"}),
+            ),
+        ],
+    );
+    assert_eq!(
+        until(&fake, &mut events, 12).await,
+        vec![AgentEvent::TurnCompleted {
+            turn: TurnId(2),
+            checkpoint: Some("2".to_owned()),
+        }]
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

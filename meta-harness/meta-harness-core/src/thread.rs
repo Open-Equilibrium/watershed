@@ -184,7 +184,13 @@ impl Thread {
         let follower = tokio::spawn(async move {
             while let Some(message) = stream.recv().await {
                 let mut state = applied.lock().unwrap_or_else(PoisonError::into_inner);
-                apply(&mut state, &message);
+                if message["kind"] == "snapshot" {
+                    // T3 sent the thread again on a new connection; its events go on from there.
+                    restore(&mut state, &message);
+                    state.lineage.notify_one();
+                } else {
+                    apply(&mut state, &message);
+                }
             }
             // T3 ended the stream, so the subscribers end with it.
             applied
@@ -567,6 +573,15 @@ fn predecessor(projection: &Projection, turn: u64) -> u64 {
         .filter(|&ordinal| ordinal < turn && ready_checkpoint(projection, ordinal).is_some())
         .max()
         .unwrap_or(0)
+}
+
+/// Restarts the thread from a snapshot that T3 sent again on a new connection. Its subscribers end,
+/// so each one's stream resubscribes behind a fell-behind event and Liquid reloads the Chat
+/// (ADR-0272, ADR-0290).
+fn restore(state: &mut State, snapshot: &Value) {
+    state.projection = Projection::from_snapshot(&snapshot["projection"]);
+    state.sequence = snapshot["snapshotSequence"].as_u64().unwrap_or_default();
+    state.subscribers.clear();
 }
 
 /// Applies one message of T3's thread stream and hands its agent events to the subscribers.

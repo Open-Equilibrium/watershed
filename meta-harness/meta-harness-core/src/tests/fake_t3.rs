@@ -2,6 +2,7 @@
 //! the requests, and sends the chunks a test pushes. No T3 process runs.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use futures_util::{SinkExt, StreamExt};
@@ -33,7 +34,10 @@ pub fn chunk(id: &str, values: Vec<Value>) -> Message {
 
 enum Out {
     Chunk(String, Vec<Value>),
-    Close,
+    /// T3 drops the connection, as it does when a session expires, and accepts the next one.
+    Disconnect,
+    /// T3 stops: the connection closes and no other is accepted.
+    Stop,
 }
 
 /// A running stand-in on a loopback port.
@@ -45,11 +49,13 @@ pub struct Fake {
     latest: Arc<Mutex<HashMap<String, String>>>,
     /// The request ids the client interrupted; T3 pushes nothing more to them.
     interrupts: Arc<Mutex<Vec<String>>>,
+    /// How many connections T3 accepted.
+    accepted: Arc<AtomicUsize>,
     out: mpsc::UnboundedSender<Out>,
 }
 
 impl Fake {
-    /// Accepts one connection and answers each request with `answer(tag, payload, id)`.
+    /// Accepts connections and answers each request with `answer(tag, payload, id)`.
     pub async fn start(
         answer: impl Fn(&str, &Value, &str) -> Vec<Message> + Send + 'static,
     ) -> Self {
@@ -59,51 +65,60 @@ impl Fake {
         let log = requests.clone();
         let latest: Arc<Mutex<HashMap<String, String>>> = Arc::default();
         let interrupts: Arc<Mutex<Vec<String>>> = Arc::default();
+        let accepted: Arc<AtomicUsize> = Arc::default();
         // The task owns the originals; the handle keeps the shared state for the test.
-        let (latest_handle, interrupts_handle) = (latest.clone(), interrupts.clone());
+        let (latest_handle, interrupts_handle, accepted_handle) =
+            (latest.clone(), interrupts.clone(), accepted.clone());
         let (out, mut outgoing) = mpsc::unbounded_channel();
         tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            let mut socket = accept_async(stream).await.unwrap();
-            // Requests keep being answered after the handle is dropped; only `close` ends them.
+            // Requests keep being answered after the handle is dropped; only `Stop` ends them.
             let mut handle_open = true;
-            loop {
-                tokio::select! {
-                    incoming = socket.next() => {
-                        let Some(Ok(Message::Text(text))) = incoming else { break };
-                        let frames = match serde_json::from_str::<Value>(&text).unwrap() {
-                            Value::Array(frames) => frames,
-                            frame => vec![frame],
-                        };
-                        for request in frames.iter().filter(|f| f["_tag"] == "Request") {
-                            let id = request["id"].as_str().unwrap().to_owned();
-                            let tag = request["tag"].as_str().unwrap().to_owned();
-                            let payload = request["payload"].clone();
-                            latest.lock().unwrap().insert(tag.clone(), id.clone());
-                            log.lock().unwrap().push((tag.clone(), payload.clone()));
-                            for reply in answer(&tag, &payload, &id) {
-                                socket.send(reply).await.unwrap();
+            'connections: loop {
+                let (stream, _) = listener.accept().await.unwrap();
+                accepted.fetch_add(1, Ordering::SeqCst);
+                let mut socket = accept_async(stream).await.unwrap();
+                loop {
+                    tokio::select! {
+                        incoming = socket.next() => {
+                            let Some(Ok(Message::Text(text))) = incoming else { break };
+                            let frames = match serde_json::from_str::<Value>(&text).unwrap() {
+                                Value::Array(frames) => frames,
+                                frame => vec![frame],
+                            };
+                            for request in frames.iter().filter(|f| f["_tag"] == "Request") {
+                                let id = request["id"].as_str().unwrap().to_owned();
+                                let tag = request["tag"].as_str().unwrap().to_owned();
+                                let payload = request["payload"].clone();
+                                latest.lock().unwrap().insert(tag.clone(), id.clone());
+                                log.lock().unwrap().push((tag.clone(), payload.clone()));
+                                for reply in answer(&tag, &payload, &id) {
+                                    socket.send(reply).await.unwrap();
+                                }
+                            }
+                            for interrupt in frames.iter().filter(|f| f["_tag"] == "Interrupt") {
+                                let id = interrupt["requestId"].as_str().unwrap().to_owned();
+                                interrupts.lock().unwrap().push(id);
                             }
                         }
-                        for interrupt in frames.iter().filter(|f| f["_tag"] == "Interrupt") {
-                            let id = interrupt["requestId"].as_str().unwrap().to_owned();
-                            interrupts.lock().unwrap().push(id);
-                        }
+                        next = outgoing.recv(), if handle_open => match next {
+                            Some(Out::Chunk(tag, values)) => {
+                                let id = latest.lock().unwrap()[&tag].clone();
+                                // T3 stops a request's stream once the client interrupts it.
+                                if !interrupts.lock().unwrap().contains(&id) {
+                                    socket.send(chunk(&id, values)).await.unwrap();
+                                }
+                            }
+                            Some(Out::Disconnect) => {
+                                let _ = socket.close(None).await;
+                                continue 'connections;
+                            }
+                            Some(Out::Stop) => {
+                                let _ = socket.close(None).await;
+                                break 'connections;
+                            }
+                            None => handle_open = false,
+                        },
                     }
-                    next = outgoing.recv(), if handle_open => match next {
-                        Some(Out::Chunk(tag, values)) => {
-                            let id = latest.lock().unwrap()[&tag].clone();
-                            // T3 stops a request's stream once the client interrupts it.
-                            if !interrupts.lock().unwrap().contains(&id) {
-                                socket.send(chunk(&id, values)).await.unwrap();
-                            }
-                        }
-                        Some(Out::Close) => {
-                            let _ = socket.close(None).await;
-                            break;
-                        }
-                        None => handle_open = false,
-                    },
                 }
             }
         });
@@ -112,6 +127,7 @@ impl Fake {
             requests,
             latest: latest_handle,
             interrupts: interrupts_handle,
+            accepted: accepted_handle,
             out,
         }
     }
@@ -133,9 +149,26 @@ impl Fake {
         }
     }
 
-    /// Closes the connection, as T3 does when it stops.
+    /// Drops the connection, as T3 does when a session expires; T3 accepts the next one.
+    pub fn drop_connection(&self) {
+        let _ = self.out.send(Out::Disconnect);
+    }
+
+    /// Stops T3: the connection closes and no other is accepted.
     pub fn close(&self) {
-        let _ = self.out.send(Out::Close);
+        let _ = self.out.send(Out::Stop);
+    }
+
+    /// How many connections T3 accepted.
+    pub fn connections(&self) -> usize {
+        self.accepted.load(Ordering::SeqCst)
+    }
+
+    /// Waits until T3 accepted `count` connections.
+    pub async fn accepted(&self, count: usize) {
+        while self.connections() < count {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
     }
 
     /// Waits until T3 received `count` requests for `tag`, so chunks for them can follow.

@@ -46,7 +46,7 @@ impl Host {
             .map_err(|e| format!("Could not create T3's data folder: {e}"))?;
         write_settings(&config.home, &config.acp_agents)?;
         let server = Server::start(&config.binary, &config.home).await?;
-        let client = Client::connect(&server.origin, &server.token()?).await?;
+        let client = Client::connect(&server.origin, server.issuer()).await?;
         Ok(Self { server, client })
     }
 
@@ -174,9 +174,17 @@ impl Host {
             .map(|_| ())
     }
 
-    /// Stops T3.
-    pub async fn shutdown(self) {
+    /// Stops T3. The client closes first, so the connection that T3 closes is not reconnected.
+    pub async fn shutdown(mut self) {
+        self.client.close();
         self.server.stop().await;
+    }
+}
+
+impl Drop for Host {
+    /// Dropped without a shutdown, the server stops too; its connection must not be reconnected.
+    fn drop(&mut self) {
+        self.client.close();
     }
 }
 
