@@ -838,3 +838,37 @@ fn a_closing_workspace_keeps_its_replica_lock_until_its_database_has_closed() {
     drop(workspace);
     assert_eq!(*free.lock().unwrap(), Some(false), "the lock is still held");
 }
+
+#[test]
+fn a_workspace_whose_call_failed_midway_refuses_every_later_call() {
+    // The state a failed call leaves may hold changes it never committed.
+    let folder = Folder::new("poisoned");
+    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let mut registered = false;
+    workspace
+        .watch(1, resource(BridgeResourceKind::Areas), move |_| {
+            assert!(!registered, "a subscriber failed");
+            registered = true;
+            true
+        })
+        .unwrap();
+    let create = || BridgeMutation {
+        text: Some("Trips".into()),
+        ..mutation(BridgeMutationKind::CreateArea)
+    };
+    let failed =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| workspace.apply(create())));
+    assert!(failed.is_err());
+
+    let stopped = "the Workspace stopped after an internal error; quit and reopen Liquid";
+    assert_eq!(workspace.apply(create()).err().unwrap(), stopped);
+    assert_eq!(
+        workspace
+            .query(query(BridgeQueryKind::Areas))
+            .err()
+            .unwrap(),
+        stopped
+    );
+    let watched = workspace.watch(2, resource(BridgeResourceKind::Areas), |_| true);
+    assert_eq!(watched.err().unwrap(), stopped);
+}

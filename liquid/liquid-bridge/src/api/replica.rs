@@ -4,7 +4,7 @@
 
 use std::fs::{File, TryLockError};
 use std::path::Path;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Mutex, MutexGuard};
 
 use liquid_core::{
     Actor, AreaId, BlockId, BlockKind, Created, Error, Mutation, Origin, PageId, PersonId, Request,
@@ -96,7 +96,16 @@ fn take_lock(lock: &File) -> Result<(), String> {
     }
 }
 
+/// Why every call fails once a call failed midway.
+const STOPPED: &str = "the Workspace stopped after an internal error; quit and reopen Liquid";
+
 impl LiquidWorkspace {
+    /// The Workspace's state, unless a call failed while holding it: what that call left may
+    /// hold changes it never committed, so every later call is refused.
+    fn state(&self) -> Result<MutexGuard<'_, Inner>, String> {
+        self.inner.lock().map_err(|_| STOPPED.to_string())
+    }
+
     /// Opens the Workspace whose replica lives in the folder `dir`, creating both on first
     /// use. The replica's key lives in the operating system's keychain (ADR-0237).
     pub fn open(dir: String) -> Result<LiquidWorkspace, String> {
@@ -159,7 +168,7 @@ impl LiquidWorkspace {
             | Mutation::RemoveRow { page, .. }
             | Mutation::SetCell { page, .. } => Some(page.clone()),
         };
-        let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut inner = self.state()?;
         let actor = Actor::Person(inner.workspace.owner().clone());
         let result = inner.workspace.apply(Request {
             actor,
@@ -212,7 +221,7 @@ impl LiquidWorkspace {
 
     /// Reads one bounded window, one Block's text or one Database's fields.
     pub fn query(&self, query: BridgeQuery) -> Result<BridgeAnswer, String> {
-        let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut inner = self.state()?;
         let (start, limit) = window(query.start, query.limit)?;
         let mut read = None;
         let result = Self::read(&mut inner.workspace, &query, start, limit, &mut read);
@@ -352,7 +361,7 @@ impl LiquidWorkspace {
         resource: BridgeResource,
         deliver: impl FnMut(BridgeChange) -> bool + Send + 'static,
     ) -> Result<(), String> {
-        let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut inner = self.state()?;
         inner
             .subscriptions
             .follow(subscription, resource.normalized(), Box::new(deliver))
@@ -361,7 +370,9 @@ impl LiquidWorkspace {
     /// Ends a subscription, also one whose registration has not arrived yet. A Page that no
     /// subscription follows any more leaves memory.
     pub fn close(&self, subscription: i64) {
-        let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let Ok(mut inner) = self.state() else {
+            return;
+        };
         if let Some(resource) = inner.subscriptions.close(subscription) {
             inner.release(&resource);
         }
@@ -371,13 +382,19 @@ impl LiquidWorkspace {
 #[cfg(test)]
 impl LiquidWorkspace {
     pub(crate) fn is_loaded(&self, page: &PageId) -> bool {
-        let inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         inner.workspace.is_loaded(page)
     }
 
     /// How many subscription identities wait for their other end: a registration or a close.
     pub(crate) fn lifecycle_markers(&self) -> usize {
-        let inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         inner.subscriptions.lifecycle_markers()
     }
 }

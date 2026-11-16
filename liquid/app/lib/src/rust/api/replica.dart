@@ -10,8 +10,8 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 import 'workspace.dart';
 
-// These functions are ignored because they are not marked as `pub`: `notify`, `open_lock`, `open_with`, `read`, `release_page`, `release`, `take_lock`, `watch`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Inner`
+// These functions are ignored because they are not marked as `pub`: `notify`, `open_lock`, `open_with`, `read`, `release_page`, `release`, `state`, `take_lock`, `watch`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Inner`, `ReplicaLock`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `drop`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<LiquidWorkspace>>
