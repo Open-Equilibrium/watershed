@@ -36,6 +36,10 @@ class Caret {
   final bool slash;
 }
 
+/// How many windows of a Page's Views stay read: a long Page holds and rereads only those
+/// last used, not all it was scrolled through (client architecture rules 3 and 5).
+const keptViewWindows = 10;
+
 /// An open Page's Views in order, read in windows as the Page scrolls to them, and reread
 /// after each change. It also keeps what the Page's Text Blocks share: their styles, for
 /// numbering, and where the caret goes next.
@@ -47,12 +51,16 @@ class PageViews extends ChangeNotifier {
   final WorkspaceState state;
   final String page;
 
-  late final _views = WindowedList<BridgeView>((start, limit) async {
-    final answer = await state.read(
-      query(BridgeQueryKind.views, page: page, start: start, limit: limit),
-    );
-    return (answer.count, answer.views);
-  }, _report);
+  late final _views = WindowedList<BridgeView>(
+    (start, limit) async {
+      final answer = await state.read(
+        query(BridgeQueryKind.views, page: page, start: start, limit: limit),
+      );
+      return (answer.count, answer.views);
+    },
+    _report,
+    kept: keptViewWindows,
+  );
 
   /// How many Views the Page shows; null until first read.
   int? get count => _views.count;
@@ -90,6 +98,9 @@ class PageViews extends ChangeNotifier {
       BridgeResource(kind: BridgeResourceKind.views, page: page),
     ).listen((_) => unawaited(_views.reread()), onError: _report);
   }
+
+  /// The View at `index` if its window is kept, without reading it.
+  BridgeView? peek(int index) => _views.peek(index);
 
   /// The View at `index`, or null outside the Page or while its window is read.
   BridgeView? at(int index) => _views.at(index);
@@ -169,9 +180,11 @@ class PageViews extends ChangeNotifier {
   Future<BridgeView?> viewAt(int index) => _views.load(index);
 
   /// Reads the styles of the Text Blocks above `index` that no shown Text Block reported, as
-  /// far back as a numbered run reaches, so its numbers count items out of view.
+  /// far back as a numbered run reaches, so its numbers count items out of view; at most
+  /// through the windows that fit beside the shown ones, which a longer run would push out.
   Future<void> readRun(int index) async {
-    for (var at = index - 1; at >= 0 && !_disposed; at--) {
+    final first = (index ~/ windowItems - (keptViewWindows - 3)) * windowItems;
+    for (var at = index - 1; at >= first && at >= 0 && !_disposed; at--) {
       final view = await viewAt(at);
       // A numbered run ends at a Block of another kind.
       if (view == null || view.kind != BridgeBlockKind.text) return;

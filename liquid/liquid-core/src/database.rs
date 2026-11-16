@@ -163,7 +163,7 @@ impl Index {
         let rows = model::sorted_in(doc, &rows_map)
             .into_iter()
             .map(|row| Indexed {
-                sort: row.get(SORT).unwrap_or_default().to_string(),
+                sort: row.sort().unwrap_or_default().to_string(),
                 cells: cells(doc, &rows_map, &row.id, &kinds),
                 id: RowId::stored(&row.id),
             })

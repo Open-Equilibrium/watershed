@@ -505,22 +505,22 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (_composing && !_state.quitting) return;
     final text = _text.text;
     if (text == stored) return;
-    if (_style == BridgeTextStyle.paragraph) {
-      for (final MapEntry(key: typed, value: style)
-          in markdownShortcuts.entries) {
-        if (text.startsWith(typed) &&
-            !stored.startsWith(typed) &&
-            _text.selection.baseOffset == typed.length) {
-          final rest = text.substring(typed.length);
-          _set(rest, 0);
-          _send(rest);
-          _restyle(style);
-          return;
-        }
-      }
+    if (shortcutTyped(text, stored, _text.selection.baseOffset, _style) case (
+      final typed,
+      final style,
+    )) {
+      final rest = text.substring(typed.length);
+      _set(rest, 0);
+      _send(rest);
+      _restyle(style);
+      return;
     }
-    // A boundary already exists at the Page's start (approved Section mockups).
-    if (text == sectionBreak && widget.index > 0 && !widget.view.boundary) {
+    if (startsSection(
+      text,
+      stored,
+      index: widget.index,
+      boundary: widget.view.boundary,
+    )) {
       _set('', 0);
       _send('');
       _write(
@@ -835,7 +835,8 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (widget.view.boundary) return 1;
     var number = 1;
     for (var index = widget.index - 1; index >= 0; index--) {
-      final above = widget.views.at(index);
+      // Read as far as readRun reached, without pushing the shown windows out.
+      final above = widget.views.peek(index);
       if (above == null || styles[above.block] != BridgeTextStyle.numbered) {
         break;
       }

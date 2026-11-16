@@ -10,6 +10,17 @@ use crate::{Error, Place};
 const DIGITS: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 const SMALLEST: &[u8] = b"A00000000000000000000000000";
 
+/// The longest key the core writes, as long as a name (ADR-0251); a key grows by about one
+/// character per six objects placed at one spot, so only some 6,000 of them reach it. A
+/// longer stored key, as another device may send, counts as no key.
+pub(crate) const MAX_KEY: usize = 1_000;
+
+/// `key` if it is one the core writes, within [`MAX_KEY`]; any other, as another device or
+/// an older version may store, counts as no key and sorts first.
+pub(crate) fn usable(key: Option<&str>) -> Option<&str> {
+    key.filter(|key| key.len() <= MAX_KEY && integer(key.as_bytes()).is_some())
+}
+
 fn value(digit: u8) -> usize {
     DIGITS.iter().position(|&d| d == digit).unwrap_or(0)
 }
@@ -40,11 +51,15 @@ pub(crate) fn at<T, I: PartialEq + ?Sized>(
         }
         Place::Last => sorted.len(),
     };
+    // Nothing sorts before an item without a usable key.
+    if sorted
+        .get(index)
+        .is_some_and(|item| usable(key(item)).is_none())
+    {
+        return Err(Error::TooLong);
+    }
     let key_at = |i: usize| sorted.get(i).and_then(&key);
-    Ok(between(
-        index.checked_sub(1).and_then(key_at),
-        key_at(index),
-    ))
+    between(index.checked_sub(1).and_then(key_at), key_at(index))
 }
 
 /// The key for an item placed right before `before` among `sorted`, as [at] reads them.
@@ -60,27 +75,31 @@ pub(crate) fn before<T, I: PartialEq + ?Sized>(
         .position(|item| id(item) == before)
         .ok_or(Error::NotFound)?;
     let tied = key(&sorted[at]);
+    if usable(tied).is_none() {
+        return Err(Error::TooLong);
+    }
     let below = sorted[..at]
         .iter()
         .rev()
         .map(&key)
         .find(|other| *other != tied);
-    Ok(between(below.flatten(), tied))
+    between(below.flatten(), tied)
 }
 
 /// A key after `before` and before `after`; `None` is the start or the end. Equal or
 /// misordered neighbors, from two devices placing objects at one spot concurrently, get a
 /// key after `before`; ties order by identity. A neighbor that is no valid key counts as
-/// the start or the end.
-pub(crate) fn between(before: Option<&str>, after: Option<&str>) -> String {
-    let before = before
+/// the start or the end, as one past [`MAX_KEY`] does; a new key past it is refused.
+fn between(before: Option<&str>, after: Option<&str>) -> Result<String, Error> {
+    let before = usable(before).map(str::as_bytes);
+    let after = usable(after)
         .map(str::as_bytes)
-        .filter(|key| integer(key).is_some());
-    let after = after
-        .map(str::as_bytes)
-        .filter(|key| integer(key).is_some())
         .filter(|after| before.is_none_or(|before| before < *after));
-    String::from_utf8(key_between(before, after)).expect("ASCII digits")
+    let key = key_between(before, after);
+    if key.len() > MAX_KEY {
+        return Err(Error::TooLong);
+    }
+    Ok(String::from_utf8(key).expect("ASCII digits"))
 }
 
 fn key_between(before: Option<&[u8]>, after: Option<&[u8]>) -> Vec<u8> {
@@ -225,7 +244,7 @@ fn midpoint(mut before: &[u8], mut after: Option<&[u8]>) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{at, between};
+    use super::{MAX_KEY, at, before, between, midpoint};
     use crate::{Error, Place};
 
     #[test]
@@ -242,24 +261,24 @@ mod tests {
 
     #[test]
     fn keys_fit_between_any_two_neighbors() {
-        let mut keys = vec![between(None, None)];
+        let mut keys = vec![between(None, None).unwrap()];
         for round in 0..200 {
             let i = (round * 7) % (keys.len() + 1);
             let key = between(
                 i.checked_sub(1).map(|j| keys[j].as_str()),
                 keys.get(i).map(String::as_str),
             );
-            keys.insert(i, key);
+            keys.insert(i, key.unwrap());
         }
         assert!(keys.windows(2).all(|pair| pair[0] < pair[1]));
     }
 
     #[test]
     fn keys_stay_short_when_appending_or_prepending() {
-        let (mut last, mut first) = (between(None, None), between(None, None));
+        let (mut last, mut first) = (between(None, None).unwrap(), between(None, None).unwrap());
         for _ in 0..10_000 {
-            let next = between(Some(&last), None);
-            let previous = between(None, Some(&first));
+            let next = between(Some(&last), None).unwrap();
+            let previous = between(None, Some(&first)).unwrap();
             assert!(last < next && previous < first);
             (last, first) = (next, previous);
         }
@@ -269,19 +288,76 @@ mod tests {
     #[test]
     fn prepending_at_the_smallest_integer_keeps_the_order() {
         let high = format!("A{}1", "0".repeat(25));
-        let first = between(None, Some(&high));
-        let second = between(None, Some(&first));
+        let first = between(None, Some(&high)).unwrap();
+        let second = between(None, Some(&first)).unwrap();
         assert!(second < first && first < high, "{second} {first} {high}");
     }
 
     #[test]
     fn equal_neighbors_get_a_key_after_both() {
-        assert!(between(Some("a1"), Some("a1")).as_str() > "a1");
+        assert!(between(Some("a1"), Some("a1")).unwrap().as_str() > "a1");
     }
 
     #[test]
-    fn a_long_fraction_still_gets_a_key() {
-        let lower = format!("a0{}", "z".repeat(100_000));
-        assert_eq!(between(Some(&lower), Some("a1")), format!("{lower}V"));
+    fn a_long_fraction_still_gets_a_midpoint() {
+        let fraction = "z".repeat(100_000);
+        assert_eq!(
+            midpoint(fraction.as_bytes(), None),
+            format!("{fraction}V").into_bytes()
+        );
+    }
+
+    #[test]
+    fn a_placement_needing_a_key_past_the_cap_is_refused() {
+        let place = |lower: &str| {
+            let sorted = [("x", lower), ("y", "a1")];
+            at(
+                &sorted,
+                Place::After("x"),
+                |item| item.0,
+                |item| Some(item.1),
+            )
+        };
+        let longest = format!("a0{}", "z".repeat(MAX_KEY - 3));
+        assert_eq!(place(&longest).unwrap().len(), MAX_KEY);
+        let full = format!("{longest}z");
+        assert!(matches!(place(&full), Err(Error::TooLong)));
+    }
+
+    #[test]
+    fn nothing_goes_before_a_neighbor_without_a_usable_key() {
+        let over = format!("a0{}", "z".repeat(MAX_KEY));
+        for unusable in ["", "!", over.as_str()] {
+            let sorted = [("x", unusable), ("y", "a1")];
+            assert!(matches!(
+                at(&sorted, Place::First, |item| item.0, |item| Some(item.1)),
+                Err(Error::TooLong)
+            ));
+            assert!(matches!(
+                before(&sorted, "x", |item| item.0, |item| Some(item.1)),
+                Err(Error::TooLong)
+            ));
+            let after = at(
+                &sorted,
+                Place::After("x"),
+                |item| item.0,
+                |item| Some(item.1),
+            )
+            .unwrap();
+            assert!(after.as_str() < "a1", "{after}");
+        }
+    }
+
+    #[test]
+    fn a_stored_key_past_the_cap_counts_as_no_key() {
+        let over = format!("a0{}", "z".repeat(MAX_KEY));
+        assert_eq!(
+            between(Some(&over), Some("a1")).unwrap(),
+            between(None, Some("a1")).unwrap()
+        );
+        assert_eq!(
+            between(Some("a1"), Some(&over)).unwrap(),
+            between(Some("a1"), None).unwrap()
+        );
     }
 }
