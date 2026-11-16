@@ -1,7 +1,8 @@
 //! Git for a session's checkout or the project folder, run by T3 Code with its behavior as
 //! shipped (ADR-0282).
 
-use meta_harness_core::{Git, GitAction, GitActionRequest, GitProgress, visible_name};
+use meta_harness_core::remote::Git;
+use meta_harness_core::{GitAction, GitActionRequest, GitProgress, visible_name};
 
 use crate::api::events::BridgeFileChange;
 use crate::api::session::RUNTIME;

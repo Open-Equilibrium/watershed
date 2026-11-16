@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use meta_harness_core::{AcpAgent, Host, HostConfig};
+use meta_harness_core::{AcpAgent, Service, ServiceConfig};
 
 use crate::api::details::BridgeLineageRelation;
 use crate::api::events::{BridgeChangeStatus, BridgeEvent, BridgeEventKind, BridgeItemKind};
@@ -50,6 +50,11 @@ impl Fixture {
     fn repo(&self) -> PathBuf {
         self.0.join("repo")
     }
+
+    /// Meta-Harness's data folder for the test's service.
+    fn home(&self) -> PathBuf {
+        self.0.join("meta-harness")
+    }
 }
 
 impl Drop for Fixture {
@@ -65,13 +70,16 @@ fn t3_binary() -> PathBuf {
         .into()
 }
 
-fn host(fixture: &Fixture) -> AgentHost {
+/// Starts a service in the fixture's folder with the scripted agent, and connects the bridge to it
+/// as Liquid does. The test ends the service with [`stop`].
+fn host(fixture: &Fixture) -> (Service, AgentHost) {
     let script = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../meta-harness/meta-harness-core/tests/fixtures/scripted_acp_agent.py");
-    let host = RUNTIME
-        .block_on(Host::start(HostConfig {
-            binary: t3_binary(),
-            home: fixture.0.join("t3"),
+    let home = fixture.home();
+    let service = RUNTIME
+        .block_on(Service::start(ServiceConfig {
+            home: home.clone(),
+            t3: t3_binary(),
             acp_agents: vec![AcpAgent {
                 id: "scripted".to_owned(),
                 command: PathBuf::from("/usr/bin/python3"),
@@ -79,8 +87,14 @@ fn host(fixture: &Fixture) -> AgentHost {
                 models: vec!["scripted".to_owned()],
             }],
         }))
-        .expect("T3 starts");
-    AgentHost::from_host(host)
+        .expect("the service starts");
+    let host =
+        AgentHost::connect(Some(home.to_string_lossy().into_owned())).expect("Liquid connects");
+    (service, host)
+}
+
+fn stop(service: Service) {
+    RUNTIME.block_on(service.stop());
 }
 
 fn scripted() -> BridgeModelChoice {
@@ -99,7 +113,9 @@ fn follow_until(
     done: impl Fn(&AgentSession, &BridgeSnapshot, &[BridgeEvent]) -> bool,
 ) -> (BridgeSnapshot, Vec<BridgeEvent>) {
     let (sender, receiver) = mpsc::channel();
-    let snapshot = session.forward(move |event| sender.send(event).is_ok());
+    let snapshot = session
+        .forward(move |event| sender.send(event).is_ok())
+        .expect("the session follows");
     let mut events = Vec::new();
     while !done(session, &snapshot, &events) {
         let event = receiver
@@ -166,6 +182,7 @@ fn completed(n: usize) -> impl Fn(&AgentSession) -> bool {
     move |session| {
         session
             .turns()
+            .expect("the turns")
             .iter()
             .filter(|t| t.status == BridgeTurnStatus::Completed && t.checkpoint)
             .count()
@@ -176,7 +193,7 @@ fn completed(n: usize) -> impl Fn(&AgentSession) -> bool {
 #[test]
 fn a_session_streams_diffs_reverts_and_exports_through_the_bridge() {
     let fixture = Fixture::new();
-    let host = host(&fixture);
+    let (service, host) = host(&fixture);
     let project = host
         .project(fixture.repo().to_string_lossy().into_owned())
         .expect("project");
@@ -210,7 +227,7 @@ fn a_session_streams_diffs_reverts_and_exports_through_the_bridge() {
         .turn_patch(1, 2, "contract.txt".to_owned(), false)
         .expect("patch");
     assert!(patch.contains("+first") && patch.contains("+second"));
-    let statistics = session.statistics();
+    let statistics = session.statistics().expect("statistics");
     assert_eq!(statistics.turns.len(), 2);
     assert!(statistics.tools.iter().any(|t| t.succeeded >= 1));
 
@@ -230,13 +247,18 @@ fn a_session_streams_diffs_reverts_and_exports_through_the_bridge() {
     assert!(folder.join("thread.json").is_file() && folder.join("README.txt").is_file());
 
     assert_eq!(session.revert(2, true).expect("reverted"), "append second");
-    follow(&session, |s| s.turns().len() == 1);
-    let worktree = PathBuf::from(session.worktree().expect("own worktree"));
+    follow(&session, |s| s.turns().expect("the turns").len() == 1);
+    let worktree = PathBuf::from(
+        session
+            .worktree()
+            .expect("the worktree")
+            .expect("own worktree"),
+    );
     assert_eq!(
         std::fs::read_to_string(worktree.join("contract.txt")).expect("file"),
         "first\n"
     );
-    let snapshot = session.snapshot();
+    let snapshot = session.snapshot().expect("the snapshot");
     assert!(
         snapshot
             .transcript
@@ -249,13 +271,13 @@ fn a_session_streams_diffs_reverts_and_exports_through_the_bridge() {
             |item| item.item.kind == BridgeItemKind::UserMessage && item.text == "append first"
         )
     );
-    host.shutdown();
+    stop(service);
 }
 
 #[test]
 fn a_turn_that_finished_before_its_follow_has_its_answer_in_the_snapshot() {
     let fixture = Fixture::new();
-    let host = host(&fixture);
+    let (service, host) = host(&fixture);
     let project = project_at(&host, &fixture.repo());
     let session = project
         .start(
@@ -272,13 +294,13 @@ fn a_turn_that_finished_before_its_follow_has_its_answer_in_the_snapshot() {
         answer_reached_liquid(&snapshot, &events),
         "the answer reaches Liquid"
     );
-    host.shutdown();
+    stop(service);
 }
 
 #[test]
 fn git_runs_through_the_bridge_with_its_progress() {
     let fixture = Fixture::new();
-    let host = host(&fixture);
+    let (service, host) = host(&fixture);
     let project = host
         .project(fixture.repo().to_string_lossy().into_owned())
         .expect("project");
@@ -317,53 +339,46 @@ fn git_runs_through_the_bridge_with_its_progress() {
         "{steps:?}"
     );
     assert!(git.status().expect("status").changes.is_empty());
-    host.shutdown();
+    stop(service);
 }
 
 #[test]
-fn the_host_starts_t3_and_refuses_calls_once_stopped() {
+fn connecting_says_when_meta_harness_is_not_running_and_where_it_looked() {
     let fixture = Fixture::new();
-    let home = fixture.0.join("t3");
-    // Meta-Harness creates a home folder only when it writes ACP agents into it, and T3 starts in it.
-    std::fs::create_dir(&home).expect("home");
-    let host = AgentHost::start(
-        t3_binary().to_string_lossy().into_owned(),
-        home.to_string_lossy().into_owned(),
-    )
-    .expect("T3 starts");
+    let home = fixture.home().to_string_lossy().into_owned();
+    let error = AgentHost::connect(Some(home.clone()))
+        .err()
+        .expect("no service runs in a new folder");
+    assert!(error.starts_with("Meta-Harness is not running"), "{error}");
     assert!(
-        host.providers()
+        error.contains(&home) && error.contains("META_HARNESS_HOME"),
+        "{error}"
+    );
+}
+
+#[test]
+fn closing_liquid_leaves_the_service_running() {
+    let fixture = Fixture::new();
+    let (service, host) = host(&fixture);
+    let home = fixture.home().to_string_lossy().into_owned();
+    drop(host);
+    let reconnected = AgentHost::connect(Some(home)).expect("the service still runs");
+    assert!(
+        reconnected
+            .providers()
             .is_ok_and(|providers| !providers.is_empty())
     );
-    host.shutdown();
-    assert_eq!(host.providers(), Err("T3 has stopped.".to_owned()));
-}
-
-#[test]
-fn shutdown_stops_t3_while_a_call_still_holds_the_host() {
-    let fixture = Fixture::new();
-    let host = host(&fixture);
-    // A call in flight holds the host when the app quits.
-    let _in_flight = host.host().expect("running");
-    let runtime = fixture.0.join("t3/userdata/server-runtime.json");
-    let record: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(runtime).expect("runtime record"))
-            .expect("JSON");
-    let pid = record["pid"].as_u64().expect("pid").to_string();
-    host.shutdown();
-    let running = || {
-        std::process::Command::new("ps")
-            .args(["-p", &pid])
-            .output()
-            .is_ok_and(|out| out.status.success())
-    };
-    until(|| !running());
+    stop(service);
+    assert!(
+        reconnected.providers().is_err(),
+        "a stopped service answers no call"
+    );
 }
 
 #[test]
 fn a_project_starts_finds_opens_archives_and_deletes_its_sessions() {
     let fixture = Fixture::new();
-    let host = host(&fixture);
+    let (service, host) = host(&fixture);
     let project = host
         .project(fixture.repo().to_string_lossy().into_owned())
         .expect("project");
@@ -377,7 +392,12 @@ fn a_project_starts_finds_opens_archives_and_deletes_its_sessions() {
         )
         .expect("session starts in a new worktree");
     follow_turns(&first, 1);
-    let worktree = PathBuf::from(first.worktree().expect("its own worktree"));
+    let worktree = PathBuf::from(
+        first
+            .worktree()
+            .expect("the worktree")
+            .expect("its own worktree"),
+    );
     let second = project
         .start(
             "append second".to_owned(),
@@ -388,7 +408,10 @@ fn a_project_starts_finds_opens_archives_and_deletes_its_sessions() {
         )
         .expect("session starts in the existing worktree");
     follow_turns(&second, 1);
-    assert_eq!(second.worktree().map(PathBuf::from), Some(worktree.clone()));
+    assert_eq!(
+        second.worktree().expect("the worktree").map(PathBuf::from),
+        Some(worktree.clone())
+    );
     assert_eq!(project.threads().expect("threads").len(), 2);
     assert!(!project.only_session_in_worktree(first.id()).expect("query"));
     assert_eq!(project.open(second.id()).expect("opened").id(), second.id());
@@ -414,16 +437,16 @@ fn a_project_starts_finds_opens_archives_and_deletes_its_sessions() {
         )
         .expect("session starts in the project folder");
     follow_turns(&checkout, 1);
-    assert_eq!(checkout.worktree(), None);
+    assert_eq!(checkout.worktree().expect("the worktree"), None);
     let forked = checkout.fork(1).expect("forked from the first turn");
     assert_ne!(forked, checkout.id(), "a fork is a session of its own");
-    host.shutdown();
+    stop(service);
 }
 
 #[test]
 fn the_details_card_reads_and_acts_on_a_session_through_the_bridge() {
     let fixture = Fixture::new();
-    let host = host(&fixture);
+    let (service, host) = host(&fixture);
     assert!(
         !host
             .environment_name()
@@ -454,7 +477,7 @@ fn the_details_card_reads_and_acts_on_a_session_through_the_bridge() {
     let fork = project.open(fork_id.clone()).expect("opened");
     fork.send("append in fork".to_owned(), false).expect("sent");
     until(|| {
-        fork.turns().iter().any(|t| {
+        fork.turns().expect("the turns").iter().any(|t| {
             t.prompt == "append in fork" && t.status == BridgeTurnStatus::Completed && t.checkpoint
         })
     });
@@ -468,7 +491,7 @@ fn the_details_card_reads_and_acts_on_a_session_through_the_bridge() {
     let lineage = fork.lineage_subscribe().expect("the fork's lineage");
     assert!(lineage.can_merge && lineage.rows.iter().any(|row| row.merge_target));
     fork.merge_back().expect("merged back");
-    host.shutdown();
+    stop(service);
 }
 
 /// Reports to its test when it is dropped, which is when the task that owns it ends.
@@ -491,7 +514,7 @@ fn holding<T>(ends: Ends) -> impl FnMut(T) -> bool + Send + 'static {
 #[test]
 fn dropping_the_session_or_checkout_ends_its_live_follows() {
     let fixture = Fixture::new();
-    let host = host(&fixture);
+    let (service, host) = host(&fixture);
     let project = project_at(&host, &fixture.repo());
     let session = project
         .start(
@@ -533,7 +556,7 @@ fn dropping_the_session_or_checkout_ends_its_live_follows() {
     ended
         .recv_timeout(Duration::from_secs(10))
         .expect("the status watch ends with its checkout");
-    host.shutdown();
+    stop(service);
 }
 
 /// Starts a session that runs until stopped and queues one follow-up behind it.
@@ -551,6 +574,7 @@ fn queued_behind_a_running_turn(project: &AgentProject, prompt: &str) -> AgentSe
     until(|| {
         session
             .turns()
+            .expect("the turns")
             .get(1)
             .is_some_and(|t| t.status == BridgeTurnStatus::Queued)
     });
@@ -560,7 +584,7 @@ fn queued_behind_a_running_turn(project: &AgentProject, prompt: &str) -> AgentSe
 #[test]
 fn a_session_queues_edits_cancels_and_stops_turns_through_the_bridge() {
     let fixture = Fixture::new();
-    let host = host(&fixture);
+    let (service, host) = host(&fixture);
     let project = host
         .project(fixture.repo().to_string_lossy().into_owned())
         .expect("project");
@@ -571,11 +595,12 @@ fn a_session_queues_edits_cancels_and_stops_turns_through_the_bridge() {
     until(|| {
         cancelled
             .turns()
+            .expect("the turns")
             .get(1)
             .is_some_and(|t| t.status == BridgeTurnStatus::Aborted)
     });
     cancelled.stop().expect("stopped");
-    until(|| cancelled.turns()[0].status == BridgeTurnStatus::Aborted);
+    until(|| cancelled.turns().expect("the turns")[0].status == BridgeTurnStatus::Aborted);
 
     let edited = queued_behind_a_running_turn(&project, "append queued");
     edited
@@ -584,18 +609,22 @@ fn a_session_queues_edits_cancels_and_stops_turns_through_the_bridge() {
     until(|| {
         edited
             .turns()
+            .expect("the turns")
             .get(1)
             .is_some_and(|t| t.prompt == "append edited" && t.status == BridgeTurnStatus::Queued)
     });
     edited.stop().expect("stopped");
-    until(|| edited.turns()[0].status == BridgeTurnStatus::Aborted);
+    until(|| edited.turns().expect("the turns")[0].status == BridgeTurnStatus::Aborted);
 
     let sent = queued_behind_a_running_turn(&project, "append now");
     // T3 refuses to steer a turn that has not started; the refusal reaches Liquid.
     assert!(sent.send_queued_now(2).is_err());
     sent.stop().expect("stopped");
     let session = sent;
-    assert!(session.context().is_none(), "the agent reports no window");
+    assert!(
+        session.context().expect("the context").is_none(),
+        "the agent reports no window"
+    );
     assert!(session.dismiss("no such request".to_owned()).is_err());
     assert!(
         session
@@ -612,8 +641,10 @@ fn a_session_queues_edits_cancels_and_stops_turns_through_the_bridge() {
             BridgePermissions::Supervised,
         )
         .expect("session starts");
-    follow(&asked, |s| !s.snapshot().requests.is_empty());
-    let request = asked.snapshot().requests.remove(0);
+    follow(&asked, |s| {
+        !s.snapshot().expect("the snapshot").requests.is_empty()
+    });
+    let request = asked.snapshot().expect("the snapshot").requests.remove(0);
     let decision = request
         .approval
         .expect("an approval")
@@ -629,13 +660,13 @@ fn a_session_queues_edits_cancels_and_stops_turns_through_the_bridge() {
     ] {
         asked.set_permissions(permissions).expect("permissions set");
     }
-    host.shutdown();
+    stop(service);
 }
 
 #[test]
 fn git_switches_commits_pulls_pushes_and_initializes_through_the_bridge() {
     let fixture = Fixture::new();
-    let host = host(&fixture);
+    let (service, host) = host(&fixture);
     let repo = fixture.repo();
     git(
         &fixture.0,
@@ -718,7 +749,7 @@ fn git_switches_commits_pulls_pushes_and_initializes_through_the_bridge() {
     assert!(!plain.git().status().expect("status").repository);
     plain.git().init().expect("initialized");
     assert!(plain.git().status().expect("status").repository);
-    host.shutdown();
+    stop(service);
 }
 
 fn project_at(host: &AgentHost, folder: &Path) -> crate::api::session::AgentProject {

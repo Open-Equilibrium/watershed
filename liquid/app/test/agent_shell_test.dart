@@ -12,7 +12,6 @@ import 'package:liquid/src/diff/diff_model.dart';
 import 'package:liquid/src/diff/diff_settings.dart';
 import 'package:liquid/src/diff/diff_panel.dart';
 import 'package:liquid/src/rust/api/events.dart';
-import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/rust/api/thread.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/settings_file.dart';
@@ -34,19 +33,6 @@ class _FullDisk extends SettingsFile {
       throw const FileSystemException('disk full');
 }
 
-/// T3 as the app stops it: only `shutdown` is answered.
-class FakeAgentHost implements AgentHost {
-  bool stopped = false;
-
-  @override
-  Future<void> shutdown() async {
-    stopped = true;
-  }
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
-
 void main() {
   late FakeProject project;
   late SessionState state;
@@ -60,7 +46,6 @@ void main() {
     List<BridgeTurn> turns = const [],
     List<BridgeRequest> requests = const [],
     Size size = const Size(1600, 900),
-    AgentHost? host,
   }) async {
     await tester.binding.setSurfaceSize(size);
     sequence = 0;
@@ -82,7 +67,6 @@ void main() {
         home: AgentShell(
           state: state,
           info: info,
-          host: host,
           parseDiff: parsePatch,
         ),
       ),
@@ -878,13 +862,6 @@ void main() {
       expect(composerText(tester), 'Fix login', reason: 'not doubled');
     },
   );
-
-  testWidgets('quitting stops T3 before Liquid exits', (tester) async {
-    final host = FakeAgentHost();
-    await show(tester, host: host);
-    await tester.binding.handleRequestAppExit();
-    expect(host.stopped, isTrue);
-  });
 
   testWidgets('without a session, a failed save is reported to the Workspace', (
     tester,

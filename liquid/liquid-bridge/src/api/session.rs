@@ -1,14 +1,15 @@
-//! Agent sessions for the Liquid app: Meta-Harness's T3 Code server, a project's threads and
-//! one followed thread (ADR-0280). Calls run on flutter_rust_bridge's worker threads, never on
-//! the Dart main isolate, and events stream to Dart as they arrive (ADR-0182).
+//! Agent sessions for the Liquid app: Meta-Harness's service, a project's threads and one followed
+//! thread (ADR-0280, ADR-0297). Calls run on flutter_rust_bridge's worker threads, never on the
+//! Dart main isolate, and events stream to Dart as they arrive (ADR-0182).
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::Duration;
 
+use meta_harness_core::remote::{Host, Project, Stream, Thread};
 use meta_harness_core::{
-    Automation, Host, HostConfig, LineageChanges, LocalServer, Permissions, Project, StartThread,
-    Thread, ThreadSummary, TurnStatus, Watch, Workspace, visible_name,
+    Automation, LineageChanges, LocalServer, Permissions, StartThread, ThreadEvent, ThreadSummary,
+    TurnStatus, Watch, Workspace, default_home, visible_name,
 };
 use tokio::runtime::Runtime;
 
@@ -129,45 +130,40 @@ fn run<T>(future: impl Future<Output = T>) -> T {
     RUNTIME.block_on(future)
 }
 
-/// Meta-Harness's T3 Code server on this host.
+/// The connection to Meta-Harness's service on this host. Closing it leaves the service running.
 #[flutter_rust_bridge::frb(opaque)]
 pub struct AgentHost {
-    host: Mutex<Option<Arc<Host>>>,
+    host: Host,
 }
 
 impl AgentHost {
-    /// Starts the pinned `t3` at `binary` with its data in `home`.
-    pub fn start(binary: String, home: String) -> Result<Self, String> {
-        let host = run(Host::start(HostConfig {
-            binary: binary.into(),
-            home: home.into(),
-            acp_agents: Vec::new(),
-        }))?;
-        Ok(Self {
-            host: Mutex::new(Some(Arc::new(host))),
-        })
+    /// Connects to the service whose data folder is `home`, else the default folder.
+    pub fn connect(home: Option<String>) -> Result<Self, String> {
+        let (folder, found) = match home {
+            Some(home) => (PathBuf::from(home), "from META_HARNESS_HOME"),
+            None => (
+                default_home().ok_or("The home folder is unknown.")?,
+                "from the default folder",
+            ),
+        };
+        let host = run(Host::connect(&folder, "liquid")).map_err(|error| {
+            format!(
+                "Meta-Harness is not running. Liquid looked in {} ({found}). {error}",
+                folder.display()
+            )
+        })?;
+        Ok(Self { host })
     }
 
-    /// Wraps a started host, for Rust consumers such as tests.
+    /// Wraps a connected host, for Rust consumers such as tests.
     #[flutter_rust_bridge::frb(ignore)]
     pub fn from_host(host: Host) -> Self {
-        Self {
-            host: Mutex::new(Some(Arc::new(host))),
-        }
-    }
-
-    pub(crate) fn host(&self) -> Result<Arc<Host>, String> {
-        self.host
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
-            .ok_or_else(|| "T3 has stopped.".to_owned())
+        Self { host }
     }
 
     /// The providers T3 offers, with their models.
     pub fn providers(&self) -> Result<Vec<BridgeProvider>, String> {
-        let host = self.host()?;
-        Ok(run(host.providers())?
+        Ok(run(self.host.providers())?
             .into_iter()
             .map(convert::provider)
             .collect())
@@ -175,43 +171,28 @@ impl AgentHost {
 
     /// The name T3 shows for this host, such as the computer's name.
     pub fn environment_name(&self) -> Result<String, String> {
-        let host = self.host()?;
-        run(host.environment_name()).map(|name| visible_name(&name))
+        run(self.host.environment_name()).map(|name| visible_name(&name))
     }
 
     /// The writer model (ADR-0294), if one is set.
     pub fn writer_model(&self) -> Result<Option<BridgeModelChoice>, String> {
-        let host = self.host()?;
-        Ok(run(host.writer_model())?.map(|m| convert::model_choice(&m)))
+        Ok(run(self.host.writer_model())?.map(|m| convert::model_choice(&m)))
     }
 
     /// Sets the one model that writes commit messages, pull request text and session titles.
     pub fn set_writer_model(&self, choice: BridgeModelChoice) -> Result<(), String> {
-        let host = self.host()?;
-        run(host.set_writer_model(&convert::to_model_choice(choice)))
+        run(self
+            .host
+            .set_writer_model(&convert::to_model_choice(choice)))
     }
 
     /// The project for the folder `root`.
     pub fn project(&self, root: String) -> Result<AgentProject, String> {
-        let host = self.host()?;
-        let project = run(host.project(Path::new(&root)))?;
+        let project = run(self.host.project(Path::new(&root)))?;
         Ok(AgentProject {
             project: Arc::new(project),
             root,
         })
-    }
-
-    /// Stops T3; later calls fail.
-    pub fn shutdown(&self) {
-        let host = self
-            .host
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
-        // Calls still in flight hold the host; they fail once T3 is gone.
-        if let Some(host) = host {
-            run(host.shutdown());
-        }
     }
 }
 
@@ -305,6 +286,46 @@ fn permissions_of(permissions: BridgePermissions) -> Permissions {
     }
 }
 
+/// Moves a subscription's events into a channel of their own, which the forwarder polls. The
+/// subscription is cancelled once the channel's reader is gone.
+fn pump(mut events: Stream<ThreadEvent>) -> tokio::sync::mpsc::Receiver<ThreadEvent> {
+    // The subscription's own backlog holds what waits; this channel is one event deep.
+    let (sender, receiver) = tokio::sync::mpsc::channel(1);
+    RUNTIME.spawn(async move {
+        loop {
+            let next = tokio::select! {
+                next = events.recv() => next,
+                () = sender.closed() => return,
+            };
+            let Some(next) = next else { return };
+            if sender.send(next).await.is_err() {
+                return;
+            }
+        }
+    });
+    receiver
+}
+
+/// The subscription that replaces a lost one. It gives `None` once the thread ended for good, once
+/// T3 cannot be asked (the stream then ends rather than retries), or once the session was dropped.
+async fn resubscribe(
+    thread: Thread,
+    mut ended: tokio::sync::watch::Receiver<()>,
+) -> Option<tokio::sync::mpsc::Receiver<ThreadEvent>> {
+    until_ended(&mut ended, async {
+        match thread.ended().await {
+            Ok(false) => thread
+                .subscribe()
+                .await
+                .ok()
+                .map(|(_, events)| pump(events)),
+            _ => None,
+        }
+    })
+    .await
+    .flatten()
+}
+
 /// One followed session.
 #[flutter_rust_bridge::frb(opaque)]
 pub struct AgentSession {
@@ -355,23 +376,21 @@ impl AgentSession {
     }
 
     /// Its title.
-    pub fn title(&self) -> String {
-        self.thread.title()
+    pub fn title(&self) -> Result<String, String> {
+        run(self.thread.title())
     }
 
     /// Its own worktree, if it has one.
-    pub fn worktree(&self) -> Option<String> {
-        self.thread
-            .worktree()
-            .map(|path| path.to_string_lossy().into_owned())
+    pub fn worktree(&self) -> Result<Option<String>, String> {
+        Ok(run(self.thread.worktree())?.map(|path| path.to_string_lossy().into_owned()))
     }
 
     /// The session now; [`AgentSession::events`] then streams the events after it, with no gap.
     /// Liquid shows the snapshot and applies each event whose sequence is past it (ADR-0290).
-    pub fn subscribe(&self) -> BridgeSnapshot {
-        let (snapshot, receiver) = self.thread.subscribe();
-        *self.receiver.lock().unwrap_or_else(PoisonError::into_inner) = Some(receiver);
-        convert::snapshot(snapshot)
+    pub fn subscribe(&self) -> Result<BridgeSnapshot, String> {
+        let (snapshot, events) = run(self.thread.subscribe())?;
+        *self.receiver.lock().unwrap_or_else(PoisonError::into_inner) = Some(pump(events));
+        Ok(convert::snapshot(snapshot))
     }
 
     /// Streams the events after the latest [`AgentSession::subscribe`].
@@ -384,10 +403,10 @@ impl AgentSession {
     pub fn forward(
         &self,
         deliver: impl FnMut(BridgeEvent) -> bool + Send + 'static,
-    ) -> BridgeSnapshot {
-        let snapshot = self.subscribe();
+    ) -> Result<BridgeSnapshot, String> {
+        let snapshot = self.subscribe()?;
         self.stream(deliver).expect("just subscribed");
-        snapshot
+        Ok(snapshot)
     }
 
     fn stream(
@@ -401,9 +420,10 @@ impl AgentSession {
             .take()
             .ok_or_else(|| "Subscribe before streaming the session's events.".to_owned())?;
         let thread = self.thread.clone();
+        let ended = self.ended.subscribe();
         RUNTIME.spawn(stream::forward(
             receiver,
-            move || (!thread.ended()).then(|| thread.subscribe().1),
+            move || resubscribe(thread.clone(), ended.clone()),
             self.credit.clone(),
             deliver,
         ));
@@ -416,8 +436,8 @@ impl AgentSession {
     }
 
     /// The session now, to restore the Chat after falling behind (ADR-0290).
-    pub fn snapshot(&self) -> BridgeSnapshot {
-        convert::snapshot(self.thread.snapshot())
+    pub fn snapshot(&self) -> Result<BridgeSnapshot, String> {
+        run(self.thread.snapshot()).map(convert::snapshot)
     }
 
     /// Sends `text`: an idle session starts a turn; a running one takes it as a steer with
@@ -432,8 +452,11 @@ impl AgentSession {
     }
 
     /// The turns, oldest first.
-    pub fn turns(&self) -> Vec<BridgeTurn> {
-        self.thread.turns().into_iter().map(convert::turn).collect()
+    pub fn turns(&self) -> Result<Vec<BridgeTurn>, String> {
+        Ok(run(self.thread.turns())?
+            .into_iter()
+            .map(convert::turn)
+            .collect())
     }
 
     /// The files that changed from the start of turn `from` to the end of turn `to`.
@@ -501,9 +524,7 @@ impl AgentSession {
         request: String,
         answers: Vec<BridgeQuestionAnswer>,
     ) -> Result<(), String> {
-        let asked = self
-            .thread
-            .snapshot()
+        let asked = run(self.thread.snapshot())?
             .requests
             .into_iter()
             .find_map(|pending| match pending.request {
@@ -531,18 +552,18 @@ impl AgentSession {
     }
 
     /// The session's exact statistics (ADR-0279).
-    pub fn statistics(&self) -> BridgeStatistics {
-        convert::statistics(self.thread.statistics())
+    pub fn statistics(&self) -> Result<BridgeStatistics, String> {
+        run(self.thread.statistics()).map(convert::statistics)
     }
 
     /// The context window the latest request filled.
-    pub fn context(&self) -> Option<BridgeContext> {
-        self.thread.context().map(convert::context)
+    pub fn context(&self) -> Result<Option<BridgeContext>, String> {
+        Ok(run(self.thread.context())?.map(convert::context))
     }
 
     /// The session's model.
-    pub fn model(&self) -> Option<BridgeModelChoice> {
-        self.thread.model().map(|m| convert::model_choice(&m))
+    pub fn model(&self) -> Result<Option<BridgeModelChoice>, String> {
+        Ok(run(self.thread.model())?.map(|m| convert::model_choice(&m)))
     }
 
     /// Changes the model for the next turn.
@@ -775,14 +796,16 @@ impl AgentSession {
         host: &str,
         day: &str,
     ) -> Result<PathBuf, String> {
-        let thread = self.thread.record();
+        let thread = run(self.thread.record())?;
+        let turns = run(self.thread.turns())?;
+        let harness = self.model()?.map(|m| m.instance);
         let record = serde_json::json!({
             "schema": "watershed-session-record-v2",
             "host": host,
-            "harness": self.model().map(|m| m.instance),
+            "harness": harness,
             "project": self.root,
             "branch": thread["thread"]["branch"],
-            "turns": self.thread.turns().iter().map(|t| serde_json::json!({
+            "turns": turns.iter().map(|t| serde_json::json!({
                 "number": t.number,
                 "status": match t.status {
                     TurnStatus::Queued => "queued",
@@ -797,7 +820,7 @@ impl AgentSession {
                 })).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
         });
-        write_folder(downloads, &record_name(&self.title(), day), |folder| {
+        write_folder(downloads, &record_name(&self.title()?, day), |folder| {
             let write = |name: &str, text: String| {
                 std::fs::write(folder.join(name), text)
                     .map_err(|error| format!("could not write {name}: {error}"))

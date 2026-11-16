@@ -60,7 +60,7 @@ void main() {
       final appearance = AppearanceController();
       await tester.pumpWidget(
         LiquidApp(
-          launch: Launch.session(SessionState(FakeProject()), info, null),
+          launch: Launch.session(SessionState(FakeProject()), info),
           appearance: appearance,
         ),
       );
@@ -100,7 +100,7 @@ void main() {
       final cards = SessionCardSettingsController();
       await tester.pumpWidget(
         LiquidApp(
-          launch: Launch.session(SessionState(FakeProject()), info, null),
+          launch: Launch.session(SessionState(FakeProject()), info),
           appearance: AppearanceController(),
           cardSettings: cards,
         ),
@@ -166,7 +166,7 @@ void main() {
     final state = SessionState(FakeProject());
     await tester.pumpWidget(
       LiquidApp(
-        launch: Launch.session(state, info, null),
+        launch: Launch.session(state, info),
         appearance: appearance,
         diffSettings: diff,
       ),
@@ -194,7 +194,7 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1600, 900));
     await tester.pumpWidget(
       LiquidApp(
-        launch: Launch.session(SessionState(FakeProject()), info, null),
+        launch: Launch.session(SessionState(FakeProject()), info),
         appearance: appearance,
         diffSettings: diff,
       ),

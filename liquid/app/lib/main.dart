@@ -33,10 +33,7 @@ Future<void> main() async {
     Platform.environment,
     defaultTargetPlatform,
   );
-  final launch = await launchFromEnvironment(
-    Platform.environment,
-    defaultHome: '$settings/T3',
-  );
+  final launch = await launchFromEnvironment(Platform.environment);
   // Without a session the Workspace still opens; the reason stays in the terminal.
   if (launch.problem case final problem?) stderr.writeln('Liquid: $problem');
   // Beside the settings, in Liquid's data folder.

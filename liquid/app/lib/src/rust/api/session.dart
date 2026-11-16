@@ -12,12 +12,16 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 import 'thread.dart';
 
-// These functions are ignored because they are not marked as `pub`: `export_record_to`, `host`, `new`, `permissions_of`, `range_diff`, `run`, `stream`, `summary`
+// These functions are ignored because they are not marked as `pub`: `export_record_to`, `new`, `permissions_of`, `pump`, `range_diff`, `resubscribe`, `run`, `stream`, `summary`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `automations_with`, `follow`, `forward`, `from_host`, `lineage_with`, `servers_with`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentHost>>
 abstract class AgentHost implements RustOpaqueInterface {
+  /// Connects to the service whose data folder is `home`, else the default folder.
+  static Future<AgentHost> connect({String? home}) =>
+      RustLib.instance.api.crateApiSessionAgentHostConnect(home: home);
+
   /// The name T3 shows for this host, such as the computer's name.
   Future<String> environmentName();
 
@@ -29,18 +33,6 @@ abstract class AgentHost implements RustOpaqueInterface {
 
   /// Sets the one model that writes commit messages, pull request text and session titles.
   Future<void> setWriterModel({required BridgeModelChoice choice});
-
-  /// Stops T3; later calls fail.
-  Future<void> shutdown();
-
-  /// Starts the pinned `t3` at `binary` with its data in `home`.
-  static Future<AgentHost> start({
-    required String binary,
-    required String home,
-  }) => RustLib.instance.api.crateApiSessionAgentHostStart(
-    binary: binary,
-    home: home,
-  );
 
   /// The writer model (ADR-0294), if one is set.
   Future<BridgeModelChoice?> writerModel();

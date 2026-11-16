@@ -179,9 +179,9 @@ pub(crate) async fn until_ended<T>(
 /// subscriber, which fell too far behind, or a reconnect restored the thread, the stream takes
 /// `resubscribe`'s events after a fell-behind event; `resubscribe` gives none once the thread
 /// ended for good, and the stream ends.
-pub(crate) async fn forward(
+pub(crate) async fn forward<Next: Future<Output = Option<mpsc::Receiver<ThreadEvent>>>>(
     mut receiver: mpsc::Receiver<ThreadEvent>,
-    mut resubscribe: impl FnMut() -> Option<mpsc::Receiver<ThreadEvent>>,
+    mut resubscribe: impl FnMut() -> Next,
     credit: Arc<Credit>,
     mut deliver: impl FnMut(BridgeEvent) -> bool,
 ) {
@@ -217,7 +217,7 @@ pub(crate) async fn forward(
                 }
             }
             Some(None) => {
-                let Some(next) = resubscribe() else {
+                let Some(next) = resubscribe().await else {
                     // T3 ended the thread for good: no event comes, so the stream ends.
                     return;
                 };

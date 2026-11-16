@@ -3,47 +3,32 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/launch.dart';
 
-const _usage =
-    'Start Liquid with LIQUID_PROJECT set to a project directory and LIQUID_T3 set to the '
-    'absolute path of the pinned t3 executable.';
+const _usage = 'Start Liquid with LIQUID_PROJECT set to a project directory.';
 
 void main() {
   final project = Directory.current.path;
 
   Future<String?> problemOf(Map<String, String> environment) async =>
-      (await launchFromEnvironment(
-        environment,
-        defaultHome: '/Users/me/.t3',
-      )).problem;
+      (await launchFromEnvironment(environment)).problem;
 
-  test('refuses a missing or relative T3 program or project', () async {
-    for (final environment in [
-      {'LIQUID_PROJECT': project},
-      {'LIQUID_T3': '/opt/t3/bin/t3'},
-      {'LIQUID_PROJECT': project, 'LIQUID_T3': 'bin/t3'},
-    ]) {
-      expect(await problemOf(environment), _usage, reason: '$environment');
-    }
+  test('refuses a missing project', () async {
+    expect(await problemOf({}), _usage);
   });
 
   test('says when the project directory does not exist', () async {
     expect(
-      await problemOf({
-        'LIQUID_PROJECT': '/nonexistent/acme-api',
-        'LIQUID_T3': '/opt/t3/bin/t3',
-      }),
+      await problemOf({'LIQUID_PROJECT': '/nonexistent/acme-api'}),
       'LIQUID_PROJECT names no directory: /nonexistent/acme-api',
     );
   });
 
-  test('refuses a relative T3 home, which Liquid cannot resolve', () async {
+  test('refuses a relative Meta-Harness home, which Liquid cannot resolve', () async {
     expect(
       await problemOf({
         'LIQUID_PROJECT': project,
-        'LIQUID_T3': '/opt/t3/bin/t3',
-        'LIQUID_T3_HOME': 't3-data',
+        'META_HARNESS_HOME': 'meta-data',
       }),
-      'LIQUID_T3_HOME must be an absolute path: t3-data',
+      'META_HARNESS_HOME must be an absolute path: meta-data',
     );
   });
 
