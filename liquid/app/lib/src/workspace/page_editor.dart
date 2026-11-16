@@ -25,6 +25,34 @@ const markdownShortcuts = {
 /// mockups).
 const sectionBreak = '---';
 
+/// The Markdown shortcut that `text`, typed into a paragraph with the caret at `caret`, just
+/// put at its start, where `before` had none, and the style it gives; null if none.
+(String, BridgeTextStyle)? shortcutTyped(
+  String text,
+  String before,
+  int caret,
+  BridgeTextStyle style,
+) {
+  if (style != BridgeTextStyle.paragraph) return null;
+  for (final MapEntry(key: typed, value: style) in markdownShortcuts.entries) {
+    if (text.startsWith(typed) &&
+        !before.startsWith(typed) &&
+        caret == typed.length) {
+      return (typed, style);
+    }
+  }
+  return null;
+}
+
+/// Whether `text`, typed where `before` stood, now starts a Section: `---` alone, in any Text
+/// Block but the Page's first, where a boundary already exists (approved Section mockups).
+bool startsSection(
+  String text,
+  String before, {
+  required int index,
+  required bool boundary,
+}) => text == sectionBreak && before != sectionBreak && index > 0 && !boundary;
+
 /// The style of the Text Block ⏎ starts, as in Notion: lists and to-dos go on, the rest
 /// becomes a paragraph.
 BridgeTextStyle nextStyle(BridgeTextStyle style) => switch (style) {
@@ -661,28 +689,27 @@ class PageEditor {
   /// alone starts a Section, as typing in a Text Block does; true if one applied.
   Future<bool> _markdown(EditorTarget target, String before) async {
     if (await _sectionBreak(target, before)) return true;
-    if (target.style != BridgeTextStyle.paragraph) return false;
-    for (final MapEntry(key: typed, value: style)
-        in markdownShortcuts.entries) {
-      if (!target.text.startsWith(typed) ||
-          before.startsWith(typed) ||
-          target.caret != typed.length) {
-        continue;
-      }
-      await _replace(target, 0, typed.length, '');
-      await _restyle(target, style);
-      return true;
-    }
-    return false;
+    final shortcut = shortcutTyped(
+      target.text,
+      before,
+      target.caret,
+      target.style,
+    );
+    if (shortcut == null) return false;
+    final (typed, style) = shortcut;
+    await _replace(target, 0, typed.length, '');
+    await _restyle(target, style);
+    return true;
   }
 
-  /// `---` typed alone starts a Section, in any Text Block but the Page's first, where a
-  /// boundary already exists (approved Section mockups).
+  /// `---` typed alone starts a Section (see [startsSection]).
   Future<bool> _sectionBreak(EditorTarget target, String before) async {
-    if (target.text == sectionBreak &&
-        before != sectionBreak &&
-        target.index > 0 &&
-        !target.boundary) {
+    if (startsSection(
+      target.text,
+      before,
+      index: target.index,
+      boundary: target.boundary,
+    )) {
       await _replace(target, 0, target.text.length, '');
       await _apply(
         mutation(

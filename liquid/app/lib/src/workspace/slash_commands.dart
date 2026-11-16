@@ -4,17 +4,12 @@ import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'page_editor.dart' show markdownShortcuts;
 
 /// A slash command: a Text Block style, or a Table without one.
 @immutable
 class SlashCommand {
-  const SlashCommand(
-    this.label,
-    this.icon, {
-    this.style,
-    this.shortcut,
-    this.description,
-  });
+  const SlashCommand(this.label, this.icon, {this.style, this.description});
 
   final String label;
   final IconData icon;
@@ -24,7 +19,11 @@ class SlashCommand {
   final String? description;
 
   /// The Markdown shortcut that formats the same way.
-  final String? shortcut;
+  String? get shortcut => markdownShortcuts.entries
+      .where((shortcut) => shortcut.value == style)
+      .firstOrNull
+      ?.key
+      .trimRight();
 }
 
 /// The slash commands in order: the Text Block styles, then Table.
@@ -34,44 +33,33 @@ const slashCommands = [
     'Heading 1',
     LucideIcons.heading1,
     style: BridgeTextStyle.heading1,
-    shortcut: '#',
   ),
   SlashCommand(
     'Heading 2',
     LucideIcons.heading2,
     style: BridgeTextStyle.heading2,
-    shortcut: '##',
   ),
   SlashCommand(
     'Heading 3',
     LucideIcons.heading3,
     style: BridgeTextStyle.heading3,
-    shortcut: '###',
   ),
   SlashCommand(
     'Bulleted list',
     LucideIcons.list,
     style: BridgeTextStyle.bullet,
-    shortcut: '-',
   ),
   SlashCommand(
     'Numbered list',
     LucideIcons.listOrdered,
     style: BridgeTextStyle.numbered,
-    shortcut: '1.',
   ),
   SlashCommand(
     'To-do list',
     LucideIcons.squareCheck,
     style: BridgeTextStyle.todo,
-    shortcut: '[]',
   ),
-  SlashCommand(
-    'Quote',
-    LucideIcons.textQuote,
-    style: BridgeTextStyle.quote,
-    shortcut: '"',
-  ),
+  SlashCommand('Quote', LucideIcons.textQuote, style: BridgeTextStyle.quote),
   SlashCommand('Table', LucideIcons.table, description: 'Fields and rows'),
 ];
 
