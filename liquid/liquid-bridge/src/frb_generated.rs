@@ -28,8 +28,8 @@
 // Section: imports
 
 use crate::api::git::*;
+use crate::api::replica::*;
 use crate::api::session::*;
-use crate::api::workspace::*;
 use flutter_rust_bridge::for_generated::byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
 use flutter_rust_bridge::for_generated::{Lifetimeable, Lockable, transform_result_dco};
 use flutter_rust_bridge::{Handler, IntoIntoDart};
@@ -42,7 +42,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1609332818;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 922344117;
 
 // Section: executor
 
@@ -3888,7 +3888,7 @@ fn wire__crate__api__git__GitCheckout_watch_impl(
         },
     )
 }
-fn wire__crate__api__workspace__LiquidWorkspace_apply_impl(
+fn wire__crate__api__replica__LiquidWorkspace_apply_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -3932,7 +3932,7 @@ fn wire__crate__api__workspace__LiquidWorkspace_apply_impl(
                         }
                     }
                     let api_that_guard = api_that_guard.unwrap();
-                    let output_ok = crate::api::workspace::LiquidWorkspace::apply(
+                    let output_ok = crate::api::replica::LiquidWorkspace::apply(
                         &*api_that_guard,
                         api_mutation,
                     )?;
@@ -3942,7 +3942,7 @@ fn wire__crate__api__workspace__LiquidWorkspace_apply_impl(
         },
     )
 }
-fn wire__crate__api__workspace__LiquidWorkspace_close_impl(
+fn wire__crate__api__replica__LiquidWorkspace_close_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -3986,7 +3986,7 @@ fn wire__crate__api__workspace__LiquidWorkspace_close_impl(
                     }
                     let api_that_guard = api_that_guard.unwrap();
                     let output_ok = Ok::<_, ()>({
-                        crate::api::workspace::LiquidWorkspace::close(
+                        crate::api::replica::LiquidWorkspace::close(
                             &*api_that_guard,
                             api_subscription,
                         );
@@ -3997,7 +3997,7 @@ fn wire__crate__api__workspace__LiquidWorkspace_close_impl(
         },
     )
 }
-fn wire__crate__api__workspace__LiquidWorkspace_open_impl(
+fn wire__crate__api__replica__LiquidWorkspace_open_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -4023,14 +4023,14 @@ fn wire__crate__api__workspace__LiquidWorkspace_open_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::api::workspace::LiquidWorkspace::open(api_dir)?;
+                    let output_ok = crate::api::replica::LiquidWorkspace::open(api_dir)?;
                     std::result::Result::Ok(output_ok)
                 })())
             }
         },
     )
 }
-fn wire__crate__api__workspace__LiquidWorkspace_query_impl(
+fn wire__crate__api__replica__LiquidWorkspace_query_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -4074,14 +4074,14 @@ fn wire__crate__api__workspace__LiquidWorkspace_query_impl(
                     }
                     let api_that_guard = api_that_guard.unwrap();
                     let output_ok =
-                        crate::api::workspace::LiquidWorkspace::query(&*api_that_guard, api_query)?;
+                        crate::api::replica::LiquidWorkspace::query(&*api_that_guard, api_query)?;
                     std::result::Result::Ok(output_ok)
                 })())
             }
         },
     )
 }
-fn wire__crate__api__workspace__LiquidWorkspace_subscribe_impl(
+fn wire__crate__api__replica__LiquidWorkspace_subscribe_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -4130,7 +4130,7 @@ fn wire__crate__api__workspace__LiquidWorkspace_subscribe_impl(
                         }
                     }
                     let api_that_guard = api_that_guard.unwrap();
-                    let output_ok = crate::api::workspace::LiquidWorkspace::subscribe(
+                    let output_ok = crate::api::replica::LiquidWorkspace::subscribe(
                         &*api_that_guard,
                         api_subscription,
                         api_resource,
@@ -6704,31 +6704,19 @@ fn pde_ffi_dispatcher_primary_impl(
             data_len,
         ),
         73 => wire__crate__api__git__GitCheckout_watch_impl(port, ptr, rust_vec_len, data_len),
-        74 => wire__crate__api__workspace__LiquidWorkspace_apply_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        75 => wire__crate__api__workspace__LiquidWorkspace_close_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        76 => wire__crate__api__workspace__LiquidWorkspace_open_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        77 => wire__crate__api__workspace__LiquidWorkspace_query_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        78 => wire__crate__api__workspace__LiquidWorkspace_subscribe_impl(
+        74 => {
+            wire__crate__api__replica__LiquidWorkspace_apply_impl(port, ptr, rust_vec_len, data_len)
+        }
+        75 => {
+            wire__crate__api__replica__LiquidWorkspace_close_impl(port, ptr, rust_vec_len, data_len)
+        }
+        76 => {
+            wire__crate__api__replica__LiquidWorkspace_open_impl(port, ptr, rust_vec_len, data_len)
+        }
+        77 => {
+            wire__crate__api__replica__LiquidWorkspace_query_impl(port, ptr, rust_vec_len, data_len)
+        }
+        78 => wire__crate__api__replica__LiquidWorkspace_subscribe_impl(
             port,
             ptr,
             rust_vec_len,
@@ -10400,8 +10388,8 @@ mod io {
 
     use super::*;
     use crate::api::git::*;
+    use crate::api::replica::*;
     use crate::api::session::*;
-    use crate::api::workspace::*;
     use flutter_rust_bridge::for_generated::byteorder::{
         NativeEndian, ReadBytesExt, WriteBytesExt,
     };

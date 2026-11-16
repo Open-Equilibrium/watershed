@@ -5,9 +5,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use crate::api::replica::LiquidWorkspace;
 use crate::api::workspace::{
     BridgeChange, BridgeMutation, BridgeMutationKind, BridgeQuery, BridgeQueryKind, BridgeResource,
-    BridgeResourceKind, BridgeTextStyle, LiquidWorkspace, MAX_WINDOW,
+    BridgeResourceKind, BridgeTextStyle, MAX_WINDOW,
 };
 use crate::keys::{KEY_NAME_FILE, Keys, path_name};
 
@@ -810,4 +811,64 @@ fn opening_never_writes_through_a_linked_lock_file() {
     let opened = LiquidWorkspace::open_with(&folder.0, &Memory::default());
     assert!(opened.is_err(), "a linked lock file is refused");
     assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), "keep me");
+}
+
+#[test]
+fn a_closing_workspace_keeps_its_replica_lock_until_its_database_has_closed() {
+    // A subscriber's hand-off is dropped with the open Workspace's state, the database
+    // among it; whether another session could take the replica then shows in its drop.
+    struct Probe(PathBuf, Arc<Mutex<Option<bool>>>);
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            let lock = std::fs::File::open(self.0.join("replica.lock")).unwrap();
+            let free = lock.try_lock().is_ok();
+            *self.1.lock().unwrap() = Some(free);
+        }
+    }
+    let folder = Folder::new("closing");
+    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let free: Arc<Mutex<Option<bool>>> = Arc::default();
+    let probe = Probe(folder.0.clone(), free.clone());
+    workspace
+        .watch(1, resource(BridgeResourceKind::Areas), move |_| {
+            let _ = &probe;
+            true
+        })
+        .unwrap();
+    drop(workspace);
+    assert_eq!(*free.lock().unwrap(), Some(false), "the lock is still held");
+}
+
+#[test]
+fn a_workspace_whose_call_failed_midway_refuses_every_later_call() {
+    // The state a failed call leaves may hold changes it never committed.
+    let folder = Folder::new("poisoned");
+    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let mut registered = false;
+    workspace
+        .watch(1, resource(BridgeResourceKind::Areas), move |_| {
+            assert!(!registered, "a subscriber failed");
+            registered = true;
+            true
+        })
+        .unwrap();
+    let create = || BridgeMutation {
+        text: Some("Trips".into()),
+        ..mutation(BridgeMutationKind::CreateArea)
+    };
+    let failed =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| workspace.apply(create())));
+    assert!(failed.is_err());
+
+    let stopped = "the Workspace stopped after an internal error; quit and reopen Liquid";
+    assert_eq!(workspace.apply(create()).err().unwrap(), stopped);
+    assert_eq!(
+        workspace
+            .query(query(BridgeQueryKind::Areas))
+            .err()
+            .unwrap(),
+        stopped
+    );
+    let watched = workspace.watch(2, resource(BridgeResourceKind::Areas), |_| true);
+    assert_eq!(watched.err().unwrap(), stopped);
 }
