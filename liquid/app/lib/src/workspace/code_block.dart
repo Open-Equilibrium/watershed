@@ -453,7 +453,6 @@ class _CodeBlockState extends State<CodeBlock> {
       ),
     );
     _picker.show();
-    _searchFocus.requestFocus();
   }
 
   void _closePicker() {
@@ -515,6 +514,7 @@ class _CodeBlockState extends State<CodeBlock> {
             key: const Key('language search'),
             controller: _search,
             focusNode: _searchFocus,
+            autofocus: true,
             onChanged: (_) => setState(() => _chosen = 0),
             style: TextStyle(fontSize: WsMetrics.fsUi, color: ws.text),
             decoration: InputDecoration(
@@ -676,39 +676,47 @@ class _CodeBlockState extends State<CodeBlock> {
       ),
     );
     final mono = monoStyle(context);
-    final code = LayoutBuilder(
-      builder: (context, constraints) {
-        // Lines never wrap: the field is as wide as the longest line.
-        final width = measureText(
-          _text.text,
-          mono,
-          MediaQuery.textScalerOf(context),
-        ).width;
-        return ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: codeLines * WsMetrics.lhMono),
-          child: SingleChildScrollView(
+    // Lines never wrap: the field is as wide as the longest line, measured as it is typed.
+    final code = ListenableBuilder(
+      listenable: _text,
+      builder: (context, _) => LayoutBuilder(
+        builder: (context, constraints) {
+          final width = measureText(
+            _text.text,
+            mono,
+            MediaQuery.textScalerOf(context),
+          ).width;
+          return ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: codeLines * WsMetrics.lhMono,
+            ),
             child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: SizedBox(
-                width: math.max(constraints.maxWidth, width + WsMetrics.space2),
-                child: TextField(
-                  key: const Key('code'),
-                  controller: _text,
-                  focusNode: _focus,
-                  readOnly: !_editable,
-                  maxLines: null,
-                  keyboardType: TextInputType.multiline,
-                  style: mono,
-                  decoration: InputDecoration.collapsed(
-                    hintText: 'Code',
-                    hintStyle: mono.copyWith(color: ws.textFaint),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: math.max(
+                    constraints.maxWidth,
+                    width + WsMetrics.space2,
+                  ),
+                  child: TextField(
+                    key: const Key('code'),
+                    controller: _text,
+                    focusNode: _focus,
+                    readOnly: !_editable,
+                    maxLines: null,
+                    keyboardType: TextInputType.multiline,
+                    style: mono,
+                    decoration: InputDecoration.collapsed(
+                      hintText: 'Code',
+                      hintStyle: mono.copyWith(color: ws.textFaint),
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),

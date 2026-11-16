@@ -230,10 +230,8 @@ class RustSessionBackend implements SessionBackend {
   @override
   Future<BridgeSubscription> subscribe() => _session.subscribe();
   @override
-  Stream<BridgeEvent> events(int subscription) => stopOnCancel(
-    _session.events(id: subscription),
-    _session.eventsStop,
-  );
+  Stream<BridgeEvent> events(int subscription) =>
+      stopOnCancel(_session.events(id: subscription), _session.eventsStop);
   @override
   Future<void> confirmApplied(int applied) =>
       _session.confirmApplied(applied: applied);

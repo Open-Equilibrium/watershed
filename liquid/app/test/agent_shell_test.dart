@@ -64,11 +64,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: liquidTheme(Brightness.light),
-        home: AgentShell(
-          state: state,
-          info: info,
-          parseDiff: parsePatch,
-        ),
+        home: AgentShell(state: state, info: info, parseDiff: parsePatch),
       ),
     );
     await tester.pumpAndSettle();

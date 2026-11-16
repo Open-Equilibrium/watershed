@@ -215,6 +215,24 @@ void main() {
     expect(field(tester, 1).focusNode!.hasFocus, isTrue);
   });
 
+  testWidgets('a line typed past the Block\'s width scrolls, never wraps', (
+    tester,
+  ) async {
+    await kit.show(tester, [const CodePart('short')]);
+    final line = tester.getSize(code).height;
+    await caretInCode(tester, 5);
+    final long = 'x' * 300;
+    await input(
+      tester,
+      TextEditingValue(
+        text: long,
+        selection: TextSelection.collapsed(offset: long.length),
+      ),
+    );
+    expect(codeOf(0), long);
+    expect(tester.getSize(code).height, line, reason: 'still one line');
+  });
+
   testWidgets('code past 24 lines scrolls inside the Block', (tester) async {
     final long = [for (var line = 1; line <= 60; line++) 'line $line'];
     await kit.show(tester, [
