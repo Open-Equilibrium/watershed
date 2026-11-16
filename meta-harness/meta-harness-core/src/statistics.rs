@@ -92,23 +92,37 @@ pub(crate) fn statistics(projection: &Projection) -> Statistics {
         .copied()
         .filter(|r| r["status"] != "queued")
         .collect();
+    // Each record grouped by its run once, so the work stays linear in the thread's history; this
+    // runs while the thread's state is locked.
+    let attempt_runs: HashMap<&str, &str> = projection
+        .attempts
+        .iter()
+        .filter_map(|a| Some((a["id"].as_str()?, a["runId"].as_str()?)))
+        .collect();
+    let mut provider_turns: HashMap<&str, Vec<&Value>> = HashMap::new();
+    for turn in &projection.provider_turns {
+        if let Some(run) = turn["runAttemptId"]
+            .as_str()
+            .and_then(|attempt| attempt_runs.get(attempt))
+        {
+            provider_turns.entry(run).or_default().push(turn);
+        }
+    }
+    let mut items: HashMap<&str, Vec<&Value>> = HashMap::new();
+    for item in &projection.turn_items {
+        if let Some(run) = item["runId"].as_str() {
+            items.entry(run).or_default().push(item);
+        }
+    }
     for run in &visible {
+        let run_id = run["id"].as_str().unwrap_or_default();
         let running = started.last().is_some_and(|last| std::ptr::eq(*last, *run))
             && !matches!(
                 run["status"].as_str(),
                 Some("completed" | "interrupted" | "failed" | "cancelled")
             );
-        let attempts: Vec<&Value> = projection
-            .attempts
-            .iter()
-            .filter(|a| a["runId"] == run["id"])
-            .map(|a| &a["id"])
-            .collect();
         let mut turn_models = Vec::new();
-        for turn in &projection.provider_turns {
-            if !attempts.contains(&&turn["runAttemptId"]) {
-                continue;
-            }
+        for turn in provider_turns.get(run_id).into_iter().flatten() {
             if let Some(usage) = usage_of(turn) {
                 let model = turn["model"].as_str().unwrap_or_default();
                 add(&mut turn_models, model, usage);
@@ -119,11 +133,7 @@ pub(crate) fn statistics(projection: &Projection) -> Statistics {
         let mut response_ms: HashMap<String, u64> = HashMap::new();
         let mut had_tools = false;
         let mut failures = 0;
-        for item in projection
-            .turn_items
-            .iter()
-            .filter(|i| i["runId"] == run["id"])
-        {
+        for item in items.get(run_id).into_iter().flatten() {
             let Some((_, ItemDetail::Tool { name, .. })) = describe(item) else {
                 continue;
             };

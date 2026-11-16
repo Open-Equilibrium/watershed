@@ -125,6 +125,9 @@ struct State {
     subscribers: Vec<mpsc::Sender<ThreadEvent>>,
     /// Whether T3 ended the thread's stream, after which no event comes.
     ended: bool,
+    /// Counts T3's thread records and local branch choices, so an older branch answer never
+    /// overwrites a newer one.
+    metadata: u64,
     /// The lineage watches, each woken when the projection changes what the lineage shows.
     lineage: Vec<std::sync::Weak<Notify>>,
 }
@@ -191,6 +194,7 @@ impl Thread {
             items: HashMap::new(),
             subscribers: Vec::new(),
             ended: false,
+            metadata: 0,
             lineage: Vec::new(),
         }));
         let applied = state.clone();
@@ -245,15 +249,24 @@ impl Thread {
         worktree: Option<&std::path::Path>,
     ) -> Result<(), String> {
         let worktree = worktree.map(|p| p.to_string_lossy().into_owned());
+        let asked = {
+            let mut state = self.state();
+            state.metadata += 1;
+            state.metadata
+        };
         self.dispatch(json!({
             "type": "thread.metadata.update",
             "branch": branch,
             "worktreePath": worktree,
         }))
         .await?;
-        let thread = &mut self.state().projection.thread;
-        thread["branch"] = json!(branch);
-        thread["worktreePath"] = json!(worktree);
+        let mut state = self.state();
+        // T3's record or a later choice since then already holds newer metadata.
+        if state.metadata == asked {
+            let thread = &mut state.projection.thread;
+            thread["branch"] = json!(branch);
+            thread["worktreePath"] = json!(worktree);
+        }
         Ok(())
     }
 
@@ -602,6 +615,7 @@ fn restore(state: &mut State, snapshot: &Value) {
     state.projection = Projection::from_snapshot(&snapshot["projection"]);
     state.sequence = snapshot["snapshotSequence"].as_u64().unwrap_or_default();
     state.subscribers.clear();
+    state.metadata += 1;
 }
 
 /// Applies one message of T3's thread stream and hands its agent events to the subscribers.
@@ -616,6 +630,9 @@ fn apply(state: &mut State, message: &Value) {
     state.sequence = sequence;
     let event = &message["event"];
     let change = state.projection.apply(event);
+    if matches!(change, Change::Thread) {
+        state.metadata += 1;
+    }
     if matches!(change, Change::Run(_) | Change::Thread | Change::Other) {
         state.wake_lineage();
     }

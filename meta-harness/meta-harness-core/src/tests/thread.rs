@@ -894,3 +894,49 @@ async fn subscribers_end_when_t3_ends_the_thread_stream() {
         .expect("a later subscription ends too");
     assert!(ended.is_none());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_late_branch_answer_keeps_the_newer_branch_t3_already_sent() {
+    let stream = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let seen = stream.clone();
+    let snapshot =
+        json!({"kind": "snapshot", "snapshotSequence": 1, "projection": projection(json!({}))});
+    let fake = Fake::start(move |tag, _, id| match tag {
+        SUBSCRIBE => {
+            *seen.lock().unwrap() = id.to_owned();
+            vec![chunk(id, vec![snapshot.clone()])]
+        }
+        // A newer choice reaches the thread before T3 answers the older one.
+        _ => vec![
+            chunk(
+                &seen.lock().unwrap(),
+                vec![event(
+                    2,
+                    "thread.metadata-updated",
+                    json!({"id": "thread-1", "title": "Build it", "branch": "newer",
+                           "worktreePath": "/worktrees/newer"}),
+                )],
+            ),
+            ok(id, json!({})),
+        ],
+    })
+    .await;
+    let client = Client::connect(&fake.origin, || Ok("token".to_owned()))
+        .await
+        .unwrap();
+    let thread = Thread::follow(client, "thread-1".to_owned(), "/repo".to_owned())
+        .await
+        .unwrap();
+    thread.set_branch("older", None).await.unwrap();
+    // The thread ends on the newer choice, whichever of the two the follow applies first.
+    let newer = Some(std::path::PathBuf::from("/worktrees/newer"));
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while thread.worktree() != newer {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the newer worktree stays");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(thread.worktree(), newer);
+}
