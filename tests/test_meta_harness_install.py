@@ -119,6 +119,18 @@ class InstallerTest(unittest.TestCase):
         self.assertTrue((prefix / "bin" / "meta").is_file())
         self.assertEqual(self.log_lines(), [])
 
+    def test_failed_service_install_keeps_the_files_and_exits_non_zero(self):
+        prefix = self.root / "prefix"
+        bundle = self.bundle("0.0.1", HOST, "0.1.9", "first")
+        write(bundle / "bin" / "meta", f"#!/bin/sh\necho \"$*\" >> '{self.log}'\nexit 1\n", 0o755)
+        result = self.install(bundle, "--prefix", str(prefix))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(str(prefix), result.stderr)
+        self.assertIn("did not start", result.stderr)
+        self.assertIn("--no-service", result.stderr)
+        self.assertEqual(self.log_lines(), ["service install"])
+        self.assertTrue((prefix / "bin" / "meta").is_file())
+
     def test_refused_installs_change_nothing(self):
         absolute = str(self.root / "prefix")
         good = self.bundle("0.0.1", HOST, "0.1.9", "good")

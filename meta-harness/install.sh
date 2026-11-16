@@ -115,8 +115,9 @@ for old in "$lib"/t3-*; do
 done
 cp -f "$bundle/LICENSE" "$bundle/LICENSE-t3code" "$bundle/THIRD_PARTY_NOTICES.md" "$share/"
 
-if [ "$service" -eq 1 ]; then
-    "$bin/meta" service install
+if [ "$service" -eq 1 ] && ! "$bin/meta" service install; then
+    fail "the files are installed in $prefix, but the login service did not start; \
+--no-service installs without it"
 fi
 printf 'Installed Meta-Harness %s in %s\n' "$version" "$prefix"
 case ":${PATH-}:" in
