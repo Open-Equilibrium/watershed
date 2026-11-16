@@ -234,3 +234,18 @@ fn the_context_window_is_the_latest_one_t3_reported() {
     );
     assert_eq!(window(json!([{"tokenUsage": {"usedTokens": 5}}])), None);
 }
+
+#[test]
+fn a_queued_turn_behind_the_running_one_leaves_its_unfinished_calls_open() {
+    let queued = projection(json!({
+        "runs": [
+            run("r1", 1, "running", Value::Null),
+            run("r2", 2, "queued", Value::Null),
+        ],
+        "turnItems": [
+            {"id": "c1", "runId": "r1", "type": "command_execution", "status": "running", "input": "a"},
+        ],
+    }));
+    let tools = statistics(&queued).tools;
+    assert_eq!((tools[0].open, tools[0].cancelled), (1, 0));
+}

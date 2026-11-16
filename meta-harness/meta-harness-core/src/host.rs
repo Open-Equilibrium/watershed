@@ -483,7 +483,12 @@ pub(crate) fn write_settings(home: &Path, agents: &[AcpAgent]) -> Result<(), Str
     let mut settings: Value = match std::fs::read_to_string(&file) {
         Ok(text) => serde_json::from_str(&text)
             .ok()
-            .filter(Value::is_object)
+            .filter(|settings: &Value| {
+                settings.is_object()
+                    && settings
+                        .get("providerInstances")
+                        .is_none_or(|instances| instances.is_object() || instances.is_null())
+            })
             .ok_or_else(|| {
                 format!(
                     "T3's settings file {} does not hold a JSON object; it was left unchanged.",

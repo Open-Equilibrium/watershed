@@ -49,7 +49,14 @@ fn agent() -> AcpAgent {
 
 #[test]
 fn an_unreadable_settings_file_is_kept_and_reported() {
-    for text in ["{not json", "[]", "null"] {
+    // A providerInstances value that is no object cannot take the agents either.
+    for text in [
+        "{not json",
+        "[]",
+        "null",
+        r#"{"providerInstances":[]}"#,
+        r#"{"providerInstances":"x"}"#,
+    ] {
         let home = Home::new();
         std::fs::write(home.settings(), text).unwrap();
         assert!(write_settings(&home.0, &[agent()]).is_err(), "{text}");

@@ -32,7 +32,7 @@ pub struct ToolCalls {
     pub failed: u32,
     /// Calls without a result, whose turn ended or was followed by a later turn.
     pub cancelled: u32,
-    /// Calls without a result in the session's last turn, which may still be running.
+    /// Calls without a result in the turn that still runs.
     pub open: u32,
     /// Time its calls took, summed over the calls whose timing entries say how long; `None` when
     /// none of them does.
@@ -52,8 +52,8 @@ pub struct TurnStatistics {
     pub ended_ms: Option<u64>,
     /// What each model used, sorted as [`Statistics::models`].
     pub models: Vec<ModelUsage>,
-    /// Time its tools took: for each response, the longest of its tools, summed; `None` when the
-    /// turn has no timing entries.
+    /// Time its tools took: for each response, the longest of its tools, summed; none for a turn
+    /// without tool calls, and `None` when its tool calls carry no timing.
     pub tool_ms: Option<u64>,
     /// Tool calls whose result failed.
     pub failed: u32,
@@ -85,9 +85,15 @@ pub(crate) fn statistics(projection: &Projection) -> Statistics {
         .iter()
         .filter(|r| r["status"] != "rolled_back")
         .collect();
-    for (index, run) in visible.iter().enumerate() {
-        // Only the session's last turn, while it runs, may still have unfinished calls.
-        let running = index + 1 == visible.len()
+    // Only the turn that still runs may have unfinished calls: the last one that started, as turns
+    // queued behind it have none yet.
+    let started: Vec<&Value> = visible
+        .iter()
+        .copied()
+        .filter(|r| r["status"] != "queued")
+        .collect();
+    for run in &visible {
+        let running = started.last().is_some_and(|last| std::ptr::eq(*last, *run))
             && !matches!(
                 run["status"].as_str(),
                 Some("completed" | "interrupted" | "failed" | "cancelled")
