@@ -41,6 +41,9 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Harness home** — The configuration folder Meta-Harness owns for one harness, such as Claude Code's `CLAUDE_CONFIG_DIR` or Codex's `CODEX_HOME`, which T3 Code starts the harness with; the person's own harness configuration stays untouched (ADR-0298).
 - **Meta-Harness service** — The `meta serve` process that owns a data folder (`META_HARNESS_HOME`, else `~/.meta-harness`), runs the pinned T3 Code server and serves Meta-Harness's API to clients such as `meta` and Liquid (ADR-0297).
 - **Meta-Harness API version** — The number a client names in the `meta-harness-api` header of its handshake; the service admits only its own ([V-Spec](docs/concept/V-Spec_MetaHarness.html#surfaces)).
+- **Pairing code** — The single-use code, shown `XXXX-XXXX` and valid for five minutes, that `meta invite` issues so that one device or host pairs with a service's remote listener (ADR-0299).
+- **Device token** — The token a device keeps after pairing; it reaches the service's whole API except remote access, pairing codes and host links, which only this computer makes (ADR-0299).
+- **Host token** — The token another Meta-Harness host keeps after pairing; it reaches only the T3 pairing code its link needs and the tunnel to this host's T3 Code (ADR-0288, ADR-0299).
 - **Login service** — The per-user launchd agent or systemd user unit that keeps `meta serve` running (ADR-0286).
 - **BYOA** — "Bring Your Own Agent"; plugging an external agent in as the Meta-Agent.
 - **AgentPulse** — Meta-Harness subsystem measuring rework ratio, first-attempt success rate, and cost-per-productive-outcome. Meta-Harness computes/stores the metrics; Liquid only renders them.

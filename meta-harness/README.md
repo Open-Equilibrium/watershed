@@ -4,8 +4,8 @@ M2 in progress; product and runtime shape: [Meta-Harness V-Spec](../docs/concept
 
 ## Layout
 
-- `meta-harness-core/` — the Rust core: the service and its API (`service.rs`, `api.rs`), the client Liquid and `meta` use (`remote.rs`), the central configuration (`config.rs`, `config/homes.rs`), the pinned T3 Code server and its client protocol (`t3/`, ADR-0281, ADR-0292), and the host, thread and Git model T3 runs (`host.rs`, `thread.rs`, `git.rs`).
-- `meta-harness-cli/` — `meta`: the service, the configuration commands and the login service (`login.rs`).
+- `meta-harness-core/` — the Rust core: the service and its API (`service.rs`, `api.rs`), the client Liquid and `meta` use (`remote.rs`), remote access and pairing (`service/remote.rs`), host links (`hosts.rs`, `tunnel.rs`), the central configuration (`config.rs`, `config/homes.rs`), the pinned T3 Code server and its client protocol (`t3/`, ADR-0281, ADR-0292), and the host, thread and Git model T3 runs (`host.rs`, `thread.rs`, `git.rs`).
+- `meta-harness-cli/` — `meta`: the service, the configuration commands, remote access and host links (`hosts.rs`), and the login service (`login.rs`).
 - `install.sh` — the bundle's installer.
 - `t3.lock` — the pinned T3 release and each archive's SHA-256; `scripts/install-t3.mjs` installs it.
 
@@ -32,5 +32,9 @@ cargo run -p meta-harness-cli -- status
 ```
 
 `meta help` lists every command. Without `META_HARNESS_T3`, `meta serve` runs the T3 release installed beside it. The data folder is `META_HARNESS_HOME`, else `~/.meta-harness`.
+
+## Remote access and host links
+
+`meta remote on` listens on this computer's Tailscale addresses, on port 3774 unless `--port N` names another, and `meta remote off` stops it. To link a host, turn agents from other hosts on with `meta host agents on` on both hosts; then run `meta invite --host` on the host to link to, and `meta host add ADDRESS CODE` on the host that links to it, with the address and code it prints. `meta host list` shows the links; `meta host remove` unlinks one. Trust limits: [SECURITY.md](../SECURITY.md#meta-harness-service-and-configuration).
 
 Contract tests run against the pinned release with a scripted ACP agent, through the service: `META_HARNESS_T3=<pinned t3> cargo nextest run --config 'target."cfg(all())".runner = ["node", "<repository>/scripts/run-isolated-rust-test.mjs"]' -p meta-harness-core --test t3_contract`, through the isolation runner as every Rust test (TESTING.md).

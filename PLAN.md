@@ -29,7 +29,7 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 **Deliverables:**
 
 - Meta-Harness CLI run, session, schedule and metrics commands.
-- The service's authenticated remote connection, with host links (ADR-0285).
+- Host links through the Liquid account and an end-to-end relay (ADR-0285); Tailscale carries them until then (ADR-0299).
 - API/protocol surface for Liquid and BYOA: session registry, live event and transcript streams, artifact/log/handoff queries, config read/write proposals, agent schedule/trigger control, answers to a harness's own approvals and questions, revert.
 - Central configuration for Flow Agent, which receives only its global authority and explicit Flows rather than a project-local config layer; device-local Runtime bindings remain owned by the execution host. Liquid edits the configuration across devices after sync and approved mockups.
 - Control plane: session registry, routing, task state, attention state and agent schedule/trigger skeleton.
@@ -54,7 +54,7 @@ The macOS Liquid app runs its agent sessions on a pinned T3 Code server through 
 
 - Say in the Diff panel exactly what it covers (ADR-0222), copying T3 Code's wording where it has one.
 - Project scripts in the session card, once Liquid has a terminal (ADR-0295).
-- Remote access and Android follow with host links (ADR-0285).
+- Android follows with host links (ADR-0285).
 
 #### M3a — Local Workspace foundation
 

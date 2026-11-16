@@ -96,6 +96,28 @@
         <p><strong>Recommendation:</strong> C, because it closes the gap without slowing every open.</p>
         <p><strong>Acceptance criterion:</strong> an entry planted right after the folder is created makes creation fail, and the shared-workspace concurrency test passes 50 of 50 runs on macOS.</p>
       </details>
+      <details id="d-111" class="decision wide">
+        <summary><h3>D-111 - How Much A Linked Host's Token May Do</h3></summary>
+        <p><strong>Status:</strong> Open; from the remote-access step of Meta-Harness's host links (ADR-0288, ADR-0299). The code is in <code>meta-harness/meta-harness-core/src/service.rs</code> and <code>hosts.rs</code>.</p>
+        <p><strong>Problem:</strong> A host token reaches this host's T3 pairing code and the tunnel to its T3 Code. T3's pairing code carries its default scopes, and whoever redeems it chooses the link's access level. So a stolen host token can link at any level T3 allows, including full access, which is wider than ADR-0299's rule that a host's token reaches only what T3's peer link needs.</p>
+        <p><strong>Question:</strong> What bound should a host token's link have?</p>
+        <div class="dia">
+          <div class="opt"><h4>A: Keep as built</h4>
+            <div class="b ws">A host token gets a pairing code with T3's default scopes</div>
+            <ul><li>Pro: nothing to build; the linking host chooses the level.</li><li>Con: a stolen host token can link at full access.</li></ul>
+          </div>
+          <div class="opt rec"><h4>B: Cap each invitation <span class="tag">Recommended</span></h4>
+            <div class="b ws">The invitation names the highest level its host may link at, and the pairing code gets only that level's scopes</div>
+            <ul><li>Pro: a stolen host token is bounded by what its host was invited to do.</li><li>Con: changes the pairing call and the client table; a full-access link needs an invitation that names full access.</li></ul>
+          </div>
+          <div class="opt"><h4>C: No full access from hosts</h4>
+            <div class="b ws">Host tokens never link at full access</div>
+            <ul><li>Pro: small; the broadest level stays with devices and this computer.</li><li>Con: a host the person trusts with full access cannot be linked that way.</li></ul>
+          </div>
+        </div>
+        <p><strong>Recommendation:</strong> B, because the level a person chose for a host stays the bound of that host's token.</p>
+        <p><strong>Acceptance criterion:</strong> a host token invited below full access cannot obtain a link at a higher level, shown by a contract test that refuses the attempt, and the ADR-0299 contract tests still pass.</p>
+      </details>
     </div>
   </section>
 
