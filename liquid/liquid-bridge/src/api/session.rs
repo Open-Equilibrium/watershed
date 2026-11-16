@@ -842,6 +842,9 @@ impl AgentSession {
                 }
                 let delivered = match until_ended(&mut ended, thread.lineage()).await {
                     Some(Ok(lineage)) => deliver(Ok(convert::lineage(lineage))),
+                    // Meta-Harness is restarting: the changes' stream ends too, and the read
+                    // after it reconnects catches up, so the card shows no passing warning.
+                    Some(Err(error)) if meta_harness_core::remote::connection_lost(&error) => true,
                     Some(Err(error)) => deliver(Err(error)),
                     None => break,
                 };
