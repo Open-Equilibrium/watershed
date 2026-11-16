@@ -495,7 +495,11 @@ class CiWorkflowContractTest(unittest.TestCase):
 
         # The scope selects the whole workspace whenever Flow Agent changed.
         self.assertIn("      RUST_PACKAGES: ${{ needs.scope.outputs.rust_packages }}", jobs(workflow)["test"])
-        assert_step_state(self, workflow, "Run tests", job="test")
+        # Without Flow Agent the scope's packages are Liquid's coverage packages, whose coverage run
+        # already runs every one of their tests once.
+        assert_step_state(self, workflow, "Run tests", job="test",
+                          condition="needs.scope.outputs.flow_agent == 'true' || "
+                          "needs.scope.outputs.liquid != 'true'")
         self.assertEqual(
             folded_tokens(workflow, "Run tests"),
             ["cargo", "nextest", "run", "--no-fail-fast", "--config", TEST_ISOLATION,
@@ -557,7 +561,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertEqual([shlex.split(line) for line in liquid], [
             ["eval", "$(cargo llvm-cov show-env --sh)"],
             ["cargo", "llvm-cov", "clean", "--workspace"],
-            ["cargo", "nextest", "run", "--config", TEST_ISOLATION, "--locked",
+            ["cargo", "nextest", "run", "--no-fail-fast", "--config", TEST_ISOLATION, "--locked",
              *LIQUID_COVERAGE_PACKAGES.split(), "--all-targets", "--all-features"],
             report,
         ])
@@ -699,6 +703,25 @@ class CiWorkflowContractTest(unittest.TestCase):
             ["xcodebuild", "test", "-workspace", "macos/Runner.xcworkspace", "-scheme", "Runner",
              "-destination", "platform=macOS"],
         )
+        # The codegen comes as the release's prebuilt archive, checked against its pinned SHA-256.
+        codegen = step_lines(workflow, "Check the generated Liquid bridge", "liquid")
+        version = next(line.split(": ")[1] for line in codegen if "FRB_VERSION:" in line)
+        self.assertIn(f"  flutter_rust_bridge: {version}\n",
+                      (ROOT / "liquid/app/pubspec.yaml").read_text())
+        self.assertRegex("\n".join(codegen), r"FRB_CODEGEN_SHA256: [0-9a-f]{64}\n")
+        self.assertEqual(step_run(workflow, "Check the generated Liquid bridge").splitlines(), [
+            "test \"$(sed -n 's/^  flutter_rust_bridge: //p' liquid/app/pubspec.yaml)\" = "
+            "\"$FRB_VERSION\"",
+            'archive="flutter_rust_bridge_codegen-x86_64-unknown-linux-gnu-v$FRB_VERSION.tgz"',
+            'curl -fsSL -o "$RUNNER_TEMP/$archive" '
+            '"https://github.com/fzyzcjy/flutter_rust_bridge/releases/download/v$FRB_VERSION/$archive"',
+            'echo "$FRB_CODEGEN_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict',
+            'tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP"',
+            '(cd liquid/app && "$RUNNER_TEMP/flutter_rust_bridge_codegen" generate)',
+            "cargo fmt --all",
+            "git diff --exit-code -- liquid",
+            'test -z "$(git status --porcelain -- liquid)"',
+        ])
         names = step_names(workflow, "liquid")
         self.assertLess(names.index("Build the Liquid macOS app"),
                         names.index("Run the Liquid macOS app tests"))
@@ -713,9 +736,6 @@ class CiWorkflowContractTest(unittest.TestCase):
             step_run(workflow, "Check the Liquid app on macOS").splitlines(),
             ["flutter pub get --enforce-lockfile", "flutter analyze", "flutter test"],
         )
-        bridge = step_run(workflow, "Check the generated Liquid bridge")
-        self.assertIn("flutter_rust_bridge_codegen generate", bridge)
-        self.assertIn("git diff --exit-code -- liquid", bridge)
         self.assertEqual(step_run(workflow, "Check the Liquid key helper"),
                          "sh liquid/app/macos/LiquidKey/test.sh")
         # Flutter's tool directory must never reach the PATH of a privileged step.
