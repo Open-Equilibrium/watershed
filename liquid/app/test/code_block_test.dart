@@ -9,7 +9,7 @@ import 'package:liquid/src/workspace/text_block.dart';
 
 import 'page_kit.dart';
 
-/// The approved Code Block mockups.
+/// Code Blocks (ADR-0302).
 void main() {
   final kit = PageKit();
 

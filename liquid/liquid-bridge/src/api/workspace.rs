@@ -31,8 +31,7 @@ pub enum BridgeMutationKind {
     /// Adds a Text Block holding `text` to `page`, after the View `after` or first.
     AddTextBlock,
     /// Replaces `delete` units at `at` in the Text or Code `block` on its home `page` with
-    /// `text`; positions
-    /// count UTF-16 units, as Dart does.
+    /// `text`; positions count UTF-16 units, as Dart does.
     EditText,
     /// Removes `view` from `page`.
     RemoveView,

@@ -22,7 +22,7 @@ const markdownShortcuts = {
 };
 
 /// What turns a Text Block into a Code Block when typed at its start, as in Notion
-/// (approved Code Block mockups).
+/// (ADR-0302).
 const codeShortcut = '```';
 
 /// Whether `text`, typed into a Text Block with the caret at `caret`, just put

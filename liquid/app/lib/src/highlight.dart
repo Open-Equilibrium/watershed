@@ -12,7 +12,7 @@ final _token = RegExp(
 
 /// Light syntax colors for common languages, the same in every language: comments,
 /// strings, keywords and numbers; the rest stays plain. Used by the Diff panel and Code
-/// Blocks (approved Code Block mockups).
+/// Blocks (ADR-0302).
 TextSpan highlight(BuildContext context, String code) {
   final ws = context.ws;
   final base = monoStyle(context);

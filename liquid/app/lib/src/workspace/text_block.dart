@@ -569,7 +569,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   );
 
   /// Turns this Text Block into a Code Block, which takes the caret at its start once built
-  /// (approved Code Block mockups, section 2).
+  /// (ADR-0302).
   void _turnIntoCode() {
     _write(
       mutation(BridgeMutationKind.turnIntoCode, page: _page, block: block),

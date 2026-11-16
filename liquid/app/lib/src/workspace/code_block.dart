@@ -49,8 +49,7 @@ String languageLabel(String language) =>
     codeLanguages.where((known) => known.$1 == language).firstOrNull?.$2 ??
     language;
 
-/// How many lines a Code Block shows before its code scrolls inside (approved Code Block
-/// mockups, decision 7).
+/// How many lines a Code Block shows before its code scrolls inside (ADR-0302).
 const codeLines = 24;
 
 /// What one indentation step inserts.
@@ -134,7 +133,7 @@ class _CodeText extends TextEditingController {
   }
 }
 
-/// One Code Block on its Page (approved Code Block mockups): its code in the monospace font
+/// One Code Block on its Page (ADR-0302): its code in the monospace font
 /// with syntax colors, and on hover or focus a quiet header with the language and Copy. It
 /// follows only its own Block (client architecture rule 6); typing shows at once and
 /// reaches the core afterwards (rule 7). Lines do not wrap, and past [codeLines] the code
