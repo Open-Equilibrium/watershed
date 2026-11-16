@@ -52,6 +52,18 @@ void main() {
   });
 
   testWidgets(
+    'picking the option a cell holds writes nothing and warns of nothing',
+    (tester) async {
+      await kit.show(tester, [TablePart(expenses)]);
+      await open(tester, 'r1');
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(picker, findsNothing);
+      expect(chosen(), isEmpty);
+      expect(kit.workspace.problem.value, isNull);
+    },
+  );
+
+  testWidgets(
     'typing on a select cell filters its options, ⏎ picks the first',
     (tester) async {
       await kit.show(tester, [TablePart(expenses)]);

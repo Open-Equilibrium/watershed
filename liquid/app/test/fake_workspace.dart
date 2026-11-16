@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:liquid/src/rust/api/database.dart';
+import 'package:liquid/src/rust/api/replica.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 
 /// An in-memory Workspace behind the bridge's calls: areas and Page trees, with a change for
@@ -281,6 +282,16 @@ class FakeWorkspace implements LiquidWorkspace {
         final at = table.indexWhere((row) => row.id == mutation.row);
         if (at < 0) throw 'not found';
         final cell = mutation.cell!;
+        final stored = table[at].cells
+            .where((kept) => kept.field == mutation.field)
+            .firstOrNull
+            ?.value;
+        // The core refuses a write that changes nothing.
+        if (cell.kind == BridgeCellKind.empty
+            ? stored == null
+            : stored == cell) {
+          throw 'the write changes nothing';
+        }
         table[at] = BridgeRow(
           id: table[at].id,
           cells: [

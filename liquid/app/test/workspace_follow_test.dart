@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid/src/rust/api/replica.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/follow.dart';
 

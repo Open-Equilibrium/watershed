@@ -1,30 +1,20 @@
-//! The Liquid Workspace for the app. It crosses the bridge only through four message-shaped
-//! calls: apply a mutation, query, subscribe to a resource's changes and close a subscription
-//! (client architecture rule 2, ADR-0216). Each runs on flutter_rust_bridge's worker threads,
-//! never on the Dart main isolate.
+//! The Liquid Workspace's messages. The Workspace crosses the bridge only through four
+//! message-shaped calls on [`LiquidWorkspace`](super::replica::LiquidWorkspace): apply a
+//! mutation, query, subscribe to a resource's changes and close a subscription (client
+//! architecture rule 2, ADR-0216).
 //!
 //! Messages are flat structs whose kind names the parts they fill, so Dart needs no code
 //! generation for enums with data. Identities cross as text. A change carries only its
 //! resource and that resource's sequence number; the reader then queries the bounded window
 //! it shows (rule 3).
 
-use std::collections::{HashMap, HashSet};
-use std::fs::{File, TryLockError};
-use std::path::Path;
-use std::sync::{Mutex, PoisonError};
-
 use liquid_core::{
-    Actor, AreaId, BlockId, BlockKind, Changed, Created, Error, FieldId, Mutation, Origin, PageId,
-    PersonId, Place, Request, RowId, TextStyle, ViewId, Workspace,
+    AreaId, BlockId, Changed, Error, FieldId, Mutation, PageId, Place, RowId, TextStyle, ViewId,
 };
-use liquid_storage::Sqlite;
 
 use super::database::{
-    BridgeCell, BridgeDatabase, BridgeFieldKind, BridgeFilter, BridgeRow, BridgeSort, row_query,
+    BridgeCell, BridgeDatabase, BridgeFieldKind, BridgeFilter, BridgeRow, BridgeSort,
 };
-
-use crate::frb_generated::StreamSink;
-use crate::keys::{Keychain, Keys, random_hex, replica_key};
 
 /// The most items one query answers, so no answer carries an unbounded list.
 pub const MAX_WINDOW: i64 = 500;
@@ -116,7 +106,7 @@ impl BridgeTextStyle {
         }
     }
 
-    fn of(style: TextStyle) -> Self {
+    pub(crate) fn of(style: TextStyle) -> Self {
         match style {
             TextStyle::Heading(1) => Self::Heading1,
             TextStyle::Heading(2) => Self::Heading2,
@@ -336,37 +326,7 @@ pub struct BridgeChange {
     pub seq: i64,
 }
 
-type Deliver = Box<dyn FnMut(BridgeChange) -> bool + Send>;
-
-struct Inner {
-    workspace: Workspace<Sqlite>,
-    /// Open subscriptions by the identity Dart chose.
-    subscriptions: HashMap<i64, (BridgeResource, Deliver)>,
-    /// Subscriptions whose close arrived before their registration, which calls on
-    /// flutter_rust_bridge's worker threads may do.
-    closed: HashSet<i64>,
-    /// Subscriptions that ended because their stream was gone, until Dart's close arrives.
-    ended: HashSet<i64>,
-    /// Each changed resource's change count.
-    seqs: HashMap<BridgeResource, i64>,
-}
-
-/// The device's Workspace, opened from its replica.
-#[flutter_rust_bridge::frb(opaque)]
-pub struct LiquidWorkspace {
-    inner: Mutex<Inner>,
-    /// The replica folder's lock, held while the Workspace is open.
-    _lock: File,
-}
-
-impl Drop for LiquidWorkspace {
-    fn drop(&mut self) {
-        // A concurrently spawned child may still hold an inherited descriptor until exec.
-        let _ = self._lock.unlock();
-    }
-}
-
-fn message(error: Error) -> String {
+pub(crate) fn message(error: Error) -> String {
     match error {
         Error::NotAllowed => "not allowed".into(),
         Error::NotFound => "not found".into(),
@@ -410,12 +370,12 @@ impl BridgeMutation {
     }
 }
 
-fn units(value: i64, what: &str) -> Result<usize, String> {
+pub(crate) fn units(value: i64, what: &str) -> Result<usize, String> {
     usize::try_from(value).map_err(|_| format!("{what} is negative"))
 }
 
 impl BridgeMutation {
-    fn to_core(&self) -> Result<Mutation, String> {
+    pub(crate) fn to_core(&self) -> Result<Mutation, String> {
         let text = || {
             self.text
                 .clone()
@@ -532,7 +492,7 @@ impl BridgeMutation {
 impl BridgeResource {
     /// The resource with only the parts its kind uses, which must name identities, so it
     /// equals the resource a change reports.
-    fn normalized(&self) -> Result<Self, String> {
+    pub(crate) fn normalized(&self) -> Result<Self, String> {
         let area = || id(&self.area, AreaId::parse, "area").map(|area| Some(area.to_string()));
         let page = || id(&self.page, PageId::parse, "page").map(|page| Some(page.to_string()));
         let block =
@@ -551,7 +511,7 @@ impl BridgeResource {
         })
     }
 
-    fn of(changed: &Changed) -> Self {
+    pub(crate) fn of(changed: &Changed) -> Self {
         let (kind, area, page, block) = match changed {
             Changed::Areas => (BridgeResourceKind::Areas, None, None, None),
             Changed::Pages(area) => (
@@ -582,7 +542,7 @@ impl BridgeResource {
     }
 
     /// The Page whose document this resource reads, if any.
-    fn page(&self) -> Option<&str> {
+    pub(crate) fn page(&self) -> Option<&str> {
         matches!(
             self.kind,
             BridgeResourceKind::Views | BridgeResourceKind::Block
@@ -592,425 +552,10 @@ impl BridgeResource {
     }
 }
 
-/// Opens the replica folder's lock file without truncating it, and refuses one that is a
-/// link or no plain file, so opening never writes to a file elsewhere.
-fn open_lock(path: &Path) -> Result<File, String> {
-    let mut options = std::fs::OpenOptions::new();
-    options.read(true).write(true).create(true).truncate(false);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::custom_flags(
-        &mut options,
-        rustix::fs::OFlags::NOFOLLOW.bits() as i32,
-    );
-    // FILE_FLAG_OPEN_REPARSE_POINT: opens a link itself, which the plain-file check refuses.
-    #[cfg(windows)]
-    std::os::windows::fs::OpenOptionsExt::custom_flags(&mut options, 0x0020_0000);
-    let lock = options
-        .open(path)
-        .map_err(|error| format!("the replica lock {}: {error}", path.display()))?;
-    let plain = lock
-        .metadata()
-        .map_err(|error| error.to_string())?
-        .is_file();
-    if !plain {
-        return Err(format!(
-            "the replica lock {} is no plain file",
-            path.display()
-        ));
-    }
-    Ok(lock)
-}
-
-/// How long a held replica lock is tried again: a process this one starts holds the lock
-/// it inherited only until it runs its program, while another session holds it for good.
-const LOCK_PATIENCE: std::time::Duration = std::time::Duration::from_millis(500);
-
-/// Takes the replica's lock, trying again for a moment while it is held.
-fn take_lock(lock: &File) -> Result<(), String> {
-    let since = std::time::Instant::now();
-    loop {
-        match lock.try_lock() {
-            Ok(()) => return Ok(()),
-            Err(TryLockError::WouldBlock) if since.elapsed() < LOCK_PATIENCE => {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            Err(TryLockError::WouldBlock) => {
-                return Err("another Liquid session holds this replica".into());
-            }
-            Err(TryLockError::Error(error)) => return Err(error.to_string()),
-        }
-    }
-}
-
 /// The window `start..start + limit`, with `limit` capped at [`MAX_WINDOW`].
-fn window(start: i64, limit: i64) -> Result<(usize, usize), String> {
+pub(crate) fn window(start: i64, limit: i64) -> Result<(usize, usize), String> {
     Ok((
         units(start, "start")?,
         units(limit.min(MAX_WINDOW), "limit")?,
     ))
-}
-
-impl LiquidWorkspace {
-    /// Opens the Workspace whose replica lives in the folder `dir`, creating both on first
-    /// use. The replica's key lives in the operating system's keychain (ADR-0237).
-    pub fn open(dir: String) -> Result<LiquidWorkspace, String> {
-        let dir = Path::new(&dir);
-        // Created first, so the folder's canonical path is known when an older key is looked up.
-        std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
-        Self::open_with(dir, &Keychain)
-    }
-
-    /// Opens with `keys` in place of the keychain, for tests.
-    #[flutter_rust_bridge::frb(ignore)]
-    pub(crate) fn open_with(dir: &Path, keys: &dyn Keys) -> Result<LiquidWorkspace, String> {
-        std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
-        // Taken before the key is read or made, so two sessions opening a new folder at once
-        // cannot each store a key of their own.
-        let lock = open_lock(&dir.join("replica.lock"))?;
-        take_lock(&lock)?;
-        let path = dir.join("replica.db");
-        let key = replica_key(dir, keys, path.exists())?;
-        let workspace = match Workspace::open(Sqlite::open(&path, &key).map_err(message)?) {
-            Ok(workspace) => workspace,
-            // A new replica: until accounts exist, the device's person creates and owns it.
-            Err(Error::NotFound) => {
-                let store = Sqlite::open(&path, &key).map_err(message)?;
-                Workspace::create(PersonId::new(random_hex()?), store).map_err(message)?
-            }
-            Err(error) => return Err(message(error)),
-        };
-        Ok(Self {
-            inner: Mutex::new(Inner {
-                workspace,
-                subscriptions: HashMap::new(),
-                closed: HashSet::new(),
-                ended: HashSet::new(),
-                seqs: HashMap::new(),
-            }),
-            _lock: lock,
-        })
-    }
-
-    /// Applies one write as the device's person through Liquid's interface, then tells the
-    /// subscribers of every resource it changed.
-    pub fn apply(&self, mutation: BridgeMutation) -> Result<BridgeApplied, String> {
-        let mutation = mutation.to_core()?;
-        let mutation_page = match &mutation {
-            Mutation::CreateArea { .. }
-            | Mutation::CreatePage { .. }
-            | Mutation::RenamePage { .. } => None,
-            Mutation::AddTextBlock { page, .. }
-            | Mutation::EditText { page, .. }
-            | Mutation::RemoveView { page, .. }
-            | Mutation::SplitTextBlock { page, .. }
-            | Mutation::JoinTextBlock { page, .. }
-            | Mutation::SetTextStyle { page, .. }
-            | Mutation::SetSectionBoundary { page, .. }
-            | Mutation::AddDatabaseBlock { page, .. }
-            | Mutation::RenameDatabase { page, .. }
-            | Mutation::AddField { page, .. }
-            | Mutation::RenameField { page, .. }
-            | Mutation::RemoveField { page, .. }
-            | Mutation::AddOption { page, .. }
-            | Mutation::AddRow { page, .. }
-            | Mutation::RemoveRow { page, .. }
-            | Mutation::SetCell { page, .. } => Some(page.clone()),
-        };
-        let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
-        let actor = Actor::Person(inner.workspace.owner().clone());
-        let result = inner.workspace.apply(Request {
-            actor,
-            origin: Origin::Ui,
-            mutation,
-        });
-        // A refused write may have loaded its Page too.
-        let applied = match result {
-            Ok(applied) => applied,
-            Err(error) => {
-                if let Some(page) = &mutation_page {
-                    inner.release_page(page);
-                }
-                return Err(message(error));
-            }
-        };
-        for changed in &applied.changed {
-            inner.notify(BridgeResource::of(changed));
-        }
-        if let Some(page) = mutation_page.as_ref().or(match &applied.created {
-            Some(Created::Page(page)) => Some(page),
-            _ => None,
-        }) {
-            inner.release_page(page);
-        }
-        let mut answer = BridgeApplied {
-            action: applied.action.to_string(),
-            area: None,
-            page: None,
-            block: None,
-            view: None,
-            field: None,
-            row: None,
-            option: None,
-        };
-        match applied.created {
-            Some(Created::Area(area)) => answer.area = Some(area.to_string()),
-            Some(Created::Page(page)) => answer.page = Some(page.to_string()),
-            Some(Created::Block { block, view }) => {
-                answer.block = Some(block.to_string());
-                answer.view = Some(view.to_string());
-            }
-            Some(Created::Field(field)) => answer.field = Some(field.to_string()),
-            Some(Created::Row(row)) => answer.row = Some(row.to_string()),
-            Some(Created::Option(option)) => answer.option = Some(option.to_string()),
-            None => {}
-        }
-        Ok(answer)
-    }
-
-    /// Reads one bounded window, one Block's text or one Database's fields.
-    pub fn query(&self, query: BridgeQuery) -> Result<BridgeAnswer, String> {
-        let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
-        let (start, limit) = window(query.start, query.limit)?;
-        let mut read = None;
-        let result = Self::read(&mut inner.workspace, &query, start, limit, &mut read);
-        if let Some(page) = read {
-            inner.release_page(&page);
-        }
-        result
-    }
-
-    fn read(
-        workspace: &mut Workspace<Sqlite>,
-        query: &BridgeQuery,
-        start: usize,
-        limit: usize,
-        read: &mut Option<PageId>,
-    ) -> Result<BridgeAnswer, String> {
-        let mut answer = BridgeAnswer {
-            areas: Vec::new(),
-            pages: Vec::new(),
-            views: Vec::new(),
-            count: 0,
-            text: None,
-            style: None,
-            database: None,
-            rows: Vec::new(),
-        };
-        match query.kind {
-            BridgeQueryKind::Areas => {
-                let areas = workspace.areas().map_err(message)?;
-                answer.count = areas.len() as i64;
-                answer.areas = areas
-                    .into_iter()
-                    .skip(start)
-                    .take(limit)
-                    .map(|area| BridgeArea {
-                        id: area.id.to_string(),
-                        name: area.name,
-                    })
-                    .collect();
-            }
-            BridgeQueryKind::Pages => {
-                let pages = workspace
-                    .pages(&id(&query.area, AreaId::parse, "area")?)
-                    .map_err(message)?;
-                answer.count = pages.len() as i64;
-                answer.pages = pages
-                    .into_iter()
-                    .skip(start)
-                    .take(limit)
-                    .map(|page| BridgePage {
-                        id: page.id.to_string(),
-                        parent: page.parent.map(|parent| parent.to_string()),
-                        title: page.title,
-                    })
-                    .collect();
-            }
-            BridgeQueryKind::Views => {
-                let page = id(&query.page, PageId::parse, "page")?;
-                *read = Some(page.clone());
-                answer.count = workspace.view_count(&page).map_err(message)? as i64;
-                answer.views = workspace
-                    .views(&page, start, limit)
-                    .map_err(message)?
-                    .into_iter()
-                    .map(|view| BridgeView {
-                        id: view.id.to_string(),
-                        block: view.block.to_string(),
-                        boundary: view.boundary,
-                        kind: match view.kind {
-                            BlockKind::Text => BridgeBlockKind::Text,
-                            BlockKind::Database => BridgeBlockKind::Database,
-                            BlockKind::Unknown => BridgeBlockKind::Unknown,
-                        },
-                    })
-                    .collect();
-            }
-            BridgeQueryKind::Text => {
-                let page = id(&query.page, PageId::parse, "page")?;
-                *read = Some(page.clone());
-                let block = id(&query.block, BlockId::parse, "block")?;
-                answer.text = workspace.text(&page, &block).map_err(message)?;
-                answer.style = workspace
-                    .style(&page, &block)
-                    .map_err(message)?
-                    .map(BridgeTextStyle::of);
-            }
-            BridgeQueryKind::Database => {
-                let page = id(&query.page, PageId::parse, "page")?;
-                *read = Some(page.clone());
-                let block = id(&query.block, BlockId::parse, "block")?;
-                answer.database = workspace
-                    .database(&page, &block)
-                    .map_err(message)?
-                    .map(BridgeDatabase::of);
-            }
-            BridgeQueryKind::Rows => {
-                let page = id(&query.page, PageId::parse, "page")?;
-                *read = Some(page.clone());
-                let block = id(&query.block, BlockId::parse, "block")?;
-                let rows = row_query(&query.sort, &query.filter, start, limit)?;
-                let rows = workspace.rows(&page, &block, &rows).map_err(message)?;
-                answer.count = rows.count as i64;
-                answer.rows = rows.rows.into_iter().map(BridgeRow::of).collect();
-            }
-        }
-        Ok(answer)
-    }
-
-    /// Streams `resource`'s changes to Dart under the identity `subscription`, which Dart
-    /// chooses and passes to [`LiquidWorkspace::close`] when it cancels the stream. The first
-    /// change carries the resource's current count and marks the registration: a reader queries
-    /// after it, so it misses no later change.
-    pub fn subscribe(
-        &self,
-        subscription: i64,
-        resource: BridgeResource,
-        sink: StreamSink<BridgeChange>,
-    ) -> Result<(), String> {
-        // Dart's stream sees only what the sink carries, so a refusal travels through it.
-        let refused = sink.clone();
-        let watched = self.watch(subscription, resource, move |change| {
-            sink.add(change).is_ok()
-        });
-        if let Err(error) = watched {
-            let _ = refused.add_error(error);
-        }
-        Ok(())
-    }
-
-    /// Hands `resource`'s changes to `deliver` until it returns `false`; tests use it instead
-    /// of a Dart stream. `deliver` runs while the Workspace is locked, so it must not call
-    /// the Workspace, as a stream sink never does.
-    #[flutter_rust_bridge::frb(ignore)]
-    pub(crate) fn watch(
-        &self,
-        subscription: i64,
-        resource: BridgeResource,
-        deliver: impl FnMut(BridgeChange) -> bool + Send + 'static,
-    ) -> Result<(), String> {
-        let mut deliver = deliver;
-        let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
-        // A refused registration ends the subscription like any other end.
-        let resource = match resource.normalized() {
-            Ok(resource) => resource,
-            Err(error) => {
-                if !inner.closed.remove(&subscription) {
-                    inner.ended.insert(subscription);
-                }
-                return Err(error);
-            }
-        };
-        // Dart cancelled it before it arrived, which is a normal end, not an error.
-        if inner.closed.remove(&subscription) {
-            return Ok(());
-        }
-        if inner.subscriptions.contains_key(&subscription) {
-            return Err(format!("subscription {subscription} is already open"));
-        }
-        let seq = inner.seqs.get(&resource).copied().unwrap_or_default();
-        let current = BridgeChange {
-            resource: resource.clone(),
-            seq,
-        };
-        if deliver(current) {
-            inner
-                .subscriptions
-                .insert(subscription, (resource, Box::new(deliver)));
-        } else {
-            inner.ended.insert(subscription);
-        }
-        Ok(())
-    }
-
-    /// Ends a subscription, also one whose registration has not arrived yet. A Page that no
-    /// subscription follows any more leaves memory.
-    pub fn close(&self, subscription: i64) {
-        let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
-        match inner.subscriptions.remove(&subscription) {
-            Some((resource, _)) => inner.release(&resource),
-            None if inner.ended.remove(&subscription) => {}
-            None => {
-                inner.closed.insert(subscription);
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-impl LiquidWorkspace {
-    pub(crate) fn is_loaded(&self, page: &PageId) -> bool {
-        let inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
-        inner.workspace.is_loaded(page)
-    }
-
-    /// How many subscription identities wait for their other end: a registration or a close.
-    pub(crate) fn lifecycle_markers(&self) -> usize {
-        let inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
-        inner.closed.len() + inner.ended.len()
-    }
-}
-
-impl Inner {
-    /// Counts a change of `resource` and tells its subscribers, ending those whose Dart
-    /// stream is gone.
-    fn notify(&mut self, resource: BridgeResource) {
-        let seq = self.seqs.entry(resource.clone()).or_default();
-        *seq += 1;
-        let change = BridgeChange {
-            resource: resource.clone(),
-            seq: *seq,
-        };
-        let mut gone = Vec::new();
-        for (id, (followed, deliver)) in &mut self.subscriptions {
-            if *followed == resource && !deliver(change.clone()) {
-                gone.push(*id);
-            }
-        }
-        for id in gone {
-            if let Some((resource, _)) = self.subscriptions.remove(&id) {
-                self.ended.insert(id);
-                self.release(&resource);
-            }
-        }
-    }
-
-    /// Closes the Page `resource` reads once no other subscription follows it.
-    fn release(&mut self, resource: &BridgeResource) {
-        if let Some(page) = resource.page().and_then(PageId::parse) {
-            self.release_page(&page);
-        }
-    }
-
-    /// Closes `page` unless a subscription follows it, so a Page that a call loaded for
-    /// nobody does not stay in memory.
-    fn release_page(&mut self, page: &PageId) {
-        let followed = self
-            .subscriptions
-            .values()
-            .any(|(other, _)| other.page() == Some(page.as_str()));
-        if !followed {
-            self.workspace.close_page(page);
-        }
-    }
 }

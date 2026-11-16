@@ -595,8 +595,8 @@ class PageEditor {
     final above = await _above(target);
     // Only Text Blocks join.
     if (above == null || above.kind != BridgeBlockKind.text) return target;
-    final answer = await _state.workspace.query(
-      query: query(BridgeQueryKind.text, page: _page, block: above.block),
+    final answer = await _state.read(
+      query(BridgeQueryKind.text, page: _page, block: above.block),
     );
     final aboveText = answer.text ?? '';
     await _apply(
@@ -625,20 +625,15 @@ class PageEditor {
   /// not have caught up with the changes the queue just made.
   Future<BridgeView?> _above(EditorTarget target) async {
     for (var start = 0; ; start += window) {
-      final answer = await _state.workspace.query(
-        query: query(BridgeQueryKind.views, page: _page, start: start),
+      final answer = await _state.read(
+        query(BridgeQueryKind.views, page: _page, start: start),
       );
       final at = answer.views.indexWhere((view) => view.id == target.view);
       if (at > 0) return answer.views[at - 1];
       if (at == 0) {
         if (start == 0) return null;
-        final before = await _state.workspace.query(
-          query: query(
-            BridgeQueryKind.views,
-            page: _page,
-            start: start - 1,
-            limit: 1,
-          ),
+        final before = await _state.read(
+          query(BridgeQueryKind.views, page: _page, start: start - 1, limit: 1),
         );
         return before.views.firstOrNull;
       }

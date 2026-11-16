@@ -7,6 +7,7 @@ import 'api/database.dart';
 import 'api/details.dart';
 import 'api/events.dart';
 import 'api/git.dart';
+import 'api/replica.dart';
 import 'api/session.dart';
 import 'api/thread.dart';
 import 'api/workspace.dart';

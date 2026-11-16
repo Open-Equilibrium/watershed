@@ -170,11 +170,10 @@ class CellSelection extends ChangeNotifier {
     _changed();
   }
 
-  /// Picks `option` for the selected cell and closes the picker.
+  /// Picks `option` for the selected cell, unless it holds it already, and closes the picker.
   void pick(BridgeOption option) {
-    final target = _target;
-    if (target != null) {
-      final (row, field, _) = target;
+    if (_target case (final row, final field, final cell)
+        when cell?.kind != BridgeCellKind.select || cell?.text != option.id) {
       _write(row, field, _cell(BridgeCellKind.select, text: option.id));
     }
     closePick();

@@ -8,9 +8,10 @@ use super::workspace::{Folder, Memory, lisbon, mutation, query, resource};
 use crate::api::database::{
     BridgeCell, BridgeCellKind, BridgeFieldKind, BridgeFilter, BridgeMatch, BridgeSort,
 };
+use crate::api::replica::LiquidWorkspace;
 use crate::api::workspace::{
     BridgeAnswer, BridgeBlockKind, BridgeMutation, BridgeMutationKind, BridgeQuery,
-    BridgeQueryKind, BridgeResource, BridgeResourceKind, LiquidWorkspace, MAX_WINDOW,
+    BridgeQueryKind, BridgeResource, BridgeResourceKind, MAX_WINDOW,
 };
 
 fn cell(kind: BridgeCellKind) -> BridgeCell {

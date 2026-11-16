@@ -222,7 +222,10 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
             ? await views.viewAt(widget.index - 1)
             : null;
         if (widget.index > 0 && above == null) {
-          throw 'The Page changed; choose Table again.';
+          _state.report(
+            'Liquid did not add the Table, as the Page changed; choose Table again.',
+          );
+          throw StateError('The Page changed.');
         }
         after = above?.id;
       }
@@ -235,9 +238,8 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         ),
         const [],
       );
-    } on Object catch (error) {
+    } on Object {
       // The problem shows on the Page; what was typed stays in the line.
-      _report(error);
       if (mounted) {
         _adding = false;
         _typed();
@@ -357,7 +359,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   }
 
   void _report(Object error) {
-    if (mounted) _state.problem.value = '$error';
+    if (mounted) _state.readFailed(error);
   }
 
   /// Shows the stored text and style, unless a write to this Block or a change of the
@@ -370,8 +372,8 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     final sent = views.sent(block);
     final BridgeAnswer answer;
     try {
-      answer = await _state.workspace.query(
-        query: query(BridgeQueryKind.text, page: _page, block: block),
+      answer = await _state.read(
+        query(BridgeQueryKind.text, page: _page, block: block),
       );
     } on Object catch (error) {
       _report(error);

@@ -5,6 +5,7 @@ pub mod details;
 pub mod events;
 pub mod git;
 pub(crate) mod record;
+pub mod replica;
 pub mod session;
 pub mod thread;
 pub mod workspace;
