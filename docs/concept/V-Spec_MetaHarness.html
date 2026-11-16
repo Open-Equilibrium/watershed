@@ -166,7 +166,7 @@ meta config revert N
 meta service install
 meta service uninstall
 meta uninstall</code></pre>
-          <p class="muted">Implemented (ADR-0296); <code>meta help</code> describes each command and data commands print JSON. Target, not yet built: <code>meta sessions</code>, <code>attach</code>, <code>run</code>, <code>schedule</code>, <code>metrics</code>.</p></div>
+          <p class="muted">Implemented (ADR-0296); <code>meta help</code> describes each command and the config commands print JSON. Target, not yet built: <code>meta sessions</code>, <code>attach</code>, <code>run</code>, <code>schedule</code>, <code>metrics</code>.</p></div>
         <div class="card"><h3>API / protocol surface</h3><ul>
           <li>session registry;</li>
           <li>live event stream;</li>
@@ -184,7 +184,7 @@ meta uninstall</code></pre>
       <h3>Service / daemon surface</h3>
       <p>Implemented on macOS and Linux (ADR-0215, ADR-0286, ADR-0297). <code>meta serve</code> runs the service in its own process; the login service starts it at login and again after it ends. It owns its data folder, <code>META_HARNESS_HOME</code> or else <code>~/.meta-harness</code> (readable only by the user): the configuration store <code>meta-harness.sqlite</code>, T3's data in <code>t3/</code>, the harness homes in <code>harness/</code> and <code>service.log</code>; a second service on the same folder refuses to start. It serves one WebSocket on 127.0.0.1 at a free port, as T3 Code serves its clients, and admits only connections with the bearer token it writes, with its address, into <code>connection.json</code>, a user-only file renewed at every start.</p>
       <ul>
-        <li><strong>Messages:</strong> JSON text frames, defined in <code>meta-harness-core/src/api.rs</code>: a call gets one answer; a stream gets a first value, such as a thread's snapshot (ADR-0290), then items until it ends or the client cancels it. Every thread call names its project and thread, so a client that reconnects goes on without opening anything again.</li>
+        <li><strong>Messages:</strong> JSON text frames, defined in <code>meta-harness-core/src/api.rs</code>: a call gets one answer; a stream gets a first value, such as a thread's snapshot (ADR-0290), then items until it ends or the client cancels it. Every thread call names its project and thread, so a client that reconnects goes on without opening anything again. The message set is internal and unversioned until the BYOA deliverable in <a href="../../PLAN.md">PLAN.md</a>.</li>
         <li><strong>Clients:</strong> <code>meta</code> and Liquid's agent surface, which keeps nothing of the core or T3 running in its process and leaves the service and its agents running when it quits. A lost connection fails the calls it left unanswered, which are never sent again, and ends its streams; a reader that falls 4,096 items behind loses its stream and restores from a snapshot.</li>
         <li><strong>Remote clients:</strong> the authenticated network connection follows with host links (ADR-0285); execution ownership never moves with it.</li>
       </ul>
@@ -248,10 +248,17 @@ meta uninstall</code></pre>
       <p>The person's own <code>~/.claude</code> and <code>~/.codex</code> stay unchanged and do not configure these sessions; both harnesses keep the person's login (<a href="../../SECURITY.md#meta-harness-service-and-configuration">SECURITY.md</a>). Files a harness keeps in its home, and skills Meta-Harness did not write, stay; Meta-Harness replaces only what it wrote. A change is a list of configuration blocks to set or remove:</p>
       <pre><code>meta config propose change.json "Test first"
 [{"instruction": {"name": "rules", "text": "Run the tests."}},
+ {"instruction": {"name": "old", "text": null}},
+ {"skill": {"name": "review",
+   "files": {"SKILL.md": "# Review"}}},
  {"mcp_server": {"name": "docs",
-   "server": {"command": {"command": "docs-mcp", "args": ["--stdio"]}}}}]</code></pre>
+   "server": {"command": {"command": "docs-mcp",
+     "args": ["--stdio"]}}}},
+ {"mcp_server": {"name": "wiki",
+   "server": {"url": {"url": "https://example.com/mcp"}}}}]</code></pre>
+      <p>A skill needs a <code>SKILL.md</code> and relative file paths; a proposal holds at most 256 changes.</p>
       <p>Until Liquid syncs (M3c), the configuration lives in Meta-Harness's SQLite on its host and changes through <code>meta config</code> and the API; Liquid then edits it across devices, after approved mockups. Flow Agent joins with ACP and needs a public way to replace a home's configuration; its target stays global-only, with project behavior as explicit Flows in its global authority (<a href="../../PROTOCOL.md">PROTOCOL.md</a>). A host's Runtime binding stays device-local and is not copied into shared configuration. Every harness can use local inference: Meta-Harness writes endpoints per host and Flow Agent uses its device-local Runtime binding (ADR-0225). Configuration is not a project VCS.</p>
-      <p id="policy-gate"><strong>Approval and log (ADR-0298):</strong> every change, from any client, is a proposal that takes effect only once approved, and anyone on the account approves or rejects it through the CLI or the API. Proposals, revisions and the log only grow: the log keeps each proposal, approval and rejection with its time and the client's own name for itself, and a revert proposes an earlier revision's blocks, approved like any change. An approval counts only once both homes took the new revision; otherwise nothing changes, and a service whose homes cannot take its current revision still starts, so a revert stays possible. This guards against changes nobody looked at, not against an agent acting as the person. An area may later be kept to local models, which Meta-Harness checks before a session starts (ADR-0225).</p>
+      <p id="policy-gate"><strong>Approval and log (ADR-0298):</strong> every change, from any client, is a proposal that takes effect only once approved, and anyone on the account approves or rejects it through the CLI or the API. Proposals, revisions and the log only grow: the log keeps each proposal, approval and rejection with its time and the client's own name for itself, and a revert proposes an earlier revision's blocks, approved like any change. Harness sessions started after an approval use the new revision. An approval counts only once both homes took the new revision; otherwise nothing changes, and a service whose homes cannot take its current revision still starts, so a revert stays possible. This guards against changes nobody looked at, not against an agent acting as the person. An area may later be kept to local models, which Meta-Harness checks before a session starts (ADR-0225).</p>
     </div></section>
 
     <section id="agentpulse" class="section"><h2>9. AgentPulse</h2><div class="body">

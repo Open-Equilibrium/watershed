@@ -13,13 +13,15 @@ M2 in progress; product and runtime shape: [Meta-Harness V-Spec](../docs/concept
 
 No release is published yet. A release's `meta-harness-<version>-<platform>.tar.gz` (`darwin-arm64` or `linux-x64`) and `SHA256SUMS` are downloaded in a browser from the [GitHub Releases page](https://github.com/Open-Equilibrium/watershed/releases) and checked before anything is unpacked, as for [Flow Agent](../README.md#download-installation-on-linux-or-macos):
 
+Set `version` to the release's version and `platform` to `darwin-arm64` or `linux-x64` first:
+
 ```sh
 grep " meta-harness-$version-$platform.tar.gz\$" SHA256SUMS | shasum -a 256 -c -
 tar -xzf "meta-harness-$version-$platform.tar.gz"
 sh "meta-harness-$version-$platform/install.sh"
 ```
 
-The installer puts `meta` and the pinned T3 Code into `~/.local/meta-harness` (`--prefix` chooses another folder) without administrator rights and starts the login service (`--no-service` skips it). A newer archive installs the same way over the old one and restarts the service; `meta uninstall` removes the service and the installation and keeps the data. On Linux the service keeps running after logout only with lingering ([PLATFORMS.md](../PLATFORMS.md)); on Linux, `sha256sum -c` replaces `shasum -a 256 -c`. `scripts/package-meta-harness.mjs` packs a bundle from a built `meta` and the folder `scripts/install-t3.mjs` unpacks.
+The installer puts `meta` and the pinned T3 Code into `~/.local/meta-harness` (`--prefix` chooses another folder) without administrator rights and starts the login service (`--no-service` skips it; `meta service install` starts it later). A newer archive installs the same way over the old one, with the same `--prefix`, and restarts the service; `meta uninstall` removes the service and the installation and keeps the data. The service logs to `service.log` in the data folder. On Linux the service keeps running after logout only with lingering ([PLATFORMS.md](../PLATFORMS.md)); on Linux, `sha256sum -c` replaces `shasum -a 256 -c`. `scripts/package-meta-harness.mjs` packs a bundle from a built `meta` and the folder `scripts/install-t3.mjs` unpacks.
 
 ## Run from the repository
 

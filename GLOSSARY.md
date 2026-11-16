@@ -37,7 +37,9 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Meta-Agent** — The agent that _operates_ the Meta-Harness; either Liquid-native or BYOA. May propose configuration changes for underlying agents, which take effect only once approved (ADR-0298).
 - **Configuration block** — One named instruction, skill or MCP server in Meta-Harness's central configuration, written into every harness home; not a Flow Agent Building Block (ADR-0298).
 - **Configuration proposal** — A change to Meta-Harness's central configuration that takes effect only once someone on the account approves it, which makes a new revision (ADR-0298).
+- **Configuration revision** — One approved state of the central configuration, numbered from 0 (ADR-0298).
 - **Harness home** — The configuration folder Meta-Harness owns for one harness, such as Claude Code's `CLAUDE_CONFIG_DIR` or Codex's `CODEX_HOME`, which T3 Code starts the harness with; the person's own harness configuration stays untouched (ADR-0298).
+- **Login service** — The per-user launchd agent or systemd user unit that keeps `meta serve` running (ADR-0286).
 - **BYOA** — "Bring Your Own Agent"; plugging an external agent in as the Meta-Agent.
 - **AgentPulse** — Meta-Harness subsystem measuring rework ratio, first-attempt success rate, and cost-per-productive-outcome. Meta-Harness computes/stores the metrics; Liquid only renders them.
 - **Adapter** — The part of an agent host that translates an external agent's harness into normalized events and commands; on T3 Code, its providers and local ACP commands (ADR-0282). Native agent shapes do not leak past it.
