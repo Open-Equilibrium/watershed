@@ -30,7 +30,7 @@ UBUNTU = "matrix.os == 'ubuntu-24.04'"
 MAC = "matrix.os == 'xcode-27'"
 PRODUCT = "needs.scope.outputs.product == 'true'"
 LIQUID = "needs.scope.outputs.liquid == 'true'"
-LIQUID_COVERAGE_PACKAGES = "-p meta-harness-core -p liquid_bridge -p liquid-core -p liquid-storage"
+LIQUID_COVERAGE_PACKAGES = "-p meta-harness-cli -p meta-harness-core -p liquid_bridge -p liquid-core -p liquid-storage"
 MATRIX_JOBS = ("checks", "test", "flow-agent", "liquid")
 M12_EXECUTOR = "target/m12-standard/release/flow-executor"
 EVIDENCE_ONLY_UNIX_RUNNER_PATTERN = (
@@ -520,6 +520,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         exclusions = shlex.split(exclusions)[0]
         self.assertIn(EVIDENCE_ONLY_UNIX_RUNNER_PATTERN, exclusions)
         self.assertIn(r"liquid[\\/]liquid-bridge[\\/]src[\\/]frb_generated\.rs$", exclusions)
+        self.assertIn(r"meta-harness[\\/]meta-harness-cli[\\/]src[\\/]main\.rs$", exclusions)
         report = ["cargo", "llvm-cov", "report", "--fail-under-lines", "88",
                   "--ignore-filename-regex", "$COVERAGE_EXCLUSIONS", "--show-missing-lines"]
 

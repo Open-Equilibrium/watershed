@@ -11,7 +11,7 @@ from git_fixture import git_environment
 from test_ci_toolchain_contract import ROOT, job_steps, jobs, step_lines, step_run, workflow_text
 
 PRODUCTS = ("flow_agent", "meta_harness", "liquid")
-LIQUID_PACKAGES = "-p meta-harness-core -p liquid_bridge -p liquid-core -p liquid-storage"
+LIQUID_PACKAGES = "-p meta-harness-cli -p meta-harness-core -p liquid_bridge -p liquid-core -p liquid-storage"
 
 
 def scope(docs: bool, *products: str) -> dict[str, str]:
