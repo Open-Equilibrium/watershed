@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 /// Items read at once: a screenful and more, far below the bridge's window.
-const _chunk = 100;
+const windowItems = 100;
 
 /// A long list read in windows as it is shown, never whole (client architecture rules 3
 /// and 5). Each reread asks again for the count and the windows kept: all read so far, or
@@ -41,7 +41,7 @@ class WindowedList<T> extends ChangeNotifier {
   /// The item at `index`, or null outside the list or while its window is read.
   T? at(int index) {
     if (index < 0 || index >= (_count ?? index + 1)) return null;
-    final chunk = index ~/ _chunk;
+    final chunk = index ~/ windowItems;
     // Read again as it is shown, then kept as the last used.
     final items = _chunks.remove(chunk);
     if (items == null) {
@@ -49,7 +49,7 @@ class WindowedList<T> extends ChangeNotifier {
       return null;
     }
     _chunks[chunk] = items;
-    final at = index % _chunk;
+    final at = index % windowItems;
     return at < items.length ? items[at] : null;
   }
 
@@ -57,8 +57,8 @@ class WindowedList<T> extends ChangeNotifier {
   /// for walks that must not push the shown windows out.
   T? peek(int index) {
     if (index < 0) return null;
-    final items = _chunks[index ~/ _chunk];
-    final at = index % _chunk;
+    final items = _chunks[index ~/ windowItems];
+    final at = index % windowItems;
     return items != null && at < items.length ? items[at] : null;
   }
 
@@ -66,7 +66,7 @@ class WindowedList<T> extends ChangeNotifier {
   int? indexWhere(bool Function(T item) test) {
     for (final MapEntry(key: chunk, value: items) in _chunks.entries) {
       final at = items.indexWhere(test);
-      if (at >= 0) return chunk * _chunk + at;
+      if (at >= 0) return chunk * windowItems + at;
     }
     return null;
   }
@@ -76,7 +76,7 @@ class WindowedList<T> extends ChangeNotifier {
   /// a failed read ends the wait, as its problem shows.
   Future<T?> load(int index) async {
     if (index < 0) return null;
-    final chunk = index ~/ _chunk;
+    final chunk = index ~/ windowItems;
     final failures = _failures;
     for (var tries = 0; tries < 3; tries++) {
       if (_chunks.containsKey(chunk) || _disposed || _failures != failures) {
@@ -96,7 +96,7 @@ class WindowedList<T> extends ChangeNotifier {
   Future<void> _read(int chunk) async {
     final generation = _generation;
     try {
-      final (count, items) = await _query(chunk * _chunk, _chunk);
+      final (count, items) = await _query(chunk * windowItems, windowItems);
       if (_disposed) return;
       // A reread running now reads this window too, so no order mixes with another.
       if (_reading) {
@@ -136,7 +136,7 @@ class WindowedList<T> extends ChangeNotifier {
         final read = <int, List<T>>{};
         var count = 0;
         for (final chunk in {0, ..._chunks.keys, ..._wanted}) {
-          final (all, items) = await _query(chunk * _chunk, _chunk);
+          final (all, items) = await _query(chunk * windowItems, windowItems);
           count = all;
           read[chunk] = items;
         }

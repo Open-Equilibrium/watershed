@@ -1140,6 +1140,29 @@ void main() {
     expect(big, isEmpty, reason: 'the View above is found beside the caret');
   });
 
+  testWidgets('a numbered list longer than the Views kept stays shown', (
+    tester,
+  ) async {
+    await show(tester, [
+      for (var number = 1; number <= 1600; number++) 'Item $number',
+    ], BridgeTextStyle.numbered);
+    await tester.scrollUntilVisible(
+      find.text('Item 1600'),
+      3000,
+      scrollable: find
+          .descendant(
+            of: find.byType(CustomScrollView),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.pumpAndSettle();
+    final reads = kit.fake.asked.length;
+    await tester.pumpAndSettle();
+    expect(find.text('Item 1600'), findsOneWidget);
+    expect(kit.fake.asked.length, reads, reason: 'nothing reads on and on');
+  });
+
   testWidgets('a numbered list of 600 items counts to its end', (tester) async {
     await show(tester, [
       for (var number = 1; number <= 600; number++) 'Item $number',
