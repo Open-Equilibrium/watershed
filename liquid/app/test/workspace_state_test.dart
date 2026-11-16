@@ -85,7 +85,10 @@ void main() {
     final page = state.open.value!.page;
     fake.refuse = 'the replica is read-only';
     await expectLater(state.rename(page, 'A'), throwsA(isA<String>()));
-    expect(state.problem.value, 'the replica is read-only');
+    expect(
+      state.problem.value,
+      'Liquid did not save this change: the replica is read-only',
+    );
     fake.refuse = null;
     await state.rename(page, 'B');
     expect(state.problem.value, isNull);
@@ -132,6 +135,39 @@ void main() {
     });
     await state.dispose();
     expect(fake.followed, isEmpty);
+  });
+
+  test('a failed read shows until a read succeeds, a refused change until a change does', () async {
+    final fake = FakeWorkspace();
+    final state = WorkspaceState(fake);
+    await state.start();
+    final page = state.open.value!.page;
+    final pages = query(
+      BridgeQueryKind.pages,
+      area: state.areas.value.single.id,
+    );
+
+    fake.refuseQueries = 'disk I/O error';
+    await state.rename(page, 'A');
+    await pumpEventQueue();
+    expect(
+      state.problem.value,
+      'Liquid could not read the Workspace, so what shows may be out of date: '
+      'disk I/O error',
+    );
+    fake.refuseQueries = null;
+    await state.read(pages);
+    expect(state.problem.value, isNull);
+
+    fake.refuse = 'the replica is read-only';
+    await expectLater(state.rename(page, 'B'), throwsA(isA<String>()));
+    await state.read(pages);
+    expect(
+      state.problem.value,
+      'Liquid did not save this change: the replica is read-only',
+      reason: 'a read does not say the change was kept',
+    );
+    await state.dispose();
   });
 
   test('a Workspace whose first read fails says so', () async {

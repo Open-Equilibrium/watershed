@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid/src/controls.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/shortcuts/keymap.dart';
 import 'package:liquid/src/shortcuts/shortcut_store.dart';
@@ -375,7 +376,15 @@ void main() {
     kit.fake.refuse = 'the replica is read-only';
     await type(tester, 0, '!');
     expect(field(tester, 0).controller!.text, 'Lisbon');
-    expect(find.text('the replica is read-only'), findsOneWidget);
+    expect(
+      find.text('Liquid did not save this change: the replica is read-only'),
+      findsOneWidget,
+    );
+    expect(
+      tester.widget<WarningNotice>(find.byType(WarningNotice)).danger,
+      isTrue,
+      reason: 'a failure shows as one',
+    );
   });
 
   testWidgets('typing right after ⏎ lands in the new Text Block', (

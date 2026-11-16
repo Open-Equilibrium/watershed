@@ -48,13 +48,8 @@ class PageViews extends ChangeNotifier {
   final String page;
 
   late final _views = WindowedList<BridgeView>((start, limit) async {
-    final answer = await state.workspace.query(
-      query: query(
-        BridgeQueryKind.views,
-        page: page,
-        start: start,
-        limit: limit,
-      ),
+    final answer = await state.read(
+      query(BridgeQueryKind.views, page: page, start: start, limit: limit),
     );
     return (answer.count, answer.views);
   }, _report);
@@ -182,8 +177,8 @@ class PageViews extends ChangeNotifier {
       if (view == null || view.kind != BridgeBlockKind.text) return;
       var style = styles.value[view.block];
       if (style == null) {
-        final answer = await state.workspace.query(
-          query: query(BridgeQueryKind.text, page: page, block: view.block),
+        final answer = await state.read(
+          query(BridgeQueryKind.text, page: page, block: view.block),
         );
         style = answer.style ?? BridgeTextStyle.paragraph;
         // A Text Block's own read, which may be newer, wins.
@@ -198,7 +193,7 @@ class PageViews extends ChangeNotifier {
   }
 
   void _report(Object error) {
-    if (!_disposed) state.problem.value = '$error';
+    if (!_disposed) state.readFailed(error);
   }
 
   @override

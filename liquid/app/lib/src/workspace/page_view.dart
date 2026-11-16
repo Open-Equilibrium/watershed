@@ -291,7 +291,7 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                   padding: const EdgeInsets.symmetric(
                     horizontal: WsMetrics.space7,
                   ),
-                  child: WarningNotice(problem),
+                  child: WarningNotice(problem, danger: true),
                 ),
         ),
         Expanded(

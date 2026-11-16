@@ -133,8 +133,13 @@ class WorkspaceState {
   /// The open Page, or none while the agent session shows.
   final open = ValueNotifier<OpenPage?>(null);
 
-  /// The last change or read that failed, until the next one succeeds.
+  /// What last failed, as a plain sentence and then the core's message: a change Liquid did
+  /// not keep shows until the next change succeeds, a failed read until the next change or
+  /// read succeeds.
   final problem = ValueNotifier<String?>(null);
+
+  /// Whether `problem` is a failed read's.
+  bool _readFailed = false;
 
   final _trees = <String, ValueNotifier<List<BridgePage>>>{};
   final _treeReads = <String, _Reread>{};
@@ -146,9 +151,32 @@ class WorkspaceState {
   ValueListenable<List<BridgePage>> pages(String area) =>
       _trees.putIfAbsent(area, () => ValueNotifier(const []));
 
-  /// Shows `problem` until the next change or read succeeds, unless the window closed.
-  void report(Object problem) {
-    if (!_disposed) this.problem.value = '$problem';
+  /// Shows `problem`, a plain sentence on something not kept, until the next change succeeds,
+  /// unless the window closed.
+  void report(String problem) => _show(problem, read: false);
+
+  /// Shows that a read failed, until the next change or read succeeds.
+  void readFailed(Object error) => _show(
+    'Liquid could not read the Workspace, so what shows may be out of date: $error',
+    read: true,
+  );
+
+  /// Takes a failed read's problem away once a read succeeded.
+  void readSucceeded() {
+    if (_readFailed) _show(null, read: false);
+  }
+
+  /// Reads `asked` for a Page's Blocks; a failed read's problem goes once one succeeds.
+  Future<BridgeAnswer> read(BridgeQuery asked) async {
+    final answer = await workspace.query(query: asked);
+    readSucceeded();
+    return answer;
+  }
+
+  void _show(String? problem, {required bool read}) {
+    if (_disposed) return;
+    this.problem.value = problem;
+    _readFailed = read;
   }
 
   /// Completes once every mutation asked for so far is applied or refused.
@@ -161,11 +189,11 @@ class WorkspaceState {
     _applied = applied.then<void>((_) {}, onError: (_) {});
     return applied.then(
       (applied) {
-        if (!_disposed) problem.value = null;
+        _show(null, read: false);
         return applied;
       },
       onError: (Object error) {
-        if (!_disposed) problem.value = '$error';
+        _show('Liquid did not save this change: $error', read: false);
         throw error;
       },
     );
@@ -232,12 +260,10 @@ class WorkspaceState {
 
   void _listen(BridgeResource resource, _Reread reread) {
     _followed.add(
-      follow(workspace, resource).listen(
-        (_) => unawaited(_guarded(reread)),
-        onError: (Object error) {
-          if (!_disposed) problem.value = '$error';
-        },
-      ),
+      follow(
+        workspace,
+        resource,
+      ).listen((_) => unawaited(_guarded(reread)), onError: readFailed),
     );
   }
 
@@ -245,7 +271,7 @@ class WorkspaceState {
     try {
       await reread();
     } on Object catch (error) {
-      if (!_disposed) problem.value = '$error';
+      readFailed(error);
     }
   }
 
@@ -253,8 +279,8 @@ class WorkspaceState {
     final read = <BridgeArea>[];
     var count = 0;
     do {
-      final answer = await workspace.query(
-        query: query(BridgeQueryKind.areas, start: read.length),
+      final answer = await this.read(
+        query(BridgeQueryKind.areas, start: read.length),
       );
       count = answer.count;
       if (answer.areas.isEmpty) break;
@@ -277,8 +303,8 @@ class WorkspaceState {
     final read = <BridgePage>[];
     var count = 0;
     do {
-      final answer = await workspace.query(
-        query: query(BridgeQueryKind.pages, area: area, start: read.length),
+      final answer = await this.read(
+        query(BridgeQueryKind.pages, area: area, start: read.length),
       );
       count = answer.count;
       if (answer.pages.isEmpty) break;

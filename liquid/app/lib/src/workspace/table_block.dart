@@ -59,8 +59,8 @@ class _TableBlockState extends State<TableBlock> {
   BridgeDatabase? _database;
   late final _rows = WindowedList<BridgeRow>(
     (start, limit) async {
-      final answer = await _state.workspace.query(
-        query: query(
+      final answer = await _state.read(
+        query(
           BridgeQueryKind.rows,
           page: _page,
           block: _block,
@@ -336,8 +336,8 @@ class _TableBlockState extends State<TableBlock> {
         const [],
       );
       _rowAdded = true;
-    } on Object catch (error) {
-      _report(error);
+    } on Object {
+      // The problem shows on the Page.
     } finally {
       _rowsWriting--;
       _readsAtRowAdd = _reads;
@@ -478,7 +478,7 @@ class _TableBlockState extends State<TableBlock> {
   }
 
   void _report(Object error) {
-    if (mounted) _state.problem.value = '$error';
+    if (mounted) _state.readFailed(error);
   }
 
   /// A caret handed to this Table goes to its name, as for a new Table.
@@ -565,8 +565,8 @@ class _TableBlockState extends State<TableBlock> {
     final clean = views.pending(_block) == 0;
     final sent = views.sent(_block);
     try {
-      final answer = await _state.workspace.query(
-        query: query(BridgeQueryKind.database, page: _page, block: _block),
+      final answer = await _state.read(
+        query(BridgeQueryKind.database, page: _page, block: _block),
       );
       if (!mounted || read != _reads) return;
       if (_fieldAdded case final field?) {
