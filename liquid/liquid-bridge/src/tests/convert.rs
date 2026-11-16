@@ -667,9 +667,22 @@ fn providers_and_model_choices_cross_with_their_options_both_ways() {
         option_ids: vec!["effort".to_owned()],
         values: vec!["high".to_owned()],
     };
-    let core: ModelChoice = convert::to_model_choice(choice.clone());
+    let core: ModelChoice = convert::to_model_choice(choice.clone()).expect("matching pairs");
     assert_eq!(core.options, vec![("effort".to_owned(), "high".to_owned())]);
     assert_eq!(convert::model_choice(&core), choice);
+}
+
+#[test]
+fn a_model_choice_whose_option_ids_and_values_differ_in_number_is_refused() {
+    let choice = |option_ids: &[&str], values: &[&str]| BridgeModelChoice {
+        instance: "scripted".to_owned(),
+        model: "m1".to_owned(),
+        option_ids: option_ids.iter().map(|id| (*id).to_owned()).collect(),
+        values: values.iter().map(|value| (*value).to_owned()).collect(),
+    };
+    // Pairing would drop the extra option or value, and the model would run on other settings.
+    assert!(convert::to_model_choice(choice(&["effort", "speed"], &["high"])).is_err());
+    assert!(convert::to_model_choice(choice(&["effort"], &["high", "fast"])).is_err());
 }
 
 #[test]

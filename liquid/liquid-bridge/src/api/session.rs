@@ -186,7 +186,7 @@ impl AgentHost {
     pub fn set_writer_model(&self, choice: BridgeModelChoice) -> Result<(), String> {
         run(self
             .host
-            .set_writer_model(&convert::to_model_choice(choice)))
+            .set_writer_model(&convert::to_model_choice(choice)?))
     }
 
     /// The project for the folder `root`.
@@ -227,7 +227,7 @@ impl AgentProject {
     ) -> Result<AgentSession, String> {
         let thread = run(self.project.start(StartThread {
             text,
-            model: convert::to_model_choice(model),
+            model: convert::to_model_choice(model)?,
             workspace: match (base, worktree) {
                 (Some(base), _) => Workspace::NewWorktree { base },
                 (None, Some(path)) => Workspace::Worktree { path: path.into() },
@@ -647,7 +647,7 @@ impl AgentSession {
 
     /// Changes the model for the next turn.
     pub fn set_model(&self, model: BridgeModelChoice) -> Result<(), String> {
-        run(self.thread.set_model(&convert::to_model_choice(model)))
+        run(self.thread.set_model(&convert::to_model_choice(model)?))
     }
 
     /// Changes what the agent may do without asking.

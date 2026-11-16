@@ -357,12 +357,17 @@ pub(crate) fn model_choice(choice: &ModelChoice) -> BridgeModelChoice {
     }
 }
 
-pub(crate) fn to_model_choice(choice: BridgeModelChoice) -> ModelChoice {
-    ModelChoice {
+/// The core's choice; a choice whose option ids and values differ in number is refused, since
+/// pairing them would drop the extra ones and run the model on other settings.
+pub(crate) fn to_model_choice(choice: BridgeModelChoice) -> Result<ModelChoice, String> {
+    if choice.option_ids.len() != choice.values.len() {
+        return Err("The model's options do not match their values.".to_owned());
+    }
+    Ok(ModelChoice {
         instance: choice.instance,
         model: choice.model,
         options: choice.option_ids.into_iter().zip(choice.values).collect(),
-    }
+    })
 }
 
 pub(crate) fn thread_summary(thread: ThreadSummary) -> BridgeThreadSummary {
