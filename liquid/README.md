@@ -11,7 +11,7 @@ Native targets and current availability follow [PLATFORMS.md](../PLATFORMS.md).
 - `liquid-core/` — the Workspace core: object model, mutation pipeline and History over Automerge (ADR-0235, ADR-0238), committing every write to a store.
 - `liquid-storage/` — the local replica: that store in SQLite with SQLCipher (ADR-0237). Build hosts: [TESTING.md](../TESTING.md#development-toolchain).
 
-After changing `liquid-bridge/src/api`, run `flutter_rust_bridge_codegen generate` in `app/` and then `cargo fmt --all`. The generator's version is the `flutter_rust_bridge` version in `app/pubspec.yaml` (`cargo install --locked flutter_rust_bridge_codegen@<version>`). The generated files are committed without web bindings, and CI regenerates them to check they match.
+After changing `liquid-bridge/src/api`, run `flutter_rust_bridge_codegen generate` in `app/` and then `cargo fmt --all`. The generator's version is the `flutter_rust_bridge` version in `app/pubspec.yaml` (`cargo install --locked flutter_rust_bridge_codegen@<version>`). The generated files are committed without web bindings, and CI regenerates them with the release's prebuilt codegen, whose version and SHA-256 `.github/workflows/ci.yml` pins, to check they match; a version change updates that pin too.
 
 ## Run
 

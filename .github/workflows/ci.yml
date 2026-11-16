@@ -233,7 +233,10 @@ jobs:
           sudo apparmor_parser --replace /etc/apparmor.d/watershed-bwrap-userns
           test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = 1
 
+      # Without Flow Agent the scope's packages are Liquid's coverage packages: the coverage step
+      # below runs each of their tests once.
       - name: Run tests
+        if: needs.scope.outputs.flow_agent == 'true' || needs.scope.outputs.liquid != 'true'
         run: >-
           cargo nextest run
           --no-fail-fast
@@ -513,10 +516,17 @@ jobs:
       - name: Check the generated Liquid bridge
         if: matrix.os == 'ubuntu-24.04'
         shell: bash
+        env:
+          # The flutter_rust_bridge release the app uses, and the SHA-256 of its prebuilt Linux codegen.
+          FRB_VERSION: 2.13.0
+          FRB_CODEGEN_SHA256: 1bb088e6ea42782848ea6507ab745371dbde58c83abef137d3e1e68ce510d45b
         run: |
-          version=$(sed -n 's/^  flutter_rust_bridge: //p' liquid/app/pubspec.yaml)
-          cargo install --locked "flutter_rust_bridge_codegen@$version"
-          (cd liquid/app && flutter_rust_bridge_codegen generate)
+          test "$(sed -n 's/^  flutter_rust_bridge: //p' liquid/app/pubspec.yaml)" = "$FRB_VERSION"
+          archive="flutter_rust_bridge_codegen-x86_64-unknown-linux-gnu-v$FRB_VERSION.tgz"
+          curl -fsSL -o "$RUNNER_TEMP/$archive" "https://github.com/fzyzcjy/flutter_rust_bridge/releases/download/v$FRB_VERSION/$archive"
+          echo "$FRB_CODEGEN_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP"
+          (cd liquid/app && "$RUNNER_TEMP/flutter_rust_bridge_codegen" generate)
           cargo fmt --all
           git diff --exit-code -- liquid
           test -z "$(git status --porcelain -- liquid)"
