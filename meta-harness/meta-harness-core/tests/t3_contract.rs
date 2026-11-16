@@ -1273,6 +1273,34 @@ fn exchange_form(credential: &str, scope: Option<&str>) -> String {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_tunnel_passes_only_the_paths_a_link_uses() {
+    let (dir, _repo, _home) = fixture();
+    let link = linked(dir.path()).await;
+    let port = peer_row(&dir.path().join("a"), &link.name).0;
+    let addr = format!("127.0.0.1:{port}");
+    for (method, path) in [
+        ("GET", "/api/auth/session"),
+        ("POST", "/api/auth/browser-session"),
+        ("POST", "/oauth/token"),
+        ("POST", "/api/auth/websocket-ticket"),
+        ("GET", "/api/projects"),
+        ("GET", "/api/orchestration/shell"),
+        ("GET", "/ws"),
+        ("GET", "/"),
+    ] {
+        let answer = http(&addr, method, path, "");
+        assert_eq!(status_of(&answer), 403, "{method} {path}");
+    }
+    let descriptor = http(&addr, "GET", "/.well-known/t3/environment", "");
+    assert_eq!(status_of(&descriptor), 200, "the link's descriptor");
+    assert_ne!(
+        status_of(&http(&addr, "GET", "/mcp", "")),
+        403,
+        "the link's MCP path"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_pairing_code_from_a_host_token_redeems_only_orchestration_scopes() {
     let (dir, _repo, _home) = fixture();
     let (home_b, port_b) = (dir.path().join("b"), free_port());
@@ -1367,4 +1395,173 @@ async fn a_failed_add_says_the_other_host_may_keep_a_paired_entry() {
         .unwrap_err();
     let me = a.environment_name().await.unwrap().to_lowercase();
     assert!(error.contains(&format!("meta host revoke {me}")), "{error}");
+}
+
+/// Sends one HTTP/1.1 request with `headers` and `body` to `addr`, and answers everything sent
+/// back, the connection closing after the answer.
+fn http_with(addr: &str, method: &str, path: &str, headers: &[(&str, &str)], body: &str) -> String {
+    let mut stream = std::net::TcpStream::connect(addr).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+    let mut request = format!("{method} {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n");
+    for (name, value) in headers {
+        request.push_str(&format!("{name}: {value}\r\n"));
+    }
+    request.push_str(&format!("Content-Length: {}\r\n\r\n{body}", body.len()));
+    std::io::Write::write_all(&mut stream, request.as_bytes()).unwrap();
+    let mut answer = String::new();
+    let _ = std::io::Read::read_to_string(&mut stream, &mut answer);
+    answer
+}
+
+/// The JSON object in an HTTP answer's body.
+fn body_json(answer: &str) -> serde_json::Value {
+    let body = &answer[answer.find('{').unwrap()..=answer.rfind('}').unwrap()];
+    serde_json::from_str(body).unwrap()
+}
+
+/// Posts `body` as JSON to `path` at `addr`, which must answer with success; answers its body.
+fn http_json(addr: &str, method: &str, path: &str, body: &serde_json::Value) -> serde_json::Value {
+    let answer = http_with(
+        addr,
+        method,
+        path,
+        &[("Content-Type", "application/json")],
+        &body.to_string(),
+    );
+    assert!((200..300).contains(&status_of(&answer)), "{path}: {answer}");
+    body_json(&answer)
+}
+
+/// Posts `form` to `path` at `addr`, which must answer with success; answers its body.
+fn http_form(addr: &str, path: &str, form: &str) -> serde_json::Value {
+    let answer = http_with(
+        addr,
+        "POST",
+        path,
+        &[("Content-Type", "application/x-www-form-urlencoded")],
+        form,
+    );
+    assert!((200..300).contains(&status_of(&answer)), "{path}: {answer}");
+    body_json(&answer)
+}
+
+/// Percent-encodes `text` for a form body, keeping only the unreserved characters.
+fn form_value(text: &str) -> String {
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                char::from(b).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// `bytes` in unpadded base64url, as PKCE writes a code challenge.
+fn base64url(bytes: &[u8]) -> String {
+    const LETTERS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut text = String::new();
+    for chunk in bytes.chunks(3) {
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |n, (i, b)| n | u32::from(*b) << (16 - 8 * i));
+        for i in 0..=chunk.len() {
+            text.push(char::from(LETTERS[((n >> (18 - 6 * i)) & 63) as usize]));
+        }
+    }
+    text
+}
+
+/// The first `key` in the query of `url`.
+fn query(url: &str, key: &str) -> String {
+    let query = url.split_once('?').unwrap().1;
+    query
+        .split('&')
+        .find_map(|pair| pair.strip_prefix(&format!("{key}=")))
+        .unwrap()
+        .to_owned()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_linked_agents_mcp_request_reaches_t3_through_the_tunnel() {
+    use sha2::{Digest, Sha256};
+    let (dir, _repo, _home) = fixture();
+    let link = linked(dir.path()).await;
+    let (_b, b) = &link.b;
+    let port = peer_row(&dir.path().join("a"), &link.name).0;
+    let addr = format!("127.0.0.1:{port}");
+    let resource = format!("http://{addr}/mcp");
+    let redirect = "http://127.0.0.1/t3code-peer-link";
+    // The sign-in a link makes, run over the tunnel: register, approve with a pairing code, then
+    // exchange the code for a token that the linked agents' MCP requests carry.
+    let code = b.invite(Kind::Host).await.unwrap();
+    let (_, host_token) = remote::pair(&link.url_b, &code, "tester").await.unwrap();
+    let host = remote::Host::connect_to(&link.url_b, &host_token, "tester")
+        .await
+        .unwrap();
+    let pairing = host.t3_pairing().await.unwrap();
+
+    let registered = http_json(
+        &addr,
+        "POST",
+        "/oauth/mcp/register",
+        &serde_json::json!({"client_name": "tester", "redirect_uris": [redirect]}),
+    );
+    let client_id = registered["client_id"].as_str().unwrap().to_owned();
+    let verifier = "a".repeat(64);
+    let challenge = base64url(&Sha256::digest(verifier.as_bytes()));
+    let decided = http_json(
+        &addr,
+        "POST",
+        "/oauth/mcp/decision",
+        &serde_json::json!({
+            "authorization": {
+                "response_type": "code",
+                "client_id": client_id,
+                "redirect_uri": redirect,
+                "code_challenge": challenge,
+                "code_challenge_method": "S256",
+                "state": "state",
+                "resource": resource,
+            },
+            "decision": {"_tag": "pairing-code", "access": "auto", "code": pairing},
+        }),
+    );
+    let code = query(decided["redirectTo"].as_str().unwrap(), "code");
+    let form = format!(
+        "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={verifier}&resource={}",
+        form_value(&code),
+        form_value(redirect),
+        form_value(&client_id),
+        form_value(&resource),
+    );
+    let token = http_form(&addr, "/oauth/mcp/token", &form);
+    let access = token["access_token"].as_str().unwrap().to_owned();
+
+    let initialize = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "tester", "version": "0"},
+        },
+    });
+    let answer = http_with(
+        &addr,
+        "POST",
+        "/mcp",
+        &[
+            ("Authorization", &format!("Bearer {access}")),
+            ("Accept", "application/json, text/event-stream"),
+            ("Content-Type", "application/json"),
+        ],
+        &initialize.to_string(),
+    );
+    assert_eq!(status_of(&answer), 200, "{answer}");
+    assert!(answer.contains("protocolVersion"), "{answer}");
 }

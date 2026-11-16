@@ -485,12 +485,10 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream, listener: Listener) {
         Some(Admission::Tunnel(owner)) => {
             let mut revocations = shared.revoked.subscribe();
             let mut stopping = shared.stopping.clone();
-            if let Ok(t3) = TcpStream::connect(shared.host.t3_address()).await {
-                tokio::select! {
-                    () = tunnel::relay(t3, socket) => {}
-                    () = revoked(&mut revocations, Some(&owner)) => {}
-                    _ = stopping.wait_for(|stopped| *stopped) => {}
-                }
+            tokio::select! {
+                () = tunnel::serve(socket, shared.host.t3_address().to_owned()) => {}
+                () = revoked(&mut revocations, Some(&owner)) => {}
+                _ = stopping.wait_for(|stopped| *stopped) => {}
             }
             return;
         }

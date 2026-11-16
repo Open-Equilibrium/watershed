@@ -53,6 +53,10 @@ tokio = { version = "=1.53.3", features = ["rt-multi-thread", "sync", "time"] }
 # Meta-Harness's client for T3 Code's WebSocket protocol (ADR-0292).
 tokio-tungstenite = { version = "=0.30.0", default-features = false, features = ["connect", "handshake"] }
 futures-util = { version = "=0.3.34", default-features = false, features = ["sink", "std"] }
+# The HTTP server and client of a host tunnel (ADR-0301), at the versions reqwest already locks.
+hyper = { version = "=1.11.1", default-features = false, features = ["client", "http1", "server"] }
+hyper-util = { version = "=0.1.21", default-features = false, features = ["tokio"] }
+http-body-util = { version = "=0.1.5", default-features = false }
 unicode-normalization = "=0.1.25"
 
 [workspace.lints.clippy]
