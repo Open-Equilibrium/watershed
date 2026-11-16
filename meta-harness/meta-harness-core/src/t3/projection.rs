@@ -1,6 +1,8 @@
 //! A T3 thread's projection as Meta-Harness keeps it: the snapshot `subscribeThread` sends,
 //! updated by each later event as T3's own client applies them.
 
+use std::collections::HashMap;
+
 use serde_json::Value;
 
 /// The thread and its records, each collection keyed by its records' `id`.
@@ -179,20 +181,20 @@ impl Projection {
         })
     }
 
-    /// A run's prompt: its user message, or the queued prompt's turn item before T3 stored the
-    /// message.
-    pub fn prompt(&self, run: &Value) -> &str {
-        let id = &run["userMessageId"];
-        self.messages
+    /// The runs' prompts by user message id, read in one pass: the user message, or the queued
+    /// prompt's turn item before T3 stored the message. Look one up with [`prompt_of`].
+    pub fn prompts(&self) -> HashMap<&str, &str> {
+        let items = self
+            .turn_items
             .iter()
-            .find(|m| &m["id"] == id)
-            .or_else(|| {
-                self.turn_items
-                    .iter()
-                    .find(|i| i["type"] == "user_message" && &i["messageId"] == id)
-            })
-            .and_then(|record| record["text"].as_str())
-            .unwrap_or_default()
+            .filter(|i| i["type"] == "user_message")
+            .filter_map(|i| Some((i["messageId"].as_str()?, i["text"].as_str()?)));
+        let messages = self
+            .messages
+            .iter()
+            .filter_map(|m| Some((m["id"].as_str()?, m["text"].as_str()?)));
+        // Later entries win, so a stored message takes the place of its turn item.
+        items.chain(messages).collect()
     }
 
     pub fn run(&self, id: &Value) -> Option<&Value> {
@@ -229,4 +231,12 @@ fn upsert(list: &mut Vec<Value>, value: Value) -> Option<Value> {
             None
         }
     }
+}
+
+/// `run`'s prompt among `prompts`, as [`Projection::prompts`] reads them.
+pub fn prompt_of<'a>(prompts: &HashMap<&str, &'a str>, run: &Value) -> &'a str {
+    run["userMessageId"]
+        .as_str()
+        .and_then(|id| prompts.get(id).copied())
+        .unwrap_or_default()
 }

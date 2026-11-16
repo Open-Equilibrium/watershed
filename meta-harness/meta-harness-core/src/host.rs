@@ -491,7 +491,8 @@ pub(crate) fn write_settings(home: &Path, agents: &[AcpAgent]) -> Result<(), Str
             })
             .ok_or_else(|| {
                 format!(
-                    "T3's settings file {} does not hold a JSON object; it was left unchanged.",
+                    "T3's settings file {} does not hold a JSON object with an object of provider \
+                     instances; it was left unchanged.",
                     file.display()
                 )
             })?,

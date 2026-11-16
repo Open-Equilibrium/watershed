@@ -22,7 +22,7 @@ pub use details::{
 };
 pub use lineage::{Group, Lineage, LineageChanges, LineageRow, Relation};
 
-use crate::t3::{Change, Client, Projection, fresh_id, millis};
+use crate::t3::{Change, Client, Projection, fresh_id, millis, prompt_of};
 
 /// Events a subscriber may fall behind by before it is dropped; it then restores from a new
 /// snapshot (ADR-0272, ADR-0290).
@@ -785,6 +785,7 @@ fn snapshot(state: &mut State) -> Snapshot {
 }
 
 fn turns(projection: &Projection) -> Vec<Turn> {
+    let prompts = projection.prompts();
     projection
         .runs
         .iter()
@@ -811,7 +812,7 @@ fn turns(projection: &Projection) -> Vec<Turn> {
                     Some("interrupted" | "failed" | "cancelled") => TurnStatus::Aborted,
                     _ => TurnStatus::Running,
                 },
-                prompt: projection.prompt(run).to_owned(),
+                prompt: prompt_of(&prompts, run).to_owned(),
                 started_ms: millis(&run["startedAt"]),
                 ended_ms: millis(&run["completedAt"]),
                 added: files.iter().map(|f| f.added).sum(),

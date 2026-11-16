@@ -248,4 +248,16 @@ fn a_queued_turn_behind_the_running_one_leaves_its_unfinished_calls_open() {
     }));
     let tools = statistics(&queued).tools;
     assert_eq!((tools[0].open, tools[0].cancelled), (1, 0));
+
+    // A queued prompt the person removed never started: T3 keeps it as cancelled.
+    let mut removed = run("r2", 2, "cancelled", Value::Null);
+    removed["startedAt"] = Value::Null;
+    let removed = projection(json!({
+        "runs": [run("r1", 1, "running", Value::Null), removed],
+        "turnItems": [
+            {"id": "c1", "runId": "r1", "type": "command_execution", "status": "running", "input": "a"},
+        ],
+    }));
+    let tools = statistics(&removed).tools;
+    assert_eq!((tools[0].open, tools[0].cancelled), (1, 0));
 }

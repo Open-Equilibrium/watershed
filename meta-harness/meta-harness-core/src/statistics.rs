@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use crate::t3::{Projection, millis};
+use crate::t3::{Projection, millis, prompt_of};
 use crate::thread::{describe, duration, failed, usage_of};
 use crate::{Context, ItemDetail, Usage};
 
@@ -52,7 +52,7 @@ pub struct TurnStatistics {
     pub ended_ms: Option<u64>,
     /// What each model used, sorted as [`Statistics::models`].
     pub models: Vec<ModelUsage>,
-    /// Time its tools took: for each response, the longest of its tools, summed; none for a turn
+    /// Time its tools took: for each response, the longest of its tools, summed; zero for a turn
     /// without tool calls, and `None` when its tool calls carry no timing.
     pub tool_ms: Option<u64>,
     /// Tool calls whose result failed.
@@ -86,11 +86,11 @@ pub(crate) fn statistics(projection: &Projection) -> Statistics {
         .filter(|r| r["status"] != "rolled_back")
         .collect();
     // Only the turn that still runs may have unfinished calls: the last one that started, as turns
-    // queued behind it have none yet.
+    // queued behind it, or removed from the queue, never did.
     let started: Vec<&Value> = visible
         .iter()
         .copied()
-        .filter(|r| r["status"] != "queued")
+        .filter(|r| r["status"] != "queued" && !r["startedAt"].is_null())
         .collect();
     // Each record grouped by its run once, so the work stays linear in the thread's history; this
     // runs while the thread's state is locked.
@@ -114,6 +114,7 @@ pub(crate) fn statistics(projection: &Projection) -> Statistics {
             items.entry(run).or_default().push(item);
         }
     }
+    let prompts = projection.prompts();
     for run in &visible {
         let run_id = run["id"].as_str().unwrap_or_default();
         let running = started.last().is_some_and(|last| std::ptr::eq(*last, *run))
@@ -171,8 +172,7 @@ pub(crate) fn statistics(projection: &Projection) -> Statistics {
         }
         turns.push(TurnStatistics {
             entry: run["ordinal"].to_string(),
-            prompt: projection
-                .prompt(run)
+            prompt: prompt_of(&prompts, run)
                 .lines()
                 .next()
                 .unwrap_or_default()
