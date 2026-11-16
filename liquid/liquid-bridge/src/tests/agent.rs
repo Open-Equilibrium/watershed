@@ -483,6 +483,57 @@ fn a_followed_session_resumes_after_meta_harness_restarts() {
     stop(service);
 }
 
+#[test]
+fn servers_automations_and_lineage_follows_resume_after_meta_harness_restarts() {
+    let fixture = Fixture::new();
+    let (service, bridge) = host(&fixture);
+    let session = project_at(&bridge, &fixture.repo())
+        .start(
+            "append first".to_owned(),
+            scripted(),
+            Some("main".to_owned()),
+            None,
+            BridgePermissions::FullAccess,
+        )
+        .expect("session starts");
+    let (servers, servers_seen) = mpsc::channel();
+    session.servers_subscribe().expect("the servers");
+    session
+        .servers_with(move |list| servers.send(list).is_ok())
+        .expect("the servers follow");
+    let (tasks, tasks_seen) = mpsc::channel();
+    session
+        .automations_subscribe()
+        .expect("the scheduled tasks");
+    session
+        .automations_with(move |list| tasks.send(list).is_ok())
+        .expect("the scheduled tasks follow");
+    let (lineage, lineage_seen) = mpsc::channel();
+    session.lineage_subscribe().expect("the lineage");
+    session
+        .lineage_with(move |result| lineage.send(result).is_ok())
+        .expect("the lineage follows");
+
+    stop(service);
+    // Nothing answers for a while, as a restart takes time; each follow retries meanwhile.
+    std::thread::sleep(Duration::from_secs(1));
+    let (service, _) = host(&fixture);
+    // Nothing changes meanwhile, so each follow's first delivery is the one after its reconnect.
+    let wait = Duration::from_secs(60);
+    servers_seen.recv_timeout(wait).expect("the servers resume");
+    tasks_seen
+        .recv_timeout(wait)
+        .expect("the scheduled tasks resume");
+    // A change that came as the service stopped may read the lineage during the outage, which
+    // fails; the follow then reads again once Meta-Harness answers.
+    let mut lineage_reads = std::iter::from_fn(|| lineage_seen.recv_timeout(wait).ok());
+    assert!(
+        lineage_reads.any(|read| read.is_ok()),
+        "the lineage resumes"
+    );
+    stop(service);
+}
+
 const FOLLOWERS: usize = 8;
 const ROUNDS: usize = 4;
 
