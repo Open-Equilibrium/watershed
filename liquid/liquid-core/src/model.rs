@@ -188,6 +188,12 @@ impl Entry {
             .find(|(field, _)| field == key)
             .map(|(_, value)| value.as_str())
     }
+
+    /// Its sort key; one past the cap, as another device may send, is no key (ADR-0297).
+    pub(crate) fn sort(&self) -> Option<&str> {
+        self.get(SORT)
+            .filter(|key| key.len() <= crate::sort_key::MAX_KEY)
+    }
 }
 
 /// The live objects in the top-level map `map`, ordered by sort key, then identity.
@@ -227,7 +233,7 @@ pub(crate) fn sorted_in(doc: &AutoCommit, map: &ObjId) -> Vec<Entry> {
             })
         })
         .collect();
-    entries.sort_by(|a, b| (a.get(SORT), &a.id).cmp(&(b.get(SORT), &b.id)));
+    entries.sort_by(|a, b| (a.sort(), &a.id).cmp(&(b.sort(), &b.id)));
     entries
 }
 
@@ -242,12 +248,7 @@ pub(crate) fn sort_after(siblings: &[Entry], after: Option<&str>) -> Result<Stri
 
 /// The sort key for an entry placed at `place` among `siblings`.
 pub(crate) fn sort_at(siblings: &[Entry], place: Place<&str>) -> Result<String, Error> {
-    crate::sort_key::at(
-        siblings,
-        place,
-        |entry| entry.id.as_str(),
-        |entry| entry.get(SORT),
-    )
+    crate::sort_key::at(siblings, place, |entry| entry.id.as_str(), Entry::sort)
 }
 
 pub(crate) fn areas(doc: &AutoCommit) -> Vec<Area> {

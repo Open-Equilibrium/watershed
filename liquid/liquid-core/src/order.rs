@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use automerge::AutoCommit;
 
-use crate::model::{self, BLOCK, BLOCKS, BOUNDARY, KIND, SORT, VIEWS};
+use crate::model::{self, BLOCK, BLOCKS, BOUNDARY, KIND, VIEWS};
 use crate::{BlockId, BlockKind, Error, Place, View, ViewId};
 
 /// One live View with its sort key.
@@ -33,7 +33,7 @@ impl Order {
                     .get(BLOCK)
                     .and_then(|block| Some((block, *blocks.get(block)?)))?;
                 Some(Placed {
-                    sort: entry.get(SORT).unwrap_or_default().to_string(),
+                    sort: entry.sort().unwrap_or_default().to_string(),
                     view: View {
                         id: ViewId::stored(&entry.id),
                         block: BlockId::stored(block),
@@ -149,5 +149,36 @@ mod tests {
             .map(|placed| (placed.view.block.as_str(), placed.view.kind))
             .collect();
         assert_eq!(shown, [("b1", BlockKind::Text), ("b2", BlockKind::Unknown)]);
+    }
+
+    /// A key past the cap, as another device may send, reads as no key, as placing does
+    /// (ADR-0297).
+    #[test]
+    fn a_stored_key_past_the_cap_orders_as_no_key() {
+        let mut doc = model::document(&ActorId::random());
+        model::create_maps(&mut doc, &[BLOCKS, VIEWS]).unwrap();
+        let over = format!("a0{}", "z".repeat(crate::sort_key::MAX_KEY));
+        for (block, sort) in [("b1", "a0"), ("b2", over.as_str()), ("b3", "a1")] {
+            model::insert(&mut doc, BLOCKS, block, &[(KIND, "text")]).unwrap();
+            let view = format!("v-{block}");
+            model::insert(&mut doc, VIEWS, &view, &[(BLOCK, block), (SORT, sort)]).unwrap();
+        }
+        let mut order = Order::read(&doc);
+        let shown = |order: &Order| -> Vec<String> {
+            order
+                .placed
+                .iter()
+                .map(|placed| placed.view.block.as_str().to_owned())
+                .collect()
+        };
+        assert_eq!(shown(&order), ["b2", "b1", "b3"]);
+        let mut added = order.placed[1].view.clone();
+        added.block = crate::BlockId::stored("b4");
+        order.insert("a0V".to_owned(), added);
+        assert_eq!(
+            shown(&order),
+            ["b2", "b1", "b4", "b3"],
+            "an insert agrees with the read"
+        );
     }
 }

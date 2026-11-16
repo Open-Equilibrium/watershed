@@ -73,7 +73,7 @@ pub(crate) fn before<T, I: PartialEq + ?Sized>(
 /// A key after `before` and before `after`; `None` is the start or the end. Equal or
 /// misordered neighbors, from two devices placing objects at one spot concurrently, get a
 /// key after `before`; ties order by identity. A neighbor that is no valid key counts as
-/// the start or the end. A key past [`MAX_KEY`] is refused (ADR-0251).
+/// the start or the end, as one past [`MAX_KEY`] does; a new key past it is refused.
 fn between(before: Option<&str>, after: Option<&str>) -> Result<String, Error> {
     let valid = |key: &&[u8]| key.len() <= MAX_KEY && integer(key).is_some();
     let before = before.map(str::as_bytes).filter(valid);
