@@ -126,6 +126,25 @@
         <p><strong>Recommendation:</strong> A; the fake keeps the app's tests fast, and the scenarios keep it honest.</p>
         <p><strong>Acceptance criterion:</strong> a change to the fake that makes it answer a covered scenario differently from the core fails a test in CI, and every mutation kind the fake handles is covered by a scenario.</p>
       </details>
+
+      <details id="d-113" class="decision wide">
+        <summary><h3>D-113 - When A New Active Agent Host Takes Effect</h3></summary>
+        <p><strong>Status:</strong> Open; part of Settings → Agent hosts (ADR-0295). Liquid uses option A until this is decided.</p>
+        <p><strong>Problem:</strong> Liquid's agent surface works with one agent host at a time, and it connects to that host once, at launch. Settings → Agent hosts can change the host that sessions run on, but a running Liquid cannot move its open sessions without rebuilding that surface. Until decided, a new choice applies at the next start, and Settings say so. Related: when the active host does not answer at launch, Liquid shows why and does not fall back to This Mac.</p>
+        <p><strong>Question:</strong> When should a new active agent host take effect, and should a failed launch fall back to This Mac?</p>
+        <div class="dia">
+          <div class="opt rec"><h4>A: At the next start <span class="tag">Used now</span></h4>
+            <div class="b ws">Save the choice; Liquid connects to it when it starts</div>
+            <ul><li>Pro: the agent surface stays as it is, and no running turn is cut off.</li><li>Con: changing hosts needs a restart.</li></ul>
+          </div>
+          <div class="opt"><h4>B: At once</h4>
+            <div class="b ws">Rebuild the agent surface on the new host and end or keep the old host's sessions</div>
+            <ul><li>Pro: no restart, as T3 Code switches environments.</li><li>Con: a larger change, and a running turn on the old host must be stopped or left behind; a multi-host sidebar needs the same rebuild.</li></ul>
+          </div>
+        </div>
+        <p><strong>Recommendation:</strong> A now, with no fallback; B together with the multi-host sidebar.</p>
+        <p><strong>Acceptance criterion:</strong> choosing a host shows its sessions in the open window with no restart, the old host's running turn is ended or kept as the decision says, and a Flutter test covers the switch.</p>
+      </details>
       <details id="d-027" class="decision">
         <summary><h3>D-027 - Liquid CLI/API Surface</h3></summary>
         <p><strong>Status:</strong> Open before external-agent Liquid edits.</p>
