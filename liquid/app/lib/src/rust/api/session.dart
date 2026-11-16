@@ -110,6 +110,9 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// streams once; an unknown or streamed one is an error.
   Stream<BridgeEvent> events({required PlatformInt64 id});
 
+  /// Ends the Chat's event stream now, without waiting for its next event.
+  Future<void> eventsStop();
+
   /// Writes the session's record into a new folder in Downloads (ADR-0257); returns it.
   Future<String> exportRecord({required String host, required String day});
 
@@ -125,6 +128,9 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Streams the lineage after each change that may have changed it, once the changes settle,
   /// after the latest [`AgentSession::lineage_subscribe`]. A failed read streams as an error.
   Stream<BridgeLineage> lineageEvents();
+
+  /// Ends the lineage stream now, without waiting for its next change.
+  Future<void> lineageStop();
 
   /// The lineage now: the threads related to this session, as T3's relationships panel shows
   /// them. Its changes then stream from [`AgentSession::lineage_events`].

@@ -904,6 +904,60 @@ fn a_stopped_or_replaced_follow_ends_its_task_while_the_session_stays_open() {
     stop(service);
 }
 
+#[test]
+fn a_stopped_or_replaced_lineage_or_chat_follow_ends_while_the_session_stays_open() {
+    let fixture = Fixture::new();
+    let (service, host) = host(&fixture);
+    let project = project_at(&host, &fixture.repo());
+    let session = project
+        .start(
+            "append first".to_owned(),
+            scripted(),
+            Some("main".to_owned()),
+            None,
+            BridgePermissions::FullAccess,
+        )
+        .expect("session starts");
+    follow_turns(&session, 1);
+    let (sender, ended) = mpsc::channel();
+    let wait = Duration::from_secs(10);
+    session.lineage_subscribe().expect("the lineage");
+    session
+        .lineage_with(holding(Ends(sender.clone())))
+        .expect("the lineage follows");
+    // Nothing changes, so the first follow would run on; a newer one replaces it.
+    session.lineage_subscribe().expect("the lineage");
+    session
+        .lineage_with(holding(Ends(sender.clone())))
+        .expect("the lineage follows");
+    ended
+        .recv_timeout(wait)
+        .expect("the replaced lineage follow ends");
+    session.lineage_stop();
+    ended
+        .recv_timeout(wait)
+        .expect("the stopped lineage follow ends");
+
+    // The Chat's events follow the same rule: each subscription streams once, and a newer stream
+    // replaces the one before it.
+    let first = session.subscribe().expect("the first subscription");
+    session
+        .events_with(first.id, holding(Ends(sender.clone())))
+        .expect("the first subscription streams");
+    let second = session.subscribe().expect("the second subscription");
+    session
+        .events_with(second.id, holding(Ends(sender)))
+        .expect("the second subscription streams");
+    ended
+        .recv_timeout(wait)
+        .expect("the replaced Chat stream ends");
+    session.events_stop();
+    ended
+        .recv_timeout(wait)
+        .expect("the stopped Chat stream ends");
+    stop(service);
+}
+
 /// Starts a session that runs until stopped and queues one follow-up behind it.
 fn queued_behind_a_running_turn(project: &AgentProject, prompt: &str) -> AgentSession {
     let session = project

@@ -230,8 +230,10 @@ class RustSessionBackend implements SessionBackend {
   @override
   Future<BridgeSubscription> subscribe() => _session.subscribe();
   @override
-  Stream<BridgeEvent> events(int subscription) =>
-      _session.events(id: subscription);
+  Stream<BridgeEvent> events(int subscription) => stopOnCancel(
+    _session.events(id: subscription),
+    _session.eventsStop,
+  );
   @override
   Future<void> confirmApplied(int applied) =>
       _session.confirmApplied(applied: applied);
@@ -329,7 +331,8 @@ class RustSessionBackend implements SessionBackend {
   @override
   Future<BridgeLineage> lineage() => _session.lineageSubscribe();
   @override
-  Stream<BridgeLineage> lineageChanges() => _session.lineageEvents();
+  Stream<BridgeLineage> lineageChanges() =>
+      stopOnCancel(_session.lineageEvents(), _session.lineageStop);
   @override
   Future<void> mergeBack() => _session.mergeBack();
   @override

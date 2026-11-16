@@ -355,6 +355,10 @@ pub struct AgentSession {
     servers_generation: stream::Generation,
     automations_generation: stream::Generation,
     lineage: Mutex<Option<LineageChanges>>,
+    /// The current Chat events and lineage streams, each ended by its next one or its stop. A
+    /// stream also ends with the session, since the generation's sender is dropped with it.
+    events_generation: stream::Generation,
+    lineage_generation: stream::Generation,
 }
 
 impl Drop for AgentSession {
@@ -384,6 +388,8 @@ impl AgentSession {
             servers_generation: stream::Generation::default(),
             automations_generation: stream::Generation::default(),
             lineage: Mutex::default(),
+            events_generation: stream::Generation::default(),
+            lineage_generation: stream::Generation::default(),
         }
     }
 
@@ -436,8 +442,13 @@ impl AgentSession {
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&id)
             .ok_or_else(|| "This subscription is not open.".to_owned())?;
-        self.spawn_stream(receiver, deliver);
+        self.spawn_stream(receiver, deliver, Some(self.events_generation.replace()));
         Ok(())
+    }
+
+    /// Ends the Chat's event stream now, without waiting for its next event.
+    pub fn events_stop(&self) {
+        self.events_generation.stop();
     }
 
     /// Subscribes and streams to a Rust consumer; returns the snapshot.
@@ -448,24 +459,34 @@ impl AgentSession {
     ) -> Result<BridgeSnapshot, String> {
         // Its own subscription, so concurrent calls never take each other's events.
         let (snapshot, events) = run(self.thread.subscribe())?;
-        self.spawn_stream(pump(events), deliver);
+        self.spawn_stream(pump(events), deliver, None);
         Ok(convert::snapshot(snapshot))
     }
 
-    /// Forwards `receiver`'s events to `deliver`, resubscribing when the subscription is lost.
+    /// Forwards `receiver`'s events to `deliver`, resubscribing when the subscription is lost. With
+    /// `replaced`, the forwarding also ends once that generation changes.
     fn spawn_stream(
         &self,
         receiver: tokio::sync::mpsc::Receiver<ThreadEvent>,
         deliver: impl FnMut(BridgeEvent) -> bool + Send + 'static,
+        replaced: Option<tokio::sync::watch::Receiver<u64>>,
     ) {
         let thread = self.thread.clone();
         let ended = self.ended.subscribe();
-        RUNTIME.spawn(stream::forward(
+        let forwarding = stream::forward(
             receiver,
             move || resubscribe(thread.clone(), ended.clone()),
             self.credit.clone(),
             deliver,
-        ));
+        );
+        RUNTIME.spawn(async move {
+            match replaced {
+                Some(mut replaced) => {
+                    until_ended(&mut replaced, forwarding).await;
+                }
+                None => forwarding.await,
+            }
+        });
     }
 
     /// Confirms that Liquid applied the stream's first `applied` events (ADR-0272).
@@ -791,7 +812,8 @@ impl AgentSession {
             .take()
             .ok_or_else(|| "Subscribe to the lineage before streaming it.".to_owned())?;
         let thread = self.thread.clone();
-        let mut ended = self.ended.subscribe();
+        // Replaces the lineage stream before it, and ends with the session.
+        let mut ended = self.lineage_generation.replace();
         RUNTIME.spawn(async move {
             loop {
                 match until_ended(&mut ended, changes.changed()).await {
@@ -829,6 +851,11 @@ impl AgentSession {
             }
         });
         Ok(())
+    }
+
+    /// Ends the lineage stream now, without waiting for its next change.
+    pub fn lineage_stop(&self) {
+        self.lineage_generation.stop();
     }
 
     /// T3's "Merge back": merges this fork's latest finished run into the session it forked from.
