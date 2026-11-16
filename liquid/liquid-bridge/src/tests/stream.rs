@@ -354,6 +354,78 @@ fn closing_the_credit_releases_a_forwarder_that_waits_for_the_next_event() {
 }
 
 #[test]
+fn closing_the_credit_releases_every_forwarder_that_shares_it() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        // Two forwarders of one session, each idle on a subscription that stays open.
+        let mut senders = Vec::new();
+        let mut forwarding = Vec::new();
+        for _ in 0..2 {
+            let (sender, receiver) = tokio::sync::mpsc::channel(16);
+            senders.push(sender);
+            forwarding.push(tokio::spawn(forward(
+                receiver,
+                || std::future::ready(Some(never())),
+                credit.clone(),
+                |_event| true,
+            )));
+        }
+        settle().await;
+        credit.close();
+        for forwarding in forwarding {
+            tokio::time::timeout(Duration::from_secs(1), forwarding)
+                .await
+                .expect("each forwarder returns once the session closed")
+                .expect("forward completes");
+        }
+    });
+}
+
+#[test]
+fn closing_the_credit_ends_a_resubscription_that_is_still_pending() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let probe = Arc::new(());
+        let held = probe.clone();
+        let (entered, mut reached) = tokio::sync::mpsc::unbounded_channel();
+        let (sender, receiver) = tokio::sync::mpsc::channel(16);
+        // The subscription closes, and the resubscription that replaces it never answers.
+        let forwarding = tokio::spawn(forward(
+            receiver,
+            move || {
+                let _ = entered.send(());
+                let held = held.clone();
+                async move {
+                    let _held = held;
+                    std::future::pending::<Option<tokio::sync::mpsc::Receiver<ThreadEvent>>>().await
+                }
+            },
+            credit.clone(),
+            |_event| true,
+        ));
+        drop(sender);
+        reached.recv().await.expect("the resubscription starts");
+        // An ordinary confirmation does not end the attempt; only the session's drop does.
+        credit.confirm(0);
+        settle().await;
+        assert!(
+            !forwarding.is_finished(),
+            "the resubscription is still pending"
+        );
+        credit.close();
+        tokio::time::timeout(Duration::from_secs(1), forwarding)
+            .await
+            .expect("forward returns once the session closed, while the resubscription waits")
+            .expect("forward completes");
+        assert_eq!(
+            Arc::strong_count(&probe),
+            1,
+            "the pending resubscription was released"
+        );
+    });
+}
+
+#[test]
 fn falling_behind_keeps_finished_items_and_sends_one_fell_behind_event() {
     paused_runtime().block_on(async {
         let credit = Arc::new(Credit::default());

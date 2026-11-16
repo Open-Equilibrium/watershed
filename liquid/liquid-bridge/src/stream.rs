@@ -1,7 +1,7 @@
 //! How streams cross to Dart: how the event forwarder batches them and how far ahead of Liquid it
 //! sends (ADR-0272), and when the follows of a session or checkout end (`until_ended`).
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use meta_harness_core::remote::connection_lost;
@@ -41,11 +41,21 @@ pub(crate) const PENDING_LIMIT: usize = 256;
 
 /// How many of the stream's events Liquid applied, as `AgentSession::confirm_applied` reports,
 /// and whether the session that owns the stream was dropped and no confirmation will come.
-#[derive(Default)]
 pub(crate) struct Credit {
     applied: AtomicU64,
-    closed: AtomicBool,
+    /// Set once the session was dropped, which every waiter sees, including a later one.
+    closed: watch::Sender<bool>,
     notify: Notify,
+}
+
+impl Default for Credit {
+    fn default() -> Self {
+        Self {
+            applied: AtomicU64::default(),
+            closed: watch::channel(false).0,
+            notify: Notify::default(),
+        }
+    }
 }
 
 impl Credit {
@@ -57,8 +67,7 @@ impl Credit {
 
     /// Records that the session was dropped, which ends the stream's wait for Liquid.
     pub(crate) fn close(&self) {
-        self.closed.store(true, Ordering::Release);
-        self.notify.notify_one();
+        self.closed.send_replace(true);
     }
 
     /// How many events Liquid applied so far.
@@ -68,12 +77,20 @@ impl Credit {
 
     /// Whether the session was dropped.
     fn is_closed(&self) -> bool {
-        self.closed.load(Ordering::Acquire)
+        *self.closed.borrow()
+    }
+
+    /// Waits until the session was dropped.
+    async fn wait_closed(&self) {
+        let _ = self.closed.subscribe().wait_for(|closed| *closed).await;
     }
 
     /// Waits until a confirmation may have reopened the window, or the session was dropped.
     async fn wait(&self) {
-        self.notify.notified().await;
+        tokio::select! {
+            () = self.notify.notified() => {}
+            () = self.wait_closed() => {}
+        }
     }
 }
 
@@ -302,7 +319,13 @@ pub(crate) async fn forward<Next: Future<Output = Option<mpsc::Receiver<ThreadEv
                 }
             }
             Some(None) => {
-                let Some(next) = resubscribe().await else {
+                let next = tokio::select! {
+                    next = resubscribe() => next,
+                    // Only the session's drop ends the wait; an ordinary confirmation leaves the
+                    // attempt pending.
+                    () = credit.wait_closed() => return,
+                };
+                let Some(next) = next else {
                     // T3 ended the thread for good: no event comes, but what waits still goes.
                     return send_waiting(&mut outbox, &credit, &mut deliver).await;
                 };
