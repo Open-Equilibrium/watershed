@@ -561,7 +561,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertEqual([shlex.split(line) for line in liquid], [
             ["eval", "$(cargo llvm-cov show-env --sh)"],
             ["cargo", "llvm-cov", "clean", "--workspace"],
-            ["cargo", "nextest", "run", "--config", TEST_ISOLATION, "--locked",
+            ["cargo", "nextest", "run", "--no-fail-fast", "--config", TEST_ISOLATION, "--locked",
              *LIQUID_COVERAGE_PACKAGES.split(), "--all-targets", "--all-features"],
             report,
         ])
