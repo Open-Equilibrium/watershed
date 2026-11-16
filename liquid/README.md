@@ -7,7 +7,7 @@ Native targets and current availability follow [PLATFORMS.md](../PLATFORMS.md).
 ## Layout
 
 - `app/` — the Flutter app. Its exact Flutter release is pinned in `app/pubspec.yaml`, which CI reads.
-- `liquid-bridge/` — the Rust side of the flutter_rust_bridge bindings (ADR-0186). It embeds the Meta-Harness core (ADR-0184), which runs a pinned T3 Code server (ADR-0281), and opens the Workspace with its key from the keychain (ADR-0216, ADR-0237); neither core depends on the bridge; `app/hook/build.dart` compiles it into the app (ADR-0213).
+- `liquid-bridge/` — the Rust side of the flutter_rust_bridge bindings (ADR-0186). It reaches agent sessions through the Meta-Harness service as a client (ADR-0215, ADR-0297), and opens the Workspace with its key from the keychain (ADR-0216, ADR-0237); neither core depends on the bridge; `app/hook/build.dart` compiles it into the app (ADR-0213).
 - `liquid-core/` — the Workspace core: object model, mutation pipeline and History over Automerge (ADR-0235, ADR-0238), committing every write to a store.
 - `liquid-storage/` — the local replica: that store in SQLite with SQLCipher (ADR-0237). Build hosts: [TESTING.md](../TESTING.md#development-toolchain).
 
@@ -15,11 +15,10 @@ After changing `liquid-bridge/src/api`, run `flutter_rust_bridge_codegen generat
 
 ## Run
 
-The app opens the Workspace, whose replica lives in `~/Library/Application Support/Liquid/Workspace/` with its key in the keychain. With the project named in the environment it also starts Meta-Harness's T3 Code server and opens the start page, where the project's sessions continue and the first message starts a new one; without a session, it opens the Workspace's first Page and says why on stderr. Agents need the pinned T3 Code release (`meta-harness/t3.lock`; `node scripts/install-t3.mjs <folder>` installs it) and a provider it runs, such as Claude Code or Codex, with its login; the installer and service follow with ADR-0286. `flutter run -d macos` in `app/` needs Xcode and rustup ([build hosts](../TESTING.md#development-toolchain)). The project signs development builds ad hoc; release builds are to be signed with Developer ID, hardened and notarized, and to run without the App Sandbox (ADR-0200).
+The app opens the Workspace, whose replica lives in `~/Library/Application Support/Liquid/Workspace/` with its key in the keychain. With the project named in `LIQUID_PROJECT` it also connects to the Meta-Harness service in `META_HARNESS_HOME`, else `~/.meta-harness`, and opens the start page, where the project's sessions continue and the first message starts a new one; without a session, such as when the service is not running, it opens the Workspace's first Page and says why on stderr. Quitting Liquid leaves the service and its agents running. Agents need Meta-Harness, installed or run with `meta serve` ([meta-harness/README.md](../meta-harness/README.md)), and a provider it runs, such as Claude Code or Codex, with its login. `flutter run -d macos` in `app/` needs Xcode and rustup ([build hosts](../TESTING.md#development-toolchain)). The project signs development builds ad hoc; release builds are to be signed with Developer ID, hardened and notarized, and to run without the App Sandbox (ADR-0200).
 
 - `LIQUID_PROJECT` — the agent's project directory (required for an agent session).
-- `LIQUID_T3` — the absolute path of the pinned `t3` executable (required for an agent session).
-- `LIQUID_T3_HOME` — T3's data folder, owned by this Liquid's Meta-Harness; defaults to `~/Library/Application Support/Liquid/T3`.
+- `META_HARNESS_HOME` — the Meta-Harness data folder whose service Liquid connects to, an absolute path; defaults to `~/.meta-harness`.
 - `LIQUID_KEY_LOG=1` — writes key events to stderr twice, as macOS hands them to the window (`native key`) and as Flutter receives them (`flutter key`), to diagnose shortcuts; only with the Liquid key, or with ⌘ or ⌃ but not ⌥ (which types characters such as @ on many layouts), so plain typing is not recorded.
 
 ## Liquid key

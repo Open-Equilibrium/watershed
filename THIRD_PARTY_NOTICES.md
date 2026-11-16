@@ -17,3 +17,11 @@ Watershed-authored files remain licensed under `AGPL-3.0-only` unless otherwise 
 - License text is bundled with the vendored material in `liquid/app/assets/fonts/LICENSE-lucide` and shipped as an app asset.
 - Copyright notice: `Copyright (c) 2026 Lucide Icons and Contributors`; `Copyright (c) 2013-present Cole Bemis`.
 - Upstream/source: `lucide-icons/lucide`.
+
+## T3 Code
+
+- Purpose: the pinned agent server that the Meta-Harness bundle carries and its service runs (ADR-0281, ADR-0296); its release archive is shipped unchanged.
+- License: MIT; the archive lists its own components' licenses in `client/third-party-licenses.json`.
+- License text: `meta-harness/LICENSE-t3code`, shipped in the bundle.
+- Copyright notice: `Copyright (c) 2026 T3 Tools Inc.`
+- Upstream/source: `pingdotgg/t3code`, the release that `meta-harness/t3.lock` pins.

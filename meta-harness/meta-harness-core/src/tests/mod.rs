@@ -1,11 +1,14 @@
 mod client;
+mod config;
 mod details;
 mod fake_t3;
 mod git;
+mod homes;
 mod host;
 mod lineage;
 mod projection;
 mod pull_request;
+mod remote;
 mod statistics;
 mod thread;
 mod visible;

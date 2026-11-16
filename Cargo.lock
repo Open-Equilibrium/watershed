@@ -1591,12 +1591,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "meta-harness-cli"
+version = "0.0.0"
+dependencies = [
+ "getrandom 0.4.3",
+ "meta-harness-core",
+ "rustix",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "meta-harness-core"
 version = "0.0.0"
 dependencies = [
  "futures-util",
  "getrandom 0.4.3",
+ "rusqlite",
  "rustix",
+ "serde",
  "serde_json",
  "tokio",
  "tokio-tungstenite",

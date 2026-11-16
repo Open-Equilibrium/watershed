@@ -40,6 +40,21 @@ impl<T: Send + Sync + 'static> Watch<T> {
     }
 }
 
+impl<T: serde::de::DeserializeOwned + Send + Sync + 'static> Watch<T> {
+    /// Follows a stream of the Meta-Harness service, starting at `first`.
+    pub(crate) fn from_stream(first: T, mut stream: crate::remote::Stream<T>) -> Self {
+        let (sender, latest) = watch::channel(first);
+        let task = tokio::spawn(async move {
+            while let Some(value) = stream.recv().await {
+                if sender.send(value).is_err() {
+                    break;
+                }
+            }
+        });
+        Self { latest, task }
+    }
+}
+
 impl<T: Clone> Watch<T> {
     /// The latest value.
     pub fn current(&self) -> T {

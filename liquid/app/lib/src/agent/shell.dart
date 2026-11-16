@@ -11,7 +11,6 @@ import '../diff/diff_panel.dart';
 import '../diff/diff_settings.dart';
 import '../diff/diff_view.dart';
 import '../diff/turn_scope.dart';
-import '../rust/api/session.dart';
 import '../session/session_state.dart';
 import '../settings_file.dart';
 import '../settings_page.dart';
@@ -42,7 +41,6 @@ class AgentShell extends StatefulWidget {
     super.key,
     this.state,
     this.info,
-    this.host,
     this.workspace,
     this.workspaceProblem,
     this.shortcuts,
@@ -55,9 +53,6 @@ class AgentShell extends StatefulWidget {
   /// The agent session, if one started.
   final SessionState? state;
   final SessionInfo? info;
-
-  /// The agent host, which stops when the app quits.
-  final AgentHost? host;
 
   /// The Workspace, or why it did not open.
   final WorkspaceState? workspace;
@@ -113,14 +108,13 @@ class _AgentShellState extends State<AgentShell> {
   /// settings save again.
   final _saveFailure = ValueNotifier<SaveFailure?>(null);
 
-  /// Stops the session and then T3 before the app exits, so no agent server outlives Liquid.
+  /// Stops the session before the app exits; Meta-Harness keeps running after Liquid closes.
   late final _lifecycle = AppLifecycleListener(
     onExitRequested: () async {
       await widget.state?.dispose();
       // Every edit asked for reaches the replica before Liquid exits.
       await widget.workspace?.drain();
       await widget.workspace?.dispose();
-      await widget.host?.shutdown();
       return AppExitResponse.exit;
     },
   );

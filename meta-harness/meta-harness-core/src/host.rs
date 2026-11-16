@@ -178,6 +178,23 @@ impl Host {
             .map(|_| ())
     }
 
+    /// T3's provider instances as its settings hold them.
+    pub(crate) async fn provider_instances(&self) -> Result<Value, String> {
+        let config = self.client.call("server.getConfig", json!({})).await?;
+        Ok(config["settings"]["providerInstances"].clone())
+    }
+
+    /// Replaces T3's provider instances; T3 replaces the whole map, so `instances` holds all.
+    pub(crate) async fn set_provider_instances(&self, instances: Value) -> Result<(), String> {
+        self.client
+            .call(
+                "server.updateSettings",
+                json!({"patch": {"providerInstances": instances}}),
+            )
+            .await
+            .map(|_| ())
+    }
+
     /// Stops T3. The client closes first, so the connection that T3 closes is not reconnected.
     pub async fn shutdown(&self) {
         self.client.close();
@@ -193,7 +210,7 @@ impl Drop for Host {
 }
 
 /// A provider T3 runs, such as Claude Code or Codex.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Provider {
     /// The instance id threads choose it by.
     pub instance: String,
@@ -206,7 +223,7 @@ pub struct Provider {
 }
 
 /// A model and its choices, such as reasoning effort.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Model {
     /// The id.
     pub id: String,
@@ -217,7 +234,7 @@ pub struct Model {
 }
 
 /// One select option of a model, such as reasoning effort.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ModelOption {
     /// The id.
     pub id: String,
@@ -230,7 +247,7 @@ pub struct ModelOption {
 }
 
 /// A chosen provider, model and option values.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ModelChoice {
     /// The provider instance.
     pub instance: String,
@@ -269,7 +286,7 @@ impl ModelChoice {
 }
 
 /// A thread as the project's list shows it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ThreadSummary {
     /// T3's thread id.
     pub id: String,
@@ -288,7 +305,7 @@ pub struct ThreadSummary {
 }
 
 /// How a new thread's checkout is chosen, as in T3's workspace selector.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Workspace {
     /// The project folder itself; T3 then rewinds only the conversation.
     Checkout,
@@ -305,7 +322,7 @@ pub enum Workspace {
 }
 
 /// What an agent may do without asking, as T3's Permissions control offers it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Permissions {
     /// Ask before commands and file changes.
     Supervised,
@@ -330,7 +347,7 @@ impl Permissions {
 }
 
 /// A new thread's first prompt, agent and checkout.
-#[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct StartThread {
     /// The first prompt.
     pub text: String,
@@ -343,6 +360,7 @@ pub struct StartThread {
 }
 
 /// A T3 project: one folder and its threads.
+#[derive(Clone)]
 pub struct Project {
     client: Client,
     id: String,

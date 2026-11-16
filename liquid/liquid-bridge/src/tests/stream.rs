@@ -72,7 +72,7 @@ fn start_forwarding(
     let (delivered, deliveries) = tokio::sync::mpsc::unbounded_channel();
     tokio::spawn(forward(
         receiver,
-        || Some(never()),
+        || std::future::ready(Some(never())),
         credit,
         move |event| delivered.send(event).is_ok(),
     ));
@@ -181,7 +181,7 @@ fn forwards_streaming_text_once_its_window_passed() {
             let start = tokio::time::Instant::now();
             tokio::spawn(forward(
                 receiver,
-                || Some(never()),
+                || std::future::ready(Some(never())),
                 Arc::default(),
                 move |event| {
                     delivered
@@ -294,7 +294,7 @@ fn closing_the_credit_releases_a_forwarder_that_waits_on_a_dropped_session() {
         let (events, receiver) = tokio::sync::mpsc::channel(4096);
         let forwarding = tokio::spawn(forward(
             receiver,
-            || Some(never()),
+            || std::future::ready(Some(never())),
             credit.clone(),
             move |_event| {
                 let _held = &held;
@@ -332,7 +332,7 @@ fn closing_the_credit_releases_a_forwarder_that_waits_for_the_next_event() {
         let (_events, receiver) = tokio::sync::mpsc::channel(16);
         let forwarding = tokio::spawn(forward(
             receiver,
-            || Some(never()),
+            || std::future::ready(Some(never())),
             credit.clone(),
             move |_event| {
                 let _held = &held;
@@ -463,7 +463,7 @@ fn a_dropped_subscription_falls_behind_once_and_continues_on_a_new_one() {
         let (delivered, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
         tokio::spawn(forward(
             receiver,
-            move || Some(resubscribed.take().expect("one resubscription")),
+            move || std::future::ready(Some(resubscribed.take().expect("one resubscription"))),
             Arc::default(),
             move |event| delivered.send(event).is_ok(),
         ));
@@ -495,7 +495,7 @@ fn a_thread_that_ended_ends_its_stream_without_a_reload() {
         let forwarding = tokio::spawn(forward(
             closed(),
             // The core says the thread ended, so there is nothing to subscribe to again.
-            || None,
+            || std::future::ready(None),
             Arc::<Credit>::default(),
             move |event| {
                 if event.kind == BridgeEventKind::FellBehind {
@@ -513,6 +513,39 @@ fn a_thread_that_ended_ends_its_stream_without_a_reload() {
 }
 
 #[test]
+fn what_waits_when_the_thread_ended_is_sent_once_liquid_confirms() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let (events, receiver) = tokio::sync::mpsc::channel(4096);
+        let (delivered, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
+        let forwarding = tokio::spawn(forward(
+            receiver,
+            // The thread ended for good, so no subscription comes.
+            || std::future::ready(None),
+            credit.clone(),
+            move |event| delivered.send(event).is_ok(),
+        ));
+        for item in 1..=WINDOW as u64 + 1 {
+            events.send(started(item)).await.expect("sent");
+        }
+        // The source ends with the event past the window still waiting for Liquid.
+        drop(events);
+        settle().await;
+        assert!(
+            !forwarding.is_finished(),
+            "the forwarder waits for Liquid while an event waits"
+        );
+        assert_eq!(taken(&mut deliveries).len(), WINDOW);
+        credit.confirm(WINDOW as u64);
+        tokio::time::timeout(Duration::from_secs(1), forwarding)
+            .await
+            .expect("forward ends once what waits is sent")
+            .expect("forward completes");
+        assert_eq!(taken(&mut deliveries).len(), 1, "the waiting event is sent");
+    });
+}
+
+#[test]
 fn an_idle_thread_stays_live_across_two_restores_without_an_event_between() {
     paused_runtime().block_on(async {
         let (live, receiver) = tokio::sync::mpsc::channel(16);
@@ -521,7 +554,7 @@ fn an_idle_thread_stays_live_across_two_restores_without_an_event_between() {
         let (delivered, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
         let forwarding = tokio::spawn(forward(
             closed(),
-            move || next.pop(),
+            move || std::future::ready(next.pop()),
             Arc::default(),
             move |event| delivered.send(event).is_ok(),
         ));

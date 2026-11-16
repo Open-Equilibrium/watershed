@@ -11,7 +11,7 @@ use crate::thread::{describe, duration, failed, usage_of};
 use crate::{Context, ItemDetail, Usage};
 
 /// What one model used.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct ModelUsage {
     /// The model as `provider/id`; empty for usage no model produced, such as a compaction summary.
     pub model: String,
@@ -22,7 +22,7 @@ pub struct ModelUsage {
 }
 
 /// The calls of one tool, by outcome.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct ToolCalls {
     /// The tool's name as Watershed shows it.
     pub name: String,
@@ -40,7 +40,7 @@ pub struct ToolCalls {
 }
 
 /// One turn and what it counted to.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct TurnStatistics {
     /// T3's run ordinal, as text.
     pub entry: String,
@@ -60,7 +60,7 @@ pub struct TurnStatistics {
 }
 
 /// What a session's stored entries count to.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct Statistics {
     /// What each model used over the whole session, the entries before the first turn included,
     /// largest first by tokens.

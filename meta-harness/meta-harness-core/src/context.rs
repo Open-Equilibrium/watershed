@@ -2,7 +2,7 @@
 //! (ADR-0279).
 
 /// The context window the next request fills, and when T3 compacts it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Context {
     /// Tokens the window holds now, as T3 reports them; `None` when the report has no count.
     pub tokens: Option<u64>,

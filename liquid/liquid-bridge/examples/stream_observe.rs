@@ -1,6 +1,6 @@
 //! Observation workload for Liquid's token streaming (PERFORMANCE.md, Liquid): a scripted ACP
 //! agent streams one response of 20,000 text chunks through the pinned T3 Code server, the
-//! Meta-Harness core and the bridge to a consumer that takes and confirms each event at once,
+//! Meta-Harness service and the bridge to a consumer that takes and confirms each event at once,
 //! as Liquid confirms what it applies. It prints one JSON line per sample and a summary and never
 //! compares with a threshold. Run from the repository root with the pinned `t3`:
 //!
@@ -15,8 +15,9 @@ use std::time::{Duration, Instant};
 
 use liquid_bridge::api::events::BridgeEventKind;
 use liquid_bridge::api::session::AgentSession;
+use meta_harness_core::remote::Host;
 use meta_harness_core::{
-    AcpAgent, Host, HostConfig, ModelChoice, Permissions, StartThread, Workspace,
+    AcpAgent, ModelChoice, Permissions, Service, ServiceConfig, StartThread, Workspace,
 };
 
 const CHUNKS: usize = 20_000;
@@ -50,10 +51,11 @@ fn main() {
     let script = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../meta-harness/meta-harness-core/tests/fixtures/scripted_acp_agent.py");
     let runtime = tokio::runtime::Runtime::new().expect("runtime starts");
-    let host = runtime
-        .block_on(Host::start(HostConfig {
-            binary: PathBuf::from(std::env::var_os("META_HARNESS_T3").expect("META_HARNESS_T3")),
-            home: dir.join("t3"),
+    let home = dir.join("meta-harness");
+    let service = runtime
+        .block_on(Service::start(ServiceConfig {
+            home: home.clone(),
+            t3: PathBuf::from(std::env::var_os("META_HARNESS_T3").expect("META_HARNESS_T3")),
             acp_agents: vec![AcpAgent {
                 id: "scripted".to_owned(),
                 command: PathBuf::from("/usr/bin/python3"),
@@ -61,7 +63,10 @@ fn main() {
                 models: vec!["scripted".to_owned()],
             }],
         }))
-        .expect("T3 starts");
+        .expect("the service starts");
+    let host = runtime
+        .block_on(Host::connect(&home, "stream_observe"))
+        .expect("the bridge connects");
     let project = runtime.block_on(host.project(&repo)).expect("project");
     let mut elapsed = Vec::new();
     for sample in 0..SAMPLES {
@@ -80,7 +85,9 @@ fn main() {
             .expect("thread starts");
         let session = AgentSession::follow(thread, repo.to_string_lossy().into_owned());
         let (sender, receiver) = mpsc::channel();
-        let snapshot = session.forward(move |event| sender.send(event).is_ok());
+        let snapshot = session
+            .forward(move |event| sender.send(event).is_ok())
+            .expect("the session follows");
         let mut text: usize = snapshot
             .transcript
             .iter()
@@ -115,7 +122,7 @@ fn main() {
         );
         elapsed.push(millis);
     }
-    runtime.block_on(host.shutdown());
+    runtime.block_on(service.stop());
     let _ = std::fs::remove_dir_all(&dir);
     elapsed.sort_by(f64::total_cmp);
     println!(

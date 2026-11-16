@@ -8,16 +8,13 @@ import 'session/backend.dart';
 import 'session/session_state.dart';
 import 'workspace/workspace_state.dart';
 
-/// The agent host the app opens, or why it opened none.
+/// The Meta-Harness session the app opens, or why it opened none.
 class Launch {
-  const Launch.session(this.state, this.info, this.host) : problem = null;
-  const Launch.problem(this.problem) : state = null, info = null, host = null;
+  const Launch.session(this.state, this.info) : problem = null;
+  const Launch.problem(this.problem) : state = null, info = null;
 
   final SessionState? state;
   final SessionInfo? info;
-
-  /// The T3 server, which stops when the app quits.
-  final AgentHost? host;
   final String? problem;
 }
 
@@ -28,31 +25,26 @@ String projectName(String project) =>
         .pathSegments
         .lastWhere((part) => part.isNotEmpty, orElse: () => '/');
 
-/// Starts the pinned T3 for the project the environment names, with its data in
-/// `LIQUID_T3_HOME` or else `defaultHome`; the start page then begins or continues a session.
-Future<Launch> launchFromEnvironment(
-  Map<String, String> environment, {
-  required String defaultHome,
-}) async {
+/// Connects to Meta-Harness for the project the environment names; `META_HARNESS_HOME` may name its
+/// data folder. The start page then begins or continues a session.
+Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
   final project = environment['LIQUID_PROJECT'];
-  final binary = environment['LIQUID_T3'];
-  // A relative program would be looked up from wherever Liquid started.
-  if (project == null || binary == null || !File(binary).isAbsolute) {
+  if (project == null) {
     return const Launch.problem(
-      'Start Liquid with LIQUID_PROJECT set to a project directory and LIQUID_T3 set to the '
-      'absolute path of the pinned t3 executable.',
+      'Start Liquid with LIQUID_PROJECT set to a project directory.',
     );
   }
   if (!Directory(project).existsSync()) {
     return Launch.problem('LIQUID_PROJECT names no directory: $project');
   }
-  final home = environment['LIQUID_T3_HOME'] ?? defaultHome;
-  if (!File(home).isAbsolute) {
-    return Launch.problem('LIQUID_T3_HOME must be an absolute path: $home');
+  final home = environment['META_HARNESS_HOME'];
+  // A relative folder would be looked up from wherever Liquid started.
+  if (home != null && !File(home).isAbsolute) {
+    return Launch.problem('META_HARNESS_HOME must be an absolute path: $home');
   }
   final root = Directory(project).absolute.path;
   try {
-    final host = await AgentHost.start(binary: binary, home: home);
+    final host = await AgentHost.connect(home: home);
     final state = SessionState(
       RustProjectBackend(host, await host.project(root: root)),
     );
@@ -60,10 +52,10 @@ Future<Launch> launchFromEnvironment(
     return Launch.session(
       state,
       SessionInfo(project: projectName(project), path: root),
-      host,
     );
   } on Object catch (error) {
-    return Launch.problem('T3 Code did not start: $error');
+    // The bridge's error says that Meta-Harness is not running and where Liquid looked.
+    return Launch.problem('$error');
   }
 }
 

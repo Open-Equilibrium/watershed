@@ -18,7 +18,8 @@ flowchart TD
   P --> S
   P --> R
   S --> R
-  L[liquid_bridge] --> M[meta-harness-core]
+  MC[meta-harness-cli] --> M[meta-harness-core]
+  L[liquid_bridge] --> M
   L --> LS[liquid-storage]
   L --> LC[liquid-core]
   LS --> LC

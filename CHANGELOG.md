@@ -10,12 +10,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 - Rust workspace and Flow Agent M1: standalone CLI, canonical events, script registry, deterministic fixtures, local session logs and policy artifacts.
 - Flow Agent M1.1 practical-execution foundations: provider integration, authentication, Conversations, authoring, cancellation and durable recovery.
 - Contributor harness and mandatory cross-platform CI gates; canonical commands and policy live in `TESTING.md` and `.github/workflows/ci.yml`.
-- Liquid's agent surface on macOS, not yet released: the embedded Meta-Harness core starts a pinned T3 Code server and follows its threads, and the Flutter client copies T3 Code's desktop Chat: streaming answers, approvals and questions, queued and steered prompts, the Diff per turn, Edit from here and Fork from this response, the session card with exact statistics and the session record export.
+- Liquid's agent surface on macOS, not yet released: Meta-Harness starts a pinned T3 Code server and follows its threads, and the Flutter client copies T3 Code's desktop Chat: streaming answers, approvals and questions, queued and steered prompts, the Diff per turn, Edit from here and Fork from this response, the session card with exact statistics and the session record export.
 - Liquid's Git integration for the agent's project on macOS, run by T3 Code with its behavior as shipped: commit with an optional written message, push, pull, pull requests, publishing, the ref picker with Checkout pull request, and worktrees per session.
 - Liquid's local Workspace on macOS: the `liquid-core` mutation pipeline over Automerge, an encrypted SQLite replica with its key in the keychain, and Pages with Text Blocks, Sections and Tables whose rows, fields and cells can be edited (ADR-0237, ADR-0238).
+- Meta-Harness on macOS and Linux, not yet released: the `meta` command, a login service that keeps its service running, an installer bundle that carries the pinned T3 Code release, and central configuration for Claude Code and Codex whose changes take effect only once approved, with an append-only log.
 
 ### Changed
 
+- Liquid's agent surface reaches the Meta-Harness service instead of embedding its core, and leaves the service and its agents running when it quits (ADR-0215).
 - Meta-Harness leaves governance to each harness: Watershed's own tool approvals are removed, and Liquid shows only the approvals a harness itself asks for (ADR-0252).
 - Liquid clients use Flutter over the Rust core on desktop and Android under binding stability invariants: no Workspace work on the Dart main isolate, bounded delta streams, viewport virtualization, durable local commit before acknowledgement and sync, an established CRDT library and owned disposal (ADR-0182).
 - Before the first release, Flow Agent removed `flow import` and compatibility for automatic flat-session migration, `flow-conversation-entry-v0`, `flow-run-log-record-v0`, `flow-provider-output-v1`, legacy Phase/Step events and Tool observations.

@@ -144,7 +144,7 @@ Liquid
         <p class="muted">The API client is remote; execution is not. The server instance owns only its host-local agents, sessions, config, metrics and scheduled work.</p>
       </div>
       <div class="card"><h3>Mode C — headless Meta-Harness only (no Liquid)</h3>
-        <pre><code>meta start
+        <pre><code>meta serve
 meta run ...
 meta sessions
 meta schedule ...
@@ -155,16 +155,18 @@ meta metrics ...</code></pre>
     </div></section>
 
     <section id="surfaces" class="section"><h2>6. Public surfaces</h2><div class="body">
-      <p>Command names below are <em>target shape, not final implementation</em>.</p>
       <div class="grid">
-        <div class="card"><h3>CLI surface</h3><pre><code>meta start
-meta status
-meta sessions
-meta attach &lt;session-id&gt;
-meta run &lt;agent&gt; ...
-meta schedule ...
-meta config ...
-meta metrics ...</code></pre></div>
+        <div class="card"><h3>CLI surface</h3><pre><code>meta serve | status
+meta config show | log
+meta config pending
+meta config propose FILE
+meta config approve N
+meta config reject N
+meta config revert N
+meta service install
+meta service uninstall
+meta uninstall</code></pre>
+          <p class="muted">Implemented (ADR-0296); <code>meta help</code> describes each command and the config commands print JSON. Target, not yet built: <code>meta sessions</code>, <code>attach</code>, <code>run</code>, <code>schedule</code>, <code>metrics</code>.</p></div>
         <div class="card"><h3>API / protocol surface</h3><ul>
           <li>session registry;</li>
           <li>live event stream;</li>
@@ -180,12 +182,17 @@ meta metrics ...</code></pre></div>
       </div>
       <p id="remote-control">Accepted target (ADR-0185): an agent executor controls only whole CLI agent processes created or adopted on its own host under an explicit local identity and rejects cross-host process claims. Exposing the API to another device requires authenticated, integrity-protected transport and does not expand agent-executor authority. Liquid must route live commands to the instance that owns the addressed session/configuration and must not treat cached state as controllable while that instance is unreachable.</p>
       <h3>Service / daemon surface</h3>
-      <p>The service runs in its own process on the host, started as a login service (ADR-0286), also on a server host; Liquid embeds no Meta-Harness core once the service exists (ADR-0215). Until then the core runs inside the Liquid app process (ADR-0184); even there the core, never the Liquid UI, owns agent processes, and Liquid sees only its agent-neutral session model. This changes client reachability, not Meta-Harness agent-executor ownership. One command set travels over a private local connection on the host and an authenticated network connection remotely (ADR-0185); its own state lives in SQLite (ADR-0286). Flow Agent's designed local control transport baseline is JSON-RPC over stdio.</p>
+      <p>Implemented on macOS and Linux (ADR-0215, ADR-0286, ADR-0297). <code>meta serve</code> runs the service in its own process; the login service starts it at login and again after it ends. It owns its data folder, <code>META_HARNESS_HOME</code> or else <code>~/.meta-harness</code>: the configuration store <code>meta-harness.sqlite</code>, T3's data in <code>t3/</code>, the harness homes in <code>harness/</code> and <code>service.log</code>; a second service on the same folder refuses to start. It serves one WebSocket on 127.0.0.1 at a free port, as T3 Code serves its clients, and admits only connections with the bearer token it writes, with its address, into <code>connection.json</code> (<a href="../../SECURITY.md#meta-harness-service-and-configuration">trust limits</a>).</p>
+      <ul>
+        <li><strong>Messages:</strong> JSON text frames, defined in <code>meta-harness-core/src/api.rs</code>: a call gets one answer; a stream gets a first value, such as a thread's snapshot (ADR-0290), then items until it ends or the client cancels it. Every thread call names its project and thread, so a client that reconnects goes on without opening anything again. The message set is internal and unversioned until the BYOA deliverable in <a href="../../PLAN.md">PLAN.md</a>.</li>
+        <li><strong>Clients:</strong> <code>meta</code> and Liquid's agent surface, which keeps nothing of the core or T3 running in its process and leaves the service and its agents running when it quits. A lost connection fails the calls it left unanswered, which are never sent again, and ends its streams; a reader that falls 4,096 items behind loses its stream and restores from a snapshot.</li>
+        <li><strong>Remote clients:</strong> the authenticated network connection follows with host links (ADR-0285); execution ownership never moves with it.</li>
+      </ul>
     </div></section>
 
     <section id="architecture" class="section"><h2>7. Architecture</h2><div class="body">
       <h3 id="t3-stack">Agent host on T3 Code</h3>
-      <p>Accepted (ADR-0280 to ADR-0282, ADR-0286); implemented on macOS with Meta-Harness embedded in Liquid. The pipeline and crates further down predate building on T3 Code and follow it once reworked.</p>
+      <p>Accepted (ADR-0280 to ADR-0282, ADR-0286); implemented on macOS and Linux as the Meta-Harness service. The pipeline further down predates building on T3 Code and follows it once reworked.</p>
       <ul>
         <li><strong>Start:</strong> Meta-Harness runs the pinned <code>t3</code> itself with <code>serve --host 127.0.0.1</code>, its own <code>T3CODE_HOME</code>, <code>T3CODE_TELEMETRY_ENABLED=false</code> and <code>T3CODE_OTEL_SDK_DISABLED=true</code>, reads the port from <code>userdata/server-runtime.json</code> and takes an owner token from <code>t3 auth session issue</code>. Before starting, it stops the pinned <code>t3 serve</code> the data folder records as running, such as one a dead Meta-Harness left; one data folder belongs to one Meta-Harness.</li>
         <li><strong>Protocol:</strong> Effect RPC JSON messages on <code>/ws?orchestrationProtocol=2</code> over <code>tokio-tungstenite</code>, acknowledging every streamed message (ADR-0292). A followed thread keeps T3's projection, updated by each event as T3's own client applies it. T3 closes a socket when its session expires, so the client reconnects with a new 24 h owner token, sends its open streams again, and a thread restarts from the snapshot T3 then sends, so Liquid reloads its Chat.</li>
@@ -203,8 +210,10 @@ meta metrics ...</code></pre></div>
           <div class="pd-b pd-h">Harnesses<small>Codex, Claude Code, Flow Agent through ACP, …</small></div>
         </div>
         <div>
-          <div class="pd-cap">Start and packaging (ADR-0286)</div>
-          <div class="pd-b pd-ws">One installer: <code>meta</code> CLI and a login service<small>launchd, a systemd user unit or a Windows per-user autostart, no administrator rights</small></div>
+          <div class="pd-cap">Start and packaging (ADR-0286, ADR-0296)</div>
+          <div class="pd-b pd-ws">One archive per platform with <code>SHA256SUMS</code><small><code>meta</code>, the pinned T3 release and <code>install.sh</code>, downloaded like Flow Agent's</small></div>
+          <div class="pd-a"><code>install.sh</code> into <code>~/.local/meta-harness</code>, then <code>meta service install</code></div>
+          <div class="pd-b pd-ws">Login service, no administrator rights<small>a launch agent or a systemd user unit; a Windows per-user autostart with ADR-0291</small></div>
           <div class="pd-a">at sign-in and after a crash</div>
           <div class="pd-b pd-ws">Meta-Harness<small>own state in SQLite with an append-only approval log</small></div>
           <div class="pd-a">starts and supervises</div>
@@ -217,47 +226,39 @@ meta metrics ...</code></pre></div>
         <div class="node">Meta-Harness agent executor</div><div class="arrow">→</div><div class="node">Agent adapter</div><div class="arrow">→</div><div class="node">Artifact index</div>
         <div class="node">AgentPulse</div><div class="arrow">→</div><div class="node">Metrics / events</div><div class="arrow">→</div><div class="node">API / service</div>
       </div>
-      <p>Recommended structure (crate names remain provisional until M2 implementation planning):</p>
-      <pre><code>meta-harness-core
-  session registry, control plane, config resolver,
-  agent schedule/trigger engine, policy gate,
-  AgentPulse engine, artifact index
-
-meta-harness-adapters
-  Flow Agent adapter, Codex CLI adapter,
-  Claude Code adapter, future adapters
-
-meta-harness-service
-  local daemon / server-host service, API/protocol transport,
-  event subscriptions, authentication/permissions hooks
-
-meta-harness-cli
-  headless user/admin CLI; run/session/config/metrics commands
-
-liquid integration
-  consumes the Meta-Harness API; does not duplicate backend logic</code></pre>
+      <p>Crates: <code>meta-harness-core</code> (T3's server and client, the session model, the service and its API, the central configuration and the client Liquid uses) and <code>meta-harness-cli</code> (<code>meta</code>); Liquid consumes the API and duplicates no backend logic.</p>
       <ul>
         <li><strong>Control plane:</strong> session registry, task state, attention state and schedules for this instance/host.</li>
-        <li><strong>Config resolver:</strong> maps Watershed building blocks to agent-specific CLI config and launch commands.</li>
+        <li><strong>Config resolver:</strong> writes the configuration blocks into each harness home (<a href="#config">central config</a>).</li>
         <li><strong>Meta-Harness agent executor:</strong> host-local supervisor for whole CLI agents. It validates that every launched or controlled CLI process belongs to this instance's host; cross-host execution is outside the architecture.</li>
         <li><strong>Adapters:</strong> T3 Code runs each harness through its built-in providers or as a local ACP command (ADR-0282).</li>
         <li><strong>Artifact index:</strong> logs, summaries, checkpoints, handoff packs and host-provided diffs.</li>
-        <li><strong>Policy gate:</strong> configuration-change proposals (ADR-0227) and control commands follow the <a href="#policy-gate">policy gate</a>.</li>
+        <li><strong>Policy gate:</strong> every configuration change is a proposal that needs approval (<a href="#policy-gate">approval and log</a>); control commands leave governance to the harness (ADR-0252).</li>
       </ul>
     </div></section>
 
     <section id="config" class="section"><h2>8. Central config</h2><div class="body">
-      <p>Meta-Harness is responsible for central config management across agents. It defines shared Watershed building blocks once and resolves them into target-specific runtime configuration for Flow Agent, Codex CLI, Claude Code and future adapters. The Flow Agent target is global-only: it receives no project-local config layer, and project-specific behavior is an explicit Flow in its global authority. Other adapters retain their own documented scope. A host's Runtime binding—endpoint plus capability-dependent model/runtime, optional local-artifact, optional typed credential-reference and resource-policy fields—remains device-local operational state and is not copied into portable shared config; credential material stays in the target's protected store. Config is made of reusable building blocks, not agent-specific vocabulary (example, not final syntax):</p>
-      <pre><code>shared block: "review-rust-change"
-  instructions: ["review safety", "review tests"]
-  tools: ["read", "search", "run-tests"]
-  targets:
-    flow-agent:  flow script + building blocks
-    codex-cli:   instruction pack + command args
-    claude-code: instruction pack + command args</code></pre>
-      <p>Meta-Harness config resolution is <strong>not</strong> a project VCS/history engine. Config changes must be auditable, reviewable and policy-gated. Meta-Harness may manage Flow Agent's <code>FLOW_AGENT_HOME</code> authority only through a public config surface; it never writes target-private storage directly. Meta-Harness keeps its own state in SQLite (ADR-0286); Flow Agent's global path and authoring boundary are canonical in <a href="../../PROTOCOL.md">PROTOCOL.md</a>.</p>
-      <p>Accepted target (ADR-0225, ADR-0227): unlike T3 Code, harness configurations live centrally and across devices. Liquid is where they are edited and stored per harness; Meta-Harness materializes them per session into a home it owns, such as <code>PI_CODING_AGENT_DIR</code>, <code>FLOW_AGENT_HOME</code> or <code>CODEX_HOME</code>, linking the user's credentials instead of copying them. Liquid sends changes as proposals the host applies after approval with audit, and Flow Agent needs a public way to replace a home's configuration. Every harness can use local inference: Meta-Harness materializes endpoints per host, Flow Agent uses its device-local Runtime binding, and Liquid knows each model's context window and tool support. What a model provider does with prompts is not Liquid's responsibility.</p>
-      <p id="policy-gate">Accepted target (ADR-0225, ADR-0227), <strong>policy gate:</strong> a Meta-Agent may reconfigure underlying agents only through it. Low-risk configuration changes apply only through the configured review/audit flow; sensitive ones (permission, tool, network, schedule and external-credential settings) require human approval. Every change is recorded with who/what/when, is monitorable and is revertible according to the chosen config-storage model, so the human always knows what changed. Harness configuration changes arrive as proposals through this gate, and credentials never leave the host. An area may be kept to local models, which Meta-Harness checks before a session starts. The same gate applies to <strong>all Meta-Harness control surfaces</strong>: its CLI, API/service and BYOA/external command surface. Meta-Harness runs headlessly (without Liquid), so the policy/audit gate, not a UI confirmation dialog, is the boundary: configuration changes and control commands from any client must be authorized and audited identically.</p>
+      <p>Unlike T3 Code, Meta-Harness keeps harness configurations centrally (ADR-0225, ADR-0227, ADR-0298). Implemented for Claude Code and Codex: a revision holds three kinds of configuration blocks, each named with letters, digits, <code>-</code> and <code>_</code>, and Meta-Harness writes the current one into a home per harness it owns, which T3 starts each harness with (<code>CLAUDE_CONFIG_DIR</code>, <code>CODEX_HOME</code>, through T3's provider settings).</p>
+      <table style="width:100%;table-layout:fixed;overflow-wrap:anywhere">
+        <tr><th>Block</th><th>Claude Code home</th><th>Codex home</th></tr>
+        <tr><td>Instructions, joined in name order</td><td><code>CLAUDE.md</code></td><td><code>AGENTS.md</code></td></tr>
+        <tr><td>Skills: a folder of text files with a <code>SKILL.md</code></td><td><code>skills/&lt;name&gt;/</code></td><td><code>skills/&lt;name&gt;/</code></td></tr>
+        <tr><td>MCP servers: a command, or an http(s) address</td><td><code>mcp.json</code>, passed with <code>--mcp-config</code></td><td><code>config.toml</code></td></tr>
+      </table>
+      <p>The person's own <code>~/.claude</code> and <code>~/.codex</code> stay unchanged and do not configure these sessions; both harnesses keep the person's login (<a href="../../SECURITY.md#meta-harness-service-and-configuration">SECURITY.md</a>). Files a harness keeps in its home, and skills Meta-Harness did not write, stay; Meta-Harness replaces only what it wrote. A change is a list of configuration blocks to set or remove:</p>
+      <pre><code>meta config propose change.json "Test first"
+[{"instruction": {"name": "rules", "text": "Run the tests."}},
+ {"instruction": {"name": "old", "text": null}},
+ {"skill": {"name": "review",
+   "files": {"SKILL.md": "# Review"}}},
+ {"mcp_server": {"name": "docs",
+   "server": {"command": {"command": "docs-mcp",
+     "args": ["--stdio"]}}}},
+ {"mcp_server": {"name": "wiki",
+   "server": {"url": {"url": "https://example.com/mcp"}}}}]</code></pre>
+      <p>A skill needs a <code>SKILL.md</code> and relative file paths; a proposal holds at most 256 changes.</p>
+      <p>Until Liquid syncs (M3c), the configuration lives in Meta-Harness's SQLite on its host and changes through <code>meta config</code> and the API; Liquid then edits it across devices, after approved mockups. Flow Agent joins with ACP and needs a public way to replace a home's configuration; its target stays global-only, with project behavior as explicit Flows in its global authority (<a href="../../PROTOCOL.md">PROTOCOL.md</a>). A host's Runtime binding stays device-local and is not copied into shared configuration. Target (ADR-0225): every harness can use local inference; Meta-Harness will write endpoints per host, and Flow Agent uses its device-local Runtime binding. Configuration is not a project VCS.</p>
+      <p id="policy-gate"><strong>Approval and log (ADR-0298):</strong> every change, from any client, is a proposal that takes effect only once approved, and anyone on the account approves or rejects it through the CLI or the API. Proposals, revisions and the log only grow: the log keeps each proposal, approval and rejection with its time and the client's own name for itself, and a revert proposes an earlier revision's blocks, approved like any change. Harness sessions started after an approval use the new revision. An approval counts only once both homes took the new revision; otherwise nothing changes, and a service whose homes cannot take its current revision still starts, so a revert stays possible. Trust limits: <a href="../../SECURITY.md#meta-harness-service-and-configuration">SECURITY.md</a>. An area may later be kept to local models, which Meta-Harness checks before a session starts (ADR-0225).</p>
     </div></section>
 
     <section id="agentpulse" class="section"><h2>9. AgentPulse</h2><div class="body">
@@ -396,7 +397,7 @@ liquid integration
         <li>an external tool queries AgentPulse;</li>
         <li>an external CLI monitors live transcripts.</li>
       </ul>
-      <p>Configuration-change proposals and control commands go through the <a href="#policy-gate">policy gate</a>.</p>
+      <p>Configuration changes from any client are proposals that need approval (<a href="#policy-gate">approval and log</a>).</p>
     </div></section>
 
     <section id="m2" class="section"><h2>13. M2 implementation reference</h2><div class="body">

@@ -1,10 +1,10 @@
 //! How streams cross to Dart: how the event forwarder batches them and how far ahead of Liquid it
 //! sends (ADR-0272), and when the follows of a session or checkout end (`until_ended`).
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use meta_harness_core::ThreadEvent;
+use meta_harness_core::{ThreadEvent, Watch};
 use tokio::sync::{Notify, mpsc, watch};
 
 use crate::api::events::{BridgeEvent, BridgeEventKind};
@@ -159,11 +159,41 @@ async fn next_or_wake(
     .await
 }
 
-/// Waits for `next` unless the owner of the stream drops first, which gives `None`. The owner
-/// holds the sender of `ended` and never sends on it, so its drop ends the wait at once; the
-/// stream then ends with its owner instead of at its next change.
-pub(crate) async fn until_ended<T>(
-    ended: &mut watch::Receiver<()>,
+/// The counter of the current stream of one kind. A new stream or a stop bumps it, which ends the
+/// stream before it (see [`until_ended`]).
+pub(crate) struct Generation(Mutex<watch::Sender<u64>>);
+
+impl Default for Generation {
+    fn default() -> Self {
+        Self(Mutex::new(watch::channel(0).0))
+    }
+}
+
+impl Generation {
+    /// Ends the current stream and gives the new one's end signal. The bump and the subscription
+    /// share one lock, so a concurrent replacement cannot slip in between them.
+    pub(crate) fn replace(&self) -> watch::Receiver<u64> {
+        let sender = self.lock();
+        sender.send_modify(|generation| *generation += 1);
+        sender.subscribe()
+    }
+
+    /// Ends the current stream.
+    pub(crate) fn stop(&self) {
+        self.lock().send_modify(|generation| *generation += 1);
+    }
+
+    fn lock(&self) -> MutexGuard<'_, watch::Sender<u64>> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// Waits for `next` unless `ended` ends first, which gives `None`. The owner of the stream holds
+/// the sender of `ended`: its drop ends the wait at once, and so does a change of a [`Generation`],
+/// which a newer stream of its kind or a stop makes. The stream then ends at once, not at its
+/// next change.
+pub(crate) async fn until_ended<S, T>(
+    ended: &mut watch::Receiver<S>,
     next: impl Future<Output = T>,
 ) -> Option<T> {
     tokio::select! {
@@ -173,15 +203,67 @@ pub(crate) async fn until_ended<T>(
     }
 }
 
+/// The first pause before Meta-Harness is asked again, doubling after each failed attempt up to
+/// `RETRY_MAX`.
+const RETRY_FIRST: std::time::Duration = std::time::Duration::from_millis(500);
+const RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Asks Meta-Harness through `attempt` until it answers. A failed attempt means Meta-Harness cannot
+/// be reached now, such as while it restarts, so the next comes after a pause. Gives `None` once
+/// `ended` ends (see [`until_ended`]).
+pub(crate) async fn reconnect<S, T, E, Fut: Future<Output = Result<T, E>>>(
+    ended: &mut watch::Receiver<S>,
+    mut attempt: impl FnMut() -> Fut,
+) -> Option<T> {
+    let mut pause = RETRY_FIRST;
+    loop {
+        if let Ok(value) = until_ended(ended, attempt()).await? {
+            return Some(value);
+        }
+        until_ended(ended, tokio::time::sleep(pause)).await?;
+        pause = (pause * 2).min(RETRY_MAX);
+    }
+}
+
+/// Forwards each change of `watch` to `deliver` until `deliver` refuses one or `ended` ends (see
+/// [`until_ended`]). Once the watch's stream ended, `open` reopens it (see [`reconnect`]), and its
+/// current value goes out, since changes may have been missed meanwhile.
+pub(crate) async fn follow_watch<S, T: Clone, Fut: Future<Output = Result<Watch<T>, String>>>(
+    mut watch: Watch<T>,
+    ended: &mut watch::Receiver<S>,
+    mut open: impl FnMut() -> Fut,
+    mut deliver: impl FnMut(T) -> bool,
+) {
+    loop {
+        match until_ended(ended, watch.changed()).await {
+            None => return,
+            Some(Some(value)) => {
+                if !deliver(value) {
+                    return;
+                }
+            }
+            Some(None) => {
+                let Some(reopened) = reconnect(ended, &mut open).await else {
+                    return;
+                };
+                watch = reopened;
+                if !deliver(watch.current()) {
+                    return;
+                }
+            }
+        }
+    }
+}
+
 /// Hands the thread's events to `deliver` until it returns `false` or the session is dropped.
 /// It sends at most `WINDOW` events that `credit` has not confirmed; what waits meanwhile
 /// merges, and an overflow ends in one fell-behind event (ADR-0272). When the core drops this
 /// subscriber, which fell too far behind, or a reconnect restored the thread, the stream takes
 /// `resubscribe`'s events after a fell-behind event; `resubscribe` gives none once the thread
-/// ended for good, and the stream ends.
-pub(crate) async fn forward(
+/// ended for good, and the stream ends once what waits is sent.
+pub(crate) async fn forward<Next: Future<Output = Option<mpsc::Receiver<ThreadEvent>>>>(
     mut receiver: mpsc::Receiver<ThreadEvent>,
-    mut resubscribe: impl FnMut() -> Option<mpsc::Receiver<ThreadEvent>>,
+    mut resubscribe: impl FnMut() -> Next,
     credit: Arc<Credit>,
     mut deliver: impl FnMut(BridgeEvent) -> bool,
 ) {
@@ -217,9 +299,9 @@ pub(crate) async fn forward(
                 }
             }
             Some(None) => {
-                let Some(next) = resubscribe() else {
-                    // T3 ended the thread for good: no event comes, so the stream ends.
-                    return;
+                let Some(next) = resubscribe().await else {
+                    // T3 ended the thread for good: no event comes, but what waits still goes.
+                    return send_waiting(&mut outbox, &credit, &mut deliver).await;
                 };
                 receiver = next;
                 if !outbox.behind {
@@ -228,6 +310,21 @@ pub(crate) async fn forward(
             }
             None => {}
         }
+    }
+}
+
+/// Sends what waits once no event comes, as each confirmation reopens room for it. Returns once
+/// nothing waits, the session was dropped or `deliver` refused an event.
+async fn send_waiting(
+    outbox: &mut Outbox,
+    credit: &Credit,
+    deliver: &mut impl FnMut(BridgeEvent) -> bool,
+) {
+    while !credit.is_closed()
+        && outbox.send(credit.applied(), deliver)
+        && !outbox.pending.is_empty()
+    {
+        credit.wait().await;
     }
 }
 

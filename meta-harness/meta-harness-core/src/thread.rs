@@ -29,7 +29,7 @@ use crate::t3::{Change, Client, Projection, fresh_id, millis, prompt_of};
 const BACKLOG: usize = 4096;
 
 /// An agent event and its position in the thread's stream.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ThreadEvent {
     /// T3's sequence number of the event it came from.
     pub sequence: u64,
@@ -38,7 +38,7 @@ pub struct ThreadEvent {
 }
 
 /// How a turn ended, or that it runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnStatus {
     /// Queued behind the running turn.
     Queued,
@@ -51,7 +51,7 @@ pub enum TurnStatus {
 }
 
 /// One file a turn changed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct TurnFile {
     /// The path in the checkout.
     pub path: String,
@@ -64,7 +64,7 @@ pub struct TurnFile {
 }
 
 /// One turn: a prompt and the agent's work on it, a T3 run.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Turn {
     /// T3's run ordinal, which also numbers its checkpoint and diff.
     pub number: u64,
@@ -87,7 +87,7 @@ pub struct Turn {
 }
 
 /// One item of the Chat.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ChatItem {
     /// The item, as the live events name it.
     pub id: ItemId,
@@ -106,7 +106,7 @@ pub struct ChatItem {
 }
 
 /// The thread at one stream position: what Liquid shows, and the last event it contains.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Snapshot {
     /// Events up to this sequence are contained; later ones apply on top.
     pub sequence: u64,

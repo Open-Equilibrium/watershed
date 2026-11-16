@@ -9,7 +9,7 @@ use super::Thread;
 use crate::t3::{Watch, millis};
 
 /// A local server a terminal or the agent of this thread started.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct LocalServer {
     /// The host, such as `localhost`.
     pub host: String,
@@ -26,7 +26,7 @@ pub struct LocalServer {
 }
 
 /// How a scheduled task's last run ended, or that it never ran.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunStatus {
     /// It never ran.
     Never,
@@ -39,7 +39,7 @@ pub enum RunStatus {
 }
 
 /// When a scheduled task runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScheduleKind {
     /// Every `every_ms`.
     Interval,
@@ -52,7 +52,7 @@ pub enum ScheduleKind {
 }
 
 /// A scheduled task's schedule, with the fields of its kind.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Schedule {
     /// The kind.
     pub kind: ScheduleKind,
@@ -67,7 +67,7 @@ pub struct Schedule {
 }
 
 /// A scheduled task bound to a thread, as Automations shows it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Automation {
     /// T3's task id.
     pub id: String,
@@ -86,7 +86,7 @@ pub struct Automation {
 }
 
 /// Where a usage window stands against the time it covers, as T3 names it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pace {
     /// Used faster than time passed.
     Ahead,
@@ -97,7 +97,7 @@ pub enum Pace {
 }
 
 /// One window of a provider's usage limits.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct UsageWindow {
     /// Its label, such as `5h`.
     pub label: String,
@@ -110,7 +110,7 @@ pub struct UsageWindow {
 }
 
 /// A provider's usage limits: its windows, or why there are none.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct UsageLimits {
     /// Why the windows are missing or empty, as T3 words it.
     pub notice: Option<String>,

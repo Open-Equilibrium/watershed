@@ -7,11 +7,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
+use futures_util::FutureExt;
 use meta_harness_core::{
     AcpAgent, AgentEvent, GitAction, GitActionRequest, GitProgress, Group, Host, HostConfig,
     LineCount, ModelChoice, Permissions, Relation, Request, Snapshot, StartThread, Thread,
     ThreadEvent, TurnStatus, Workspace,
 };
+use meta_harness_core::{CONNECTION_FILE, Change, Service, ServiceConfig, remote, t3_version};
 
 const AGENT: &str = "scripted";
 
@@ -48,24 +50,47 @@ fn fixture() -> (tempdir::Dir, PathBuf, PathBuf) {
 }
 
 async fn host(home: &Path) -> Host {
-    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/scripted_acp_agent.py");
     Host::start(HostConfig {
         binary: t3(),
         home: home.to_owned(),
-        acp_agents: vec![AcpAgent {
-            id: AGENT.to_owned(),
-            command: PathBuf::from("/usr/bin/python3"),
-            // The script ignores its arguments; the home folder names this test's agents in the
-            // process list.
-            args: vec![
-                script.to_string_lossy().into_owned(),
-                home.to_string_lossy().into_owned(),
-            ],
-            models: vec![AGENT.to_owned()],
-        }],
+        acp_agents: agents(home),
     })
     .await
     .expect("T3 starts")
+}
+
+/// Starts a service on `home`, which keeps T3's data in `home/t3`, and connects a client to it.
+async fn start_service(home: &Path) -> (Service, remote::Host) {
+    let service = Service::start(service_config(home))
+        .await
+        .expect("the service starts");
+    let host = remote::Host::connect(home, "contract")
+        .await
+        .expect("a client connects");
+    (service, host)
+}
+
+fn agents(home: &Path) -> Vec<AcpAgent> {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/scripted_acp_agent.py");
+    vec![AcpAgent {
+        id: AGENT.to_owned(),
+        command: PathBuf::from("/usr/bin/python3"),
+        // The script ignores its arguments; the home folder names this test's agents in the
+        // process list.
+        args: vec![
+            script.to_string_lossy().into_owned(),
+            home.to_string_lossy().into_owned(),
+        ],
+        models: vec![AGENT.to_owned()],
+    }]
+}
+
+fn service_config(home: &Path) -> ServiceConfig {
+    ServiceConfig {
+        home: home.to_owned(),
+        t3: t3(),
+        acp_agents: agents(home),
+    }
 }
 
 fn worktree() -> Workspace {
@@ -88,7 +113,25 @@ fn start(text: &str, workspace: Workspace, permissions: Permissions) -> StartThr
 }
 
 /// Waits until the thread's snapshot satisfies `done`, failing after a minute.
-async fn wait(thread: &Thread, done: impl Fn(&Snapshot) -> bool) -> Snapshot {
+async fn wait(thread: &remote::Thread, done: impl Fn(&Snapshot) -> bool) -> Snapshot {
+    let waited = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let (snapshot, mut events) = thread.subscribe().await.unwrap();
+            if done(&snapshot) {
+                return snapshot;
+            }
+            events.recv().await;
+        }
+    })
+    .await;
+    match waited {
+        Ok(snapshot) => snapshot,
+        Err(_) => panic!("not there within a minute: {:#?}", thread.snapshot().await),
+    }
+}
+
+/// `wait` for a thread of the core Host, for the one test that stays on it.
+async fn wait_core(thread: &Thread, done: impl Fn(&Snapshot) -> bool) -> Snapshot {
     let waited = tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             let (snapshot, mut events) = thread.subscribe();
@@ -116,7 +159,7 @@ fn completed(n: usize) -> impl Fn(&Snapshot) -> bool {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_thread_runs_turns_and_reverts_files_in_its_worktree() {
     let (_dir, repo, home) = fixture();
-    let host = host(&home).await;
+    let (service, host) = start_service(&home).await;
     let project = host.project(&repo).await.unwrap();
     let thread = project
         .start(start("append first", worktree(), Permissions::FullAccess))
@@ -126,10 +169,14 @@ async fn a_thread_runs_turns_and_reverts_files_in_its_worktree() {
     thread.send("append second", false).await.unwrap();
     wait(&thread, completed(2)).await;
 
-    let worktree = thread.worktree().expect("the thread has its own worktree");
+    let worktree = thread
+        .worktree()
+        .await
+        .unwrap()
+        .expect("the thread has its own worktree");
     let file = worktree.join("contract.txt");
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "first\nsecond\n");
-    let turns = thread.turns();
+    let turns = thread.turns().await.unwrap();
     assert_eq!(turns.len(), 2);
     assert_eq!(
         (turns[1].number, turns[1].added, turns[1].removed),
@@ -153,14 +200,17 @@ async fn a_thread_runs_turns_and_reverts_files_in_its_worktree() {
 
     // The branch picker chose the project folder's checkout; Git follows it at once.
     thread.set_branch("main", Some(&repo)).await.unwrap();
-    assert_eq!(thread.worktree().as_deref(), Some(repo.as_path()));
-    host.shutdown().await;
+    assert_eq!(
+        thread.worktree().await.unwrap().as_deref(),
+        Some(repo.as_path())
+    );
+    service.stop().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_turn_after_a_rewind_reverts_and_diffs_from_its_visible_predecessor() {
     let (_dir, repo, home) = fixture();
-    let host = host(&home).await;
+    let (service, host) = start_service(&home).await;
     let project = host.project(&repo).await.unwrap();
     let thread = project
         .start(start("append first", worktree(), Permissions::FullAccess))
@@ -175,21 +225,32 @@ async fn a_turn_after_a_rewind_reverts_and_diffs_from_its_visible_predecessor() 
     // T3 numbers the next run after the rolled back one, so the new turn is number 3.
     thread.send("append third", false).await.unwrap();
     wait(&thread, completed(2)).await;
-    let numbers: Vec<u64> = thread.turns().iter().map(|t| t.number).collect();
+    let numbers: Vec<u64> = thread
+        .turns()
+        .await
+        .unwrap()
+        .iter()
+        .map(|t| t.number)
+        .collect();
     assert_eq!(numbers, [1, 3]);
-    let file = thread.worktree().unwrap().join("contract.txt");
+    let file = thread
+        .worktree()
+        .await
+        .unwrap()
+        .unwrap()
+        .join("contract.txt");
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "first\nthird\n");
     assert!(thread.diff(3, 3, false).await.unwrap().contains("+third"));
     assert_eq!(thread.revert(3, true).await.unwrap(), "append third");
     wait(&thread, |s| s.turns.len() == 1).await;
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "first\n");
-    host.shutdown().await;
+    service.stop().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn shutdown_stops_t3_and_the_agent_processes_it_started() {
     let (_dir, repo, home) = fixture();
-    let host = host(&home).await;
+    let (service, host) = start_service(&home).await;
     let project = host.project(&repo).await.unwrap();
     let thread = project
         .start(start("wait", Workspace::Checkout, Permissions::FullAccess))
@@ -208,7 +269,7 @@ async fn shutdown_stops_t3_and_the_agent_processes_it_started() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     assert!(!agents.is_empty(), "T3 started its agent");
-    host.shutdown().await;
+    service.stop().await;
     // T3 stops its provider processes as it stops; an agent left running would wait forever.
     for _ in 0..50 {
         agents.retain(|pid| running(*pid));
@@ -296,6 +357,9 @@ async fn a_stale_server_record_never_stops_another_process() {
     other.wait().unwrap();
 }
 
+// Stays on the core Host: the service delivers a subscription's events from its own task, so the
+// remote stream can lag the snapshots its calls return, and the remote API cannot wait until the
+// stream has caught up.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_snapshot_names_the_events_it_already_contains() {
     let (_dir, repo, home) = fixture();
@@ -306,7 +370,7 @@ async fn a_snapshot_names_the_events_it_already_contains() {
         .await
         .unwrap();
     let (before, mut events) = thread.subscribe();
-    wait(&thread, completed(1)).await;
+    wait_core(&thread, completed(1)).await;
     // The stream applies each change and sends its events under the lock that snapshots take, so
     // once `wait` read the turn complete, every later event is already in `events` (ADR-0290).
     // The turn may also have ended before `before`; then its completion is in the snapshot instead.
@@ -337,10 +401,16 @@ async fn a_snapshot_names_the_events_it_already_contains() {
     host.shutdown().await;
 }
 
+/// The events `events` already holds, without waiting for more. The remote stream has no
+/// non-blocking receive, so this takes only the events that are ready now.
+fn buffered(events: &mut remote::Stream<ThreadEvent>) -> Vec<ThreadEvent> {
+    std::iter::from_fn(|| events.recv().now_or_never().flatten()).collect()
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_supervised_thread_waits_for_the_person_to_approve() {
     let (_dir, repo, home) = fixture();
-    let host = host(&home).await;
+    let (service, host) = start_service(&home).await;
     let project = host.project(&repo).await.unwrap();
     let thread = project
         .start(start("ask", Workspace::Checkout, Permissions::Supervised))
@@ -348,7 +418,10 @@ async fn a_supervised_thread_waits_for_the_person_to_approve() {
         .unwrap();
     let (asked, mut events) = {
         let snapshot = wait(&thread, |s| !s.requests.is_empty()).await;
-        (snapshot.requests[0].clone(), thread.subscribe().1)
+        (
+            snapshot.requests[0].clone(),
+            thread.subscribe().await.unwrap().1,
+        )
     };
     let Request::Approval { options, .. } = &asked.request else {
         panic!("an approval, not {asked:?}");
@@ -358,26 +431,26 @@ async fn a_supervised_thread_waits_for_the_person_to_approve() {
     let resolved = events.recv().await.unwrap();
     let mut seen = vec![resolved.event];
     let done = wait(&thread, completed(1)).await;
-    seen.extend(std::iter::from_fn(|| events.try_recv().ok()).map(|e| e.event));
+    seen.extend(buffered(&mut events).into_iter().map(|e| e.event));
     assert!(seen.contains(&AgentEvent::RequestResolved {
         request: asked.id.clone()
     }));
     assert!(done.requests.is_empty());
     assert!(done.transcript.iter().any(|item| item.text == "Approved."));
-    host.shutdown().await;
+    service.stop().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn statistics_count_a_thread_s_turns_and_tool_calls() {
     let (_dir, repo, home) = fixture();
-    let host = host(&home).await;
+    let (service, host) = start_service(&home).await;
     let project = host.project(&repo).await.unwrap();
     let thread = project
         .start(start("append one", worktree(), Permissions::FullAccess))
         .await
         .unwrap();
     wait(&thread, completed(1)).await;
-    let statistics = thread.statistics();
+    let statistics = thread.statistics().await.unwrap();
     assert_eq!(statistics.turns.len(), 1);
     assert_eq!(statistics.turns[0].prompt, "append one");
     let edits: u32 = statistics
@@ -386,13 +459,13 @@ async fn statistics_count_a_thread_s_turns_and_tool_calls() {
         .map(|t| t.succeeded + t.failed + t.cancelled + t.open)
         .sum();
     assert!(edits >= 1, "the append's tool call counts: {statistics:?}");
-    host.shutdown().await;
+    service.stop().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_prompt_sent_while_a_turn_runs_queues_and_can_be_removed() {
     let (_dir, repo, home) = fixture();
-    let host = host(&home).await;
+    let (service, host) = start_service(&home).await;
     let project = host.project(&repo).await.unwrap();
     let thread = project
         .start(start("wait", Workspace::Checkout, Permissions::FullAccess))
@@ -445,13 +518,13 @@ async fn a_prompt_sent_while_a_turn_runs_queues_and_can_be_removed() {
         s.turns.iter().all(|t| t.status == TurnStatus::Aborted)
     })
     .await;
-    host.shutdown().await;
+    service.stop().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn deleting_a_worktree_s_only_thread_can_delete_the_worktree() {
     let (_dir, repo, home) = fixture();
-    let host = host(&home).await;
+    let (service, host) = start_service(&home).await;
     let project = host.project(&repo).await.unwrap();
     let thread = project
         .start(start("append one", worktree(), Permissions::FullAccess))
@@ -472,13 +545,13 @@ async fn deleting_a_worktree_s_only_thread_can_delete_the_worktree() {
             .iter()
             .all(|t| t.id != thread.id())
     );
-    host.shutdown().await;
+    service.stop().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn forking_a_response_starts_a_thread_with_the_turns_up_to_it() {
     let (_dir, repo, home) = fixture();
-    let host = host(&home).await;
+    let (service, host) = start_service(&home).await;
     let project = host.project(&repo).await.unwrap();
     let thread = project
         .start(start("append first", worktree(), Permissions::FullAccess))
@@ -493,13 +566,13 @@ async fn forking_a_response_starts_a_thread_with_the_turns_up_to_it() {
     })
     .await;
     assert!(forked.transcript.iter().all(|i| i.text != "append second"));
-    host.shutdown().await;
+    service.stop().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_writer_model_is_set_once_for_every_thread() {
     let (_dir, _repo, home) = fixture();
-    let host = host(&home).await;
+    let (service, host) = start_service(&home).await;
     let writer = ModelChoice {
         instance: "claudeAgent".to_owned(),
         model: "claude-haiku-5-5".to_owned(),
@@ -514,15 +587,11 @@ async fn the_writer_model_is_set_once_for_every_thread() {
             .iter()
             .any(|p| p.instance == AGENT)
     );
-    host.shutdown().await;
+    service.stop().await;
 }
 
 /// Runs a stacked action and returns how it ended.
-async fn run(
-    git: &meta_harness_core::Git,
-    action: GitAction,
-    message: Option<&str>,
-) -> GitProgress {
+async fn run(git: &remote::Git, action: GitAction, message: Option<&str>) -> GitProgress {
     let mut progress = git
         .run(GitActionRequest {
             action,
@@ -549,7 +618,7 @@ async fn git_commits_branches_and_pushes_as_t3_does() {
         &["remote", "add", "origin", &origin.to_string_lossy()],
     );
     git(&repo, &["push", "-q", "-u", "origin", "main"]);
-    let host = host(&home).await;
+    let (service, host) = start_service(&home).await;
     let project = host.project(&repo).await.unwrap();
     let git = project.git();
 
@@ -585,7 +654,7 @@ async fn git_commits_branches_and_pushes_as_t3_does() {
 
     git.switch("main").await.unwrap();
     assert_eq!(git.status().await.unwrap().branch.as_deref(), Some("main"));
-    host.shutdown().await;
+    service.stop().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -598,7 +667,7 @@ async fn branch_changes_and_the_branch_diff_compare_the_branch_with_its_base_as_
         &["remote", "add", "origin", &origin.to_string_lossy()],
     );
     git(&repo, &["push", "-q", "-u", "origin", "main"]);
-    let host = host(&home).await;
+    let (service, host) = start_service(&home).await;
     let checkout = host.project(&repo).await.unwrap().git();
 
     checkout.create_branch("feature").await.unwrap();
@@ -627,7 +696,7 @@ async fn branch_changes_and_the_branch_diff_compare_the_branch_with_its_base_as_
     );
     let diff = checkout.branch_diff(false).await.unwrap();
     assert!(diff.contains("+branch") && diff.contains("+more"), "{diff}");
-    host.shutdown().await;
+    service.stop().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -635,12 +704,12 @@ async fn git_initializes_a_folder_without_a_repository() {
     let (dir, _repo, home) = fixture();
     let plain = dir.path().join("plain");
     std::fs::create_dir(&plain).unwrap();
-    let host = host(&home).await;
+    let (service, host) = start_service(&home).await;
     let git = host.project(&plain).await.unwrap().git();
     assert!(!git.status().await.unwrap().repository);
     git.init().await.unwrap();
     assert!(git.status().await.unwrap().repository);
-    host.shutdown().await;
+    service.stop().await;
 }
 
 mod tempdir {
@@ -673,7 +742,7 @@ mod tempdir {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_thread_details_card_reads_t3_and_a_fork_merges_back() {
     let (_dir, repo, home) = fixture();
-    let host = host(&home).await;
+    let (service, host) = start_service(&home).await;
     assert!(!host.environment_name().await.unwrap().is_empty());
     let project = host.project(&repo).await.unwrap();
     let thread = project
@@ -704,5 +773,141 @@ async fn a_thread_details_card_reads_t3_and_a_fork_merges_back() {
     assert!(parent_row.is_some_and(|row| row.merge_target));
     assert!(lineage.can_merge);
     fork.merge_back().await.unwrap();
-    host.shutdown().await;
+    service.stop().await;
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn the_service_admits_only_clients_with_its_token_and_owns_its_folder() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, _repo, _) = fixture();
+    let home = dir.path().join("meta");
+    let service = Service::start(service_config(&home)).await.unwrap();
+    let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&home), 0o700);
+    assert_eq!(mode(&home.join(CONNECTION_FILE)), 0o600);
+
+    assert!(
+        remote::Host::connect_to(&service.url, "mh-wrong", "test")
+            .await
+            .is_err()
+    );
+    let client = remote::Host::connect(&home, "test").await.unwrap();
+    assert_eq!(client.status().await.unwrap().t3_version, t3_version());
+    let second = Service::start(service_config(&home)).await;
+    assert!(second.is_err_and(|e| e.contains("Another Meta-Harness service")));
+
+    service.stop().await;
+    assert!(!home.join(CONNECTION_FILE).exists());
+    assert!(
+        client.status().await.is_err(),
+        "a stopped service answers nothing"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dropped_service_stops_serving_its_clients() {
+    let (dir, _repo, _) = fixture();
+    let home = dir.path().join("meta");
+    let service = Service::start(service_config(&home)).await.unwrap();
+    let (url, token) = (service.url.clone(), service.token.clone());
+    let client = remote::Host::connect(&home, "test").await.unwrap();
+    drop(service);
+    assert!(!home.join(CONNECTION_FILE).exists());
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while client.status().await.is_ok() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        while remote::Host::connect_to(&url, &token, "test").await.is_ok() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("a dropped service ends its connections and stops listening");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_approved_configuration_reaches_the_harness_homes_t3_runs_them_in() {
+    let (dir, _repo, _) = fixture();
+    let home = dir.path().join("meta");
+    let service = Service::start(service_config(&home)).await.unwrap();
+    let client = remote::Host::connect(&home, "liquid").await.unwrap();
+    let number = client
+        .propose(
+            "Test first",
+            vec![Change::Instruction {
+                name: "rules".to_owned(),
+                text: Some("Run the tests.".to_owned()),
+            }],
+        )
+        .await
+        .unwrap();
+    let claude = home.join("harness/claude");
+    let codex = home.join("harness/codex");
+    assert!(
+        !claude.join("CLAUDE.md").exists(),
+        "nothing before approval"
+    );
+    assert_eq!(client.approve(number).await.unwrap().revision, 1);
+    assert_eq!(
+        std::fs::read_to_string(claude.join("CLAUDE.md")).unwrap(),
+        "Run the tests.\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(codex.join("AGENTS.md")).unwrap(),
+        "Run the tests.\n"
+    );
+    let log = client.log().await.unwrap();
+    assert!(log.iter().all(|entry| entry.client == "liquid"), "{log:?}");
+
+    // T3 keeps the homes in its settings, so it starts Claude Code and Codex in them.
+    let settings: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(home.join("t3/userdata/settings.json")).unwrap(),
+    )
+    .unwrap();
+    let instances = &settings["providerInstances"];
+    assert_eq!(
+        instances["codex"]["config"]["homePath"],
+        codex.to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        instances["claudeAgent"]["config"]["homePath"],
+        claude.to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        instances[AGENT]["driver"], "acpRegistry",
+        "the ACP agent stays"
+    );
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_goes_on_after_the_service_restarts() {
+    let (dir, repo, _) = fixture();
+    let home = dir.path().join("meta");
+    let (service, client) = start_service(&home).await;
+    let mut statuses = client
+        .project(&repo)
+        .await
+        .unwrap()
+        .git()
+        .watch()
+        .await
+        .unwrap();
+    let before = client.status().await.unwrap();
+
+    service.stop().await;
+    assert!(client.status().await.is_err(), "nothing answers meanwhile");
+    let ended = tokio::time::timeout(Duration::from_secs(10), async {
+        while statuses.recv().await.is_some() {}
+    })
+    .await;
+    assert!(ended.is_ok(), "a stream of the lost connection ends");
+
+    // The login service starts it again with a new port and token; the client finds both.
+    let service = Service::start(service_config(&home)).await.unwrap();
+    let after = client.status().await.unwrap();
+    assert_eq!(after.revision, before.revision);
+    assert!(client.project(&repo).await.is_ok());
+    service.stop().await;
 }
