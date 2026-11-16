@@ -94,6 +94,23 @@ class UnsubscribableSession extends FakeSession {
   Future<BridgeSubscription> subscribe() => Future.error('the stream is gone');
 }
 
+/// A session whose turn changes for `from` wait for `holds[from]`, so an older read can finish last
+/// or fail.
+class HeldChanges extends FakeSession {
+  final holds = <int, Completer<void>>{};
+
+  @override
+  Future<List<BridgeFileChange>> turnChanges(
+    int from,
+    int to, {
+    required bool hideWhitespace,
+  }) async {
+    final files = [fileOf('turn-$from-$to.dart')];
+    await holds[from]?.future;
+    return files;
+  }
+}
+
 /// A session whose event stream takes until `cancelGate` completes to cancel, so a switch can happen
 /// while the session it leaves is still being released.
 class SlowCancel extends FakeSession {
@@ -781,6 +798,48 @@ void main() {
       ]);
       session.gitBackend.patches['a.dart'] = '+uncommitted';
       expect(await state.patch('a.dart'), '+uncommitted');
+    });
+
+    /// Opens a session with two finished turns, starts an AllTurns read that waits, then selects
+    /// OneTurn(2), which completes. Returns the older read's hold.
+    Future<Completer<void>> selectOverSlowerRead() async {
+      final held = HeldChanges()..turnList = [turnOf(1), turnOf(2)];
+      project.session = held;
+      await state.open('thread-1');
+      await pumpEventQueue();
+
+      final older = Completer<void>();
+      held.holds[1] = older;
+      unawaited(state.showTurns(const AllTurns()));
+      await pumpEventQueue();
+      await state.showTurns(const OneTurn(2));
+      return older;
+    }
+
+    test(
+      'a slower read of an earlier scope cannot replace the newer selection',
+      () async {
+        final older = await selectOverSlowerRead();
+
+        older.complete();
+        await pumpEventQueue();
+
+        expect(state.shownScope.value, const OneTurn(2));
+        expect(state.shown.value?.from.number, 2);
+        expect(state.changed.value?.map((file) => file.path), [
+          'turn-2-2.dart',
+        ]);
+      },
+    );
+
+    test('a failed slower read of an earlier scope shows no error over the newer selection', () async {
+      final older = await selectOverSlowerRead();
+
+      older.completeError('the turn is gone');
+      await pumpEventQueue();
+
+      expect(state.changesProblem.value, isNull);
+      expect(state.changed.value?.map((file) => file.path), ['turn-2-2.dart']);
     });
   });
 

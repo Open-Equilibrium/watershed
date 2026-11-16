@@ -413,9 +413,15 @@ class SessionState {
     await readChanges();
   }
 
+  /// Counts the reads of the Diff, so a read that a newer one overtakes never lands.
+  int _diffRequests = 0;
+
   /// Reads the turns and what the shown ones changed.
   Future<void> readChanges() async {
     final generation = _generation;
+    final diffRequest = ++_diffRequests;
+    bool isLatest() =>
+        generation == _generation && diffRequest == _diffRequests;
     final session = _session;
     try {
       final scope = diffScope.value;
@@ -426,7 +432,7 @@ class SessionState {
             : await checkout.uncommittedChanges(
                 hideWhitespace: hideWhitespace.value,
               );
-        if (generation != _generation) return;
+        if (!isLatest()) return;
         shownScope.value = scope;
         shown.value = null;
         changesProblem.value = null;
@@ -436,7 +442,7 @@ class SessionState {
       final read = session == null
           ? const <BridgeTurn>[]
           : await session.turns();
-      if (generation != _generation) return;
+      if (!isLatest()) return;
       _setTurns(read);
       final pair = compared(read, scope);
       if (pair == null || session == null) {
@@ -454,13 +460,13 @@ class SessionState {
         pair.to.number,
         hideWhitespace: hideWhitespace.value,
       );
-      if (generation != _generation) return;
+      if (!isLatest()) return;
       shownScope.value = scope;
       shown.value = pair;
       changesProblem.value = null;
       changed.value = files;
     } on Object catch (error) {
-      if (generation != _generation) return;
+      if (!isLatest()) return;
       changesProblem.value = (
         title: 'No changes shown',
         text: 'Could not show the changes: $error',
