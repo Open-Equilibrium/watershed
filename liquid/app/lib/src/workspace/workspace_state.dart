@@ -133,13 +133,14 @@ class WorkspaceState {
   /// The open Page, or none while the agent session shows.
   final open = ValueNotifier<OpenPage?>(null);
 
-  /// What last failed, as a plain sentence and then the core's message: a change Liquid did
-  /// not keep shows until the next change succeeds, a failed read until the next change or
-  /// read succeeds.
+  /// What failed, as a plain sentence and then the core's message: a change Liquid did not
+  /// keep shows until the next change succeeds, a failed read until the next change or read
+  /// succeeds, and both show while both last.
   final problem = ValueNotifier<String?>(null);
 
-  /// Whether `problem` is a failed read's.
-  bool _readFailed = false;
+  /// The change and the read that failed last and still show.
+  String? _changeFailed;
+  String? _readFailed;
 
   final _trees = <String, ValueNotifier<List<BridgePage>>>{};
   final _treeReads = <String, _Reread>{};
@@ -153,18 +154,17 @@ class WorkspaceState {
 
   /// Shows `problem`, a plain sentence on something not kept, until the next change succeeds,
   /// unless the window closed.
-  void report(String problem) => _show(problem, read: false);
+  void report(String problem) => _show(change: problem, read: _readFailed);
 
   /// Shows that a read failed, until the next change or read succeeds.
   void readFailed(Object error) => _show(
-    'Liquid could not read the Workspace, so what shows may be out of date: $error',
-    read: true,
+    change: _changeFailed,
+    read:
+        'Liquid could not read the Workspace, so what shows may be out of date: $error',
   );
 
   /// Takes a failed read's problem away once a read succeeded.
-  void readSucceeded() {
-    if (_readFailed) _show(null, read: false);
-  }
+  void readSucceeded() => _show(change: _changeFailed, read: null);
 
   /// Reads `asked` for a Page's Blocks; a failed read's problem goes once one succeeds.
   Future<BridgeAnswer> read(BridgeQuery asked) async {
@@ -173,10 +173,12 @@ class WorkspaceState {
     return answer;
   }
 
-  void _show(String? problem, {required bool read}) {
+  void _show({required String? change, required String? read}) {
     if (_disposed) return;
-    this.problem.value = problem;
+    _changeFailed = change;
     _readFailed = read;
+    final shown = [?change, ?read];
+    problem.value = shown.isEmpty ? null : shown.join('\n');
   }
 
   /// Completes once every mutation asked for so far is applied or refused.
@@ -189,11 +191,14 @@ class WorkspaceState {
     _applied = applied.then<void>((_) {}, onError: (_) {});
     return applied.then(
       (applied) {
-        _show(null, read: false);
+        _show(change: null, read: null);
         return applied;
       },
       onError: (Object error) {
-        _show('Liquid did not save this change: $error', read: false);
+        _show(
+          change: 'Liquid did not save this change: $error',
+          read: _readFailed,
+        );
         throw error;
       },
     );

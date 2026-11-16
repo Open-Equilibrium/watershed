@@ -159,8 +159,15 @@ void main() {
     await state.read(pages);
     expect(state.problem.value, isNull);
 
+    state.readFailed('disk I/O error');
     fake.refuse = 'the replica is read-only';
     await expectLater(state.rename(page, 'B'), throwsA(isA<String>()));
+    expect(
+      state.problem.value,
+      'Liquid did not save this change: the replica is read-only\n'
+      'Liquid could not read the Workspace, so what shows may be out of date: '
+      'disk I/O error',
+    );
     await state.read(pages);
     expect(
       state.problem.value,
