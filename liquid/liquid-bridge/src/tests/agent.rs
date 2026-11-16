@@ -525,6 +525,14 @@ fn an_event_stream_takes_the_subscription_it_names() {
         session.events_with(first.id + 1000, |_| true).is_err(),
         "an unknown subscription is an error"
     );
+    // Subscriptions nobody streamed end once enough newer ones replace them.
+    for _ in 0..4 {
+        session.subscribe().expect("a newer subscription");
+    }
+    assert!(
+        session.events_with(second.id, |_| true).is_err(),
+        "an abandoned subscription ends"
+    );
     stop(service);
 }
 
