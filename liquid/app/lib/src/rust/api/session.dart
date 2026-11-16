@@ -4,6 +4,7 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../frb_generated.dart';
+import 'details.dart';
 import 'events.dart';
 import 'git.dart';
 
@@ -17,6 +18,9 @@ import 'thread.dart';
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentHost>>
 abstract class AgentHost implements RustOpaqueInterface {
+  /// The name T3 shows for this host, such as the computer's name.
+  Future<String> environmentName();
+
   /// The project for the folder `root`.
   Future<AgentProject> project({required String root});
 
@@ -81,6 +85,14 @@ abstract class AgentSession implements RustOpaqueInterface {
     required List<BridgeQuestionAnswer> answers,
   });
 
+  /// Streams each change of the scheduled tasks after the latest
+  /// [`AgentSession::automations_subscribe`].
+  Stream<List<BridgeAutomation>> automationsEvents();
+
+  /// The scheduled tasks bound to this session now; their changes then stream from
+  /// [`AgentSession::automations_events`].
+  Future<List<BridgeAutomation>> automationsSubscribe();
+
   /// Removes a queued turn.
   Future<void> cancelQueued({required PlatformInt64 turn});
 
@@ -89,6 +101,9 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// The context window the latest request filled.
   Future<BridgeContext?> context();
+
+  /// T3's "Disconnect agent session": detaches the session's provider sessions.
+  Future<void> disconnect();
 
   /// Dismisses questions without answering.
   Future<void> dismiss({required String request});
@@ -111,6 +126,17 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// The session's id.
   Future<String> id();
 
+  /// Streams the lineage after each change that may have changed it, once the changes settle,
+  /// after the latest [`AgentSession::lineage_subscribe`]. A failed read streams as an error.
+  Stream<BridgeLineage> lineageEvents();
+
+  /// The lineage now: the threads related to this session, as T3's relationships panel shows
+  /// them. Its changes then stream from [`AgentSession::lineage_events`].
+  Future<BridgeLineage> lineageSubscribe();
+
+  /// T3's "Merge back": merges this fork's latest finished run into the session it forked from.
+  Future<void> mergeBack();
+
   /// The session's model.
   Future<BridgeModelChoice?> model();
 
@@ -124,12 +150,28 @@ abstract class AgentSession implements RustOpaqueInterface {
     required bool restoreFiles,
   });
 
+  /// Runs the scheduled task `id` now.
+  Future<void> runAutomationNow({required String id});
+
   /// Sends `text`: an idle session starts a turn; a running one takes it as a steer with
   /// `steer`, else queues it.
   Future<void> send({required String text, required bool steer});
 
   /// "Send now" on a queued turn.
   Future<void> sendQueuedNow({required PlatformInt64 turn});
+
+  /// Streams each change of the servers after the latest [`AgentSession::servers_subscribe`].
+  Stream<List<BridgeLocalServer>> serversEvents();
+
+  /// The local servers this session's terminals and agent started now; the servers' changes
+  /// then stream from [`AgentSession::servers_events`].
+  Future<List<BridgeLocalServer>> serversSubscribe();
+
+  /// Pauses or resumes the scheduled task `id`.
+  Future<void> setAutomationEnabled({
+    required String id,
+    required bool enabled,
+  });
 
   /// Points the session at `branch`, in `worktree` when the branch picker chose one.
   Future<void> setBranch({required String branch, String? worktree});
@@ -148,6 +190,15 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// Stops the running turn.
   Future<void> stop();
+
+  /// Stops the local server `pid` on `port`.
+  Future<void> stopServer({
+    required PlatformInt64 pid,
+    required PlatformInt64 port,
+  });
+
+  /// T3's "Stop subagent": stops the subagent `id`.
+  Future<void> stopSubagent({required String id});
 
   /// The session now; [`AgentSession::events`] then streams the events after it, with no gap.
   /// Liquid shows the snapshot and applies each event whose sequence is past it (ADR-0290).
@@ -173,6 +224,9 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// The turns, oldest first.
   Future<List<BridgeTurn>> turns();
+
+  /// The provider's usage limits, or `None` when it reports none.
+  Future<BridgeUsageLimits?> usageLimits();
 
   /// Its own worktree, if it has one.
   Future<String?> worktree();

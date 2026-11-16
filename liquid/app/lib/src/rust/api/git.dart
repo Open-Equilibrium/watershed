@@ -8,12 +8,21 @@ import 'events.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `new`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `changed_files`, `file_patch`, `new`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `run_with`, `watch_with`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<GitCheckout>>
 abstract class GitCheckout implements RustOpaqueInterface {
+  /// The branch's files changed against its base, as T3's Changes tap lists them.
+  Future<List<BridgeFileChange>> branchFiles({required bool hideWhitespace});
+
+  /// One file's unified diff against the branch's base.
+  Future<String> branchPatch({
+    required String path,
+    required bool hideWhitespace,
+  });
+
   /// Checks a pull request out here, or with `worktree` in its own worktree.
   Future<BridgeCheckedOut> checkOutPullRequest({
     required String reference,
@@ -36,6 +45,14 @@ abstract class GitCheckout implements RustOpaqueInterface {
   /// Pulls; returns T3's result title and description.
   Future<List<String>> pull();
 
+  /// Pull request `number` of the checkout's branch, with its checks and the actions the card
+  /// offers.
+  Future<BridgePullRequestDetail> pullRequest({required PlatformInt64 number});
+
+  /// Checks pull request `url` out into a new worktree for a new thread; returns its branch and
+  /// worktree.
+  Future<BridgeCheckedOut> pullRequestWorktree({required String url});
+
   /// Refs whose names contain `query`.
   Future<BridgeRefs> refs({
     required String query,
@@ -54,6 +71,13 @@ abstract class GitCheckout implements RustOpaqueInterface {
     String? message,
     List<String>? files,
     required bool featureBranch,
+  });
+
+  /// Runs `action` (`ready` or `merge`) on pull request `number`; a merge uses `merge_method`.
+  Future<void> runPullRequestAction({
+    required PlatformInt64 number,
+    required String action,
+    String? mergeMethod,
   });
 
   /// The checkout's status now.
@@ -245,6 +269,22 @@ class BridgeGitStatus {
   /// Uncommitted files.
   final List<BridgeFileChange> changes;
 
+  /// Lines the uncommitted files add, in total.
+  final PlatformInt64 workingAdded;
+
+  /// Lines the uncommitted files remove, in total.
+  final PlatformInt64 workingRemoved;
+
+  /// The base the branch's changes are counted against, with hiding characters written out;
+  /// `None` when T3 names none.
+  final String? branchBase;
+
+  /// Lines the branch adds against its base.
+  final PlatformInt64 branchAdded;
+
+  /// Lines the branch removes against its base.
+  final PlatformInt64 branchRemoved;
+
   /// Whether the branch has an upstream.
   final bool upstream;
 
@@ -267,6 +307,11 @@ class BridgeGitStatus {
     required this.remote,
     this.provider,
     required this.changes,
+    required this.workingAdded,
+    required this.workingRemoved,
+    this.branchBase,
+    required this.branchAdded,
+    required this.branchRemoved,
     required this.upstream,
     required this.ahead,
     required this.behind,
@@ -282,6 +327,11 @@ class BridgeGitStatus {
       remote.hashCode ^
       provider.hashCode ^
       changes.hashCode ^
+      workingAdded.hashCode ^
+      workingRemoved.hashCode ^
+      branchBase.hashCode ^
+      branchAdded.hashCode ^
+      branchRemoved.hashCode ^
       upstream.hashCode ^
       ahead.hashCode ^
       behind.hashCode ^
@@ -299,11 +349,176 @@ class BridgeGitStatus {
           remote == other.remote &&
           provider == other.provider &&
           changes == other.changes &&
+          workingAdded == other.workingAdded &&
+          workingRemoved == other.workingRemoved &&
+          branchBase == other.branchBase &&
+          branchAdded == other.branchAdded &&
+          branchRemoved == other.branchRemoved &&
           upstream == other.upstream &&
           ahead == other.ahead &&
           behind == other.behind &&
           aheadOfDefault == other.aheadOfDefault &&
           pullRequest == other.pullRequest;
+}
+
+/// One check of a pull request.
+class BridgePullRequestCheck {
+  /// Its name, with hiding characters written out.
+  final String name;
+
+  /// T3's status: `pending`, `action-required`, `success`, `failure`, `skipped`, `neutral` or
+  /// `cancelled`.
+  final String status;
+
+  /// What it reports, with hiding characters written out.
+  final String? description;
+
+  /// Its web address.
+  final String? url;
+
+  const BridgePullRequestCheck({
+    required this.name,
+    required this.status,
+    this.description,
+    this.url,
+  });
+
+  @override
+  int get hashCode =>
+      name.hashCode ^ status.hashCode ^ description.hashCode ^ url.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgePullRequestCheck &&
+          runtimeType == other.runtimeType &&
+          name == other.name &&
+          status == other.status &&
+          description == other.description &&
+          url == other.url;
+}
+
+/// The checkout's pull request, as T3's thread details card shows it.
+class BridgePullRequestDetail {
+  /// Its number.
+  final PlatformInt64 number;
+
+  /// Its title, with hiding characters written out.
+  final String title;
+
+  /// Its web address.
+  final String url;
+
+  /// `open`, `closed` or `merged`.
+  final String state;
+
+  /// Whether it is a draft.
+  final bool draft;
+
+  /// The branch it merges into, with hiding characters written out.
+  final String base;
+
+  /// Its branch, with hiding characters written out.
+  final String head;
+
+  /// Whether it is open and conflicts with its base.
+  final bool conflicting;
+
+  /// How many files it changes.
+  final PlatformInt64 files;
+
+  /// Lines it adds.
+  final PlatformInt64 added;
+
+  /// Lines it removes.
+  final PlatformInt64 removed;
+
+  /// Its checks, as T3 lists them.
+  final List<BridgePullRequestCheck> checks;
+
+  /// T3's rollup of the checks: `none`, `pending`, `failing` or `passing`.
+  final String checksState;
+
+  /// T3's summary of the checks, such as "1 of 2 failing".
+  final String checksSummary;
+
+  /// The action the card offers: `resolve`, `ready`, `fix` or `merge`; `None` when none.
+  final String? action;
+
+  /// The merge method a merge uses: `merge`, `squash` or `rebase`.
+  final String mergeMethod;
+
+  /// The prompt of the Fix action, with hiding characters written out.
+  final String fixPrompt;
+
+  /// The prompt of the Resolve action, with hiding characters written out.
+  final String resolvePrompt;
+
+  const BridgePullRequestDetail({
+    required this.number,
+    required this.title,
+    required this.url,
+    required this.state,
+    required this.draft,
+    required this.base,
+    required this.head,
+    required this.conflicting,
+    required this.files,
+    required this.added,
+    required this.removed,
+    required this.checks,
+    required this.checksState,
+    required this.checksSummary,
+    this.action,
+    required this.mergeMethod,
+    required this.fixPrompt,
+    required this.resolvePrompt,
+  });
+
+  @override
+  int get hashCode =>
+      number.hashCode ^
+      title.hashCode ^
+      url.hashCode ^
+      state.hashCode ^
+      draft.hashCode ^
+      base.hashCode ^
+      head.hashCode ^
+      conflicting.hashCode ^
+      files.hashCode ^
+      added.hashCode ^
+      removed.hashCode ^
+      checks.hashCode ^
+      checksState.hashCode ^
+      checksSummary.hashCode ^
+      action.hashCode ^
+      mergeMethod.hashCode ^
+      fixPrompt.hashCode ^
+      resolvePrompt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgePullRequestDetail &&
+          runtimeType == other.runtimeType &&
+          number == other.number &&
+          title == other.title &&
+          url == other.url &&
+          state == other.state &&
+          draft == other.draft &&
+          base == other.base &&
+          head == other.head &&
+          conflicting == other.conflicting &&
+          files == other.files &&
+          added == other.added &&
+          removed == other.removed &&
+          checks == other.checks &&
+          checksState == other.checksState &&
+          checksSummary == other.checksSummary &&
+          action == other.action &&
+          mergeMethod == other.mergeMethod &&
+          fixPrompt == other.fixPrompt &&
+          resolvePrompt == other.resolvePrompt;
 }
 
 /// One ref the branch picker lists.

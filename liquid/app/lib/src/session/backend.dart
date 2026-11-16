@@ -1,3 +1,4 @@
+import '../rust/api/details.dart';
 import '../rust/api/events.dart';
 import '../rust/api/git.dart';
 import '../rust/api/session.dart';
@@ -29,6 +30,9 @@ abstract interface class ProjectBackend {
   Future<List<BridgeProvider>> providers();
   Future<BridgeModelChoice?> writerModel();
   Future<void> setWriterModel(BridgeModelChoice model);
+
+  /// The name T3 shows for this host, such as the computer's name.
+  Future<String> environmentName();
 }
 
 /// What Liquid needs from one session.
@@ -85,6 +89,27 @@ abstract interface class SessionBackend {
 
   /// Writes the session's record into Downloads; returns the folder.
   Future<String> exportRecord({required String host, required String day});
+
+  /// The servers the session's agent or terminals run, now and as they change.
+  Future<List<BridgeLocalServer>> servers();
+  Stream<List<BridgeLocalServer>> serverChanges();
+  Future<void> stopServer(int pid, int port);
+
+  /// The session's scheduled tasks, now and as they change.
+  Future<List<BridgeAutomation>> automations();
+  Stream<List<BridgeAutomation>> automationChanges();
+  Future<void> setAutomationEnabled(String id, {required bool enabled});
+  Future<void> runAutomationNow(String id);
+
+  /// The session's related threads (T3's Lineage and Side chats), now and as they change.
+  Future<BridgeLineage> lineage();
+  Stream<BridgeLineage> lineageChanges();
+  Future<void> mergeBack();
+  Future<void> disconnect();
+  Future<void> stopSubagent(String id);
+
+  /// The provider's usage limits, if it reports any.
+  Future<BridgeUsageLimits?> usageLimits();
 }
 
 /// Git for one checkout, as T3 runs it.
@@ -118,6 +143,19 @@ abstract interface class GitBackend {
     String repository, {
     required bool public,
   });
+
+  /// The branch compared with its base, as T3's "Changes vs" row.
+  Future<List<BridgeFileChange>> branchChanges({required bool hideWhitespace});
+  Future<String> branchPatch(String path, {required bool hideWhitespace});
+  Future<BridgePullRequestDetail> pullRequest(int number);
+  Future<void> runPullRequestAction(
+    int number,
+    String action, {
+    String? mergeMethod,
+  });
+
+  /// Checks out the pull request at `url` in a worktree, as T3's Fix and Resolve do.
+  Future<BridgeCheckedOut> pullRequestWorktree(String url);
 }
 
 /// The project on Meta-Harness's T3 server, reached through the Rust bridge.
@@ -166,6 +204,8 @@ class RustProjectBackend implements ProjectBackend {
   @override
   Future<void> setWriterModel(BridgeModelChoice model) =>
       _host.setWriterModel(choice: model);
+  @override
+  Future<String> environmentName() => _host.environmentName();
 }
 
 /// One session on the agent host, reached through the Rust bridge.
@@ -258,6 +298,36 @@ class RustSessionBackend implements SessionBackend {
   @override
   Future<String> exportRecord({required String host, required String day}) =>
       _session.exportRecord(host: host, day: day);
+  @override
+  Future<List<BridgeLocalServer>> servers() => _session.serversSubscribe();
+  @override
+  Stream<List<BridgeLocalServer>> serverChanges() => _session.serversEvents();
+  @override
+  Future<void> stopServer(int pid, int port) =>
+      _session.stopServer(pid: pid, port: port);
+  @override
+  Future<List<BridgeAutomation>> automations() =>
+      _session.automationsSubscribe();
+  @override
+  Stream<List<BridgeAutomation>> automationChanges() =>
+      _session.automationsEvents();
+  @override
+  Future<void> setAutomationEnabled(String id, {required bool enabled}) =>
+      _session.setAutomationEnabled(id: id, enabled: enabled);
+  @override
+  Future<void> runAutomationNow(String id) => _session.runAutomationNow(id: id);
+  @override
+  Future<BridgeLineage> lineage() => _session.lineageSubscribe();
+  @override
+  Stream<BridgeLineage> lineageChanges() => _session.lineageEvents();
+  @override
+  Future<void> mergeBack() => _session.mergeBack();
+  @override
+  Future<void> disconnect() => _session.disconnect();
+  @override
+  Future<void> stopSubagent(String id) => _session.stopSubagent(id: id);
+  @override
+  Future<BridgeUsageLimits?> usageLimits() => _session.usageLimits();
 }
 
 /// Git through the Rust bridge; the checkout arrives from the bridge's worker threads.
@@ -336,4 +406,30 @@ class RustGitBackend implements GitBackend {
     repository: repository,
     public: public,
   );
+  @override
+  Future<List<BridgeFileChange>> branchChanges({
+    required bool hideWhitespace,
+  }) async => (await _git).branchFiles(hideWhitespace: hideWhitespace);
+  @override
+  Future<String> branchPatch(
+    String path, {
+    required bool hideWhitespace,
+  }) async =>
+      (await _git).branchPatch(path: path, hideWhitespace: hideWhitespace);
+  @override
+  Future<BridgePullRequestDetail> pullRequest(int number) async =>
+      (await _git).pullRequest(number: number);
+  @override
+  Future<void> runPullRequestAction(
+    int number,
+    String action, {
+    String? mergeMethod,
+  }) async => (await _git).runPullRequestAction(
+    number: number,
+    action: action,
+    mergeMethod: mergeMethod,
+  );
+  @override
+  Future<BridgeCheckedOut> pullRequestWorktree(String url) async =>
+      (await _git).pullRequestWorktree(url: url);
 }

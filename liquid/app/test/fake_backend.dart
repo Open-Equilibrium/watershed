@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:liquid/src/rust/api/details.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/rust/api/session.dart';
@@ -82,6 +83,11 @@ class FakeProject implements ProjectBackend {
     calls.add('writer ${model.model}');
     writer = model;
   }
+
+  String hostName = 'Mac mini';
+
+  @override
+  Future<String> environmentName() async => hostName;
 }
 
 /// One session on the fake host: [emit] streams events; everything else is recorded in [calls].
@@ -230,6 +236,48 @@ class FakeSession implements SessionBackend {
     calls.add('export $host $day');
     return '/Downloads/$day';
   }
+
+  /// What the card's live sections show; [serverUpdates], [automationUpdates] and
+  /// [lineageUpdates] stream their changes.
+  List<BridgeLocalServer> serverList = [];
+  final serverUpdates = StreamController<List<BridgeLocalServer>>.broadcast();
+  List<BridgeAutomation> automationList = [];
+  final automationUpdates =
+      StreamController<List<BridgeAutomation>>.broadcast();
+  BridgeLineage family = lineageOf();
+  final lineageUpdates = StreamController<BridgeLineage>.broadcast();
+  BridgeUsageLimits? limits;
+
+  @override
+  Future<List<BridgeLocalServer>> servers() async => serverList;
+  @override
+  Stream<List<BridgeLocalServer>> serverChanges() => serverUpdates.stream;
+  @override
+  Future<void> stopServer(int pid, int port) async =>
+      calls.add('stop server $pid $port');
+  @override
+  Future<List<BridgeAutomation>> automations() async => automationList;
+  @override
+  Stream<List<BridgeAutomation>> automationChanges() =>
+      automationUpdates.stream;
+  @override
+  Future<void> setAutomationEnabled(String id, {required bool enabled}) async =>
+      calls.add('automation $id enabled=$enabled');
+  @override
+  Future<void> runAutomationNow(String id) async =>
+      calls.add('run automation $id');
+  @override
+  Future<BridgeLineage> lineage() async => family;
+  @override
+  Stream<BridgeLineage> lineageChanges() => lineageUpdates.stream;
+  @override
+  Future<void> mergeBack() async => calls.add('merge back');
+  @override
+  Future<void> disconnect() async => calls.add('disconnect');
+  @override
+  Future<void> stopSubagent(String id) async => calls.add('stop subagent $id');
+  @override
+  Future<BridgeUsageLimits?> usageLimits() async => limits;
 }
 
 /// Git for a fake checkout: [statuses] streams status changes; actions are recorded in [calls].
@@ -356,6 +404,33 @@ class FakeGit implements GitBackend {
     String repository, {
     required bool public,
   }) async => calls.add('publish $provider $repository public=$public');
+
+  List<BridgeFileChange> branchFiles = [];
+  BridgePullRequestDetail? detail;
+
+  @override
+  Future<List<BridgeFileChange>> branchChanges({
+    required bool hideWhitespace,
+  }) async => branchFiles;
+  @override
+  Future<String> branchPatch(
+    String path, {
+    required bool hideWhitespace,
+  }) async => patches[path] ?? '';
+  @override
+  Future<BridgePullRequestDetail> pullRequest(int number) async =>
+      detail ?? pullRequestDetailOf(number: number);
+  @override
+  Future<void> runPullRequestAction(
+    int number,
+    String action, {
+    String? mergeMethod,
+  }) async => calls.add('pr $number $action merge=$mergeMethod');
+  @override
+  Future<BridgeCheckedOut> pullRequestWorktree(String url) async {
+    calls.add('pr worktree $url');
+    return const BridgeCheckedOut(branch: 'feature', worktree: '/worktrees/pr');
+  }
 }
 
 BridgeProvider providerOf({
@@ -534,6 +609,11 @@ BridgeGitStatus gitStatusOf({
   bool remote = true,
   String? provider = 'github',
   List<BridgeFileChange> changes = const [],
+  int workingAdded = 0,
+  int workingRemoved = 0,
+  String? branchBase,
+  int branchAdded = 0,
+  int branchRemoved = 0,
   bool upstream = true,
   int ahead = 0,
   int behind = 0,
@@ -546,6 +626,11 @@ BridgeGitStatus gitStatusOf({
   remote: remote,
   provider: provider,
   changes: changes,
+  workingAdded: workingAdded,
+  workingRemoved: workingRemoved,
+  branchBase: branchBase,
+  branchAdded: branchAdded,
+  branchRemoved: branchRemoved,
   upstream: upstream,
   ahead: ahead,
   behind: behind,
@@ -591,4 +676,40 @@ BridgeGitProgress progressOf(
   text: text,
   description: description,
   pullRequest: pullRequest,
+);
+
+BridgeLineage lineageOf({List<BridgeLineageRow> rows = const []}) =>
+    BridgeLineage(
+      rows: rows,
+      running: 0,
+      sideChatsRunning: 0,
+      canDisconnect: false,
+      mergeReady: false,
+      canMerge: false,
+    );
+
+BridgePullRequestDetail pullRequestDetailOf({
+  int number = 7,
+  String state = 'open',
+  bool draft = false,
+  String? action,
+}) => BridgePullRequestDetail(
+  number: number,
+  title: 'Add a feature',
+  url: 'https://github.com/o/r/pull/$number',
+  state: state,
+  draft: draft,
+  base: 'main',
+  head: 'feature',
+  conflicting: false,
+  files: 1,
+  added: 1,
+  removed: 0,
+  checks: const [],
+  checksState: 'none',
+  checksSummary: '',
+  action: action,
+  mergeMethod: 'squash',
+  fixPrompt: 'Fix the checks',
+  resolvePrompt: 'Resolve the conflicts',
 );
