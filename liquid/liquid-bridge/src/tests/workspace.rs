@@ -5,9 +5,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use crate::api::replica::LiquidWorkspace;
 use crate::api::workspace::{
     BridgeChange, BridgeMutation, BridgeMutationKind, BridgeQuery, BridgeQueryKind, BridgeResource,
-    BridgeResourceKind, BridgeTextStyle, LiquidWorkspace, MAX_WINDOW,
+    BridgeResourceKind, BridgeTextStyle, MAX_WINDOW,
 };
 use crate::keys::{KEY_NAME_FILE, Keys, path_name};
 

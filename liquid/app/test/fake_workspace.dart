@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:liquid/src/rust/api/database.dart';
+import 'package:liquid/src/rust/api/replica.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 
 /// An in-memory Workspace behind the bridge's calls: areas and Page trees, with a change for

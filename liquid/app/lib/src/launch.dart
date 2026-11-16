@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'agent/sidebar.dart';
 import 'rust/api/session.dart';
-import 'rust/api/workspace.dart';
+import 'rust/api/replica.dart';
 import 'session/backend.dart';
 import 'session/session_state.dart';
 import 'workspace/workspace_state.dart';

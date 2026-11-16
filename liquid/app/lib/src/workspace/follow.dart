@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../rust/api/replica.dart';
 import '../rust/api/workspace.dart';
 
 /// Subscription identities, unique for the life of the app.

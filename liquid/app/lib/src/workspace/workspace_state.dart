@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../rust/api/database.dart';
+import '../rust/api/replica.dart';
 import '../rust/api/workspace.dart';
 import 'follow.dart';
 

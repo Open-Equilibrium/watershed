@@ -7,6 +7,7 @@ import 'api/database.dart';
 import 'api/details.dart';
 import 'api/events.dart';
 import 'api/git.dart';
+import 'api/replica.dart';
 import 'api/session.dart';
 import 'api/thread.dart';
 import 'api/workspace.dart';
@@ -73,7 +74,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -1609332818;
+  int get rustContentHash => 922344117;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -438,26 +439,26 @@ abstract class RustLibApi extends BaseApi {
     required GitCheckout that,
   });
 
-  Future<BridgeApplied> crateApiWorkspaceLiquidWorkspaceApply({
+  Future<BridgeApplied> crateApiReplicaLiquidWorkspaceApply({
     required LiquidWorkspace that,
     required BridgeMutation mutation,
   });
 
-  Future<void> crateApiWorkspaceLiquidWorkspaceClose({
+  Future<void> crateApiReplicaLiquidWorkspaceClose({
     required LiquidWorkspace that,
     required PlatformInt64 subscription,
   });
 
-  Future<LiquidWorkspace> crateApiWorkspaceLiquidWorkspaceOpen({
+  Future<LiquidWorkspace> crateApiReplicaLiquidWorkspaceOpen({
     required String dir,
   });
 
-  Future<BridgeAnswer> crateApiWorkspaceLiquidWorkspaceQuery({
+  Future<BridgeAnswer> crateApiReplicaLiquidWorkspaceQuery({
     required LiquidWorkspace that,
     required BridgeQuery query,
   });
 
-  Stream<BridgeChange> crateApiWorkspaceLiquidWorkspaceSubscribe({
+  Stream<BridgeChange> crateApiReplicaLiquidWorkspaceSubscribe({
     required LiquidWorkspace that,
     required PlatformInt64 subscription,
     required BridgeResource resource,
@@ -3282,7 +3283,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<BridgeApplied> crateApiWorkspaceLiquidWorkspaceApply({
+  Future<BridgeApplied> crateApiReplicaLiquidWorkspaceApply({
     required LiquidWorkspace that,
     required BridgeMutation mutation,
   }) {
@@ -3306,21 +3307,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_bridge_applied,
           decodeErrorData: sse_decode_String,
         ),
-        constMeta: kCrateApiWorkspaceLiquidWorkspaceApplyConstMeta,
+        constMeta: kCrateApiReplicaLiquidWorkspaceApplyConstMeta,
         argValues: [that, mutation],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiWorkspaceLiquidWorkspaceApplyConstMeta =>
+  TaskConstMeta get kCrateApiReplicaLiquidWorkspaceApplyConstMeta =>
       const TaskConstMeta(
         debugName: "LiquidWorkspace_apply",
         argNames: ["that", "mutation"],
       );
 
   @override
-  Future<void> crateApiWorkspaceLiquidWorkspaceClose({
+  Future<void> crateApiReplicaLiquidWorkspaceClose({
     required LiquidWorkspace that,
     required PlatformInt64 subscription,
   }) {
@@ -3344,21 +3345,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_unit,
           decodeErrorData: null,
         ),
-        constMeta: kCrateApiWorkspaceLiquidWorkspaceCloseConstMeta,
+        constMeta: kCrateApiReplicaLiquidWorkspaceCloseConstMeta,
         argValues: [that, subscription],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiWorkspaceLiquidWorkspaceCloseConstMeta =>
+  TaskConstMeta get kCrateApiReplicaLiquidWorkspaceCloseConstMeta =>
       const TaskConstMeta(
         debugName: "LiquidWorkspace_close",
         argNames: ["that", "subscription"],
       );
 
   @override
-  Future<LiquidWorkspace> crateApiWorkspaceLiquidWorkspaceOpen({
+  Future<LiquidWorkspace> crateApiReplicaLiquidWorkspaceOpen({
     required String dir,
   }) {
     return handler.executeNormal(
@@ -3378,18 +3379,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
               sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerLiquidWorkspace,
           decodeErrorData: sse_decode_String,
         ),
-        constMeta: kCrateApiWorkspaceLiquidWorkspaceOpenConstMeta,
+        constMeta: kCrateApiReplicaLiquidWorkspaceOpenConstMeta,
         argValues: [dir],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiWorkspaceLiquidWorkspaceOpenConstMeta =>
+  TaskConstMeta get kCrateApiReplicaLiquidWorkspaceOpenConstMeta =>
       const TaskConstMeta(debugName: "LiquidWorkspace_open", argNames: ["dir"]);
 
   @override
-  Future<BridgeAnswer> crateApiWorkspaceLiquidWorkspaceQuery({
+  Future<BridgeAnswer> crateApiReplicaLiquidWorkspaceQuery({
     required LiquidWorkspace that,
     required BridgeQuery query,
   }) {
@@ -3413,21 +3414,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_bridge_answer,
           decodeErrorData: sse_decode_String,
         ),
-        constMeta: kCrateApiWorkspaceLiquidWorkspaceQueryConstMeta,
+        constMeta: kCrateApiReplicaLiquidWorkspaceQueryConstMeta,
         argValues: [that, query],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiWorkspaceLiquidWorkspaceQueryConstMeta =>
+  TaskConstMeta get kCrateApiReplicaLiquidWorkspaceQueryConstMeta =>
       const TaskConstMeta(
         debugName: "LiquidWorkspace_query",
         argNames: ["that", "query"],
       );
 
   @override
-  Stream<BridgeChange> crateApiWorkspaceLiquidWorkspaceSubscribe({
+  Stream<BridgeChange> crateApiReplicaLiquidWorkspaceSubscribe({
     required LiquidWorkspace that,
     required PlatformInt64 subscription,
     required BridgeResource resource,
@@ -3456,7 +3457,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             decodeSuccessData: sse_decode_unit,
             decodeErrorData: sse_decode_String,
           ),
-          constMeta: kCrateApiWorkspaceLiquidWorkspaceSubscribeConstMeta,
+          constMeta: kCrateApiReplicaLiquidWorkspaceSubscribeConstMeta,
           argValues: [that, subscription, resource, sink],
           apiImpl: this,
         ),
@@ -3465,7 +3466,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return sink.stream;
   }
 
-  TaskConstMeta get kCrateApiWorkspaceLiquidWorkspaceSubscribeConstMeta =>
+  TaskConstMeta get kCrateApiReplicaLiquidWorkspaceSubscribeConstMeta =>
       const TaskConstMeta(
         debugName: "LiquidWorkspace_subscribe",
         argNames: ["that", "subscription", "resource", "sink"],
@@ -9885,12 +9886,12 @@ class LiquidWorkspaceImpl extends RustOpaque implements LiquidWorkspace {
   Future<BridgeApplied> apply({required BridgeMutation mutation}) => RustLib
       .instance
       .api
-      .crateApiWorkspaceLiquidWorkspaceApply(that: this, mutation: mutation);
+      .crateApiReplicaLiquidWorkspaceApply(that: this, mutation: mutation);
 
   /// Ends a subscription, also one whose registration has not arrived yet. A Page that no
   /// subscription follows any more leaves memory.
   Future<void> close({required PlatformInt64 subscription}) =>
-      RustLib.instance.api.crateApiWorkspaceLiquidWorkspaceClose(
+      RustLib.instance.api.crateApiReplicaLiquidWorkspaceClose(
         that: this,
         subscription: subscription,
       );
@@ -9899,7 +9900,7 @@ class LiquidWorkspaceImpl extends RustOpaque implements LiquidWorkspace {
   Future<BridgeAnswer> query({required BridgeQuery query}) => RustLib
       .instance
       .api
-      .crateApiWorkspaceLiquidWorkspaceQuery(that: this, query: query);
+      .crateApiReplicaLiquidWorkspaceQuery(that: this, query: query);
 
   /// Streams `resource`'s changes to Dart under the identity `subscription`, which Dart
   /// chooses and passes to [`LiquidWorkspace::close`] when it cancels the stream. The first
@@ -9908,7 +9909,7 @@ class LiquidWorkspaceImpl extends RustOpaque implements LiquidWorkspace {
   Stream<BridgeChange> subscribe({
     required PlatformInt64 subscription,
     required BridgeResource resource,
-  }) => RustLib.instance.api.crateApiWorkspaceLiquidWorkspaceSubscribe(
+  }) => RustLib.instance.api.crateApiReplicaLiquidWorkspaceSubscribe(
     that: this,
     subscription: subscription,
     resource: resource,

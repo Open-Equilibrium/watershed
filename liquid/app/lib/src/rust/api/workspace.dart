@@ -8,37 +8,8 @@ import 'database.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `id`, `message`, `normalized`, `notify`, `of`, `of`, `open_lock`, `open_with`, `optional_id`, `page`, `place`, `read`, `release_page`, `release`, `take_lock`, `to_core`, `to_core`, `units`, `watch`, `window`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Inner`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
-
-// Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<LiquidWorkspace>>
-abstract class LiquidWorkspace implements RustOpaqueInterface {
-  /// Applies one write as the device's person through Liquid's interface, then tells the
-  /// subscribers of every resource it changed.
-  Future<BridgeApplied> apply({required BridgeMutation mutation});
-
-  /// Ends a subscription, also one whose registration has not arrived yet. A Page that no
-  /// subscription follows any more leaves memory.
-  Future<void> close({required PlatformInt64 subscription});
-
-  /// Opens the Workspace whose replica lives in the folder `dir`, creating both on first
-  /// use. The replica's key lives in the operating system's keychain (ADR-0237).
-  static Future<LiquidWorkspace> open({required String dir}) =>
-      RustLib.instance.api.crateApiWorkspaceLiquidWorkspaceOpen(dir: dir);
-
-  /// Reads one bounded window, one Block's text or one Database's fields.
-  Future<BridgeAnswer> query({required BridgeQuery query});
-
-  /// Streams `resource`'s changes to Dart under the identity `subscription`, which Dart
-  /// chooses and passes to [`LiquidWorkspace::close`] when it cancels the stream. The first
-  /// change carries the resource's current count and marks the registration: a reader queries
-  /// after it, so it misses no later change.
-  Stream<BridgeChange> subscribe({
-    required PlatformInt64 subscription,
-    required BridgeResource resource,
-  });
-}
+// These functions are ignored because they are not marked as `pub`: `id`, `message`, `normalized`, `of`, `of`, `optional_id`, `page`, `place`, `to_core`, `to_core`, `units`, `window`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
 
 /// The answer to a query; the query's kind names the parts it fills.
 class BridgeAnswer {

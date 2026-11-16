@@ -9,6 +9,7 @@ mod convert;
 mod frb_generated;
 mod keys;
 mod stream;
+mod subscriptions;
 
 #[cfg(test)]
 mod tests;
