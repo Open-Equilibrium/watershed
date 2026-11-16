@@ -4,6 +4,8 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../agent_hosts/agent_hosts.dart';
+import '../agent_hosts/agent_hosts_pane.dart';
 import '../appearance.dart';
 import '../controls.dart';
 import '../diff/diff_model.dart';
@@ -47,6 +49,7 @@ class AgentShell extends StatefulWidget {
     this.diffSettings,
     this.cardSettings,
     this.appearance,
+    this.agentHosts,
     this.parseDiff = parsePatchInBackground,
   }) : assert((state == null) == (info == null));
 
@@ -69,6 +72,9 @@ class AgentShell extends StatefulWidget {
 
   /// Which rows the session card shows; all of them, unsaved, without it.
   final SessionCardSettingsController? cardSettings;
+
+  /// The agent hosts Settings lists (ADR-0295); without it Settings show no Agent hosts section.
+  final AgentHostsController? agentHosts;
 
   /// How the Diff panel reads a patch; tests pass the synchronous parser.
   final PatchParser parseDiff;
@@ -455,6 +461,9 @@ class _AgentShellState extends State<AgentShell> {
                             writer: project == null
                                 ? null
                                 : WriterModelPane(project: project),
+                            agentHosts: widget.agentHosts == null
+                                ? null
+                                : AgentHostsPane(hosts: widget.agentHosts!),
                           );
                         }
                         final open = widget.workspace?.open.value;

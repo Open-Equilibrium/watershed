@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'agent/sidebar.dart';
+import 'agent_hosts/agent_hosts.dart';
 import 'rust/api/session.dart';
 import 'rust/api/replica.dart';
 import 'session/backend.dart';
@@ -26,25 +27,40 @@ String projectName(String project) =>
         .lastWhere((part) => part.isNotEmpty, orElse: () => '/');
 
 /// Connects to Meta-Harness for the project the environment names; `META_HARNESS_HOME` may name its
-/// data folder. The start page then begins or continues a session.
-Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
+/// data folder. The start page then begins or continues a session. With `activeAddress`, the
+/// session runs on that agent host (ADR-0295), where the project folder is, so this Mac does not
+/// look for it.
+Future<Launch> launchFromEnvironment(
+  Map<String, String> environment, {
+  String? activeAddress,
+}) async {
   final project = environment['LIQUID_PROJECT'];
   if (project == null) {
     return const Launch.problem(
       'Start Liquid with LIQUID_PROJECT set to a project directory.',
     );
   }
-  if (!Directory(project).existsSync()) {
-    return Launch.problem('LIQUID_PROJECT names no directory: $project');
-  }
   final home = environment['META_HARNESS_HOME'];
-  // A relative folder would be looked up from wherever Liquid started.
-  if (home != null && !File(home).isAbsolute) {
-    return Launch.problem('META_HARNESS_HOME must be an absolute path: $home');
+  if (activeAddress == null) {
+    if (!Directory(project).existsSync()) {
+      return Launch.problem('LIQUID_PROJECT names no directory: $project');
+    }
+    // A relative folder would be looked up from wherever Liquid started.
+    if (home != null && !File(home).isAbsolute) {
+      return Launch.problem(
+        'META_HARNESS_HOME must be an absolute path: $home',
+      );
+    }
+  } else if (!Directory(project).isAbsolute) {
+    return Launch.problem(
+      'LIQUID_PROJECT must be an absolute path on the agent host $activeAddress: $project',
+    );
   }
   final root = Directory(project).absolute.path;
   try {
-    final host = await AgentHost.connect(home: home);
+    final host = activeAddress == null
+        ? await AgentHost.connect(home: home)
+        : await AgentHost.connectRemote(address: activeAddress);
     final state = SessionState(
       RustProjectBackend(host, await host.project(root: root)),
     );
@@ -54,6 +70,11 @@ Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
       SessionInfo(project: projectName(project), path: root),
     );
   } on Object catch (error) {
+    if (activeAddress != null) {
+      return Launch.problem(
+        'Liquid could not connect to the agent host $activeAddress: ${messageOf(error)}. Its saved entry is unchanged; choose This Mac or another agent host in Settings → Agent hosts.',
+      );
+    }
     // The bridge's error says that Meta-Harness is not running and where Liquid looked.
     return Launch.problem('$error');
   }

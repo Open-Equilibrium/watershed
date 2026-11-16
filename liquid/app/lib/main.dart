@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_io.dart'
     show ExternalLibrary;
 
+import 'src/agent_hosts/agent_hosts.dart';
 import 'src/app.dart';
 import 'src/appearance.dart';
 import 'src/diff/diff_settings.dart';
@@ -33,7 +34,13 @@ Future<void> main() async {
     Platform.environment,
     defaultTargetPlatform,
   );
-  final launch = await launchFromEnvironment(Platform.environment);
+  // Liquid's agent hosts: which host sessions run on, read before the session connects to it.
+  final agentHostsFile = SettingsFile(File('$settings/agent_hosts.json'));
+  final agentHosts = await AgentHostsSettings.load(agentHostsFile);
+  final launch = await launchFromEnvironment(
+    Platform.environment,
+    activeAddress: agentHosts.activeAddress,
+  );
   // Without a session the Workspace still opens; the reason stays in the terminal.
   if (launch.problem case final problem?) stderr.writeln('Liquid: $problem');
   // Beside the settings, in Liquid's data folder.
@@ -58,6 +65,14 @@ Future<void> main() async {
       ),
       appearance: await AppearanceController.load(
         SettingsFile(File('$settings/appearance.json')),
+      ),
+      agentHosts: AgentHostsController(
+        settings: agentHosts,
+        bridge: RustAgentHostBridge(
+          home: Platform.environment['META_HARNESS_HOME'],
+        ),
+        running: agentHosts.activeAddress,
+        save: (next) => agentHostsFile.save(next.toJson()),
       ),
     ),
   );

@@ -3,6 +3,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'agent/session_card_settings.dart';
 import 'agent/shell.dart';
+import 'agent_hosts/agent_hosts.dart';
 import 'appearance.dart';
 import 'diff/diff_settings.dart';
 import 'launch.dart';
@@ -26,6 +27,7 @@ class LiquidApp extends StatelessWidget {
     this.diffSettings,
     this.cardSettings,
     this.appearance,
+    this.agentHosts,
     this.workspace,
     this.workspaceProblem,
   });
@@ -41,6 +43,9 @@ class LiquidApp extends StatelessWidget {
 
   /// Theme and text size; the system theme at the default size, unsaved, without it.
   final AppearanceController? appearance;
+
+  /// The agent hosts Settings lists (ADR-0295).
+  final AgentHostsController? agentHosts;
 
   @override
   Widget build(BuildContext context) {
@@ -79,6 +84,7 @@ class LiquidApp extends StatelessWidget {
                 diffSettings: diffSettings,
                 cardSettings: cardSettings,
                 appearance: appearance,
+                agentHosts: agentHosts,
               )
             : Scaffold(
                 body: Center(
