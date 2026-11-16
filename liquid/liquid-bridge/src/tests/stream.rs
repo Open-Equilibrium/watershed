@@ -333,7 +333,7 @@ fn deltas_taken_while_a_recovery_snapshot_is_taken_stay_apart() {
 }
 
 #[test]
-fn a_replacement_stream_gets_only_the_room_the_session_has_left() {
+fn a_replacement_stream_is_not_credited_with_its_predecessors_confirmations() {
     paused_runtime().block_on(async {
         let credit = Arc::new(Credit::default());
         let (events, mut deliveries) = start_forwarding(credit.clone());
@@ -352,7 +352,7 @@ fn a_replacement_stream_gets_only_the_room_the_session_has_left() {
         assert_eq!(
             taken(&mut replaced).len(),
             WINDOW,
-            "the window counts every event the session sent, so the replacement waits after one window"
+            "the confirmations the first stream received do not reopen the replacement's window"
         );
     });
 }

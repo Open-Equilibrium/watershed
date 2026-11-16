@@ -41,13 +41,11 @@ pub(crate) const WINDOW: usize = 256;
 /// goes and Liquid falls behind; other events are never dropped (ADR-0272).
 pub(crate) const PENDING_LIMIT: usize = 256;
 
-/// The session's window (ADR-0272): how many events its streams sent to Dart, how many Liquid
-/// applied (as `AgentSession::confirm_applied` reports), and whether the session was dropped and no
-/// confirmation will come.
+/// The session's confirmations (ADR-0272): how many events Liquid applied, as
+/// `AgentSession::confirm_applied` reports, and whether the session was dropped and no
+/// confirmation will come. It also marks the recovery snapshots that merging must respect.
 pub(crate) struct Credit {
     applied: AtomicU64,
-    /// Events sent to Dart by the session's streams, which the window counts from.
-    sent: Mutex<u64>,
     /// Recovery snapshots being taken, and the sequence of the last one that returned.
     snapshots_taken: AtomicU64,
     snapshot_sequence: AtomicI64,
@@ -60,7 +58,6 @@ impl Default for Credit {
     fn default() -> Self {
         Self {
             applied: AtomicU64::default(),
-            sent: Mutex::default(),
             snapshots_taken: AtomicU64::default(),
             snapshot_sequence: AtomicI64::default(),
             closed: watch::channel(false).0,
@@ -84,26 +81,6 @@ impl Credit {
     /// How many events Liquid applied so far.
     fn applied(&self) -> u64 {
         self.applied.load(Ordering::Acquire)
-    }
-
-    fn lock_sent(&self) -> MutexGuard<'_, u64> {
-        self.sent.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// Takes room for up to `wanted` events and gives how many it took: the session's events sent
-    /// and not yet applied stay within `WINDOW`, whichever of its streams sent them.
-    fn reserve(&self, wanted: usize) -> usize {
-        let mut sent = self.lock_sent();
-        let unconfirmed = sent.saturating_sub(self.applied());
-        let room = (WINDOW as u64).saturating_sub(unconfirmed);
-        let count = room.min(wanted as u64);
-        *sent += count;
-        count as usize
-    }
-
-    /// Gives back `count` events that `reserve` took but that were not sent.
-    fn release(&self, count: usize) {
-        *self.lock_sent() -= count as u64;
     }
 
     /// Marks a recovery snapshot as being taken, until [`Credit::end_snapshot`].
@@ -151,17 +128,31 @@ impl Credit {
     }
 }
 
-/// What the forwarder holds for Liquid: merged events waiting for room in the window.
+/// What the forwarder holds for Liquid: merged events waiting for room in the window, and how many
+/// events it sent.
 #[derive(Default)]
 pub(crate) struct Outbox {
     /// Events waiting for room, merged where they can be.
     pub(crate) pending: Vec<BridgeEvent>,
+    /// Events handed to Dart so far.
+    sent: u64,
+    /// The session's confirmations before this stream began. They confirm the stream it replaced,
+    /// so this stream does not count them.
+    confirmed_before: u64,
     /// Set from dropping partial output until its fell-behind event goes out; further drops
     /// then add no second event.
     behind: bool,
 }
 
 impl Outbox {
+    /// An outbox for a stream that begins now, with `credit`'s confirmations so far behind it.
+    pub(crate) fn beginning(credit: &Credit) -> Self {
+        Self {
+            confirmed_before: credit.applied(),
+            ..Self::default()
+        }
+    }
+
     /// Queues `event` for Dart. Past the bound, the partial output waiting goes, since the reload
     /// replaces it, and one fell-behind event follows it; no other event is ever dropped.
     pub(crate) fn admit(&mut self, event: BridgeEvent, credit: &Credit) {
@@ -191,22 +182,21 @@ impl Outbox {
         self.pending.len() <= PENDING_LIMIT
     }
 
-    /// Hands pending events to `deliver` in order, as far as the session's window has room. Returns
-    /// `false` once `deliver` refused one.
+    /// Hands pending events to `deliver` in order, as far as the window has room. Returns `false`
+    /// once `deliver` refused one.
     fn send(&mut self, credit: &Credit, deliver: &mut impl FnMut(BridgeEvent) -> bool) -> bool {
-        let count = credit.reserve(self.pending.len());
-        let mut delivered = 0;
+        let applied = credit.applied().saturating_sub(self.confirmed_before);
+        let unconfirmed = self.sent.saturating_sub(applied);
+        let room = (WINDOW as u64).saturating_sub(unconfirmed);
+        let count = room.min(self.pending.len() as u64) as usize;
         for event in self.pending.drain(..count) {
             if event.kind == BridgeEventKind::FellBehind {
                 self.behind = false;
             }
+            self.sent += 1;
             if !deliver(event) {
-                // What was not handed over leaves the window, so the session's other streams can
-                // use it.
-                credit.release(count - delivered);
                 return false;
             }
-            delivered += 1;
         }
         true
     }
@@ -343,7 +333,7 @@ pub(crate) async fn forward<Next: Future<Output = Option<mpsc::Receiver<ThreadEv
     credit: Arc<Credit>,
     mut deliver: impl FnMut(BridgeEvent) -> bool,
 ) {
-    let mut outbox = Outbox::default();
+    let mut outbox = Outbox::beginning(&credit);
     loop {
         if credit.is_closed() {
             // The session was dropped, so no confirmation comes; what waits is released with it.
