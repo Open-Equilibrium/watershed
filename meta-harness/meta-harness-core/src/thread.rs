@@ -275,6 +275,11 @@ impl Thread {
         (snapshot(&mut state), receiver)
     }
 
+    /// Whether T3 ended the thread's stream for good, so no event comes; a reconnect does not.
+    pub fn ended(&self) -> bool {
+        self.state().ended
+    }
+
     /// The thread as it is now.
     pub fn snapshot(&self) -> Snapshot {
         snapshot(&mut self.state())

@@ -70,9 +70,12 @@ fn start_forwarding(
 ) {
     let (events, receiver) = tokio::sync::mpsc::channel(4096);
     let (delivered, deliveries) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(forward(receiver, never, credit, move |event| {
-        delivered.send(event).is_ok()
-    }));
+    tokio::spawn(forward(
+        receiver,
+        || Some(never()),
+        credit,
+        move |event| delivered.send(event).is_ok(),
+    ));
     (events, deliveries)
 }
 
@@ -176,11 +179,16 @@ fn forwards_streaming_text_once_its_window_passed() {
             let (events, receiver) = tokio::sync::mpsc::channel(16);
             let (delivered, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
             let start = tokio::time::Instant::now();
-            tokio::spawn(forward(receiver, never, Arc::default(), move |event| {
-                delivered
-                    .send((start.elapsed(), event.kind, event.text))
-                    .is_ok()
-            }));
+            tokio::spawn(forward(
+                receiver,
+                || Some(never()),
+                Arc::default(),
+                move |event| {
+                    delivered
+                        .send((start.elapsed(), event.kind, event.text))
+                        .is_ok()
+                },
+            ));
             let streamed =
                 |at, text: &str| Some((at, BridgeEventKind::ContentDelta, Some(text.to_owned())));
             events.send(delta("Hel")).await.expect("sent");
@@ -284,10 +292,15 @@ fn closing_the_credit_releases_a_forwarder_that_waits_on_a_dropped_session() {
         let probe = Arc::new(());
         let held = probe.clone();
         let (events, receiver) = tokio::sync::mpsc::channel(4096);
-        let forwarding = tokio::spawn(forward(receiver, never, credit.clone(), move |_event| {
-            let _held = &held;
-            true
-        }));
+        let forwarding = tokio::spawn(forward(
+            receiver,
+            || Some(never()),
+            credit.clone(),
+            move |_event| {
+                let _held = &held;
+                true
+            },
+        ));
         for item in 1..=WINDOW as u64 + 1 {
             events.send(started(item)).await.expect("sent");
         }
@@ -317,10 +330,15 @@ fn closing_the_credit_releases_a_forwarder_that_waits_for_the_next_event() {
         // The session's sender stays open, as the core keeps a dropped thread's subscriber until
         // the thread's next event.
         let (_events, receiver) = tokio::sync::mpsc::channel(16);
-        let forwarding = tokio::spawn(forward(receiver, never, credit.clone(), move |_event| {
-            let _held = &held;
-            true
-        }));
+        let forwarding = tokio::spawn(forward(
+            receiver,
+            || Some(never()),
+            credit.clone(),
+            move |_event| {
+                let _held = &held;
+                true
+            },
+        ));
         settle().await;
         credit.close();
         tokio::time::timeout(Duration::from_secs(1), forwarding)
@@ -445,7 +463,7 @@ fn a_dropped_subscription_falls_behind_once_and_continues_on_a_new_one() {
         let (delivered, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
         tokio::spawn(forward(
             receiver,
-            move || resubscribed.take().expect("one resubscription"),
+            move || Some(resubscribed.take().expect("one resubscription")),
             Arc::default(),
             move |event| delivered.send(event).is_ok(),
         ));
@@ -470,23 +488,14 @@ fn a_dropped_subscription_falls_behind_once_and_continues_on_a_new_one() {
 }
 
 #[test]
-fn a_thread_that_ended_is_not_resubscribed_in_a_loop() {
-    // Real time: a loop that resubscribes without waiting never lets the paused clock advance.
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_time()
-        .build()
-        .expect("runtime starts");
-    runtime.block_on(async {
-        let resubscriptions = Arc::new(AtomicUsize::new(0));
-        let counted = resubscriptions.clone();
+fn a_thread_that_ended_ends_its_stream_without_a_reload() {
+    paused_runtime().block_on(async {
         let reloads = Arc::new(AtomicUsize::new(0));
         let delivered = reloads.clone();
         let forwarding = tokio::spawn(forward(
             closed(),
-            move || {
-                counted.fetch_add(1, Ordering::SeqCst);
-                closed()
-            },
+            // The core says the thread ended, so there is nothing to subscribe to again.
+            || None,
             Arc::<Credit>::default(),
             move |event| {
                 if event.kind == BridgeEventKind::FellBehind {
@@ -495,13 +504,35 @@ fn a_thread_that_ended_is_not_resubscribed_in_a_loop() {
                 true
             },
         ));
-        // A subscription that closes again before any event means T3 ended the thread for good:
-        // Liquid reloads once, and the stream ends instead of reloading again and again.
         tokio::time::timeout(Duration::from_secs(1), forwarding)
             .await
             .expect("forward returns once the thread ended")
             .expect("forward completes");
-        assert_eq!(resubscriptions.load(Ordering::SeqCst), 1);
-        assert!(reloads.load(Ordering::SeqCst) <= 1);
+        assert_eq!(reloads.load(Ordering::SeqCst), 0);
+    });
+}
+
+#[test]
+fn an_idle_thread_stays_live_across_two_restores_without_an_event_between() {
+    paused_runtime().block_on(async {
+        let (live, receiver) = tokio::sync::mpsc::channel(16);
+        // A reconnect's snapshot restore drops the subscription twice before any event.
+        let mut next = vec![receiver, closed()];
+        let (delivered, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
+        let forwarding = tokio::spawn(forward(
+            closed(),
+            move || next.pop(),
+            Arc::default(),
+            move |event| delivered.send(event).is_ok(),
+        ));
+        live.send(started(1)).await.expect("sent");
+        settle().await;
+        assert!(!forwarding.is_finished(), "the stream stays live");
+        assert!(
+            taken(&mut deliveries)
+                .iter()
+                .any(|event| event.kind == BridgeEventKind::ItemStarted),
+            "the event after the restores arrives"
+        );
     });
 }

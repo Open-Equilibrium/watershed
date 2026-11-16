@@ -403,7 +403,7 @@ impl AgentSession {
         let thread = self.thread.clone();
         RUNTIME.spawn(stream::forward(
             receiver,
-            move || thread.subscribe().1,
+            move || (!thread.ended()).then(|| thread.subscribe().1),
             self.credit.clone(),
             deliver,
         ));

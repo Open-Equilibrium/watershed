@@ -176,17 +176,16 @@ pub(crate) async fn until_ended<T>(
 /// Hands the thread's events to `deliver` until it returns `false` or the session is dropped.
 /// It sends at most `WINDOW` events that `credit` has not confirmed; what waits meanwhile
 /// merges, and an overflow ends in one fell-behind event (ADR-0272). When the core drops this
-/// subscriber, which fell too far behind, the stream takes `resubscribe`'s events after a
-/// fell-behind event.
+/// subscriber, which fell too far behind, or a reconnect restored the thread, the stream takes
+/// `resubscribe`'s events after a fell-behind event; `resubscribe` gives none once the thread
+/// ended for good, and the stream ends.
 pub(crate) async fn forward(
     mut receiver: mpsc::Receiver<ThreadEvent>,
-    mut resubscribe: impl FnMut() -> mpsc::Receiver<ThreadEvent>,
+    mut resubscribe: impl FnMut() -> Option<mpsc::Receiver<ThreadEvent>>,
     credit: Arc<Credit>,
     mut deliver: impl FnMut(BridgeEvent) -> bool,
 ) {
     let mut outbox = Outbox::default();
-    // Whether `receiver` came from `resubscribe` and has yielded no event yet.
-    let mut resubscribed = false;
     loop {
         if credit.is_closed() {
             // The session was dropped, so no confirmation comes; what waits is released with it.
@@ -206,7 +205,6 @@ pub(crate) async fn forward(
         let idle = outbox.pending.is_empty();
         match next_or_wake(&credit, &mut receiver).await {
             Some(Some(event)) => {
-                resubscribed = false;
                 outbox.admit(BridgeEvent::from(event));
                 if idle {
                     // Bounded by the window, so a busy agent never holds delivery back.
@@ -219,14 +217,11 @@ pub(crate) async fn forward(
                 }
             }
             Some(None) => {
-                if resubscribed {
-                    // The new subscription closed before any event: T3 ended the thread for good
-                    // (a reconnect keeps the core's follow open), so the stream ends after the one
-                    // reload Liquid already has.
+                let Some(next) = resubscribe() else {
+                    // T3 ended the thread for good: no event comes, so the stream ends.
                     return;
-                }
-                receiver = resubscribe();
-                resubscribed = true;
+                };
+                receiver = next;
                 if !outbox.behind {
                     outbox.fell_behind();
                 }
