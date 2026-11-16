@@ -13,7 +13,7 @@ use super::Thread;
 use crate::t3::{Projection, millis};
 
 /// How a row's thread relates to the thread the panel shows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Relation {
     /// Context transferred between the two threads.
     ContextTransfer,
@@ -30,7 +30,7 @@ pub enum Relation {
 }
 
 /// The section of the panel a row sits in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Group {
     /// Forks, the parent and transfers: listed at once.
     Related,
@@ -43,7 +43,7 @@ pub enum Group {
 }
 
 /// One related thread.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct LineageRow {
     /// T3's thread id.
     pub thread: String,
@@ -71,7 +71,7 @@ pub struct LineageRow {
 }
 
 /// The lineage the panel shows.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Lineage {
     /// The related threads, in T3's order.
     pub rows: Vec<LineageRow>,
@@ -628,6 +628,18 @@ pub struct LineageChanges {
 }
 
 impl LineageChanges {
+    /// Wakes on each item of a stream of the Meta-Harness service.
+    pub(crate) fn from_stream(mut stream: crate::remote::Stream<()>) -> Self {
+        let wake = Arc::new(Notify::new());
+        let woken = wake.clone();
+        let task = tokio::spawn(async move {
+            while stream.recv().await.is_some() {
+                woken.notify_one();
+            }
+        });
+        Self { wake, task }
+    }
+
     /// Waits for a change; read the lineage again after each.
     pub async fn changed(&self) {
         self.wake.notified().await;

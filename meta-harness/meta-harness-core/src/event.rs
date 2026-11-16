@@ -1,15 +1,15 @@
 //! Agent-neutral agent events, in T3 Code's vocabulary (ADR-0281).
 
 /// One turn: a user prompt until the agent settles, including its retries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TurnId(pub u64);
 
 /// One item within a session, such as a message, a reasoning block or a tool call.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ItemId(pub u64);
 
 /// What an item represents.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ItemKind {
     /// A prompt or steering message from the user.
     UserMessage,
@@ -28,7 +28,7 @@ pub enum ItemKind {
 }
 
 /// Kind-specific information about a started item.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum ItemDetail {
     /// No further information.
     None,
@@ -42,7 +42,7 @@ pub enum ItemDetail {
 }
 
 /// Tokens of one model request, as the provider reported them; T3 reports no cost (ADR-0293).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Usage {
     /// Input tokens.
     pub input: u64,
@@ -57,11 +57,11 @@ pub struct Usage {
 }
 
 /// One open request from the agent that waits for the user.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RequestId(pub String);
 
 /// A request the agent waits on.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct PendingRequest {
     /// The request.
     pub id: RequestId,
@@ -72,7 +72,7 @@ pub struct PendingRequest {
 }
 
 /// What a request asks.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     /// Approve an action.
     Approval {
@@ -90,7 +90,7 @@ pub enum Request {
 }
 
 /// One choice of an approval.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ApprovalOption {
     /// T3's decision: `accept`, `acceptForSession`, `acceptAlways`, `decline` or `cancel`.
     pub decision: String,
@@ -101,7 +101,7 @@ pub struct ApprovalOption {
 }
 
 /// One question the agent asks.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Question {
     /// The id its answer is sent under.
     pub id: String,
@@ -118,7 +118,7 @@ pub struct Question {
 }
 
 /// How an item ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ItemStatus {
     /// The item completed.
     Completed,
@@ -127,7 +127,7 @@ pub enum ItemStatus {
 }
 
 /// An agent-neutral agent event.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum AgentEvent {
     /// A turn started.
     TurnStarted {

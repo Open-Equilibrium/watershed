@@ -1,0 +1,603 @@
+//! Meta-Harness's service (ADR-0286, ADR-0297): it owns a data folder, starts the pinned T3 Code
+//! server there and serves the API (see [`crate::api`]) on a WebSocket at 127.0.0.1, as T3 Code
+//! serves its own clients. Every connection must carry the bearer token the service writes, with
+//! its address, into `connection.json`, which only the user can read.
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use futures_util::{SinkExt, StreamExt};
+use serde::Serialize;
+use serde_json::{Value, json};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{Mutex, mpsc};
+use tokio::task::{AbortHandle, JoinHandle};
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
+use tokio_tungstenite::tungstenite::http::StatusCode;
+
+use crate::api::{
+    self, Call, Checkout, ConfigCall, GitCall, HostCall, ProjectCall, Reply, Stream, ThreadCall,
+};
+use crate::config::{Homes, Proposed, Store, provider_instances};
+use crate::{AcpAgent, Host, HostConfig, Project, Thread};
+
+/// The file that tells clients where the service listens and which token it accepts.
+pub const CONNECTION_FILE: &str = "connection.json";
+
+/// Frames a connection's writer holds before a stream waits for the client to read.
+const OUTGOING: usize = 256;
+
+/// What a service runs on.
+#[derive(Debug, Clone)]
+pub struct ServiceConfig {
+    /// Meta-Harness's data folder: its store, T3's data, the harness homes and the connection
+    /// file. One service at a time owns it.
+    pub home: PathBuf,
+    /// The pinned `t3` executable (ADR-0281).
+    pub t3: PathBuf,
+    /// Agents T3 runs as local ACP commands.
+    pub acp_agents: Vec<AcpAgent>,
+}
+
+/// A running service.
+pub struct Service {
+    /// `ws://127.0.0.1:<port>`.
+    pub url: String,
+    /// The bearer token every connection must send.
+    pub token: String,
+    host: Arc<Host>,
+    accept: JoinHandle<()>,
+    stopping: tokio::sync::watch::Sender<bool>,
+    connection_file: PathBuf,
+    // Held for its lock until the service stops.
+    _lock: std::fs::File,
+}
+
+struct Shared {
+    host: Arc<Host>,
+    store: Store,
+    homes: Homes,
+    person_codex: PathBuf,
+    token: String,
+    /// Turns true when the service stops, which ends every connection.
+    stopping: tokio::sync::watch::Receiver<bool>,
+}
+
+impl Service {
+    /// Takes the data folder, writes the current configuration into the harness homes, starts
+    /// T3 with Claude Code and Codex pointed at them and listens for clients.
+    pub async fn start(config: ServiceConfig) -> Result<Self, String> {
+        create_private_dir(&config.home)?;
+        let lock = take_lock(&config.home)?;
+        let store = Store::open(&config.home.join("meta-harness.sqlite"))?;
+        let homes = Homes::under(&config.home);
+        let person_codex = std::env::var_os("CODEX_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::home_dir().map(|h| h.join(".codex")))
+            .ok_or("The home folder is unknown.")?;
+        homes.write(&store.current()?.blocks, &person_codex)?;
+        let host = Arc::new(
+            Host::start(HostConfig {
+                binary: config.t3,
+                home: config.home.join("t3"),
+                acp_agents: config.acp_agents,
+            })
+            .await?,
+        );
+        let claude_dir = std::env::var("CLAUDE_CONFIG_DIR").ok();
+        let instances = provider_instances(
+            &host.provider_instances().await?,
+            &homes,
+            claude_dir.as_deref(),
+        )?;
+        host.set_provider_instances(instances).await?;
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .map_err(|e| format!("Could not listen on the loopback: {e}"))?;
+        let url = format!("ws://{}", listener.local_addr().map_err(|e| e.to_string())?);
+        let token = crate::t3::fresh_id("mh");
+        let connection_file = config.home.join(CONNECTION_FILE);
+        write_private(
+            &connection_file,
+            &json!({"url": url, "token": token, "pid": std::process::id()}).to_string(),
+        )?;
+        let (stopping, stopped) = tokio::sync::watch::channel(false);
+        let shared = Arc::new(Shared {
+            host: host.clone(),
+            store,
+            homes,
+            person_codex,
+            token: token.clone(),
+            stopping: stopped,
+        });
+        let accept = tokio::spawn(async move {
+            while let Ok((socket, _)) = listener.accept().await {
+                tokio::spawn(serve(shared.clone(), socket));
+            }
+        });
+        Ok(Self {
+            url,
+            token,
+            host,
+            accept,
+            stopping,
+            connection_file,
+            _lock: lock,
+        })
+    }
+
+    /// Stops listening, ends every connection, removes the connection file and stops T3.
+    pub async fn stop(self) {
+        self.accept.abort();
+        let _ = self.stopping.send(true);
+        let _ = std::fs::remove_file(&self.connection_file);
+        self.host.shutdown().await;
+    }
+}
+
+fn create_private_dir(path: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(path)
+        .map_err(|e| format!("Could not create {}: {e}", path.display()))?;
+    #[cfg(unix)]
+    std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o700))
+        .map_err(|e| format!("Could not protect {}: {e}", path.display()))?;
+    Ok(())
+}
+
+/// Locks `home` for this service; a second service on it fails at once.
+fn take_lock(home: &Path) -> Result<std::fs::File, String> {
+    let path = home.join("service.lock");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .map_err(|e| format!("Could not open {}: {e}", path.display()))?;
+    file.try_lock()
+        .map_err(|_| format!("Another Meta-Harness service runs on {}.", home.display()))?;
+    Ok(file)
+}
+
+/// Writes `text` to `path` readable only by the user, replacing it whole.
+fn write_private(path: &Path, text: &str) -> Result<(), String> {
+    use std::io::Write;
+    let temporary = path.with_extension("tmp");
+    let _ = std::fs::remove_file(&temporary);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut file = options
+        .open(&temporary)
+        .map_err(|e| format!("Could not write {}: {e}", temporary.display()))?;
+    file.write_all(text.as_bytes())
+        .and_then(|()| file.sync_all())
+        .map_err(|e| format!("Could not write {}: {e}", temporary.display()))?;
+    std::fs::rename(&temporary, path)
+        .map_err(|e| format!("Could not write {}: {e}", path.display()))
+}
+
+/// Whether `given` equals `expected`, in time that does not depend on where they differ.
+fn same(given: &[u8], expected: &[u8]) -> bool {
+    given.len() == expected.len()
+        && given
+            .iter()
+            .zip(expected)
+            .fold(0u8, |diff, (a, b)| diff | (a ^ b))
+            == 0
+}
+
+/// One client connection: its handshake must carry the token; then each request runs on its
+/// own task, and streams end when the client cancels them or leaves.
+// tungstenite's handshake callback returns its own large error response.
+#[allow(clippy::result_large_err)]
+async fn serve(shared: Arc<Shared>, socket: TcpStream) {
+    let mut client = String::new();
+    let check = |request: &Request, response: Response| -> Result<Response, ErrorResponse> {
+        let bearer = request
+            .headers()
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "));
+        if !bearer.is_some_and(|b| same(b.as_bytes(), shared.token.as_bytes())) {
+            let mut refused = ErrorResponse::new(Some("Meta-Harness needs its token.".into()));
+            *refused.status_mut() = StatusCode::UNAUTHORIZED;
+            return Err(refused);
+        }
+        client = request
+            .headers()
+            .get(api::CLIENT_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("unnamed")
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(64)
+            .collect();
+        Ok(response)
+    };
+    let Ok(socket) = tokio_tungstenite::accept_hdr_async(socket, check).await else {
+        return;
+    };
+    let (mut sink, mut frames) = socket.split();
+    let (out, mut outgoing) = mpsc::channel::<Message>(OUTGOING);
+    let writer = tokio::spawn(async move {
+        while let Some(message) = outgoing.recv().await {
+            if sink.send(message).await.is_err() {
+                break;
+            }
+        }
+    });
+    let mut stopping = shared.stopping.clone();
+    let session = Arc::new(Session {
+        shared,
+        client,
+        projects: Mutex::default(),
+        threads: Mutex::default(),
+    });
+    let mut streams: HashMap<u64, AbortHandle> = HashMap::new();
+    loop {
+        let frame = tokio::select! {
+            frame = frames.next() => frame,
+            _ = stopping.wait_for(|stopped| *stopped) => break,
+        };
+        let Some(Ok(frame)) = frame else { break };
+        let Message::Text(text) = frame else { continue };
+        let Ok(request) = serde_json::from_str::<api::Request>(&text) else {
+            continue;
+        };
+        streams.retain(|_, task| !task.is_finished());
+        match request {
+            api::Request::Call { id, call } => {
+                let (session, out) = (session.clone(), out.clone());
+                tokio::spawn(async move {
+                    let reply = match session.call(call).await {
+                        Ok(ok) => Reply::Ok { id, ok },
+                        Err(error) => Reply::Error { id, error },
+                    };
+                    let _ = out.send(frame_of(&reply)).await;
+                });
+            }
+            api::Request::Stream { id, stream } => {
+                let (session, out) = (session.clone(), out.clone());
+                let task = tokio::spawn(async move {
+                    if let Err(error) = session.stream(id, stream, &out).await {
+                        let _ = out.send(frame_of(&Reply::Error { id, error })).await;
+                    }
+                });
+                streams.insert(id, task.abort_handle());
+            }
+            api::Request::Cancel { cancel } => {
+                if let Some(task) = streams.remove(&cancel) {
+                    task.abort();
+                }
+            }
+        }
+    }
+    for task in streams.values() {
+        task.abort();
+    }
+    writer.abort();
+}
+
+fn frame_of(reply: &Reply) -> Message {
+    Message::Text(
+        serde_json::to_string(reply)
+            .expect("replies serialize")
+            .into(),
+    )
+}
+
+fn to(value: impl Serialize) -> Result<Value, String> {
+    serde_json::to_value(value).map_err(|e| e.to_string())
+}
+
+/// What one connection opened: projects by folder and threads by id.
+struct Session {
+    shared: Arc<Shared>,
+    client: String,
+    projects: Mutex<HashMap<String, Project>>,
+    threads: Mutex<HashMap<String, Thread>>,
+}
+
+impl Session {
+    fn host(&self) -> &Host {
+        &self.shared.host
+    }
+
+    async fn project(&self, root: &str) -> Result<Project, String> {
+        let mut projects = self.projects.lock().await;
+        if let Some(project) = projects.get(root) {
+            return Ok(project.clone());
+        }
+        let project = self.host().project(Path::new(root)).await?;
+        projects.insert(root.to_owned(), project.clone());
+        Ok(project)
+    }
+
+    /// The thread `id`, followed on first use, also after the client reconnected.
+    async fn thread(&self, root: &str, id: &str) -> Result<Thread, String> {
+        if let Some(thread) = self.threads.lock().await.get(id) {
+            return Ok(thread.clone());
+        }
+        let thread = self.project(root).await?.open(id).await?;
+        self.threads
+            .lock()
+            .await
+            .insert(id.to_owned(), thread.clone());
+        Ok(thread)
+    }
+
+    async fn git(&self, checkout: &Checkout) -> Result<crate::Git, String> {
+        Ok(match checkout {
+            Checkout::Project(root) => self.project(root).await?.git(),
+            Checkout::Thread { root, id } => self.thread(root, id).await?.git(),
+        })
+    }
+
+    async fn call(&self, call: Call) -> Result<Value, String> {
+        match call {
+            Call::Host(call) => self.host_call(call).await,
+            Call::Project { root, call } => self.project_call(&root, call).await,
+            Call::Thread { root, id, call } => {
+                let thread = self.thread(&root, &id).await?;
+                thread_call(&thread, call).await
+            }
+            Call::Git { checkout, call } => git_call(&self.git(&checkout).await?, call).await,
+            Call::Config(call) => self.config_call(call),
+        }
+    }
+
+    async fn host_call(&self, call: HostCall) -> Result<Value, String> {
+        let host = self.host();
+        match call {
+            HostCall::Status => to(api::Status {
+                t3_version: crate::t3_version().to_owned(),
+                pid: std::process::id(),
+                revision: self.shared.store.current()?.revision,
+            }),
+            HostCall::Providers => to(host.providers().await?),
+            HostCall::EnvironmentName => to(host.environment_name().await?),
+            HostCall::WriterModel => to(host.writer_model().await?),
+            HostCall::SetWriterModel(choice) => to(host.set_writer_model(&choice).await?),
+        }
+    }
+
+    async fn project_call(&self, root: &str, call: ProjectCall) -> Result<Value, String> {
+        let project = self.project(root).await?;
+        match call {
+            ProjectCall::Threads => to(project.threads().await?),
+            ProjectCall::Start(start) => {
+                let thread = project.start(start).await?;
+                let id = thread.id().to_owned();
+                self.threads.lock().await.insert(id.clone(), thread);
+                to(id)
+            }
+            ProjectCall::Open(id) => to(self.thread(root, &id).await.map(|_| ())?),
+            ProjectCall::OnlyThreadInWorktree(thread) => {
+                to(project.only_thread_in_worktree(&thread).await?)
+            }
+            ProjectCall::Delete { thread, worktree } => {
+                self.threads.lock().await.remove(&thread.id);
+                to(project.delete(&thread, worktree).await?)
+            }
+            ProjectCall::Archive { thread, archived } => {
+                to(project.archive(&thread, archived).await?)
+            }
+        }
+    }
+
+    fn config_call(&self, call: ConfigCall) -> Result<Value, String> {
+        let (store, client) = (&self.shared.store, self.client.as_str());
+        match call {
+            ConfigCall::Current => to(store.current()?),
+            ConfigCall::Propose { summary, changes } => {
+                to(store.propose(client, &summary, Proposed::Changes(changes))?)
+            }
+            ConfigCall::Revert(revision) => to(store.propose(
+                client,
+                &format!("Back to revision {revision}"),
+                Proposed::Restore(revision),
+            )?),
+            ConfigCall::Pending => to(store.pending()?),
+            ConfigCall::Approve(number) => {
+                let current = store.approve(client, number)?;
+                self.shared
+                    .homes
+                    .write(&current.blocks, &self.shared.person_codex)?;
+                to(current)
+            }
+            ConfigCall::Reject(number) => to(store.reject(client, number)?),
+            ConfigCall::Log => to(store.log()?),
+        }
+    }
+
+    /// Answers stream `id` with its first value, then sends its items until it ends.
+    async fn stream(
+        &self,
+        id: u64,
+        stream: Stream,
+        out: &mpsc::Sender<Message>,
+    ) -> Result<(), String> {
+        let send = |reply: Reply| async move { out.send(frame_of(&reply)).await.is_ok() };
+        let item = |value: Result<Value, String>| match value {
+            Ok(item) => Reply::Item { id, item },
+            Err(error) => Reply::Error { id, error },
+        };
+        match stream {
+            Stream::Subscribe { root, id: thread } => {
+                let (snapshot, mut events) = self.thread(&root, &thread).await?.subscribe();
+                send(Reply::Ok {
+                    id,
+                    ok: to(snapshot)?,
+                })
+                .await;
+                while let Some(event) = events.recv().await {
+                    if !send(item(to(event))).await {
+                        return Ok(());
+                    }
+                }
+            }
+            Stream::Servers { root, id: thread } => {
+                let mut watch = self.thread(&root, &thread).await?.servers().await?;
+                send(Reply::Ok {
+                    id,
+                    ok: to(watch.current())?,
+                })
+                .await;
+                while let Some(servers) = watch.changed().await {
+                    if !send(item(to(servers))).await {
+                        return Ok(());
+                    }
+                }
+            }
+            Stream::Automations { root, id: thread } => {
+                let mut watch = self.thread(&root, &thread).await?.automations().await?;
+                send(Reply::Ok {
+                    id,
+                    ok: to(watch.current())?,
+                })
+                .await;
+                while let Some(automations) = watch.changed().await {
+                    if !send(item(to(automations))).await {
+                        return Ok(());
+                    }
+                }
+            }
+            Stream::LineageChanges { root, id: thread } => {
+                let changes = self.thread(&root, &thread).await?.lineage_changes().await?;
+                send(Reply::Ok {
+                    id,
+                    ok: Value::Null,
+                })
+                .await;
+                loop {
+                    changes.changed().await;
+                    if !send(item(Ok(Value::Null))).await {
+                        return Ok(());
+                    }
+                }
+            }
+            Stream::GitWatch(checkout) => {
+                let mut statuses = self.git(&checkout).await?.watch().await?;
+                send(Reply::Ok {
+                    id,
+                    ok: Value::Null,
+                })
+                .await;
+                while let Some(status) = statuses.recv().await {
+                    if !send(item(to(status))).await {
+                        return Ok(());
+                    }
+                }
+            }
+            Stream::GitRun { checkout, request } => {
+                let mut progress = self.git(&checkout).await?.run(request).await?;
+                send(Reply::Ok {
+                    id,
+                    ok: Value::Null,
+                })
+                .await;
+                while let Some(step) = progress.recv().await {
+                    if !send(item(to(step))).await {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        send(Reply::End { id, end: () }).await;
+        Ok(())
+    }
+}
+
+async fn thread_call(thread: &Thread, call: ThreadCall) -> Result<Value, String> {
+    use crate::RequestId;
+    match call {
+        ThreadCall::Title => to(thread.title()),
+        ThreadCall::Worktree => to(thread.worktree()),
+        ThreadCall::Ended => to(thread.ended()),
+        ThreadCall::Snapshot => to(thread.snapshot()),
+        ThreadCall::Turns => to(thread.turns()),
+        ThreadCall::Statistics => to(thread.statistics()),
+        ThreadCall::Context => to(thread.context()),
+        ThreadCall::Model => to(thread.model()),
+        ThreadCall::Record => to(thread.record()),
+        ThreadCall::Send { text, steer } => to(thread.send(&text, steer).await?),
+        ThreadCall::Stop => to(thread.stop().await?),
+        ThreadCall::Diff {
+            from,
+            to: until,
+            ignore_whitespace,
+        } => to(thread.diff(from, until, ignore_whitespace).await?),
+        ThreadCall::Revert {
+            turn,
+            restore_files,
+        } => to(thread.revert(turn, restore_files).await?),
+        ThreadCall::Fork(turn) => to(thread.fork(turn).await?),
+        ThreadCall::SetPermissions(permissions) => to(thread.set_permissions(permissions).await?),
+        ThreadCall::SetModel(model) => to(thread.set_model(&model).await?),
+        ThreadCall::SendQueuedNow(turn) => to(thread.send_queued_now(turn).await?),
+        ThreadCall::EditQueued { turn, text } => to(thread.edit_queued(turn, &text).await?),
+        ThreadCall::CancelQueued(turn) => to(thread.cancel_queued(turn).await?),
+        ThreadCall::Respond { request, decision } => {
+            to(thread.respond(&RequestId(request), &decision).await?)
+        }
+        ThreadCall::Answer { request, answers } => {
+            to(thread.answer(&RequestId(request), &answers).await?)
+        }
+        ThreadCall::Dismiss(request) => to(thread.dismiss(&RequestId(request)).await?),
+        ThreadCall::SetBranch { branch, worktree } => to(thread
+            .set_branch(&branch, worktree.as_deref().map(Path::new))
+            .await?),
+        ThreadCall::StopServer { pid, port } => to(thread.stop_server(pid, port).await?),
+        ThreadCall::SetAutomationEnabled { id, enabled } => {
+            to(thread.set_automation_enabled(&id, enabled).await?)
+        }
+        ThreadCall::RunAutomationNow(id) => to(thread.run_automation_now(&id).await?),
+        ThreadCall::UsageLimits => to(thread.usage_limits().await?),
+        ThreadCall::Lineage => to(thread.lineage().await?),
+        ThreadCall::MergeBack => to(thread.merge_back().await?),
+        ThreadCall::Disconnect => to(thread.disconnect().await?),
+        ThreadCall::StopSubagent(id) => to(thread.stop_subagent(&id).await?),
+    }
+}
+
+async fn git_call(git: &crate::Git, call: GitCall) -> Result<Value, String> {
+    match call {
+        GitCall::Status => to(git.status().await?),
+        GitCall::Refs {
+            query,
+            cursor,
+            limit,
+        } => to(git.refs(&query, cursor, limit).await?),
+        GitCall::Switch(name) => to(git.switch(&name).await?),
+        GitCall::CreateBranch(name) => to(git.create_branch(&name).await?),
+        GitCall::Init => to(git.init().await?),
+        GitCall::Pull => to(git.pull().await?),
+        GitCall::BranchDiff(ignore) => to(git.branch_diff(ignore).await?),
+        GitCall::UncommittedDiff(ignore) => to(git.uncommitted_diff(ignore).await?),
+        GitCall::ResolvePullRequest(reference) => to(git.resolve_pull_request(&reference).await?),
+        GitCall::CheckOutPullRequest {
+            reference,
+            worktree,
+        } => to(git.check_out_pull_request(&reference, worktree).await?),
+        GitCall::Publish {
+            provider,
+            repository,
+            public,
+        } => to(git.publish(&provider, &repository, public).await?),
+        GitCall::PullRequest(number) => to(git.pull_request(number).await?),
+        GitCall::RunPullRequestAction {
+            number,
+            action,
+            merge_method,
+        } => to(git
+            .run_pull_request_action(number, &action, merge_method.as_deref())
+            .await?),
+        GitCall::PullRequestWorktree(reference) => {
+            to(git.pull_request_worktree(&reference).await?)
+        }
+    }
+}

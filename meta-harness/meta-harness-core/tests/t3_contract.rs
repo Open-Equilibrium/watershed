@@ -12,6 +12,7 @@ use meta_harness_core::{
     LineCount, ModelChoice, Permissions, Relation, Request, Snapshot, StartThread, Thread,
     ThreadEvent, TurnStatus, Workspace,
 };
+use meta_harness_core::{CONNECTION_FILE, Change, Service, ServiceConfig, remote, t3_version};
 
 const AGENT: &str = "scripted";
 
@@ -66,6 +67,27 @@ async fn host(home: &Path) -> Host {
     })
     .await
     .expect("T3 starts")
+}
+
+fn agents(home: &Path) -> Vec<AcpAgent> {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/scripted_acp_agent.py");
+    vec![AcpAgent {
+        id: AGENT.to_owned(),
+        command: PathBuf::from("/usr/bin/python3"),
+        args: vec![
+            script.to_string_lossy().into_owned(),
+            home.to_string_lossy().into_owned(),
+        ],
+        models: vec![AGENT.to_owned()],
+    }]
+}
+
+fn service_config(home: &Path) -> ServiceConfig {
+    ServiceConfig {
+        home: home.to_owned(),
+        t3: t3(),
+        acp_agents: agents(home),
+    }
 }
 
 fn worktree() -> Workspace {
@@ -705,4 +727,88 @@ async fn a_thread_details_card_reads_t3_and_a_fork_merges_back() {
     assert!(lineage.can_merge);
     fork.merge_back().await.unwrap();
     host.shutdown().await;
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn the_service_admits_only_clients_with_its_token_and_owns_its_folder() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, _repo, _) = fixture();
+    let home = dir.path().join("meta");
+    let service = Service::start(service_config(&home)).await.unwrap();
+    let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&home), 0o700);
+    assert_eq!(mode(&home.join(CONNECTION_FILE)), 0o600);
+
+    assert!(
+        remote::Host::connect_to(&service.url, "mh-wrong", "test")
+            .await
+            .is_err()
+    );
+    let client = remote::Host::connect(&home, "test").await.unwrap();
+    assert_eq!(client.status().await.unwrap().t3_version, t3_version());
+    let second = Service::start(service_config(&home)).await;
+    assert!(second.is_err_and(|e| e.contains("Another Meta-Harness service")));
+
+    service.stop().await;
+    assert!(!home.join(CONNECTION_FILE).exists());
+    assert!(
+        client.status().await.is_err(),
+        "a stopped service answers nothing"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_approved_configuration_reaches_the_harness_homes_t3_runs_them_in() {
+    let (dir, _repo, _) = fixture();
+    let home = dir.path().join("meta");
+    let service = Service::start(service_config(&home)).await.unwrap();
+    let client = remote::Host::connect(&home, "liquid").await.unwrap();
+    let number = client
+        .propose(
+            "Test first",
+            vec![Change::Instruction {
+                name: "rules".to_owned(),
+                text: Some("Run the tests.".to_owned()),
+            }],
+        )
+        .await
+        .unwrap();
+    let claude = home.join("harness/claude");
+    let codex = home.join("harness/codex");
+    assert!(
+        !claude.join("CLAUDE.md").exists(),
+        "nothing before approval"
+    );
+    assert_eq!(client.approve(number).await.unwrap().revision, 1);
+    assert_eq!(
+        std::fs::read_to_string(claude.join("CLAUDE.md")).unwrap(),
+        "Run the tests.\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(codex.join("AGENTS.md")).unwrap(),
+        "Run the tests.\n"
+    );
+    let log = client.log().await.unwrap();
+    assert!(log.iter().all(|entry| entry.client == "liquid"), "{log:?}");
+
+    // T3 keeps the homes in its settings, so it starts Claude Code and Codex in them.
+    let settings: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(home.join("t3/userdata/settings.json")).unwrap(),
+    )
+    .unwrap();
+    let instances = &settings["providerInstances"];
+    assert_eq!(
+        instances["codex"]["config"]["homePath"],
+        codex.to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        instances["claudeAgent"]["config"]["homePath"],
+        claude.to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        instances[AGENT]["driver"], "acpRegistry",
+        "the ACP agent stays"
+    );
+    service.stop().await;
 }

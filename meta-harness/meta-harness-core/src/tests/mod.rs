@@ -1,7 +1,9 @@
 mod client;
+mod config;
 mod details;
 mod fake_t3;
 mod git;
+mod homes;
 mod host;
 mod lineage;
 mod projection;

@@ -13,7 +13,7 @@ mod pull_request;
 pub use pull_request::{PullRequestCheck, PullRequestDetail};
 
 /// Added and removed lines.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct LineCount {
     /// Added lines.
     pub added: u32,
@@ -22,7 +22,7 @@ pub struct LineCount {
 }
 
 /// One file's uncommitted line counts.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ChangedFile {
     /// The path, relative to the checkout.
     pub path: String,
@@ -33,7 +33,7 @@ pub struct ChangedFile {
 }
 
 /// The branch's changes against its base, as T3 counts them.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct BranchChanges {
     /// The branch the changes are compared with; `None` when T3 found none.
     pub base: Option<String>,
@@ -42,7 +42,7 @@ pub struct BranchChanges {
 }
 
 /// The pull request of the checked-out branch.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct BranchPullRequest {
     /// Its number.
     pub number: u64,
@@ -59,7 +59,7 @@ pub struct BranchPullRequest {
 }
 
 /// A checkout's state, as T3's status reports it.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct GitStatus {
     /// Whether the folder is in a repository.
     pub repository: bool,
@@ -90,7 +90,7 @@ pub struct GitStatus {
 }
 
 /// T3's stacked Git actions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GitAction {
     /// Commit.
     Commit,
@@ -117,7 +117,7 @@ impl GitAction {
 }
 
 /// A stacked action's request.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct GitActionRequest {
     /// The action.
     pub action: GitAction,
@@ -130,7 +130,7 @@ pub struct GitActionRequest {
 }
 
 /// What a running stacked action reports.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum GitProgress {
     /// A phase started, with T3's label such as "Committing...".
     Phase(String),
@@ -152,7 +152,7 @@ pub enum GitProgress {
 }
 
 /// One ref the branch picker lists.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Ref {
     /// Its name.
     pub name: String,
@@ -167,7 +167,7 @@ pub struct Ref {
 }
 
 /// A page of refs.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Refs {
     /// The refs.
     pub refs: Vec<Ref>,
@@ -178,7 +178,7 @@ pub struct Refs {
 }
 
 /// A pull request T3 resolved from a reference such as `#42` or a URL.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedPullRequest {
     /// Its number.
     pub number: u64,

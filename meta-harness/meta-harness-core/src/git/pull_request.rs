@@ -11,7 +11,7 @@ use super::{Git, LineCount, count, text};
 const FINDING_LIMIT: usize = 20;
 
 /// One check of the pull request.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct PullRequestCheck {
     /// Its name.
     pub name: String,
@@ -25,7 +25,7 @@ pub struct PullRequestCheck {
 }
 
 /// The pull request of a checkout, as T3's thread details card shows it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct PullRequestDetail {
     /// Its number.
     pub number: u64,

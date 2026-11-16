@@ -3,15 +3,20 @@
 
 #![deny(missing_docs)]
 
+pub mod api;
+mod config;
 mod context;
 mod event;
 mod git;
 mod host;
+pub mod remote;
+mod service;
 mod statistics;
 mod t3;
 mod thread;
 mod visible;
 
+pub use config::{Action, Blocks, Change, Current, LogEntry, McpServer, Proposal, Proposed};
 pub use context::Context;
 pub use event::{
     AgentEvent, ApprovalOption, ItemDetail, ItemId, ItemKind, ItemStatus, PendingRequest, Question,
@@ -26,6 +31,7 @@ pub use host::{
     AcpAgent, Host, HostConfig, Model, ModelChoice, ModelOption, Permissions, Project, Provider,
     StartThread, ThreadSummary, Workspace,
 };
+pub use service::{CONNECTION_FILE, Service, ServiceConfig};
 pub use statistics::{ModelUsage, Statistics, ToolCalls, TurnStatistics};
 pub use t3::{Watch, t3_version};
 pub use thread::{
