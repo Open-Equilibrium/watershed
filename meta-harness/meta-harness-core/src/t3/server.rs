@@ -36,25 +36,39 @@ impl Server {
     pub async fn start(binary: &Path, home: &Path) -> Result<Self, String> {
         let runtime = home.join("userdata").join("server-runtime.json");
         stop_left_behind(binary, &runtime).await;
-        let _ = std::fs::remove_file(&runtime);
-        let mut command = tokio::process::Command::new(binary);
-        command
-            .args(["serve", "--host", "127.0.0.1", "--no-browser"])
-            .current_dir(home)
-            .env("T3CODE_HOME", home)
-            .envs(QUIET_ENV)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .kill_on_drop(true);
-        let child = crate::spawn(&mut command).map_err(|e| format!("Could not start T3: {e}"))?;
-        let origin = wait_for_origin(&runtime, child.id()).await?;
-        Ok(Self {
-            child,
-            origin,
-            home: home.to_owned(),
-            binary: binary.to_owned(),
-        })
+        // T3 picks a free port before it binds it, so a server starting at the same moment can
+        // take it and this one ends; it is started again rather than waited for.
+        for attempt in 1..=START_ATTEMPTS {
+            let _ = std::fs::remove_file(&runtime);
+            let mut command = tokio::process::Command::new(binary);
+            command
+                .args(["serve", "--host", "127.0.0.1", "--no-browser"])
+                .current_dir(home)
+                .env("T3CODE_HOME", home)
+                .envs(QUIET_ENV)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .kill_on_drop(true);
+            let mut child =
+                crate::spawn(&mut command).map_err(|e| format!("Could not start T3: {e}"))?;
+            match wait_for_origin(&runtime, &mut child).await? {
+                Some(origin) => {
+                    return Ok(Self {
+                        child,
+                        origin,
+                        home: home.to_owned(),
+                        binary: binary.to_owned(),
+                    });
+                }
+                None if attempt < START_ATTEMPTS => continue,
+                None => break,
+            }
+        }
+        Err(format!(
+            "T3 {} ended {START_ATTEMPTS} times before it listened",
+            t3_version()
+        ))
     }
 
     /// Issues owner bearer tokens with `t3 auth session issue`, which needs no person. A socket
@@ -151,12 +165,23 @@ async fn stop_left_behind(binary: &Path, runtime: &Path) {
     let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
 }
 
-async fn wait_for_origin(runtime: &Path, pid: Option<u32>) -> Result<String, String> {
+/// How often a server that ends before it listens is started.
+const START_ATTEMPTS: u32 = 3;
+
+/// The origin the started `child` listens on; `None` once it ended before listening.
+async fn wait_for_origin(
+    runtime: &Path,
+    child: &mut tokio::process::Child,
+) -> Result<Option<String>, String> {
+    let pid = child.id();
     for _ in 0..300 {
         if let Ok(text) = std::fs::read_to_string(runtime)
             && let Some(origin) = listening_origin(&text, pid)?
         {
-            return Ok(origin);
+            return Ok(Some(origin));
+        }
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            return Ok(None);
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -189,6 +214,43 @@ fn listening_origin(text: &str, pid: Option<u32>) -> Result<Option<String>, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stand-in `t3` whose first start ends at once, as one that lost a race for its port does,
+    /// and whose second writes the pinned release's runtime record and serves.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_server_that_ends_during_its_start_is_started_again() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("t3-start-{}", std::process::id()));
+        let home = dir.join("home");
+        std::fs::create_dir_all(home.join("userdata")).unwrap();
+        let binary = dir.join("t3");
+        let script = format!(
+            "#!/bin/sh\n\
+             [ \"$1\" = serve ] || exit 1\n\
+             if [ ! -e \"{started}\" ]; then : > \"{started}\"; exit 1; fi\n\
+             printf '{{\"pid\":%s,\"serverVersion\":\"{version}\",\"origin\":\"http://127.0.0.1:1\"}}' $$ \
+             > \"$T3CODE_HOME/userdata/server-runtime.json\"\n\
+             exec sleep 30\n",
+            started = dir.join("started").display(),
+            version = t3_version(),
+        );
+        std::fs::write(&binary, script).unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let started = std::time::Instant::now();
+        let mut server = Server::start(&binary, &home)
+            .await
+            .expect("the second start serves");
+        assert_eq!(server.origin, "http://127.0.0.1:1");
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            started.elapsed()
+        );
+        server.stop().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn a_stale_pid_counts_as_t3_only_when_it_runs_the_binary_as_serve() {
