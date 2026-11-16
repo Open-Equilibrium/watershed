@@ -53,19 +53,14 @@ void main() {
         'Cell editor text, set when the editor opens (its field is built only while open) and by typing relays.',
       ),
       (
-        'lib/src/workspace/page_view.dart',
-        "_title.text = _page?.title ?? '';",
-        'The first title, before its field is built.',
-      ),
-      (
         'lib/src/workspace/cell_pickers.dart',
         '_text.value = TextEditingValue(',
         'Date arrow keys: a person\'s own change, which stays undoable.',
       ),
       (
-        'lib/src/workspace/table_block.dart',
-        '_name.value = TextEditingValue(',
-        'The name taken from the line that became the Table, in its first frame; no earlier text is on its undo history.',
+        'lib/src/workspace/stored_name.dart',
+        '_controller.value = TextEditingValue(',
+        'handOver: the name taken from the line that became the Table, in its first frame; no earlier text is on its undo history.',
       ),
       (
         'lib/src/workspace/field_menu.dart',

@@ -4,7 +4,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../controls.dart';
 import '../rust/api/database.dart';
 import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
@@ -16,6 +15,7 @@ import 'explorer.dart' show untitled;
 import 'field_menu.dart';
 import 'field_panel.dart';
 import 'row_menu.dart';
+import 'stored_name.dart';
 import 'table_cells.dart';
 import 'table_selection.dart';
 import 'follow.dart';
@@ -122,17 +122,24 @@ class _TableBlockState extends State<TableBlock> {
   StreamSubscription<BridgeChange>? _followed;
 
   /// The name as typed; a name changed elsewhere shows unless the person is typing one.
-  var _name = TextEditingController();
+  late final _name = StoredName(
+    '',
+    rename: (name) => widget.views.write(
+      mutation(
+        BridgeMutationKind.renameDatabase,
+        page: _page,
+        block: _block,
+        text: name,
+      ),
+      [_block],
+    ),
+    restore: () async => mounted ? _database?.name ?? '' : null,
+    quitting: () => _state.quitting,
+    replaced: () {
+      if (mounted) setState(() {});
+    },
+  );
   final _nameFocus = FocusNode(debugLabel: 'Table name');
-
-  /// Whether a name Liquid wrote is waiting for the name field to take a fresh controller.
-  bool _replaced = false;
-
-  /// Renames asked for, so only the latest refusal puts the stored name back.
-  int _renames = 0;
-
-  /// The name as last read or written, which typing changes once a composition ends.
-  String _named = '';
 
   /// The renames sent when the name shown last was read.
   int _readSent = 0;
@@ -154,8 +161,7 @@ class _TableBlockState extends State<TableBlock> {
       ..addListener(_closePanel)
       ..addListener(_scrolled);
     _down.addListener(_scrolled);
-    _name.addListener(_typed);
-    _state.finishing.add(_typed);
+    _state.finishing.add(_name.typed);
     _state.finishing.add(_cells.finish);
     _state.finishing.add(_fieldMenus.renameTyped);
     _nameFocus.addListener(_left);
@@ -210,15 +216,14 @@ class _TableBlockState extends State<TableBlock> {
   @override
   void dispose() {
     _pageScroll?.removeListener(_moved);
-    // A composition still open is written as it stands.
-    _write();
-    _state.finishing.remove(_typed);
+    _state.finishing.remove(_name.typed);
     unawaited(_followed?.cancel());
     unawaited(_settled?.cancel());
     widget.views.caret.removeListener(_takeCaret);
     _rows.dispose();
     _sideways.dispose();
     _down.dispose();
+    // A composition still open is written as it stands.
     _name.dispose();
     _nameFocus.dispose();
     // A name typed in a field's menu is kept as it stands.
@@ -490,72 +495,18 @@ class _TableBlockState extends State<TableBlock> {
     // What was typed in the line it took the place of is its name.
     final (text, written) =
         widget.views.naming.remove(widget.view.id)?.call() ?? ('', false);
-    if (text.isNotEmpty) {
-      if (written) _named = text;
-      _name.value = TextEditingValue(
-        text: text,
-        selection: TextSelection.collapsed(offset: text.length),
-      );
-    }
+    if (text.isNotEmpty) _name.handOver(text, written: written);
     _nameFocus.requestFocus();
-  }
-
-  /// Each change of the name, once any composition ends, is one rename; a refused one puts
-  /// the stored name back.
-  void _typed() {
-    // On quitting, a composition still open is written as it stands.
-    if (!_name.value.composing.isCollapsed && !_state.quitting) return;
-    _write();
-  }
-
-  void _write() {
-    final name = _name.text;
-    if (name == _named) return;
-    _named = name;
-    final rename = ++_renames;
-    unawaited(
-      widget.views
-          .write(
-            mutation(
-              BridgeMutationKind.renameDatabase,
-              page: _page,
-              block: _block,
-              text: name,
-            ),
-            [_block],
-          )
-          .then<void>(
-            (_) {},
-            onError: (Object _) {
-              if (!mounted || rename != _renames) return;
-              _show(_database?.name ?? '');
-            },
-          ),
-    );
   }
 
   /// Leaving the name writes a composition still open as it stands; a name changed
   /// elsewhere meanwhile then shows, unless the person's own rename is on its way.
   void _left() {
     if (_nameFocus.hasFocus) return;
-    _write();
+    _name.write();
     final views = widget.views;
     if (views.pending(_block) > 0 || views.sent(_block) != _readSent) return;
-    _show(_database?.name ?? '');
-  }
-
-  /// Shows `name` as the stored one.
-  void _show(String name) {
-    _named = name;
-    if (!writeText(_name, TextEditingValue(text: name))) return;
-    if (mounted) setState(() => _replaced = true);
-  }
-
-  /// The name field takes a fresh controller when it builds, so ⌘Z cannot bring back the name
-  /// Liquid replaced (see [_show]).
-  void _adopt() {
-    _replaced = false;
-    _name = adoptController(_name, listener: _typed);
+    _name.show(_database?.name ?? '');
   }
 
   /// Reads the name and fields, then the rows read so far.
@@ -583,7 +534,7 @@ class _TableBlockState extends State<TableBlock> {
       }
       if (clean && views.pending(_block) == 0 && sent == views.sent(_block)) {
         _readSent = sent;
-        if (!_nameFocus.hasFocus) _show(answer.database?.name ?? '');
+        if (!_nameFocus.hasFocus) _name.show(answer.database?.name ?? '');
       }
       setState(() => _database = answer.database);
       _fieldMenus.read();
@@ -605,7 +556,6 @@ class _TableBlockState extends State<TableBlock> {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    if (_replaced) _adopt();
     final database = _database;
     final locale = Localizations.localeOf(context);
     final numbers = intlLocale(locale, NumberFormat.localeExists);
@@ -656,7 +606,7 @@ class _TableBlockState extends State<TableBlock> {
                       const SizedBox(width: WsMetrics.space3),
                       Expanded(
                         child: TextField(
-                          controller: _name,
+                          controller: _name.take(),
                           focusNode: _nameFocus,
                           // The caret stays where Liquid puts it; desktop Flutter would select all on focus.
                           selectAllOnFocus: false,
