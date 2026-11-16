@@ -8,6 +8,7 @@ members = [
     "liquid/liquid-bridge",
     "liquid/liquid-core",
     "liquid/liquid-storage",
+    "meta-harness/meta-harness-cli",
     "meta-harness/meta-harness-core",
     "proto/proto",
 ]
