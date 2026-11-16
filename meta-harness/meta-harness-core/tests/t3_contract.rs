@@ -911,3 +911,32 @@ async fn a_client_goes_on_after_the_service_restarts() {
     assert!(client.project(&repo).await.is_ok());
     service.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_service_refuses_a_client_that_names_no_api_version_or_another() {
+    use tokio_tungstenite::tungstenite::{Error, client::IntoClientRequest, http::StatusCode};
+    let (dir, _repo, _) = fixture();
+    let home = dir.path().join("meta");
+    let service = Service::start(service_config(&home)).await.unwrap();
+    for version in [None, Some("2")] {
+        let mut request = service.url.as_str().into_client_request().unwrap();
+        request.headers_mut().insert(
+            "authorization",
+            format!("Bearer {}", service.token).parse().unwrap(),
+        );
+        if let Some(version) = version {
+            request
+                .headers_mut()
+                .insert("meta-harness-api", version.parse().unwrap());
+        }
+        let refused = match tokio_tungstenite::connect_async(request).await {
+            Err(Error::Http(response)) => response,
+            Ok(_) => panic!("the service admits a client of version {version:?}"),
+            Err(other) => panic!("{other}"),
+        };
+        assert_eq!(refused.status(), StatusCode::UPGRADE_REQUIRED);
+        // The refusal names the version the service speaks.
+        assert_eq!(refused.headers()["meta-harness-api"], "1");
+    }
+    service.stop().await;
+}

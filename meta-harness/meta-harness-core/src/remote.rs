@@ -14,6 +14,7 @@ use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::http::{Response, StatusCode};
 
 use crate::api::{
     self, Call, Checkout, ConfigCall, GitCall, HostCall, ProjectCall, Reply, ThreadCall,
@@ -49,6 +50,23 @@ pub fn connection_lost(error: &str) -> bool {
     CONNECTION_ERRORS
         .iter()
         .any(|start| error.starts_with(start))
+}
+
+/// The error of a service that refuses this client's API version, which names the version the
+/// service speaks. It is not a lost connection: a later attempt would be refused again.
+fn refused_version(response: &Response<Option<Vec<u8>>>) -> String {
+    let speaks = match response
+        .headers()
+        .get(api::API_HEADER)
+        .and_then(|v| v.to_str().ok())
+    {
+        Some(version) => format!("API version {version}"),
+        None => "another API version".to_owned(),
+    };
+    format!(
+        "Meta-Harness speaks {speaks}; this client needs {}. Update Meta-Harness or Liquid.",
+        api::API_VERSION
+    )
 }
 
 /// Where the service is.
@@ -176,6 +194,7 @@ impl Host {
                 .parse()
                 .map_err(|_| "The client name is not a header value.".to_owned())?,
         );
+        headers.insert(api::API_HEADER, api::API_VERSION.into());
         let (socket, _) = tokio_tungstenite::connect_async(request)
             .await
             .map_err(|e| match e {
@@ -188,6 +207,12 @@ impl Host {
                          `meta serve`, or `meta service install` for the login service; its log \
                          is service.log in the data folder."
                     )
+                }
+                // A service of another API version refuses this client, naming its version.
+                tokio_tungstenite::tungstenite::Error::Http(response)
+                    if response.status() == StatusCode::UPGRADE_REQUIRED =>
+                {
+                    refused_version(&response)
                 }
                 e => format!("Could not reach Meta-Harness at {url}: {e}"),
             })?;
