@@ -96,28 +96,6 @@
         <p><strong>Recommendation:</strong> C, because it closes the gap without slowing every open.</p>
         <p><strong>Acceptance criterion:</strong> an entry planted right after the folder is created makes creation fail, and the shared-workspace concurrency test passes 50 of 50 runs on macOS.</p>
       </details>
-      <details id="d-111" class="decision wide">
-        <summary><h3>D-111 - What A Linked Host's Token May Reach</h3></summary>
-        <p><strong>Status:</strong> Open, and it blocks shipping host links (ADR-0288, ADR-0299). The code is in <code>meta-harness/meta-harness-core/src/service.rs</code>, <code>hosts.rs</code> and <code>tunnel.rs</code>. Read from T3's source, not yet run end to end.</p>
-        <p><strong>Problem:</strong> A host token opens a tunnel to this host's T3 Code, and the tunnel passes every byte of T3's HTTP and WebSocket surface, not only the link's <code>/mcp</code> path. A host token may also ask for a T3 pairing code, which carries T3's default scopes. A loopback T3 accepts a one-time code at its own bootstrap, which issues a bearer token of the code's scopes (<code>apps/server/src/auth/EnvironmentAuthPolicy.ts</code>, <code>apps/server/src/auth/http.ts</code>). So a stolen host token could act as the owner of the linked T3, including its terminal and filesystem scopes. ADR-0299 says a host token reaches only what T3's peer link needs.</p>
-        <p><strong>Question:</strong> What may a host token reach through the tunnel?</p>
-        <div class="dia">
-          <div class="opt"><h4>A: Keep as built</h4>
-            <div class="b ws">Whole T3 origin; default-scope pairing codes</div>
-            <ul><li>Pro: nothing to build.</li><li>Con: a stolen host token is owner access to the linked T3.</li></ul>
-          </div>
-          <div class="opt rec"><h4>B: Narrow the pairing scopes <span class="tag">Recommended</span></h4>
-            <div class="b ws">Pairing codes for hosts carry only the scopes the link's access level needs, with no scope for terminal, filesystem or settings</div>
-            <ul><li>Pro: bootstrap and <code>/mcp</code> both stop at those scopes; no tunnel change.</li><li>Con: the level a host can link at is capped by that scope set; T3 must accept the narrowed codes, which the spike did not test.</li></ul>
-          </div>
-          <div class="opt"><h4>C: Parse the tunnel's HTTP</h4>
-            <div class="b ws">The receiving host passes only the link's paths and refuses the rest</div>
-            <ul><li>Pro: limits reach by path, whatever T3 grants.</li><li>Con: the tunnel stops being a byte pipe; the T3 HTTP and WebSocket framing must be read.</li></ul>
-          </div>
-        </div>
-        <p><strong>Recommendation:</strong> B, with C only if T3 cannot narrow the codes, because T3's own scopes then bound every path the tunnel reaches.</p>
-        <p><strong>Acceptance criterion:</strong> a host token cannot obtain a bearer token with any scope outside the link's access level, shown by a contract test that exchanges a host's pairing code at the linked T3 and is refused the terminal, filesystem and settings scopes, while the link still works at its level.</p>
-      </details>
     </div>
   </section>
 
