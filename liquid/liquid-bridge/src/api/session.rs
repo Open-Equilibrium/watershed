@@ -126,8 +126,14 @@ pub struct BridgeQuestionAnswer {
     pub values: Vec<String>,
 }
 
-fn run<T>(future: impl Future<Output = T>) -> T {
-    RUNTIME.block_on(future)
+/// Runs `future` for a synchronous bridge call. Inside the runtime, such as in a Rust consumer's
+/// callback, `block_on` would panic, so the worker blocks in place instead.
+pub(crate) fn run<T>(future: impl Future<Output = T>) -> T {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        tokio::task::block_in_place(|| RUNTIME.handle().block_on(future))
+    } else {
+        RUNTIME.block_on(future)
+    }
 }
 
 /// The connection to Meta-Harness's service on this host. Closing it leaves the service running.

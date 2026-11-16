@@ -5,7 +5,7 @@ use meta_harness_core::remote::Git;
 use meta_harness_core::{GitAction, GitActionRequest, GitProgress, visible_name};
 
 use crate::api::events::BridgeFileChange;
-use crate::api::session::RUNTIME;
+use crate::api::session::{RUNTIME, run};
 use crate::convert;
 use crate::frb_generated::StreamSink;
 use crate::stream::until_ended;
@@ -235,7 +235,7 @@ impl GitCheckout {
 
     /// The checkout's status now.
     pub fn status(&self) -> Result<BridgeGitStatus, String> {
-        RUNTIME.block_on(self.git.status()).map(convert::git_status)
+        run(self.git.status()).map(convert::git_status)
     }
 
     /// Streams the status, then each change, including T3's background fetch.
@@ -249,7 +249,7 @@ impl GitCheckout {
         &self,
         mut deliver: impl FnMut(BridgeGitStatus) -> bool + Send + 'static,
     ) -> Result<(), String> {
-        let mut statuses = RUNTIME.block_on(self.git.watch())?;
+        let mut statuses = run(self.git.watch())?;
         let mut ended = self.ended.subscribe();
         RUNTIME.spawn(async move {
             while let Some(Some(status)) = until_ended(&mut ended, statuses.recv()).await {
@@ -263,7 +263,7 @@ impl GitCheckout {
 
     /// Refs whose names contain `query`.
     pub fn refs(&self, query: String, cursor: i64, limit: i64) -> Result<BridgeRefs, String> {
-        let page = RUNTIME.block_on(self.git.refs(
+        let page = run(self.git.refs(
             &query,
             u64::try_from(cursor).unwrap_or(0),
             u64::try_from(limit).unwrap_or(50),
@@ -288,22 +288,22 @@ impl GitCheckout {
 
     /// Checks out `name` as Git does.
     pub fn switch(&self, name: String) -> Result<(), String> {
-        RUNTIME.block_on(self.git.switch(&name))
+        run(self.git.switch(&name))
     }
 
     /// Creates the branch `name` here and checks it out.
     pub fn create_branch(&self, name: String) -> Result<(), String> {
-        RUNTIME.block_on(self.git.create_branch(&name))
+        run(self.git.create_branch(&name))
     }
 
     /// Initializes Git in the folder.
     pub fn init(&self) -> Result<(), String> {
-        RUNTIME.block_on(self.git.init())
+        run(self.git.init())
     }
 
     /// Pulls; returns T3's result title and description.
     pub fn pull(&self) -> Result<Vec<String>, String> {
-        let (title, description) = RUNTIME.block_on(self.git.pull())?;
+        let (title, description) = run(self.git.pull())?;
         Ok(vec![title, description])
     }
 
@@ -338,7 +338,7 @@ impl GitCheckout {
             BridgeGitAction::CommitPush => GitAction::CommitPush,
             BridgeGitAction::CommitPushPullRequest => GitAction::CommitPushPullRequest,
         };
-        let mut progress = RUNTIME.block_on(self.git.run(GitActionRequest {
+        let mut progress = run(self.git.run(GitActionRequest {
             action,
             message,
             files,
@@ -385,35 +385,34 @@ impl GitCheckout {
         &self,
         hide_whitespace: bool,
     ) -> Result<Vec<BridgeFileChange>, String> {
-        let diff = RUNTIME.block_on(self.git.uncommitted_diff(hide_whitespace))?;
+        let diff = run(self.git.uncommitted_diff(hide_whitespace))?;
         Ok(changed_files(&diff))
     }
 
     /// One uncommitted file's unified diff against `HEAD`.
     pub fn uncommitted_patch(&self, path: String, hide_whitespace: bool) -> Result<String, String> {
-        let diff = RUNTIME.block_on(self.git.uncommitted_diff(hide_whitespace))?;
+        let diff = run(self.git.uncommitted_diff(hide_whitespace))?;
         Ok(file_patch(&diff, &path))
     }
 
     /// The branch's files changed against its base, as T3's Changes tap lists them.
     pub fn branch_files(&self, hide_whitespace: bool) -> Result<Vec<BridgeFileChange>, String> {
-        let diff = RUNTIME.block_on(self.git.branch_diff(hide_whitespace))?;
+        let diff = run(self.git.branch_diff(hide_whitespace))?;
         Ok(changed_files(&diff))
     }
 
     /// One file's unified diff against the branch's base.
     pub fn branch_patch(&self, path: String, hide_whitespace: bool) -> Result<String, String> {
-        let diff = RUNTIME.block_on(self.git.branch_diff(hide_whitespace))?;
+        let diff = run(self.git.branch_diff(hide_whitespace))?;
         Ok(file_patch(&diff, &path))
     }
 
     /// Pull request `number` of the checkout's branch, with its checks and the actions the card
     /// offers.
     pub fn pull_request(&self, number: i64) -> Result<BridgePullRequestDetail, String> {
-        let detail = RUNTIME.block_on(
-            self.git
-                .pull_request(u64::try_from(number).unwrap_or_default()),
-        )?;
+        let detail = run(self
+            .git
+            .pull_request(u64::try_from(number).unwrap_or_default()))?;
         Ok(convert::pull_request_detail(detail))
     }
 
@@ -424,7 +423,7 @@ impl GitCheckout {
         action: String,
         merge_method: Option<String>,
     ) -> Result<(), String> {
-        RUNTIME.block_on(self.git.run_pull_request_action(
+        run(self.git.run_pull_request_action(
             u64::try_from(number).unwrap_or_default(),
             &action,
             merge_method.as_deref(),
@@ -434,7 +433,7 @@ impl GitCheckout {
     /// Checks pull request `url` out into a new worktree for a new thread; returns its branch and
     /// worktree.
     pub fn pull_request_worktree(&self, url: String) -> Result<BridgeCheckedOut, String> {
-        let (branch, path) = RUNTIME.block_on(self.git.pull_request_worktree(&url))?;
+        let (branch, path) = run(self.git.pull_request_worktree(&url))?;
         Ok(BridgeCheckedOut {
             branch,
             worktree: path.map(|p| p.to_string_lossy().into_owned()),
@@ -446,7 +445,7 @@ impl GitCheckout {
         &self,
         reference: String,
     ) -> Result<BridgeResolvedPullRequest, String> {
-        let pull = RUNTIME.block_on(self.git.resolve_pull_request(&reference))?;
+        let pull = run(self.git.resolve_pull_request(&reference))?;
         Ok(BridgeResolvedPullRequest {
             number: i64::try_from(pull.number).unwrap_or(i64::MAX),
             title: visible_name(&pull.title),
@@ -463,8 +462,7 @@ impl GitCheckout {
         reference: String,
         worktree: bool,
     ) -> Result<BridgeCheckedOut, String> {
-        let (branch, path) =
-            RUNTIME.block_on(self.git.check_out_pull_request(&reference, worktree))?;
+        let (branch, path) = run(self.git.check_out_pull_request(&reference, worktree))?;
         Ok(BridgeCheckedOut {
             branch,
             worktree: path.map(|p| p.to_string_lossy().into_owned()),
@@ -478,7 +476,7 @@ impl GitCheckout {
         repository: String,
         public: bool,
     ) -> Result<(), String> {
-        RUNTIME.block_on(self.git.publish(&provider, &repository, public))
+        run(self.git.publish(&provider, &repository, public))
     }
 }
 

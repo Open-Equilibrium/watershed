@@ -361,6 +361,35 @@ fn git_runs_through_the_bridge_with_its_progress() {
 }
 
 #[test]
+fn a_status_callback_reads_its_checkout_and_the_watch_goes_on() {
+    let fixture = Fixture::new();
+    let (service, host) = host(&fixture);
+    let project = project_at(&host, &fixture.repo());
+    let git = Arc::new(project.git());
+    let (sender, reads) = mpsc::channel();
+    let reader = git.clone();
+    // The callback runs on the bridge's runtime, where a Rust consumer may still read the checkout.
+    git.watch_with(move |_| sender.send(reader.status()).is_ok())
+        .expect("the status watch");
+    reads
+        .recv_timeout(Duration::from_secs(60))
+        .expect("the first read is delivered")
+        .expect("the first read answers");
+    std::fs::write(fixture.repo().join("second.txt"), "second\n").expect("change");
+    let second = reads
+        .recv_timeout(Duration::from_secs(60))
+        .expect("the watch goes on after a read")
+        .expect("the second read answers");
+    assert!(
+        second
+            .changes
+            .iter()
+            .any(|change| change.path == "second.txt")
+    );
+    stop(service);
+}
+
+#[test]
 fn connecting_says_when_meta_harness_is_not_running_and_where_it_looked() {
     let fixture = Fixture::new();
     let home = fixture.home().to_string_lossy().into_owned();
