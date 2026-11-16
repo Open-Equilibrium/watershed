@@ -394,11 +394,10 @@ impl Thread {
         };
         let target = fresh_id("thread");
         self.client
-            .call(
+            .command(
                 "orchestration.dispatchCommand",
                 json!({
                     "type": "thread.fork",
-                    "commandId": fresh_id("cmd"),
                     "createdBy": "user",
                     "creationSource": "web",
                     "sourceThreadId": self.id,
@@ -532,10 +531,9 @@ impl Thread {
     }
 
     async fn dispatch(&self, mut command: Value) -> Result<(), String> {
-        command["commandId"] = json!(fresh_id("cmd"));
         command["threadId"] = json!(self.id);
         self.client
-            .call("orchestration.dispatchCommand", command)
+            .command("orchestration.dispatchCommand", command)
             .await
             .map(|_| ())
     }

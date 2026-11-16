@@ -29,6 +29,26 @@ async fn a_call_returns_what_t3_replies_and_sends_its_payload() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_command_is_sent_with_a_fresh_command_id_each_time() {
+    let fake = Fake::start(|_, _, id| vec![ok(id, json!({}))]).await;
+    let client = connect(&fake).await;
+    for _ in 0..2 {
+        client
+            .command("orchestration.dispatchCommand", json!({"type": "x"}))
+            .await
+            .unwrap();
+    }
+    let sent = fake.payloads("orchestration.dispatchCommand");
+    assert!(sent.iter().all(|command| command["type"] == "x"));
+    assert!(
+        sent[0]["commandId"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("cmd-"))
+    );
+    assert_ne!(sent[0]["commandId"], sent[1]["commandId"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_failed_call_returns_the_cause_t3_sent() {
     let fake =
         Fake::start(|_, _, id| vec![fail(id, json!({"_tag": "Fail", "error": "no such thread"}))])

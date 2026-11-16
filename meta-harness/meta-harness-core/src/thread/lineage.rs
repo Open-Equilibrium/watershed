@@ -10,7 +10,7 @@ use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 use super::Thread;
-use crate::t3::{Projection, fresh_id, millis};
+use crate::t3::{Projection, millis};
 
 /// How a row's thread relates to the thread the panel shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -766,11 +766,10 @@ impl Thread {
         }
     }
 
-    /// Sends `command` to T3 under a new command id.
-    async fn send_command(&self, mut command: Value) -> Result<(), String> {
-        command["commandId"] = json!(fresh_id("cmd"));
+    /// Sends `command` to T3.
+    async fn send_command(&self, command: Value) -> Result<(), String> {
         self.client
-            .call("orchestration.dispatchCommand", command)
+            .command("orchestration.dispatchCommand", command)
             .await
             .map(|_| ())
     }

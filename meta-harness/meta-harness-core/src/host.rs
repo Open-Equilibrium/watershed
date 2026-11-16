@@ -71,11 +71,10 @@ impl Host {
             None => {
                 let id = crate::t3::fresh_id("project");
                 self.client
-                    .call(
+                    .command(
                         "projects.mutate",
                         json!({
                             "type": "project.create",
-                            "commandId": crate::t3::fresh_id("cmd"),
                             "projectId": id,
                             "title": Path::new(&root).file_name().map_or("project".into(), |n| n.to_string_lossy()),
                             "workspaceRoot": root,
@@ -350,10 +349,9 @@ impl Project {
         };
         let thread = crate::t3::fresh_id("thread");
         self.client
-            .call(
+            .command(
                 "orchestration.launchThread",
                 json!({
-                    "commandId": crate::t3::fresh_id("cmd"),
                     "threadId": thread,
                     "projectId": self.id,
                     "title": start.text.lines().next().unwrap_or_default(),
@@ -444,10 +442,9 @@ impl Project {
             .await
     }
 
-    async fn dispatch(&self, mut command: Value) -> Result<(), String> {
-        command["commandId"] = json!(crate::t3::fresh_id("cmd"));
+    async fn dispatch(&self, command: Value) -> Result<(), String> {
         self.client
-            .call("orchestration.dispatchCommand", command)
+            .command("orchestration.dispatchCommand", command)
             .await
             .map(|_| ())
     }

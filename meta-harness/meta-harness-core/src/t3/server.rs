@@ -139,12 +139,9 @@ async fn stop_left_behind(binary: &Path, runtime: &Path) {
 async fn wait_for_origin(runtime: &Path, pid: Option<u32>) -> Result<String, String> {
     for _ in 0..300 {
         if let Ok(text) = std::fs::read_to_string(runtime)
-            && let Ok(value) = serde_json::from_str::<serde_json::Value>(&text)
-            && value["pid"].as_u64() == pid.map(u64::from)
-            && value["serverVersion"].as_str() == Some(t3_version())
-            && let Some(origin) = value["origin"].as_str()
+            && let Some(origin) = listening_origin(&text, pid)?
         {
-            return Ok(origin.to_owned());
+            return Ok(origin);
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -152,4 +149,41 @@ async fn wait_for_origin(runtime: &Path, pid: Option<u32>) -> Result<String, Str
         "T3 {} did not start listening within 30 s",
         t3_version()
     ))
+}
+
+/// The origin that the runtime file `text` names for the server started as `pid`, once it runs the
+/// pinned release; `None` while it does not listen yet. A server of another release never starts
+/// listening for Meta-Harness, so it fails at once.
+fn listening_origin(text: &str, pid: Option<u32>) -> Result<Option<String>, String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+        return Ok(None);
+    };
+    if value["pid"].as_u64() != pid.map(u64::from) {
+        return Ok(None);
+    }
+    match value["serverVersion"].as_str() {
+        Some(version) if version != t3_version() => Err(format!(
+            "LIQUID_T3 runs T3 {version}; Meta-Harness needs {}",
+            t3_version()
+        )),
+        Some(_) => Ok(value["origin"].as_str().map(str::to_owned)),
+        None => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_server_of_another_release_fails_at_once_naming_both() {
+        let text = r#"{"pid":7,"serverVersion":"0.0.0","origin":"http://127.0.0.1:1"}"#;
+        assert_eq!(
+            listening_origin(text, Some(7)),
+            Err(format!(
+                "LIQUID_T3 runs T3 0.0.0; Meta-Harness needs {}",
+                t3_version()
+            ))
+        );
+    }
 }

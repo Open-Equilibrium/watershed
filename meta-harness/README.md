@@ -9,4 +9,4 @@ Native targets and current availability follow [PLATFORMS.md](../PLATFORMS.md).
 - `meta-harness-core/` — the Rust core: starts the pinned T3 Code server and speaks its client protocol (ADR-0281, ADR-0292); `host.rs` holds the server and projects, `thread.rs` a followed thread, `git.rs` Git through T3, `t3/` the server, protocol client and thread projection.
 - `t3.lock` — the pinned T3 release and each archive's SHA-256; `scripts/install-t3.mjs` installs it.
 
-Contract tests run against that release with a scripted ACP agent: `META_HARNESS_T3=<pinned t3> cargo test -p meta-harness-core --test t3_contract`.
+Contract tests run against that release with a scripted ACP agent: `META_HARNESS_T3=<pinned t3> cargo nextest run --config 'target."cfg(all())".runner = ["node", "<repository>/scripts/run-isolated-rust-test.mjs"]' -p meta-harness-core --test t3_contract`, through the isolation runner as every Rust test (TESTING.md).

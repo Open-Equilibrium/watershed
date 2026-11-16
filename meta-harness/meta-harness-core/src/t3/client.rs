@@ -152,6 +152,12 @@ impl Client {
             .map_err(|_| "T3 connection is closed".to_owned())?
     }
 
+    /// Calls `tag` with `payload` as a command, which T3 identifies by a fresh `commandId`.
+    pub async fn command(&self, tag: &str, mut payload: Value) -> Result<Value, String> {
+        payload["commandId"] = json!(super::fresh_id("cmd"));
+        self.call(tag, payload).await
+    }
+
     /// Opens the stream `tag`; each received item arrives in order, already acknowledged.
     pub async fn stream(&self, tag: &str, payload: Value) -> Result<Subscription, String> {
         let id = self.next.fetch_add(1, Ordering::Relaxed).to_string();
