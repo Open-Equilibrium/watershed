@@ -2,6 +2,7 @@
 //! ADR-0290).
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use meta_harness_core::{
@@ -19,6 +20,13 @@ fn ev(event: AgentEvent) -> ThreadEvent {
 fn never() -> tokio::sync::mpsc::Receiver<ThreadEvent> {
     let (sender, receiver) = tokio::sync::mpsc::channel(1);
     std::mem::forget(sender);
+    receiver
+}
+
+/// A subscription the thread already closed: its sender is gone, so it yields nothing.
+fn closed() -> tokio::sync::mpsc::Receiver<ThreadEvent> {
+    let (sender, receiver) = tokio::sync::mpsc::channel(1);
+    drop(sender);
     receiver
 }
 
@@ -458,5 +466,42 @@ fn a_dropped_subscription_falls_behind_once_and_continues_on_a_new_one() {
                 (BridgeEventKind::ItemStarted, Some(2)),
             ]
         );
+    });
+}
+
+#[test]
+fn a_thread_that_ended_is_not_resubscribed_in_a_loop() {
+    // Real time: a loop that resubscribes without waiting never lets the paused clock advance.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("runtime starts");
+    runtime.block_on(async {
+        let resubscriptions = Arc::new(AtomicUsize::new(0));
+        let counted = resubscriptions.clone();
+        let credit = Arc::<Credit>::default();
+        let forwarding = tokio::spawn(forward(
+            closed(),
+            move || {
+                counted.fetch_add(1, Ordering::SeqCst);
+                closed()
+            },
+            credit.clone(),
+            |_| true,
+        ));
+        settle().await;
+        assert!(
+            resubscriptions.load(Ordering::SeqCst) <= 2,
+            "a closed subscription is resubscribed at most once more"
+        );
+        assert!(
+            !forwarding.is_finished(),
+            "the stream waits for its session to drop"
+        );
+        credit.close();
+        tokio::time::timeout(Duration::from_secs(1), forwarding)
+            .await
+            .expect("forward returns once the session dropped")
+            .expect("forward completes");
     });
 }

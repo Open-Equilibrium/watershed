@@ -769,6 +769,35 @@ async fn a_turn_after_a_rewind_reverts_and_diffs_from_its_visible_predecessor() 
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn reverting_a_turn_that_is_not_in_the_thread_dispatches_nothing() {
+    let (fake, thread) = follow(
+        projection(json!({
+            "runs": [
+                run("r1", 1, "completed", "m1"),
+                run("r2", 2, "rolled_back", "m2"),
+                run("r3", 3, "completed", "m3"),
+            ],
+            "checkpoints": [
+                {"id": "base", "scopeId": "s", "status": "ready", "ordinalWithinScope": 0, "appRunOrdinal": null},
+                {"id": "cp1", "scopeId": "s", "status": "ready", "ordinalWithinScope": 1, "appRunOrdinal": 1},
+                {"id": "cp3", "scopeId": "s", "status": "ready", "ordinalWithinScope": 2, "appRunOrdinal": 3},
+            ],
+        })),
+        1,
+    )
+    .await;
+    // Turn 0 is the thread's start, turn 2 was rewound and turn 9 never existed. A rollback to
+    // the checkpoint before rewound turn 2 would undo turn 3, so none of them may dispatch.
+    for turn in [0, 2, 9] {
+        assert_eq!(
+            thread.revert(turn, true).await.unwrap_err(),
+            format!("Turn {turn} is not in this thread.")
+        );
+    }
+    assert!(fake.payloads(COMMAND).is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn dropping_a_followed_thread_interrupts_its_stream_on_t3() {
     let (fake, thread) = follow(projection(json!({})), 1).await;
     let id = fake.request_id(SUBSCRIBE);
@@ -857,5 +886,11 @@ async fn subscribers_end_when_t3_ends_the_thread_stream() {
     let ended = tokio::time::timeout(WAIT, events.recv())
         .await
         .expect("the subscription ends");
+    assert!(ended.is_none());
+    // The thread outlives its stream, but T3 sends nothing more: a later subscription ends too.
+    let (_, mut later) = thread.subscribe();
+    let ended = tokio::time::timeout(WAIT, later.recv())
+        .await
+        .expect("a later subscription ends too");
     assert!(ended.is_none());
 }

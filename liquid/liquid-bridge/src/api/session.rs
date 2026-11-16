@@ -156,7 +156,7 @@ impl AgentHost {
         }
     }
 
-    fn host(&self) -> Result<Arc<Host>, String> {
+    pub(crate) fn host(&self) -> Result<Arc<Host>, String> {
         self.host
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -208,7 +208,8 @@ impl AgentHost {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
-        if let Some(host) = host.and_then(Arc::into_inner) {
+        // Calls still in flight hold the host; they fail once T3 is gone.
+        if let Some(host) = host {
             run(host.shutdown());
         }
     }

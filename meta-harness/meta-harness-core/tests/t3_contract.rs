@@ -307,19 +307,33 @@ async fn a_snapshot_names_the_events_it_already_contains() {
         .unwrap();
     let (before, mut events) = thread.subscribe();
     wait(&thread, completed(1)).await;
-    // Every event after the snapshot comes later in the stream, so applying them on top of it
-    // counts each once (ADR-0290).
-    let first = events.recv().await.expect("events followed the snapshot");
-    assert!(first.sequence > before.sequence);
+    // The stream applies each change and sends its events under the lock that snapshots take, so
+    // once `wait` read the turn complete, every later event is already in `events` (ADR-0290).
+    // The turn may also have ended before `before`; then its completion is in the snapshot instead.
+    let received: Vec<ThreadEvent> = std::iter::from_fn(|| events.try_recv().ok()).collect();
     let after = thread.snapshot();
-    assert!(after.transcript.iter().any(|item| item.text == "Appended."));
-    let events: Vec<ThreadEvent> = std::iter::from_fn(|| events.try_recv().ok()).collect();
-    assert!(events.iter().all(|e| e.sequence <= after.sequence));
     assert!(
-        events
+        received
             .iter()
-            .any(|e| matches!(e.event, AgentEvent::TurnCompleted { .. }))
+            .all(|e| before.sequence < e.sequence && e.sequence <= after.sequence)
     );
+    assert!(
+        received
+            .windows(2)
+            .all(|pair| pair[0].sequence <= pair[1].sequence)
+    );
+    let finished_before = before
+        .turns
+        .iter()
+        .any(|t| t.status == TurnStatus::Completed);
+    let finished_after = received
+        .iter()
+        .any(|e| matches!(e.event, AgentEvent::TurnCompleted { .. }));
+    assert!(
+        finished_before != finished_after,
+        "the completion is in the snapshot or the stream, exactly once"
+    );
+    assert!(after.transcript.iter().any(|item| item.text == "Appended."));
     host.shutdown().await;
 }
 

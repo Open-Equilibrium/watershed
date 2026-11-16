@@ -34,7 +34,8 @@ pub struct AcpAgent {
 
 /// A running T3 server and Meta-Harness's connection to it.
 pub struct Host {
-    server: Server,
+    // Locked only to stop it, so a shutdown stops T3 while calls still hold the host.
+    server: tokio::sync::Mutex<Server>,
     client: Client,
 }
 
@@ -47,7 +48,10 @@ impl Host {
         write_settings(&config.home, &config.acp_agents)?;
         let server = Server::start(&config.binary, &config.home).await?;
         let client = Client::connect(&server.origin, server.issuer()).await?;
-        Ok(Self { server, client })
+        Ok(Self {
+            server: tokio::sync::Mutex::new(server),
+            client,
+        })
     }
 
     /// The T3 project for the folder `root`, created when T3 has none yet.
@@ -175,9 +179,9 @@ impl Host {
     }
 
     /// Stops T3. The client closes first, so the connection that T3 closes is not reconnected.
-    pub async fn shutdown(mut self) {
+    pub async fn shutdown(&self) {
         self.client.close();
-        self.server.stop().await;
+        self.server.lock().await.stop().await;
     }
 }
 

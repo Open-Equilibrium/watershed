@@ -137,13 +137,66 @@ fn statistics_count_tokens_tools_and_turns_as_t3_records_them() {
                 started_ms: Some(1_794_736_800_000),
                 ended_ms: None,
                 models: vec![codex, unnamed],
-                tool_ms: Some(0),
+                tool_ms: None,
                 failed: 0,
             },
         ]
     );
     assert_eq!(statistics.started_ms, Some(1_794_736_800_000));
     assert_eq!(statistics.ended_ms, Some(1_794_736_800_000));
+}
+
+#[test]
+fn a_turns_tool_time_counts_the_longest_call_of_each_response() {
+    let projection = projection(json!({
+        "runs": [run("r1", 1, "completed", json!("2026-11-15T10:00:10.000Z"))],
+        "turnItems": [
+            // Two calls of one response ran in parallel: the response counts the longer one.
+            {"id": "p1", "runId": "r1", "providerTurnId": "t1", "type": "command_execution", "status": "completed",
+             "exitCode": 0, "input": "a", "startedAt": "2026-11-15T10:00:01.000Z", "completedAt": "2026-11-15T10:00:02.000Z"},
+            {"id": "p2", "runId": "r1", "providerTurnId": "t1", "type": "command_execution", "status": "completed",
+             "exitCode": 0, "input": "b", "startedAt": "2026-11-15T10:00:01.000Z", "completedAt": "2026-11-15T10:00:04.000Z"},
+            // A later response's call adds its own time.
+            {"id": "p3", "runId": "r1", "providerTurnId": "t2", "type": "command_execution", "status": "completed",
+             "exitCode": 0, "input": "c", "startedAt": "2026-11-15T10:00:05.000Z", "completedAt": "2026-11-15T10:00:07.000Z"},
+        ],
+    }));
+    let statistics = statistics(&projection);
+    assert_eq!(statistics.turns[0].tool_ms, Some(5000));
+    // Each tool's own time is the sum of its calls.
+    assert_eq!(statistics.tools[0].duration_ms, Some(6000));
+}
+
+#[test]
+fn an_unfinished_call_is_open_only_while_its_turn_is_the_last_and_still_runs() {
+    // (the last turn's status, the call's status, whether the call is open)
+    let cases = [
+        ("running", "running", true),
+        ("waiting", "pending", true),
+        ("running", "interrupted", false),
+        ("completed", "running", false),
+        ("interrupted", "running", false),
+        ("failed", "pending", false),
+    ];
+    for (turn_status, call_status, open) in cases {
+        let projection = projection(json!({
+            "runs": [
+                run("r1", 1, "completed", json!("2026-11-15T10:00:10.000Z")),
+                run("r2", 2, turn_status, Value::Null),
+            ],
+            // The call in the earlier turn never got a result either: its turn was followed by another.
+            "turnItems": [
+                {"id": "c1", "runId": "r1", "type": "command_execution", "status": "running", "input": "a"},
+                {"id": "c2", "runId": "r2", "type": "command_execution", "status": call_status, "input": "b"},
+            ],
+        }));
+        let bash = &statistics(&projection).tools[0];
+        assert_eq!(
+            (bash.cancelled, bash.open),
+            if open { (1, 1) } else { (2, 0) },
+            "last turn {turn_status}, call {call_status}"
+        );
+    }
 }
 
 #[test]

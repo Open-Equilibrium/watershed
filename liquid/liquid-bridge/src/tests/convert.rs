@@ -116,6 +116,69 @@ diff --git a/a b/c.txt b/a b/c.txt
 }
 
 #[test]
+fn git_quoted_paths_are_decoded_in_headers_and_renames() {
+    // Git C-quotes a header half that holds a non-ASCII byte, a tab, a quote or a backslash.
+    let diff = r#"diff --git "a/caf\303\251.txt" "b/caf\303\251.txt"
+--- "a/caf\303\251.txt"
++++ "b/caf\303\251.txt"
+@@ -1 +1 @@
+-one
++two
+diff --git "a/tab\tname" "b/tab\tname"
+new file mode 100644
+--- /dev/null
++++ "b/tab\tname"
+@@ -0,0 +1 @@
++x
+diff --git "a/q\"uote" "b/q\"uote"
+new file mode 100644
+--- /dev/null
++++ "b/q\"uote"
+@@ -0,0 +1 @@
++x
+diff --git "a/back\\slash" "b/back\\slash"
+new file mode 100644
+--- /dev/null
++++ "b/back\\slash"
+@@ -0,0 +1 @@
++x
+diff --git a/old.txt "b/n\303\253w.txt"
+similarity index 80%
+rename from old.txt
+rename to "n\303\253w.txt"
+--- a/old.txt
++++ "b/n\303\253w.txt"
+@@ -1 +1 @@
+-was
++is
+diff --git "a/x\342\200\256y.txt" "b/x\342\200\256y.txt"
+new file mode 100644
+--- /dev/null
++++ "b/x\342\200\256y.txt"
+@@ -0,0 +1 @@
++x
+"#;
+    let files = convert::diff_files(diff);
+    let listed: Vec<_> = files
+        .iter()
+        .map(|(file, _)| (file.path.as_str(), file.status, file.added, file.removed))
+        .collect();
+    assert_eq!(
+        listed,
+        vec![
+            ("café.txt", BridgeChangeStatus::Modified, 1, 1),
+            ("tab\tname", BridgeChangeStatus::Added, 1, 0),
+            ("q\"uote", BridgeChangeStatus::Added, 1, 0),
+            ("back\\slash", BridgeChangeStatus::Added, 1, 0),
+            ("nëw.txt", BridgeChangeStatus::Renamed, 1, 1),
+            ("x\u{202e}y.txt", BridgeChangeStatus::Added, 1, 0),
+        ]
+    );
+    // The hidden character is written out in the name the Diff panel shows.
+    assert_eq!(files[5].0.shown, "x<U+202E>y.txt");
+}
+
+#[test]
 fn turn_and_item_events_cross_with_their_turn_item_and_text() {
     let turn = TurnId(2);
     let started = sequenced(

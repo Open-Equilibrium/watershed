@@ -123,6 +123,8 @@ struct State {
     sequence: u64,
     items: HashMap<String, ItemId>,
     subscribers: Vec<mpsc::Sender<ThreadEvent>>,
+    /// Whether T3 ended the thread's stream, after which no event comes.
+    ended: bool,
     /// The lineage watches, each woken when the projection changes what the lineage shows.
     lineage: Vec<std::sync::Weak<Notify>>,
 }
@@ -188,6 +190,7 @@ impl Thread {
             sequence: first["snapshotSequence"].as_u64().unwrap_or_default(),
             items: HashMap::new(),
             subscribers: Vec::new(),
+            ended: false,
             lineage: Vec::new(),
         }));
         let applied = state.clone();
@@ -202,12 +205,10 @@ impl Thread {
                     apply(&mut state, &message);
                 }
             }
-            // T3 ended the stream, so the subscribers end with it.
-            applied
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .subscribers
-                .clear();
+            // T3 ended the stream, so the subscribers end with it, and later ones end at once.
+            let mut state = applied.lock().unwrap_or_else(PoisonError::into_inner);
+            state.ended = true;
+            state.subscribers.clear();
         });
         Ok(Self {
             client,
@@ -267,7 +268,10 @@ impl Thread {
     pub fn subscribe(&self) -> (Snapshot, mpsc::Receiver<ThreadEvent>) {
         let (sender, receiver) = mpsc::channel(BACKLOG);
         let mut state = self.state();
-        state.subscribers.push(sender);
+        // Once T3 ended the stream no event comes, so the receiver ends at once.
+        if !state.ended {
+            state.subscribers.push(sender);
+        }
         (snapshot(&mut state), receiver)
     }
 
@@ -345,14 +349,15 @@ impl Thread {
         let (checkpoint, prompt) = {
             let state = self.state();
             let projection = &state.projection;
-            let checkpoint = ready_checkpoint(projection, predecessor(projection, turn))
-                .cloned()
-                .ok_or(format!("Turn {turn} has no checkpoint to revert to."))?;
+            // Only a turn the thread still shows may be reverted; no other dispatches a rollback.
             let prompt = turns(projection)
                 .into_iter()
                 .find(|t| t.number == turn)
                 .map(|t| t.prompt)
-                .unwrap_or_default();
+                .ok_or(format!("Turn {turn} is not in this thread."))?;
+            let checkpoint = ready_checkpoint(projection, predecessor(projection, turn))
+                .cloned()
+                .ok_or(format!("Turn {turn} has no checkpoint to revert to."))?;
             (checkpoint, prompt)
         };
         self.dispatch(json!({

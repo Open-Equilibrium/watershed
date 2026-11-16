@@ -30,6 +30,10 @@ pub(crate) fn push(batch: &mut Vec<BridgeEvent>, event: BridgeEvent) {
 /// its stream.
 const STREAM_WINDOW: std::time::Duration = std::time::Duration::from_millis(50);
 
+/// How long a stream waits before it resubscribes after a subscription that closed before any
+/// event; a thread that ended may restart, so the stream keeps trying until its session drops.
+const RESUBSCRIBE_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// Most events sent to Dart and not yet applied by Liquid.
 pub(crate) const WINDOW: usize = 256;
 
@@ -185,6 +189,8 @@ pub(crate) async fn forward(
     mut deliver: impl FnMut(BridgeEvent) -> bool,
 ) {
     let mut outbox = Outbox::default();
+    // Whether `receiver` came from `resubscribe` and has yielded no event yet.
+    let mut resubscribed = false;
     loop {
         if credit.is_closed() {
             // The session was dropped, so no confirmation comes; what waits is released with it.
@@ -204,6 +210,7 @@ pub(crate) async fn forward(
         let idle = outbox.pending.is_empty();
         match next_or_wake(&credit, &mut receiver).await {
             Some(Some(event)) => {
+                resubscribed = false;
                 outbox.admit(BridgeEvent::from(event));
                 if idle {
                     // Bounded by the window, so a busy agent never holds delivery back.
@@ -216,7 +223,19 @@ pub(crate) async fn forward(
                 }
             }
             Some(None) => {
+                if resubscribed {
+                    // The new subscription closed before any event: the thread may have ended.
+                    // Retry after a pause, and not at all once the session dropped.
+                    tokio::select! {
+                        _ = credit.wait() => {}
+                        _ = tokio::time::sleep(RESUBSCRIBE_DELAY) => {}
+                    }
+                    if credit.is_closed() {
+                        return;
+                    }
+                }
                 receiver = resubscribe();
+                resubscribed = true;
                 if !outbox.behind {
                     outbox.fell_behind();
                 }

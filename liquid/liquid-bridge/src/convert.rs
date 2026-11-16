@@ -617,10 +617,21 @@ pub(crate) fn usage_limits(limits: UsageLimits) -> BridgeUsageLimits {
 }
 
 /// The changed file's path: a rename's new name, else the second half of `a/<path> b/<path>`,
-/// which also holds for a path with ` b/` in it.
+/// which also holds for a path with ` b/` in it. Git C-quotes a half it cannot write raw, such as
+/// one with a non-ASCII byte, so a quoted half is decoded first.
 fn path_of(header: &str, section: &str) -> String {
     if let Some(to) = section.lines().find_map(|l| l.strip_prefix("rename to ")) {
-        return to.to_owned();
+        return unquote(to).map_or_else(|| to.to_owned(), |(path, _)| path);
+    }
+    // A quoted first half is followed by a space and the second half. A raw first half cannot
+    // hold a quote, so the first quote opens the second half.
+    let second = match unquote(header) {
+        Some((_, rest)) => rest.strip_prefix(' '),
+        None => header.find('"').and_then(|at| header.get(at..)),
+    };
+    if let Some(second) = second {
+        let decoded = unquote(second).map_or_else(|| second.to_owned(), |(path, _)| path);
+        return decoded.strip_prefix("b/").unwrap_or(&decoded).to_owned();
     }
     let half = header.len().saturating_sub(1) / 2;
     match (header.get(..half), header.get(half + 1..)) {
@@ -632,4 +643,44 @@ fn path_of(header: &str, section: &str) -> String {
             .map(|(_, b)| b.to_owned())
             .unwrap_or_default(),
     }
+}
+
+/// Decodes a path Git C-quotes (`"..."` with `\"`, `\\`, C escapes and `\ooo` octal bytes),
+/// returning it with the text after its closing quote; `None` when `text` is not quoted.
+fn unquote(text: &str) -> Option<(String, &str)> {
+    let body = text.strip_prefix('"')?.as_bytes();
+    let mut decoded = Vec::with_capacity(body.len());
+    let mut index = 0;
+    while let Some(&byte) = body.get(index) {
+        index += 1;
+        match byte {
+            // The closing quote is `text[index]`, since `body` starts one byte into `text`.
+            b'"' => {
+                let rest = &text[index + 1..];
+                return Some((String::from_utf8_lossy(&decoded).into_owned(), rest));
+            }
+            b'\\' => {
+                let escaped = *body.get(index)?;
+                index += 1;
+                decoded.push(match escaped {
+                    b'a' => 0x07,
+                    b'b' => 0x08,
+                    b'f' => 0x0c,
+                    b'n' => b'\n',
+                    b'r' => b'\r',
+                    b't' => b'\t',
+                    b'v' => 0x0b,
+                    b'"' | b'\\' => escaped,
+                    b'0'..=b'3' => {
+                        let digits = body.get(index - 1..index + 2)?;
+                        index += 2;
+                        u8::from_str_radix(std::str::from_utf8(digits).ok()?, 8).ok()?
+                    }
+                    _ => return None,
+                });
+            }
+            _ => decoded.push(byte),
+        }
+    }
+    None
 }

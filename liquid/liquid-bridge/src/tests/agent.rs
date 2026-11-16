@@ -14,7 +14,7 @@ use crate::api::session::RUNTIME;
 use crate::api::session::{
     AgentHost, AgentProject, AgentSession, BridgeModelChoice, BridgePermissions,
 };
-use crate::api::thread::BridgeTurnStatus;
+use crate::api::thread::{BridgeSnapshot, BridgeTurnStatus};
 
 fn git(dir: &Path, args: &[&str]) {
     let ok = std::process::Command::new("git")
@@ -92,13 +92,16 @@ fn scripted() -> BridgeModelChoice {
     }
 }
 
-/// Follows `session` until `done` holds for its turns, the way Liquid applies its stream:
-/// the snapshot first, then events past its sequence, each confirmed.
-fn follow(session: &AgentSession, done: impl Fn(&AgentSession) -> bool) -> Vec<BridgeEvent> {
+/// Follows `session` until `done` holds, the way Liquid applies its stream: the snapshot first,
+/// then events past its sequence, each confirmed. `done` sees the snapshot and the events so far.
+fn follow_until(
+    session: &AgentSession,
+    done: impl Fn(&AgentSession, &BridgeSnapshot, &[BridgeEvent]) -> bool,
+) -> (BridgeSnapshot, Vec<BridgeEvent>) {
     let (sender, receiver) = mpsc::channel();
     let snapshot = session.forward(move |event| sender.send(event).is_ok());
     let mut events = Vec::new();
-    while !done(session) {
+    while !done(session, &snapshot, &events) {
         let event = receiver
             .recv_timeout(Duration::from_secs(60))
             .expect("the session goes on");
@@ -106,7 +109,44 @@ fn follow(session: &AgentSession, done: impl Fn(&AgentSession) -> bool) -> Vec<B
         events.push(event);
         session.confirm_applied(i64::try_from(events.len()).expect("count"));
     }
+    (snapshot, events)
+}
+
+/// Follows `session` until `done` holds for its state.
+fn follow(session: &AgentSession, done: impl Fn(&AgentSession) -> bool) -> Vec<BridgeEvent> {
+    follow_until(session, |session, _, _| done(session)).1
+}
+
+/// Follows `session` until `turns` turns completed. The state can run ahead of the stream, so a
+/// turn running at the subscription is awaited until its end arrives as an event.
+fn follow_turns(session: &AgentSession, turns: usize) -> (BridgeSnapshot, Vec<BridgeEvent>) {
+    follow_until(session, |session, snapshot, events| {
+        let running = snapshot.turns.iter().any(|t| {
+            matches!(
+                t.status,
+                BridgeTurnStatus::Queued | BridgeTurnStatus::Running
+            )
+        });
+        let ended = events.iter().any(|e| {
+            matches!(
+                e.kind,
+                BridgeEventKind::TurnCompleted | BridgeEventKind::TurnAborted
+            )
+        });
+        completed(turns)(session) && (!running || ended)
+    })
+}
+
+/// Whether the answer reached Liquid: streamed by a turn that ran after the subscription, or in the
+/// snapshot of a turn that finished before it.
+fn answer_reached_liquid(snapshot: &BridgeSnapshot, events: &[BridgeEvent]) -> bool {
     events
+        .iter()
+        .any(|e| e.kind == BridgeEventKind::ItemCompleted && e.text.as_deref() == Some("Appended."))
+        || snapshot
+            .transcript
+            .iter()
+            .any(|item| item.text == "Appended.")
 }
 
 /// Polls `ready` until it holds: T3 applies a project's changes after the call returns.
@@ -149,18 +189,15 @@ fn a_session_streams_diffs_reverts_and_exports_through_the_bridge() {
             BridgePermissions::FullAccess,
         )
         .expect("session starts");
-    let events = follow(&session, completed(1));
+    let (snapshot, events) = follow_turns(&session, 1);
     assert!(
-        events
-            .iter()
-            .any(|e| e.kind == BridgeEventKind::ItemCompleted
-                && e.text.as_deref() == Some("Appended.")),
+        answer_reached_liquid(&snapshot, &events),
         "the answer streams to Liquid"
     );
     session
         .send("append second".to_owned(), false)
         .expect("second turn");
-    follow(&session, completed(2));
+    follow_turns(&session, 2);
 
     let changes = session.turn_changes(2, 2, false).expect("changes");
     assert_eq!(changes.len(), 1);
@@ -177,25 +214,15 @@ fn a_session_streams_diffs_reverts_and_exports_through_the_bridge() {
     assert_eq!(statistics.turns.len(), 2);
     assert!(statistics.tools.iter().any(|t| t.succeeded >= 1));
 
-    // The record goes to the Downloads folder of a home folder of the test's own.
-    let home = fixture.0.join("home");
-    std::fs::create_dir_all(home.join("Downloads")).expect("downloads");
-    // SAFETY: nextest runs each test in its own process, and no thread of this one reads the
-    // environment while the test sets it.
-    unsafe {
-        std::env::set_var("HOME", &home);
-        std::env::set_var("XDG_CONFIG_HOME", fixture.0.join("config"));
-    }
-    let folder = PathBuf::from(
-        session
-            .export_record("host".to_owned(), "2026-11-15".to_owned())
-            .expect("exported"),
-    );
-    assert!(
-        folder.starts_with(home.join("Downloads")),
-        "{}",
-        folder.display()
-    );
+    // The record goes into a Downloads folder of the test's own. Finding that folder from HOME
+    // and XDG_CONFIG_HOME is `download_dir_in`'s job, covered by its own test; setting those
+    // variables here would leak into every other test of a shared process.
+    let downloads = fixture.0.join("Downloads");
+    std::fs::create_dir_all(&downloads).expect("downloads");
+    let folder = session
+        .export_record_to(&downloads, "host", "2026-11-15")
+        .expect("exported");
+    assert!(folder.starts_with(&downloads), "{}", folder.display());
     let record: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(folder.join("record.json")).expect("record"))
             .expect("json");
@@ -221,6 +248,29 @@ fn a_session_streams_diffs_reverts_and_exports_through_the_bridge() {
         snapshot.transcript.iter().any(
             |item| item.item.kind == BridgeItemKind::UserMessage && item.text == "append first"
         )
+    );
+    host.shutdown();
+}
+
+#[test]
+fn a_turn_that_finished_before_its_follow_has_its_answer_in_the_snapshot() {
+    let fixture = Fixture::new();
+    let host = host(&fixture);
+    let project = project_at(&host, &fixture.repo());
+    let session = project
+        .start(
+            "append first".to_owned(),
+            scripted(),
+            Some("main".to_owned()),
+            None,
+            BridgePermissions::FullAccess,
+        )
+        .expect("session starts");
+    until(|| completed(1)(&session));
+    let (snapshot, events) = follow_turns(&session, 1);
+    assert!(
+        answer_reached_liquid(&snapshot, &events),
+        "the answer reaches Liquid"
     );
     host.shutdown();
 }
@@ -290,6 +340,27 @@ fn the_host_starts_t3_and_refuses_calls_once_stopped() {
 }
 
 #[test]
+fn shutdown_stops_t3_while_a_call_still_holds_the_host() {
+    let fixture = Fixture::new();
+    let host = host(&fixture);
+    // A call in flight holds the host when the app quits.
+    let _in_flight = host.host().expect("running");
+    let runtime = fixture.0.join("t3/userdata/server-runtime.json");
+    let record: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(runtime).expect("runtime record"))
+            .expect("JSON");
+    let pid = record["pid"].as_u64().expect("pid").to_string();
+    host.shutdown();
+    let running = || {
+        std::process::Command::new("ps")
+            .args(["-p", &pid])
+            .output()
+            .is_ok_and(|out| out.status.success())
+    };
+    until(|| !running());
+}
+
+#[test]
 fn a_project_starts_finds_opens_archives_and_deletes_its_sessions() {
     let fixture = Fixture::new();
     let host = host(&fixture);
@@ -305,7 +376,7 @@ fn a_project_starts_finds_opens_archives_and_deletes_its_sessions() {
             BridgePermissions::FullAccess,
         )
         .expect("session starts in a new worktree");
-    follow(&first, completed(1));
+    follow_turns(&first, 1);
     let worktree = PathBuf::from(first.worktree().expect("its own worktree"));
     let second = project
         .start(
@@ -316,7 +387,7 @@ fn a_project_starts_finds_opens_archives_and_deletes_its_sessions() {
             BridgePermissions::FullAccess,
         )
         .expect("session starts in the existing worktree");
-    follow(&second, completed(1));
+    follow_turns(&second, 1);
     assert_eq!(second.worktree().map(PathBuf::from), Some(worktree.clone()));
     assert_eq!(project.threads().expect("threads").len(), 2);
     assert!(!project.only_session_in_worktree(first.id()).expect("query"));
@@ -342,7 +413,7 @@ fn a_project_starts_finds_opens_archives_and_deletes_its_sessions() {
             BridgePermissions::FullAccess,
         )
         .expect("session starts in the project folder");
-    follow(&checkout, completed(1));
+    follow_turns(&checkout, 1);
     assert_eq!(checkout.worktree(), None);
     let forked = checkout.fork(1).expect("forked from the first turn");
     assert_ne!(forked, checkout.id(), "a fork is a session of its own");
@@ -369,7 +440,7 @@ fn the_details_card_reads_and_acts_on_a_session_through_the_bridge() {
             BridgePermissions::FullAccess,
         )
         .expect("session starts");
-    follow(&session, completed(1));
+    follow_turns(&session, 1);
     assert!(session.servers_subscribe().expect("servers").is_empty());
     assert!(
         session
@@ -431,7 +502,7 @@ fn dropping_the_session_or_checkout_ends_its_live_follows() {
             BridgePermissions::FullAccess,
         )
         .expect("session starts");
-    follow(&session, completed(1));
+    follow_turns(&session, 1);
     let (sender, ended) = mpsc::channel();
     session.servers_subscribe().expect("the servers");
     session
@@ -496,6 +567,13 @@ fn a_session_queues_edits_cancels_and_stops_turns_through_the_bridge() {
 
     let cancelled = queued_behind_a_running_turn(&project, "append doomed");
     cancelled.cancel_queued(2).expect("cancelled");
+    // The cancelled turn stays listed, aborted, and never runs.
+    until(|| {
+        cancelled
+            .turns()
+            .get(1)
+            .is_some_and(|t| t.status == BridgeTurnStatus::Aborted)
+    });
     cancelled.stop().expect("stopped");
     until(|| cancelled.turns()[0].status == BridgeTurnStatus::Aborted);
 
@@ -503,6 +581,12 @@ fn a_session_queues_edits_cancels_and_stops_turns_through_the_bridge() {
     edited
         .edit_queued(2, "append edited".to_owned())
         .expect("edited");
+    until(|| {
+        edited
+            .turns()
+            .get(1)
+            .is_some_and(|t| t.prompt == "append edited" && t.status == BridgeTurnStatus::Queued)
+    });
     edited.stop().expect("stopped");
     until(|| edited.turns()[0].status == BridgeTurnStatus::Aborted);
 

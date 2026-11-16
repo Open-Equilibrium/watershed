@@ -2,6 +2,8 @@
 //! turn, tool calls by name and outcome, and each turn's working and tool time. T3 reports no
 //! cost per turn and no timing of single model requests, so neither is counted.
 
+use std::collections::HashMap;
+
 use serde_json::Value;
 
 use crate::t3::{Projection, millis};
@@ -78,11 +80,18 @@ pub(crate) fn statistics(projection: &Projection) -> Statistics {
     let mut models = Vec::new();
     let mut tools: Vec<ToolCalls> = Vec::new();
     let mut turns = Vec::new();
-    for run in projection
+    let visible: Vec<&Value> = projection
         .runs
         .iter()
         .filter(|r| r["status"] != "rolled_back")
-    {
+        .collect();
+    for (index, run) in visible.iter().enumerate() {
+        // Only the session's last turn, while it runs, may still have unfinished calls.
+        let running = index + 1 == visible.len()
+            && !matches!(
+                run["status"].as_str(),
+                Some("completed" | "interrupted" | "failed" | "cancelled")
+            );
         let attempts: Vec<&Value> = projection
             .attempts
             .iter()
@@ -100,7 +109,8 @@ pub(crate) fn statistics(projection: &Projection) -> Statistics {
                 add(&mut models, model, usage);
             }
         }
-        let mut tool_ms = 0;
+        // Each response's longest timed call: the calls of one response may run in parallel.
+        let mut response_ms: HashMap<String, u64> = HashMap::new();
         let mut failures = 0;
         for item in projection
             .turn_items
@@ -126,12 +136,19 @@ pub(crate) fn statistics(projection: &Projection) -> Statistics {
                     failures += 1;
                 }
                 Some("completed") => calls.succeeded += 1,
-                Some("running" | "pending") => calls.open += 1,
+                Some("cancelled" | "interrupted") => calls.cancelled += 1,
+                _ if running => calls.open += 1,
                 _ => calls.cancelled += 1,
             }
             if let Some(ms) = duration(item) {
                 calls.duration_ms = Some(calls.duration_ms.unwrap_or_default() + ms);
-                tool_ms += ms;
+                // A call T3 did not tag with its response stands for its own.
+                let response = match item["providerTurnId"].as_str() {
+                    Some(turn) => turn.to_owned(),
+                    None => item["id"].to_string(),
+                };
+                let longest = response_ms.entry(response).or_default();
+                *longest = (*longest).max(ms);
             }
         }
         turns.push(TurnStatistics {
@@ -145,7 +162,7 @@ pub(crate) fn statistics(projection: &Projection) -> Statistics {
             started_ms: millis(&run["startedAt"]),
             ended_ms: millis(&run["completedAt"]),
             models: turn_models,
-            tool_ms: Some(tool_ms),
+            tool_ms: (!response_ms.is_empty()).then(|| response_ms.values().sum()),
             failed: failures,
         });
     }
