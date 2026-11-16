@@ -1,6 +1,7 @@
 //! `meta`, Meta-Harness's command line (ADR-0286, ADR-0296): it runs the service, which the
 //! login service starts, and talks to it like any client. Data commands print JSON.
 
+mod hosts;
 mod login;
 
 use std::path::{Path, PathBuf};
@@ -22,6 +23,18 @@ usage: meta <command>
   config approve NUMBER     approve a proposal; new harness sessions use the new revision
   config reject NUMBER      reject a proposal
   config log                print the append-only configuration log
+  remote on [--port N]      listen for other hosts and devices on the Tailscale addresses
+                            (port 3774 by default); it stays on across restarts
+  remote off                stop listening there
+  remote status             show whether remote access is on, and where
+  invite --device | --host  print a pairing code for another device or host, valid 5 minutes
+  host add ADDRESS CODE [--access LEVEL]
+                            link the host at ADDRESS with its pairing code; LEVEL is read-only,
+                            approval-required, auto-accept-edits, auto (the default) or full-access
+  host list                 print the linked hosts and the clients paired here as JSON
+  host remove NAME          unlink a host, and end its T3 link
+  host revoke NAME          refuse a paired client's token from its next connection on
+  host agents on|off        accept agents from other hosts here (off until turned on)
   service install           start the login service, also after each login and crash
   service uninstall         stop and remove the login service
   uninstall                 remove the login service and this installation; data stays
@@ -64,6 +77,9 @@ async fn run(args: &[&str]) -> Result<(), String> {
             Ok(())
         }
         ["config", rest @ ..] => config(&connect(&home).await?, rest).await,
+        ["remote", rest @ ..] => hosts::remote(&connect(&home).await?, rest).await,
+        ["invite", rest @ ..] => hosts::invite(&connect(&home).await?, rest).await,
+        ["host", rest @ ..] => hosts::host(&connect(&home).await?, rest).await,
         ["service", "install"] => install(home),
         ["service", "uninstall"] => remove_login_service(),
         ["uninstall"] => uninstall(),
