@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Liquid - Agent hosts</title>
+<link rel="stylesheet" href="mockup.css">
+<style>
+.set{display:flex;width:860px;height:520px;background:var(--ws-canvas);border-radius:var(--ws-radius-xl);box-shadow:var(--ws-shadow);overflow:hidden;font-size:var(--ws-fs-ui);line-height:var(--ws-lh-ui);color:var(--ws-text)}
+.set nav{width:200px;flex:none;background:var(--ws-subtle);padding:12px 8px;display:flex;flex-direction:column;gap:1px}
+.set nav b{font-size:12px;color:var(--ws-text-faint);font-weight:500;margin:4px 8px 8px}
+.set nav a{display:flex;align-items:center;height:var(--ws-row-side);padding:0 8px;border-radius:6px;color:var(--ws-text-muted);text-decoration:none}
+.set nav a.on{background:var(--ws-selected);color:var(--ws-text)}
+.set main{flex:1;padding:24px 32px;overflow:hidden}
+.set h2{margin:0 0 4px;font-size:var(--ws-fs-h3);line-height:var(--ws-lh-h3);font-weight:600}
+.set p.lead{margin:0 0 16px;color:var(--ws-text-muted);max-width:560px}
+.hosts{border-radius:8px;background:var(--ws-subtle);padding:4px}
+.host{display:flex;align-items:center;gap:12px;height:52px;padding:0 12px;border-radius:6px}
+.host:hover{background:var(--ws-hover)}
+.host .n{display:flex;flex-direction:column;min-width:0;flex:1}
+.host .n span{font-size:var(--ws-fs-small);line-height:var(--ws-lh-small);color:var(--ws-text-muted);font-family:var(--ws-font-mono)}
+.host .st{font-size:var(--ws-fs-compact);color:var(--ws-text-muted);white-space:nowrap}
+.host .st.ok{color:var(--ws-success)}
+.host .st.bad{color:var(--ws-danger)}
+.host .more{color:var(--ws-text-faint);width:20px;text-align:center}
+.add{margin-top:12px;display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--ws-border-strong);font-size:var(--ws-fs-compact)}
+.dlg{width:440px;background:var(--ws-canvas);border-radius:12px;box-shadow:var(--ws-shadow);padding:20px;font-size:var(--ws-fs-ui);line-height:var(--ws-lh-ui);color:var(--ws-text)}
+.dlg h3{margin:0 0 4px;font-size:var(--ws-fs-h3);line-height:var(--ws-lh-h3);font-weight:600}
+.dlg p{margin:0 0 14px;color:var(--ws-text-muted)}
+.dlg label{display:block;font-size:var(--ws-fs-compact);color:var(--ws-text-muted);margin:10px 0 4px}
+.dlg .in{height:30px;border-radius:6px;border:1px solid var(--ws-border-strong);padding:0 8px;display:flex;align-items:center;font-family:var(--ws-font-mono);font-size:var(--ws-fs-mono)}
+.dlg .in.ph{color:var(--ws-text-faint)}
+.dlg .err{margin-top:12px;padding:8px 10px;border-radius:6px;background:var(--ws-subtle);color:var(--ws-danger);font-size:var(--ws-fs-compact)}
+.dlg .err code{color:var(--ws-text-muted)}
+.dlg .acts{display:flex;justify-content:space-between;margin-top:18px}
+.dlg .act{height:28px;padding:0 12px;border-radius:6px;display:inline-flex;align-items:center;font-size:var(--ws-fs-compact);border:1px solid var(--ws-border-strong)}
+.dlg .act.primary{background:var(--ws-accent);color:var(--ws-on-accent);border-color:transparent}
+.stage{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap}
+</style>
+</head>
+<body class="chrome theme-light">
+<div class="page">
+  <header>
+    <h1>Agent hosts</h1>
+    <p class="sub">Step 4 of the T3 Code track (ADR-0299, ADR-0300): Liquid on one device uses the agents of another of the person's hosts. T3 Code's desktop app does the same under <b>Settings → Environments → Add environment</b> with a pairing code; Liquid keeps its own term, <b>agent host</b> (GLOSSARY.md). Choosing the host for a new session copies T3's environment picker in the Chat (ADR-0295) and needs no mockup.</p>
+  </header>
+
+  <section id="list">
+    <h3 class="sec">1. Settings → Agent hosts</h3>
+    <p class="sub">A new section after <b>Writer model</b>. This device's own Meta-Harness comes first; paired hosts follow with their Tailscale address and whether Liquid reaches them now. The row menu (···) offers <b>Remove…</b>, which forgets the host here and asks it to revoke the device's token. Status shows a word, never color alone.</p>
+    <div class="stage">
+      <div class="set">
+        <nav><b>Settings</b><a>Appearance</a><a>Shortcuts</a><a>Writer model</a><a class="on">Agent hosts</a></nav>
+        <main>
+          <h2>Agent hosts</h2>
+          <p class="lead">Where Liquid's sessions run. Another host is reached over Tailscale after it was paired once.</p>
+          <div class="hosts">
+            <div class="host"><div class="n">This Mac<span>~/.meta-harness</span></div><div class="st ok">✓ Running</div><div class="more">···</div></div>
+            <div class="host"><div class="n">vps<span>vps.tail1234.ts.net:3774</span></div><div class="st ok">✓ Connected</div><div class="more">···</div></div>
+            <div class="host"><div class="n">windows-pc<span>windows-pc.tail1234.ts.net:3774</span></div><div class="st bad">✕ Not reachable</div><div class="more">···</div></div>
+          </div>
+          <div class="add">＋ Add agent host…</div>
+        </main>
+      </div>
+    </div>
+  </section>
+
+  <section id="add">
+    <h3 class="sec">2. Add agent host</h3>
+    <p class="sub">The other host shows a single-use code after <code>meta remote on</code> and <code>meta invite --device</code>; it is valid for 5 minutes. Liquid pairs, keeps the device token in the keychain and names the host by what it reports, which the row menu can rename. Cancel left, the main action right (design guidelines).</p>
+    <div class="stage">
+      <div class="dlg">
+        <h3>Add agent host</h3>
+        <p>On the other host, run <code>meta invite --device</code> and enter its address and code here.</p>
+        <label>Address</label><div class="in">vps.tail1234.ts.net:3774</div>
+        <label>Pairing code</label><div class="in ph">8 characters</div>
+        <div class="acts"><span class="act">Cancel</span><span class="act primary">Add</span></div>
+      </div>
+      <div class="dlg">
+        <h3>Add agent host</h3>
+        <p>On the other host, run <code>meta invite --device</code> and enter its address and code here.</p>
+        <label>Address</label><div class="in">vps.tail1234.ts.net:3774</div>
+        <label>Pairing code</label><div class="in">K7Q2-M9XD</div>
+        <div class="err">The host was not added; nothing changed. <code>The pairing code expired. Ask the host for a new one.</code></div>
+        <div class="acts"><span class="act">Cancel</span><span class="act primary">Add</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="questions">
+    <h3 class="sec">Questions</h3>
+    <ol class="qs">
+      <li>Section name: <b>Agent hosts</b> (Liquid's term) or <b>Environments</b> (T3 Code's)?</li>
+      <li>Should this device's own row offer to turn on remote access (<code>meta remote on</code>) and to invite another device, or stay on the command line for now?</li>
+    </ol>
+  </section>
+</div>
+</body>
+</html>
