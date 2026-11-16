@@ -31,7 +31,7 @@ pub use host::{
     AcpAgent, Host, HostConfig, Model, ModelChoice, ModelOption, Permissions, Project, Provider,
     StartThread, ThreadSummary, Workspace,
 };
-pub use service::{CONNECTION_FILE, Service, ServiceConfig};
+pub use service::{CONNECTION_FILE, Service, ServiceConfig, default_home};
 pub use statistics::{ModelUsage, Statistics, ToolCalls, TurnStatistics};
 pub use t3::{Watch, t3_version};
 pub use thread::{

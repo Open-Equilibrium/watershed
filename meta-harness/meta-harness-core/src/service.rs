@@ -29,6 +29,14 @@ pub const CONNECTION_FILE: &str = "connection.json";
 /// Frames a connection's writer holds before a stream waits for the client to read.
 const OUTGOING: usize = 256;
 
+/// Meta-Harness's data folder: `META_HARNESS_HOME`, else `.meta-harness` in the home folder, as
+/// T3 Code keeps `~/.t3`.
+pub fn default_home() -> Option<PathBuf> {
+    std::env::var_os("META_HARNESS_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::home_dir().map(|home| home.join(".meta-harness")))
+}
+
 /// What a service runs on.
 #[derive(Debug, Clone)]
 pub struct ServiceConfig {
