@@ -1,5 +1,6 @@
 //! T3 Code's side: its server, its client protocol and a thread's projection (ADR-0281).
 
+mod cli;
 mod client;
 mod live;
 mod projection;
@@ -7,6 +8,7 @@ mod server;
 
 pub use live::Watch;
 
+pub(crate) use cli::pairing_code;
 pub(crate) use client::Client;
 pub(crate) use projection::{Change, Projection, prompt_of};
 pub(crate) use server::Server;

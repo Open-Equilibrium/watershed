@@ -13,7 +13,9 @@ use meta_harness_core::{
     LineCount, ModelChoice, Permissions, Relation, Request, Snapshot, StartThread, Thread,
     ThreadEvent, TurnStatus, Workspace,
 };
-use meta_harness_core::{CONNECTION_FILE, Change, Service, ServiceConfig, remote, t3_version};
+use meta_harness_core::{
+    CONNECTION_FILE, Change, Kind, Service, ServiceConfig, remote, t3_version,
+};
 
 const AGENT: &str = "scripted";
 
@@ -60,10 +62,14 @@ async fn host(home: &Path) -> Host {
 }
 
 /// Starts a service on `home`, which keeps T3's data in `home/t3`, and connects a client to it.
+/// Its remote listener binds loopback.
 async fn start_service(home: &Path) -> (Service, remote::Host) {
-    let service = Service::start(service_config(home))
-        .await
-        .expect("the service starts");
+    let service = Service::start_with_remote(
+        service_config(home),
+        Some(vec![std::net::Ipv4Addr::LOCALHOST.into()]),
+    )
+    .await
+    .expect("the service starts");
     let host = remote::Host::connect(home, "contract")
         .await
         .expect("a client connects");
@@ -91,6 +97,15 @@ fn service_config(home: &Path) -> ServiceConfig {
         t3: t3(),
         acp_agents: agents(home),
     }
+}
+
+/// A free loopback port, for a remote listener.
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
 }
 
 fn worktree() -> Workspace {
@@ -939,4 +954,86 @@ async fn the_service_refuses_a_client_that_names_no_api_version_or_another() {
         assert_eq!(refused.headers()["meta-harness-api"], "1");
     }
     service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_pairs_once_and_calls_the_api_remotely_while_a_host_only_asks_for_a_pairing_code()
+{
+    let (_dir, _repo, home) = fixture();
+    let (_service, local) = start_service(&home).await;
+    let port = free_port();
+    let status = local.remote_on(port).await.unwrap();
+    let url = format!("ws://127.0.0.1:{port}");
+    assert_eq!(status.addresses, [url.as_str()]);
+
+    let code = local.invite(Kind::Device).await.unwrap();
+    let (_, token) = remote::pair(&url, &code, "phone").await.unwrap();
+    let used = remote::pair(&url, &code, "tablet").await.unwrap_err();
+    assert_eq!(used, "That pairing code is wrong, already used or expired.");
+    let wrong = remote::pair(&url, "AAAA-AAAA", "tablet").await.unwrap_err();
+    assert_eq!(wrong, used);
+
+    let device = remote::Host::connect_to(&url, &token, "phone")
+        .await
+        .unwrap();
+    device.status().await.unwrap();
+    device.config().await.unwrap();
+    assert!(
+        device.remote_status().await.is_err(),
+        "remote access is set here only"
+    );
+    assert!(device.invite(Kind::Device).await.is_err());
+    local.revoke_client("phone").await.unwrap();
+    assert!(
+        remote::Host::connect_to(&url, &token, "phone")
+            .await
+            .is_err()
+    );
+
+    let host_code = local.invite(Kind::Host).await.unwrap();
+    let (name, host_token) = remote::pair(&url, &host_code, "other").await.unwrap();
+    assert_eq!(name, local.environment_name().await.unwrap().to_lowercase());
+    let host = remote::Host::connect_to(&url, &host_token, "other")
+        .await
+        .unwrap();
+    assert!(
+        host.status().await.is_err(),
+        "a host asks for a T3 pairing code only"
+    );
+    assert!(!host.t3_pairing().await.unwrap().is_empty());
+
+    assert!(
+        remote::Host::connect_to(&url, &"0".repeat(64), "other")
+            .await
+            .is_err()
+    );
+    local.remote_off().await.unwrap();
+    assert!(local.remote_status().await.unwrap().is_none());
+    assert!(
+        remote::Host::connect_to(&url, &token, "phone")
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn remote_access_that_is_on_stays_on_across_a_restart() {
+    let (_dir, _repo, home) = fixture();
+    let (service, local) = start_service(&home).await;
+    let port = free_port();
+    local.remote_on(port).await.unwrap();
+    let code = local.invite(Kind::Device).await.unwrap();
+    let url = format!("ws://127.0.0.1:{port}");
+    let (_, token) = remote::pair(&url, &code, "phone").await.unwrap();
+    drop(local);
+    service.stop().await;
+
+    let (_service, local) = start_service(&home).await;
+    let status = local.remote_status().await.unwrap().expect("still on");
+    assert_eq!(status.port, port);
+    assert!(
+        remote::Host::connect_to(&url, &token, "phone")
+            .await
+            .is_ok()
+    );
 }

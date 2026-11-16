@@ -10,6 +10,7 @@ mod context;
 mod event;
 mod git;
 mod host;
+mod hosts;
 pub mod remote;
 mod service;
 mod statistics;
@@ -17,6 +18,7 @@ mod t3;
 mod thread;
 mod visible;
 
+pub use api::RemoteStatus;
 pub use config::{Action, Blocks, Change, Current, LogEntry, McpServer, Proposal, Proposed};
 pub use context::Context;
 pub use event::{
@@ -32,6 +34,7 @@ pub use host::{
     AcpAgent, Host, HostConfig, Model, ModelChoice, ModelOption, Permissions, Project, Provider,
     StartThread, ThreadSummary, Workspace,
 };
+pub use hosts::Kind;
 pub use service::{CONNECTION_FILE, Service, ServiceConfig, default_home};
 pub use statistics::{ModelUsage, Statistics, ToolCalls, TurnStatistics};
 pub use t3::{Watch, t3_version};

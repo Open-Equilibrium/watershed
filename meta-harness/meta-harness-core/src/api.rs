@@ -10,6 +10,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::config::Change;
+use crate::hosts::Kind;
 use crate::{GitActionRequest, ModelChoice, Permissions, StartThread, ThreadSummary};
 
 /// The header a client names itself with; the configuration log records it (ADR-0298).
@@ -18,6 +19,10 @@ pub const CLIENT_HEADER: &str = "meta-harness-client";
 /// The header a client names its API version with. A service of another version, or a client that
 /// names none, is refused at the handshake, since it would misread the frames.
 pub const API_HEADER: &str = "meta-harness-api";
+
+/// The header that asks the remote listener to pair a new client with the pairing code it names
+/// (ADR-0299).
+pub const PAIRING_HEADER: &str = "meta-harness-pairing";
 
 /// The API version this build speaks: the calls, streams and frames below.
 pub const API_VERSION: u32 = 1;
@@ -28,6 +33,12 @@ pub const API_VERSION: u32 = 1;
 pub(crate) enum Call {
     /// The host's T3 Code server.
     Host(HostCall),
+    /// Remote access to this service; answered only on this computer (ADR-0299).
+    Remote(RemoteCall),
+    /// A pairing code for a new host or device; answered only on this computer (ADR-0299).
+    Invite(Kind),
+    /// The other hosts this one links to and the clients paired with it (ADR-0285).
+    Hosts(HostsCall),
     /// A project, by its folder.
     Project {
         /// The project folder.
@@ -64,6 +75,29 @@ pub(crate) enum HostCall {
     EnvironmentName,
     WriterModel,
     SetWriterModel(ModelChoice),
+}
+
+/// A call to the remote listener.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum RemoteCall {
+    /// Listens on the tailnet at `port`, from now on and after each start.
+    On { port: u16 },
+    /// Stops listening there.
+    Off,
+    /// Where it listens, if it does.
+    Status,
+}
+
+/// A call to the hosts this one links to.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum HostsCall {
+    /// A pairing code from this host's T3 Code, which another host's link redeems. The only call
+    /// a host's token may make (ADR-0288).
+    T3Pairing,
+    /// Revokes the client named so: its token is refused from its next connection on (ADR-0299).
+    Revoke(String),
 }
 
 /// A call to a project.
@@ -266,4 +300,13 @@ pub struct Status {
     pub pid: u32,
     /// The current configuration revision.
     pub revision: u64,
+}
+
+/// Where the remote listener answers, while it is on.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct RemoteStatus {
+    /// The port it listens on.
+    pub port: u16,
+    /// Each address, as `ws://<ip>:<port>`, which a host or device names to reach it.
+    pub addresses: Vec<String>,
 }

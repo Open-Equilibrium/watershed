@@ -15,7 +15,7 @@ pub fn t3_version() -> &'static str {
 /// Environment that keeps T3 from sending anything to its analytics (ADR-0281). Agent activity
 /// publishing stays off because Meta-Harness never runs `t3 connect`, which stores what
 /// publishing needs.
-const QUIET_ENV: [(&str, &str); 2] = [
+pub(crate) const QUIET_ENV: [(&str, &str); 2] = [
     ("T3CODE_TELEMETRY_ENABLED", "false"),
     ("T3CODE_OTEL_SDK_DISABLED", "true"),
 ];

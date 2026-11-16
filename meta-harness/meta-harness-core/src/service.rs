@@ -4,6 +4,7 @@
 //! its address, into `connection.json`, which only the user can read.
 
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -18,10 +19,15 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tokio_tungstenite::tungstenite::http::StatusCode;
 
+mod remote;
+
 use crate::api::{
-    self, Call, Checkout, ConfigCall, GitCall, HostCall, ProjectCall, Reply, Stream, ThreadCall,
+    self, Call, Checkout, ConfigCall, GitCall, HostCall, HostsCall, ProjectCall, Reply, Stream,
+    ThreadCall,
 };
-use crate::config::{Homes, Proposed, Store, provider_instances};
+use crate::config::{Homes, Proposed, Store, now_ms, provider_instances};
+use crate::hosts::{self, Kind};
+use crate::t3::pairing_code;
 use crate::{AcpAgent, Host, HostConfig, Project, Thread};
 
 /// The file that tells clients where the service listens and which token it accepts.
@@ -35,6 +41,9 @@ const FOLLOWED: usize = 32;
 
 /// How long a new connection may take to complete its handshake.
 const HANDSHAKE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The refusal of a call or stream that the caller's kind does not make (ADR-0299).
+const REFUSED_CALL: &str = "This client may not make that call.";
 
 /// Meta-Harness's data folder: `META_HARNESS_HOME`, which must be absolute, else `.meta-harness`
 /// in the home folder, as T3 Code keeps `~/.t3`.
@@ -67,6 +76,7 @@ pub struct Service {
     /// The bearer token every connection must send.
     pub token: String,
     host: Arc<Host>,
+    shared: Arc<Shared>,
     accept: JoinHandle<()>,
     stopping: tokio::sync::watch::Sender<bool>,
     connection_file: PathBuf,
@@ -82,12 +92,31 @@ struct Shared {
     stopping: tokio::sync::watch::Receiver<bool>,
     /// Held until the last connection and call ends; a new service on the folder fails until then.
     _lock: std::fs::File,
+    /// This host's name for other hosts: T3's name for it, in lower case.
+    name: String,
+    /// Where the remote listener binds; `None` for the Tailscale addresses.
+    remote_bind: Option<Vec<IpAddr>>,
+    /// The pinned `t3` executable and T3's data folder, for its command line.
+    t3: PathBuf,
+    t3_home: PathBuf,
+    /// The remote listener while remote access is on.
+    remote: std::sync::Mutex<Option<remote::Listening>>,
 }
 
 impl Service {
     /// Takes the data folder, writes the current configuration into the harness homes, starts
-    /// T3 with Claude Code and Codex pointed at them and listens for clients.
+    /// T3 with Claude Code and Codex pointed at them and listens for clients. Remote access binds
+    /// the Tailscale addresses.
     pub async fn start(config: ServiceConfig) -> Result<Self, String> {
+        Self::start_with_remote(config, None).await
+    }
+
+    /// As [`Service::start`], but remote access binds `remote_bind` instead of the Tailscale
+    /// addresses (ADR-0299); the tests bind loopback this way.
+    pub async fn start_with_remote(
+        config: ServiceConfig,
+        remote_bind: Option<Vec<IpAddr>>,
+    ) -> Result<Self, String> {
         create_private_dir(&config.home)?;
         let lock = take_lock(&config.home)?;
         let store = Store::open(&config.home.join("meta-harness.sqlite"))?;
@@ -100,14 +129,16 @@ impl Service {
         if let Err(error) = homes.write(&store.current()?.blocks, &person_codex) {
             eprintln!("meta: {error}");
         }
+        let t3_home = config.home.join("t3");
         let host = Arc::new(
             Host::start(HostConfig {
-                binary: config.t3,
-                home: config.home.join("t3"),
+                binary: config.t3.clone(),
+                home: t3_home.clone(),
                 acp_agents: config.acp_agents,
             })
             .await?,
         );
+        let name = host.environment_name().await?.to_lowercase();
         let claude_dir = std::env::var("CLAUDE_CONFIG_DIR").ok();
         let instances = provider_instances(
             &host.provider_instances().await?,
@@ -120,7 +151,7 @@ impl Service {
             .await
             .map_err(|e| format!("Could not listen on the loopback: {e}"))?;
         let url = format!("ws://{}", listener.local_addr().map_err(|e| e.to_string())?);
-        let token = fresh_token();
+        let token = hosts::new_token();
         let connection_file = config.home.join(CONNECTION_FILE);
         write_private(
             &connection_file,
@@ -135,20 +166,25 @@ impl Service {
             token: token.clone(),
             stopping: stopped,
             _lock: lock,
+            name,
+            remote_bind,
+            t3: config.t3,
+            t3_home,
+            remote: std::sync::Mutex::new(None),
         });
-        let accept = tokio::spawn(async move {
-            loop {
-                match listener.accept().await {
-                    Ok((socket, _)) => drop(tokio::spawn(serve(shared.clone(), socket))),
-                    // Such as too many open files: the service keeps listening.
-                    Err(_) => tokio::time::sleep(std::time::Duration::from_millis(100)).await,
-                }
-            }
-        });
+        // Remote access stays on across restarts (ADR-0299); a port it cannot take is reported.
+        let remembered = hosts::remote_port(&shared.store.db())?;
+        if let Some(port) = remembered
+            && let Err(error) = remote::start(&shared, port).await
+        {
+            eprintln!("meta: remote access is off: {error}");
+        }
+        let accept = tokio::spawn(accept(listener, shared.clone(), Listener::Local));
         Ok(Self {
             url,
             token,
             host,
+            shared,
             accept,
             stopping,
             connection_file,
@@ -168,16 +204,17 @@ impl Service {
 impl Drop for Service {
     fn drop(&mut self) {
         self.accept.abort();
+        // The remote listener's tasks hold the shared state, so they end with it.
+        drop(
+            self.shared
+                .remote
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take(),
+        );
         let _ = self.stopping.send(true);
         let _ = std::fs::remove_file(&self.connection_file);
     }
-}
-
-/// A bearer token of 256 random bits, new at each start.
-fn fresh_token() -> String {
-    let mut bytes = [0u8; 32];
-    getrandom::fill(&mut bytes).expect("the operating system provides random bytes");
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn create_private_dir(path: &Path) -> Result<(), String> {
@@ -222,51 +259,152 @@ fn write_private(path: &Path, text: &str) -> Result<(), String> {
         .map_err(|e| format!("Could not write {}: {e}", path.display()))
 }
 
-/// Whether `given` equals `expected`, in time that does not depend on where they differ.
-fn same(given: &[u8], expected: &[u8]) -> bool {
-    given.len() == expected.len()
-        && given
-            .iter()
-            .zip(expected)
-            .fold(0u8, |diff, (a, b)| diff | (a ^ b))
-            == 0
+/// Which listener a connection came in on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Listener {
+    /// This computer's loopback, which admits the local token only.
+    Local,
+    /// The remote addresses, which admit paired clients only (ADR-0299).
+    Remote,
 }
 
-/// One client connection: its handshake must carry the token; then each request runs on its
-/// own task, and streams end when the client cancels them or leaves.
+/// Who a session serves (ADR-0299): this computer's own Meta-Harness, or a client that paired.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Caller {
+    Local,
+    Device,
+    Host,
+}
+
+impl Caller {
+    /// Whether this caller may make `call`. A device makes the calls that reach its own computer's
+    /// projects, threads, Git and configuration, but not the ones only this computer makes; a host
+    /// asks only for a T3 pairing code (ADR-0288).
+    fn answers(self, call: &Call) -> bool {
+        match self {
+            Self::Local => true,
+            Self::Device => matches!(
+                call,
+                Call::Host(_)
+                    | Call::Project { .. }
+                    | Call::Thread { .. }
+                    | Call::Git { .. }
+                    | Call::Config(_)
+            ),
+            Self::Host => matches!(call, Call::Hosts(HostsCall::T3Pairing)),
+        }
+    }
+
+    /// Whether this caller may open streams; a host opens none.
+    fn streams(self) -> bool {
+        self != Self::Host
+    }
+}
+
+/// What a handshake admits a connection to.
+enum Admission {
+    /// Calls and streams, as this caller.
+    Session(Caller),
+    /// A new client, which receives its token once before the connection closes.
+    Paired(String),
+}
+
+fn refuse(status: StatusCode, reason: impl Into<String>) -> ErrorResponse {
+    let mut refused = ErrorResponse::new(Some(reason.into()));
+    *refused.status_mut() = status;
+    refused
+}
+
+fn header<'a>(request: &'a Request, name: &str) -> Option<&'a str> {
+    request.headers().get(name).and_then(|v| v.to_str().ok())
+}
+
+/// Refuses a request that names no API version, or another, since it would misread the frames.
 // tungstenite's handshake callback returns its own large error response.
 #[allow(clippy::result_large_err)]
-async fn serve(shared: Arc<Shared>, socket: TcpStream) {
+fn check_version(request: &Request) -> Result<(), ErrorResponse> {
+    let version = header(request, api::API_HEADER).and_then(|v| v.parse::<u32>().ok());
+    if version == Some(api::API_VERSION) {
+        return Ok(());
+    }
+    let mut refused = refuse(
+        StatusCode::UPGRADE_REQUIRED,
+        format!("Meta-Harness speaks API version {}.", api::API_VERSION),
+    );
+    refused
+        .headers_mut()
+        .insert(api::API_HEADER, api::API_VERSION.into());
+    Err(refused)
+}
+
+/// Decides what a handshake admits (ADR-0299). The local listener admits the local token. The
+/// remote listener admits a paired client's token, or a pairing code, which pays with a new token.
+// tungstenite's handshake callback returns its own large error response.
+#[allow(clippy::result_large_err)]
+fn admit(
+    shared: &Shared,
+    listener: Listener,
+    request: &Request,
+) -> Result<Admission, ErrorResponse> {
+    let bearer = header(request, "authorization").and_then(|v| v.strip_prefix("Bearer "));
+    match listener {
+        Listener::Local => {
+            if !bearer.is_some_and(|b| hosts::same(b.as_bytes(), shared.token.as_bytes())) {
+                return Err(refuse(
+                    StatusCode::UNAUTHORIZED,
+                    "Meta-Harness needs its token.",
+                ));
+            }
+            check_version(request)?;
+            Ok(Admission::Session(Caller::Local))
+        }
+        Listener::Remote => {
+            check_version(request)?;
+            let db = shared.store.db();
+            if let Some(code) = header(request, api::PAIRING_HEADER) {
+                let name = header(request, api::CLIENT_HEADER).unwrap_or("unnamed");
+                let token = hosts::pair(&db, code, name, now_ms())
+                    .map_err(|reason| refuse(StatusCode::FORBIDDEN, reason))?;
+                return Ok(Admission::Paired(token));
+            }
+            let kind = match bearer {
+                Some(token) => hosts::client_kind(&db, token)
+                    .map_err(|error| refuse(StatusCode::INTERNAL_SERVER_ERROR, error))?,
+                None => None,
+            };
+            match kind {
+                Some(Kind::Device) => Ok(Admission::Session(Caller::Device)),
+                Some(Kind::Host) => Ok(Admission::Session(Caller::Host)),
+                None => Err(refuse(
+                    StatusCode::UNAUTHORIZED,
+                    "Meta-Harness needs a token of a paired client.",
+                )),
+            }
+        }
+    }
+}
+
+/// Serves each connection that `listener` accepts, until the task ends.
+async fn accept(listener: TcpListener, shared: Arc<Shared>, kind: Listener) {
+    loop {
+        match listener.accept().await {
+            Ok((socket, _)) => drop(tokio::spawn(serve(shared.clone(), socket, kind))),
+            // Such as too many open files: the service keeps listening.
+            Err(_) => tokio::time::sleep(std::time::Duration::from_millis(100)).await,
+        }
+    }
+}
+
+/// One client connection: its handshake must admit it (see [`admit`]); then each request runs on
+/// its own task, and streams end when the client cancels them or leaves.
+// tungstenite's handshake callback returns its own large error response.
+#[allow(clippy::result_large_err)]
+async fn serve(shared: Arc<Shared>, socket: TcpStream, listener: Listener) {
     let mut client = String::new();
+    let mut admission = None;
     let check = |request: &Request, response: Response| -> Result<Response, ErrorResponse> {
-        let bearer = request
-            .headers()
-            .get("authorization")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("Bearer "));
-        if !bearer.is_some_and(|b| same(b.as_bytes(), shared.token.as_bytes())) {
-            let mut refused = ErrorResponse::new(Some("Meta-Harness needs its token.".into()));
-            *refused.status_mut() = StatusCode::UNAUTHORIZED;
-            return Err(refused);
-        }
-        let version = request
-            .headers()
-            .get(api::API_HEADER)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse::<u32>().ok());
-        if version != Some(api::API_VERSION) {
-            let body = format!("Meta-Harness speaks API version {}.", api::API_VERSION);
-            let mut refused = ErrorResponse::new(Some(body));
-            *refused.status_mut() = StatusCode::UPGRADE_REQUIRED;
-            refused
-                .headers_mut()
-                .insert(api::API_HEADER, api::API_VERSION.into());
-            return Err(refused);
-        }
-        client = request
-            .headers()
-            .get(api::CLIENT_HEADER)
-            .and_then(|v| v.to_str().ok())
+        admission = Some(admit(&shared, listener, request)?);
+        client = header(request, api::CLIENT_HEADER)
             .unwrap_or("unnamed")
             .chars()
             .filter(|c| !c.is_control())
@@ -274,13 +412,23 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream) {
             .collect();
         Ok(response)
     };
-    let Ok(Ok(socket)) = tokio::time::timeout(
+    let Ok(Ok(mut socket)) = tokio::time::timeout(
         HANDSHAKE,
         tokio_tungstenite::accept_hdr_async(socket, check),
     )
     .await
     else {
         return;
+    };
+    let caller = match admission {
+        Some(Admission::Session(caller)) => caller,
+        Some(Admission::Paired(token)) => {
+            let answer = json!({"token": token, "name": shared.name}).to_string();
+            let _ = socket.send(Message::Text(answer.into())).await;
+            let _ = socket.close(None).await;
+            return;
+        }
+        None => return,
     };
     let (mut sink, mut frames) = socket.split();
     let (out, mut outgoing) = mpsc::channel::<Message>(OUTGOING);
@@ -295,6 +443,7 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream) {
     let session = Arc::new(Session {
         shared,
         client,
+        caller,
         projects: Mutex::default(),
         threads: Mutex::default(),
     });
@@ -396,6 +545,7 @@ fn to(value: impl Serialize) -> Result<Value, String> {
 struct Session {
     shared: Arc<Shared>,
     client: String,
+    caller: Caller,
     projects: Mutex<HashMap<String, Project>>,
     /// Followed threads, the most recently used last.
     threads: Mutex<Vec<(String, Thread)>>,
@@ -449,6 +599,9 @@ impl Session {
     }
 
     async fn call(&self, call: Call) -> Result<Value, String> {
+        if !self.caller.answers(&call) {
+            return Err(REFUSED_CALL.to_owned());
+        }
         match call {
             Call::Host(call) => self.host_call(call).await,
             Call::Project { root, call } => self.project_call(&root, call).await,
@@ -458,6 +611,14 @@ impl Session {
             }
             Call::Git { checkout, call } => git_call(&self.git(&checkout).await?, call).await,
             Call::Config(call) => self.config_call(call),
+            Call::Remote(call) => remote::call(&self.shared, call).await,
+            Call::Invite(kind) => to(hosts::invite(&self.shared.store.db(), kind, now_ms())?),
+            Call::Hosts(HostsCall::T3Pairing) => {
+                to(pairing_code(&self.shared.t3, &self.shared.t3_home).await?)
+            }
+            Call::Hosts(HostsCall::Revoke(name)) => {
+                to(hosts::revoke(&self.shared.store.db(), &name)?)
+            }
         }
     }
 
@@ -534,6 +695,9 @@ impl Session {
         stream: Stream,
         out: &mpsc::Sender<Message>,
     ) -> Result<(), String> {
+        if !self.caller.streams() {
+            return Err(REFUSED_CALL.to_owned());
+        }
         match stream {
             Stream::Subscribe { root, id: thread } => {
                 // The stream holds the thread, so it stays followed however many others open.

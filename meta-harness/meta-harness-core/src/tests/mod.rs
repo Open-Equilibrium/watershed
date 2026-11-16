@@ -5,6 +5,7 @@ mod fake_t3;
 mod git;
 mod homes;
 mod host;
+mod hosts;
 mod lineage;
 mod projection;
 mod pull_request;
