@@ -184,6 +184,51 @@ void main() {
     await state.dispose();
   });
 
+  test('a long Page rereads only the windows of Views it last used', () async {
+    final fake = FakeWorkspace();
+    final state = WorkspaceState(fake);
+    await state.start();
+    final page = state.open.value!.page;
+    String? after;
+    for (var index = 0; index < 2000; index++) {
+      final added = await state.apply(
+        mutation(
+          BridgeMutationKind.addTextBlock,
+          page: page,
+          after: after,
+          text: '$index',
+        ),
+      );
+      after = added.view;
+    }
+    final views = PageViews(state, page)..start();
+    await pumpEventQueue();
+    // Scrolled through the whole Page.
+    for (var index = 0; index < 2000; index += 100) {
+      expect(await views.viewAt(index), isNotNull);
+    }
+    fake.asked.clear();
+    await state.apply(
+      mutation(BridgeMutationKind.addTextBlock, page: page, text: 'new'),
+    );
+    await pumpEventQueue();
+    final reads = fake.asked.where(
+      (asked) => asked.kind == BridgeQueryKind.views,
+    );
+    expect(
+      reads.length,
+      lessThanOrEqualTo(11),
+      reason: 'the windows kept, plus the first',
+    );
+    expect(
+      views.at(1999)?.id,
+      isNotNull,
+      reason: 'the window last used is kept',
+    );
+    views.dispose();
+    await state.dispose();
+  });
+
   group('a Page’s Views', () {
     late FakeWorkspace fake;
     late WorkspaceState state;

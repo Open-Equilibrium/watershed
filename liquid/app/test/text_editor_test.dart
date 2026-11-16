@@ -1104,6 +1104,42 @@ void main() {
     expect(kit.fake.textsOf(kit.page), ['A', 'x', 'B', '']);
   });
 
+  testWidgets('⌫ far down a long Page reads only the Views beside it', (
+    tester,
+  ) async {
+    await show(tester, [
+      for (var number = 1; number <= 600; number++) 'Item $number',
+    ]);
+    await tester.scrollUntilVisible(
+      find.text('Item 560'),
+      2000,
+      scrollable: find
+          .descendant(
+            of: find.byType(CustomScrollView),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.pumpAndSettle();
+    final at = find
+        .byType(TextBlock)
+        .evaluate()
+        .toList()
+        .indexWhere(
+          (element) =>
+              ((element.widget as TextBlock).view.id ==
+              kit.fake.views[kit.page]![559].id),
+        );
+    await caret(tester, at, 0);
+    kit.fake.asked.clear();
+    await key(tester, LogicalKeyboardKey.backspace);
+    expect(kit.fake.textsOf(kit.page)[558], 'Item 559Item 560');
+    final big = kit.fake.asked.where(
+      (asked) => asked.kind == BridgeQueryKind.views && asked.limit > 100,
+    );
+    expect(big, isEmpty, reason: 'the View above is found beside the caret');
+  });
+
   testWidgets('a numbered list of 600 items counts to its end', (tester) async {
     await show(tester, [
       for (var number = 1; number <= 600; number++) 'Item $number',

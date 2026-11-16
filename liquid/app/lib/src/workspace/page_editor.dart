@@ -624,6 +624,22 @@ class PageEditor {
   /// The View above the target's, as the core orders them now; the Page's own copy may
   /// not have caught up with the changes the queue just made.
   Future<BridgeView?> _above(EditorTarget target) async {
+    // Usually the target is still where the queue last put it.
+    final near = await _state.read(
+      query(
+        BridgeQueryKind.views,
+        page: _page,
+        start: target.index > 0 ? target.index - 1 : 0,
+        limit: 2,
+      ),
+    );
+    switch (near.views) {
+      case [final view, ...] when target.index == 0 && view.id == target.view:
+        return null;
+      case [final above, final view]
+          when target.index > 0 && view.id == target.view:
+        return above;
+    }
     for (var start = 0; ; start += window) {
       final answer = await _state.read(
         query(BridgeQueryKind.views, page: _page, start: start),
