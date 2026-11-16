@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use futures_util::stream::unfold;
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -35,12 +36,16 @@ const FOLLOWED: usize = 32;
 /// How long a new connection may take to complete its handshake.
 const HANDSHAKE: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Meta-Harness's data folder: `META_HARNESS_HOME`, else `.meta-harness` in the home folder, as
-/// T3 Code keeps `~/.t3`.
-pub fn default_home() -> Option<PathBuf> {
-    std::env::var_os("META_HARNESS_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::home_dir().map(|home| home.join(".meta-harness")))
+/// Meta-Harness's data folder: `META_HARNESS_HOME`, which must be absolute, else `.meta-harness`
+/// in the home folder, as T3 Code keeps `~/.t3`.
+pub fn default_home() -> Result<PathBuf, String> {
+    match std::env::var_os("META_HARNESS_HOME") {
+        Some(home) if Path::new(&home).is_absolute() => Ok(PathBuf::from(home)),
+        Some(_) => Err("META_HARNESS_HOME must be an absolute path.".to_owned()),
+        None => std::env::home_dir()
+            .map(|home| home.join(".meta-harness"))
+            .ok_or_else(|| "The home folder is unknown; set META_HARNESS_HOME.".to_owned()),
+    }
 }
 
 /// What a service runs on.
@@ -334,6 +339,28 @@ fn frame_of(reply: &Reply) -> Message {
     )
 }
 
+/// Answers stream `id` with `first`, then sends each of `items` until the client is gone or the
+/// items end, and ends the stream.
+async fn answer(
+    out: &mpsc::Sender<Message>,
+    id: u64,
+    first: Value,
+    items: impl futures_util::Stream<Item = Result<Value, String>>,
+) {
+    let _ = out.send(frame_of(&Reply::Ok { id, ok: first })).await;
+    let mut items = std::pin::pin!(items);
+    while let Some(item) = items.next().await {
+        let reply = match item {
+            Ok(item) => Reply::Item { id, item },
+            Err(error) => Reply::Error { id, error },
+        };
+        if out.send(frame_of(&reply)).await.is_err() {
+            return;
+        }
+    }
+    let _ = out.send(frame_of(&Reply::End { id, end: () })).await;
+}
+
 fn to(value: impl Serialize) -> Result<Value, String> {
     serde_json::to_value(value).map_err(|e| e.to_string())
 }
@@ -480,94 +507,57 @@ impl Session {
         stream: Stream,
         out: &mpsc::Sender<Message>,
     ) -> Result<(), String> {
-        let send = |reply: Reply| async move { out.send(frame_of(&reply)).await.is_ok() };
-        let item = |value: Result<Value, String>| match value {
-            Ok(item) => Reply::Item { id, item },
-            Err(error) => Reply::Error { id, error },
-        };
         match stream {
             Stream::Subscribe { root, id: thread } => {
                 // The stream holds the thread, so it stays followed however many others open.
                 let followed = self.thread(&root, &thread).await?;
-                let (snapshot, mut events) = followed.subscribe();
-                send(Reply::Ok {
-                    id,
-                    ok: to(snapshot)?,
-                })
-                .await;
-                while let Some(event) = events.recv().await {
-                    if !send(item(to(event))).await {
-                        return Ok(());
-                    }
-                }
+                let (snapshot, events) = followed.subscribe();
+                let items = unfold(events, |mut events| async move {
+                    Some((to(events.recv().await?), events))
+                });
+                answer(out, id, to(snapshot)?, items).await;
             }
             Stream::Servers { root, id: thread } => {
-                let mut watch = self.thread(&root, &thread).await?.servers().await?;
-                send(Reply::Ok {
-                    id,
-                    ok: to(watch.current())?,
-                })
-                .await;
-                while let Some(servers) = watch.changed().await {
-                    if !send(item(to(servers))).await {
-                        return Ok(());
-                    }
-                }
+                let watch = self.thread(&root, &thread).await?.servers().await?;
+                let first = to(watch.current())?;
+                let items = unfold(watch, |mut watch| async move {
+                    Some((to(watch.changed().await?), watch))
+                });
+                answer(out, id, first, items).await;
             }
             Stream::Automations { root, id: thread } => {
-                let mut watch = self.thread(&root, &thread).await?.automations().await?;
-                send(Reply::Ok {
-                    id,
-                    ok: to(watch.current())?,
-                })
-                .await;
-                while let Some(automations) = watch.changed().await {
-                    if !send(item(to(automations))).await {
-                        return Ok(());
-                    }
-                }
+                let watch = self.thread(&root, &thread).await?.automations().await?;
+                let first = to(watch.current())?;
+                let items = unfold(watch, |mut watch| async move {
+                    Some((to(watch.changed().await?), watch))
+                });
+                answer(out, id, first, items).await;
             }
             Stream::LineageChanges { root, id: thread } => {
                 let changes = self.thread(&root, &thread).await?.lineage_changes().await?;
-                send(Reply::Ok {
-                    id,
-                    ok: Value::Null,
-                })
-                .await;
-                while changes.changed().await {
-                    if !send(item(Ok(Value::Null))).await {
-                        return Ok(());
-                    }
-                }
+                let items = unfold(changes, |changes| async move {
+                    changes
+                        .changed()
+                        .await
+                        .then_some((Ok(Value::Null), changes))
+                });
+                answer(out, id, Value::Null, items).await;
             }
             Stream::GitWatch(checkout) => {
-                let mut statuses = self.git(&checkout).await?.watch().await?;
-                send(Reply::Ok {
-                    id,
-                    ok: Value::Null,
-                })
-                .await;
-                while let Some(status) = statuses.recv().await {
-                    if !send(item(to(status))).await {
-                        return Ok(());
-                    }
-                }
+                let statuses = self.git(&checkout).await?.watch().await?;
+                let items = unfold(statuses, |mut statuses| async move {
+                    Some((to(statuses.recv().await?), statuses))
+                });
+                answer(out, id, Value::Null, items).await;
             }
             Stream::GitRun { checkout, request } => {
-                let mut progress = self.git(&checkout).await?.run(request).await?;
-                send(Reply::Ok {
-                    id,
-                    ok: Value::Null,
-                })
-                .await;
-                while let Some(step) = progress.recv().await {
-                    if !send(item(to(step))).await {
-                        return Ok(());
-                    }
-                }
+                let progress = self.git(&checkout).await?.run(request).await?;
+                let items = unfold(progress, |mut progress| async move {
+                    Some((to(progress.recv().await?), progress))
+                });
+                answer(out, id, Value::Null, items).await;
             }
         }
-        send(Reply::End { id, end: () }).await;
         Ok(())
     }
 }

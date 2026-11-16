@@ -141,20 +141,11 @@ impl AgentHost {
     pub fn connect(home: Option<String>) -> Result<Self, String> {
         let (folder, found) = match home {
             Some(home) => (PathBuf::from(home), "from META_HARNESS_HOME"),
-            None => (
-                default_home().ok_or("The home folder is unknown.")?,
-                "from the default folder",
-            ),
+            None => (default_home()?, "from the default folder"),
         };
         let host = run(Host::connect(&folder, "liquid"))
             .map_err(|error| format!("{error} Liquid looked in {} ({found}).", folder.display()))?;
         Ok(Self { host })
-    }
-
-    /// Wraps a connected host, for Rust consumers such as tests.
-    #[flutter_rust_bridge::frb(ignore)]
-    pub fn from_host(host: Host) -> Self {
-        Self { host }
     }
 
     /// The providers T3 offers, with their models.

@@ -1,4 +1,4 @@
-//! The central configuration (ADR-0225, ADR-0227, ADR-0298): shared building blocks kept in
+//! The central configuration (ADR-0225, ADR-0227, ADR-0298): shared configuration blocks kept in
 //! Meta-Harness's SQLite, changed only through proposals that someone on the account approves.
 //! Proposals, revisions and the log are append-only; a revert restores an earlier revision as a
 //! new one.
@@ -14,7 +14,7 @@ mod homes;
 
 pub(crate) use homes::{Homes, provider_instances};
 
-/// The building blocks of one revision.
+/// The configuration blocks of one revision.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct Blocks {
     /// Instructions by name, written into each harness's instruction file in name order.

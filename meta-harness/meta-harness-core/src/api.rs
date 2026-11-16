@@ -16,7 +16,7 @@ use crate::{GitActionRequest, ModelChoice, Permissions, StartThread, ThreadSumma
 pub const CLIENT_HEADER: &str = "meta-harness-client";
 
 /// A call with one answer.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Call {
     /// The host's T3 Code server.
@@ -49,7 +49,7 @@ pub(crate) enum Call {
 }
 
 /// A call to the host.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum HostCall {
     Status,
@@ -79,14 +79,8 @@ pub(crate) enum ProjectCall {
     },
 }
 
-impl PartialEq for ProjectCall {
-    fn eq(&self, other: &Self) -> bool {
-        serde_json::to_value(self).ok() == serde_json::to_value(other).ok()
-    }
-}
-
 /// A call to a thread.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ThreadCall {
     Title,
@@ -161,7 +155,7 @@ pub(crate) enum Checkout {
 }
 
 /// A Git call.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum GitCall {
     Status,
@@ -196,10 +190,10 @@ pub(crate) enum GitCall {
 }
 
 /// A configuration call (ADR-0298).
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ConfigCall {
-    /// The current revision and its building blocks.
+    /// The current revision and its configuration blocks.
     Current,
     /// Proposes changes to the current revision and answers the proposal's number.
     Propose {
@@ -217,7 +211,7 @@ pub(crate) enum ConfigCall {
 }
 
 /// A call answered by a first value and then items.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Stream {
     /// The thread's snapshot, then its events (ADR-0290).
@@ -247,7 +241,7 @@ pub(crate) enum Request {
 }
 
 /// A frame the service sends.
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub(crate) enum Reply {
     Ok { id: u64, ok: serde_json::Value },

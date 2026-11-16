@@ -1,5 +1,6 @@
 //! Meta-Harness core: runs coding agents on its own T3 Code server and presents them in an
-//! agent-neutral session and event model (ADR-0280, ADR-0281).
+//! agent-neutral session and event model (ADR-0280, ADR-0281). Clients reach it through
+//! [`remote`], while [`Host`], [`Project`], [`Thread`] and [`Git`] run inside the service.
 
 #![deny(missing_docs)]
 

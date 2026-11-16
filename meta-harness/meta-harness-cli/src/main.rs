@@ -11,6 +11,7 @@ use meta_harness_core::{Change, Service, ServiceConfig, default_home, remote, t3
 const USAGE: &str = "\
 usage: meta <command>
 
+  help                      show this usage
   serve                     run Meta-Harness in the foreground (the login service runs this)
   status                    show whether Meta-Harness runs, its T3 Code release and revision
   config show               print the current configuration revision as JSON
@@ -18,7 +19,7 @@ usage: meta <command>
                             propose the changes in FILE, a JSON array of changes
   config revert REVISION    propose going back to an earlier revision
   config pending            list the proposals that wait for a decision
-  config approve NUMBER     approve a proposal; it takes effect at once
+  config approve NUMBER     approve a proposal; new harness sessions use the new revision
   config reject NUMBER      reject a proposal
   config log                print the append-only configuration log
   service install           start the login service, also after each login and crash
@@ -47,7 +48,11 @@ fn main() -> ExitCode {
 }
 
 async fn run(args: &[&str]) -> Result<(), String> {
-    let home = default_home().ok_or("The home folder is unknown; set META_HARNESS_HOME.")?;
+    if matches!(args, [] | ["help" | "--help" | "-h"]) {
+        println!("{USAGE}");
+        return Ok(());
+    }
+    let home = default_home()?;
     match args {
         ["serve"] => serve(home).await,
         ["status"] => {
@@ -62,11 +67,7 @@ async fn run(args: &[&str]) -> Result<(), String> {
         ["service", "install"] => install(home),
         ["service", "uninstall"] => login::Manager::current()?.uninstall(run_step),
         ["uninstall"] => uninstall(),
-        ["help" | "--help" | "-h"] => {
-            println!("{USAGE}");
-            Ok(())
-        }
-        _ => Err(format!("unknown command\n{USAGE}")),
+        _ => Err(format!("unknown command \"{}\"\n{USAGE}", args.join(" "))),
     }
 }
 
@@ -210,6 +211,15 @@ fn uninstall() -> Result<(), String> {
             }
             _ => {}
         }
+    }
+    // Only an empty folder goes; one with other content, or already gone, stays.
+    for folder in [
+        prefix.join("bin"),
+        prefix.join("lib"),
+        prefix.join("share"),
+        prefix,
+    ] {
+        let _ = std::fs::remove_dir(folder);
     }
     println!(
         "Meta-Harness is uninstalled; its data stays in {}.",

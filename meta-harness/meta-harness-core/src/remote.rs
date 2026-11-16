@@ -49,8 +49,9 @@ impl Endpoint {
             Self::File(path) => {
                 let text = std::fs::read_to_string(path).map_err(|_| {
                     format!(
-                        "Meta-Harness is not running: {} is missing. Install Meta-Harness or \
-                         start it with `meta serve`.",
+                        "Meta-Harness is not running: {} is missing. Install Meta-Harness. Start \
+                         it with `meta serve`, or `meta service install` for the login service; \
+                         its log is service.log in the data folder.",
                         path.display()
                     )
                 })?;
@@ -166,7 +167,11 @@ impl Host {
                 tokio_tungstenite::tungstenite::Error::Io(io)
                     if io.kind() == std::io::ErrorKind::ConnectionRefused =>
                 {
-                    format!("Meta-Harness is not running: nothing answers at {url}.")
+                    format!(
+                        "Meta-Harness is not running: nothing answers at {url}. Start it with \
+                         `meta serve`, or `meta service install` for the login service; its log \
+                         is service.log in the data folder."
+                    )
                 }
                 e => format!("Could not reach Meta-Harness at {url}: {e}"),
             })?;
