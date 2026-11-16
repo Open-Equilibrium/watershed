@@ -7,6 +7,7 @@ import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'code_block.dart';
 import 'explorer.dart';
 import 'page_views.dart';
 import 'page_editor.dart';
@@ -360,10 +361,18 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                                 children: [
                                   if (view.boundary && index > 0)
                                     const SectionDivider(),
-                                  if (view.kind == BridgeBlockKind.database)
-                                    TableBlock(views: _views, view: view)
-                                  else
-                                    const _Placeholder(),
+                                  switch (view.kind) {
+                                    BridgeBlockKind.database => TableBlock(
+                                      views: _views,
+                                      view: view,
+                                    ),
+                                    BridgeBlockKind.code => CodeBlock(
+                                      views: _views,
+                                      view: view,
+                                      index: index,
+                                    ),
+                                    _ => const _Placeholder(),
+                                  },
                                 ],
                               ),
                             ),

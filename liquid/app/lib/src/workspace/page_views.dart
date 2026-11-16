@@ -8,18 +8,26 @@ import 'page_editor.dart';
 import 'windowed_list.dart';
 import 'workspace_state.dart';
 
-/// Where the caret goes once a Text Block's View is built.
+/// A caret offset that means a Block's end.
+const caretEnd = 1 << 30;
+
+/// Where the caret goes once a Text or Code Block's View is built.
 @immutable
 class Caret {
   const Caret(
     this.view,
     this.offset, {
+    this.kind = BridgeBlockKind.text,
     this.text,
     this.style,
     this.slash = false,
   });
 
   final String view;
+
+  /// The kind of Block that takes it, so a View whose Block just turned into another kind
+  /// hands the caret to its new Block, not to the one still built.
+  final BridgeBlockKind kind;
 
   /// In UTF-16 units, as Dart and the core count text; past the end means the end.
   final int offset;
@@ -114,6 +122,19 @@ class PageViews extends ChangeNotifier {
     for (var at = index; ; at += by) {
       final view = _views.at(at);
       if (view == null || view.kind == BridgeBlockKind.text) return view;
+    }
+  }
+
+  /// The nearest View that takes the caret from `index` on, going by `by`: a Text or Code
+  /// Block's, past other kinds; null if none is read there.
+  BridgeView? caretFrom(int index, int by) {
+    for (var at = index; ; at += by) {
+      final view = _views.at(at);
+      if (view == null ||
+          view.kind == BridgeBlockKind.text ||
+          view.kind == BridgeBlockKind.code) {
+        return view;
+      }
     }
   }
 

@@ -11,10 +11,12 @@ class FakeWorkspace implements LiquidWorkspace {
   final pages = <String, List<BridgePage>>{};
   final applied = <BridgeMutation>[];
 
-  /// Each Page's Views in order, and each Text Block's text and style.
+  /// Each Page's Views in order, each Text or Code Block's text, each Text Block's style
+  /// and each Code Block's language other than plain text.
   final views = <String, List<BridgeView>>{};
   final texts = <String, String>{};
   final styles = <String, BridgeTextStyle>{};
+  final languages = <String, String>{};
 
   /// Each Database Block's name and fields, and its rows in order.
   final databases = <String, BridgeDatabase>{};
@@ -200,6 +202,40 @@ class FakeWorkspace implements LiquidWorkspace {
         _changed(
           BridgeResource(kind: BridgeResourceKind.views, page: mutation.page),
         );
+        return BridgeApplied(action: _id());
+      case BridgeMutationKind.turnIntoCode || BridgeMutationKind.turnIntoText:
+        final code = mutation.kind == BridgeMutationKind.turnIntoCode;
+        final (from, to) = code
+            ? (BridgeBlockKind.text, BridgeBlockKind.code)
+            : (BridgeBlockKind.code, BridgeBlockKind.text);
+        final page = views[mutation.page]!;
+        if (_kindOf(mutation.page!, mutation.block!) != from) throw 'not found';
+        for (final (at, shown) in page.indexed) {
+          if (shown.block != mutation.block) continue;
+          page[at] = BridgeView(
+            id: shown.id,
+            block: shown.block,
+            boundary: shown.boundary,
+            kind: to,
+          );
+        }
+        languages.remove(mutation.block);
+        if (!code) styles[mutation.block!] = BridgeTextStyle.paragraph;
+        _changed(
+          BridgeResource(kind: BridgeResourceKind.views, page: mutation.page),
+        );
+        _changed(_blockResource(mutation));
+        return BridgeApplied(action: _id());
+      case BridgeMutationKind.setCodeLanguage:
+        if (_kindOf(mutation.page!, mutation.block!) != BridgeBlockKind.code) {
+          throw 'not found';
+        }
+        if (mutation.text!.isEmpty) {
+          languages.remove(mutation.block);
+        } else {
+          languages[mutation.block!] = mutation.text!;
+        }
+        _changed(_blockResource(mutation));
         return BridgeApplied(action: _id());
       case BridgeMutationKind.setTextStyle:
         styles[mutation.block!] = mutation.style;
@@ -403,6 +439,15 @@ class FakeWorkspace implements LiquidWorkspace {
     }
   }
 
+  BridgeBlockKind? _kindOf(String page, String block) =>
+      views[page]?.where((view) => view.block == block).firstOrNull?.kind;
+
+  bool _isCode(String? block) => views.values.any(
+    (page) => page.any(
+      (view) => view.block == block && view.kind == BridgeBlockKind.code,
+    ),
+  );
+
   BridgeResource _blockResource(BridgeMutation mutation) => BridgeResource(
     kind: BridgeResourceKind.block,
     page: mutation.page,
@@ -499,8 +544,17 @@ class FakeWorkspace implements LiquidWorkspace {
         pages: const [],
         views: const [],
         count: 0,
-        text: texts[query.block],
-        style: styles[query.block],
+        text: _isCode(query.block) ? null : texts[query.block],
+        style: _isCode(query.block) ? null : styles[query.block],
+        rows: const [],
+      ),
+      BridgeQueryKind.code => BridgeAnswer(
+        areas: const [],
+        pages: const [],
+        views: const [],
+        count: 0,
+        text: _isCode(query.block) ? texts[query.block] : null,
+        language: _isCode(query.block) ? languages[query.block] ?? '' : null,
         rows: const [],
       ),
       BridgeQueryKind.database => BridgeAnswer(

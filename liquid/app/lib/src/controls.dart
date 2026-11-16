@@ -551,14 +551,16 @@ bool writeText(TextEditingController controller, TextEditingValue value) {
 }
 
 /// Gives a field its fresh controller when it builds after [writeText], holding what the old one
-/// holds then, so keys typed since the write are kept. `listener` moves to the fresh controller. The
-/// old one is disposed after that frame.
+/// holds then, so keys typed since the write are kept. `listener` moves to the fresh controller,
+/// which `create` makes when the field needs its own kind. The old one is disposed after that
+/// frame.
 TextEditingController adoptController(
   TextEditingController previous, {
   VoidCallback? listener,
+  TextEditingController Function(TextEditingValue value)? create,
 }) {
   if (listener != null) previous.removeListener(listener);
-  final fresh = TextEditingController.fromValue(previous.value);
+  final fresh = (create ?? TextEditingController.fromValue)(previous.value);
   if (listener != null) fresh.addListener(listener);
   WidgetsBinding.instance.addPostFrameCallback((_) => previous.dispose());
   return fresh;
