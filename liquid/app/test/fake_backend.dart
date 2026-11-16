@@ -126,6 +126,9 @@ class FakeSession implements SessionBackend {
   /// What [send] fails with.
   Object? sendError;
 
+  /// What [setPermissions] fails with.
+  Object? permissionsError;
+
   /// The applied counts Liquid confirmed, in order.
   final confirmed = <int>[];
 
@@ -225,8 +228,11 @@ class FakeSession implements SessionBackend {
   }
 
   @override
-  Future<void> setPermissions(BridgePermissions permissions) async =>
-      calls.add('permissions ${permissions.name}');
+  Future<void> setPermissions(BridgePermissions permissions) async {
+    calls.add('permissions ${permissions.name}');
+    if (permissionsError case final error?) throw error;
+  }
+
   @override
   Future<void> sendQueuedNow(int turn) async => calls.add('send now $turn');
   @override

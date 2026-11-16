@@ -301,11 +301,16 @@ class SessionState {
     }
   }
 
-  /// Sets what the agent may do without asking.
+  /// Sets what the agent may do without asking. An open session takes it first, so a refused
+  /// change is not shown.
   Future<void> setPermissions(BridgePermissions next) async {
-    permissions.value = next;
     if (_session case final session?) {
-      await _act(() => session.setPermissions(next), 'change the permissions');
+      await _act(() async {
+        await session.setPermissions(next);
+        permissions.value = next;
+      }, 'change the permissions');
+    } else {
+      permissions.value = next;
     }
   }
 

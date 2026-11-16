@@ -663,6 +663,23 @@ void main() {
       expect(state.contextWindow.value?.window, 1000000);
     });
 
+    test('a permission change the session refuses leaves the permissions it still has', () async {
+      await open();
+      session.permissionsError = 'the agent is busy';
+
+      await state.setPermissions(BridgePermissions.supervised);
+
+      expect(state.permissions.value, BridgePermissions.fullAccess);
+      expect(
+        state.notice.value?.text,
+        'Could not change the permissions: the agent is busy',
+      );
+
+      session.permissionsError = null;
+      await state.setPermissions(BridgePermissions.supervised);
+      expect(state.permissions.value, BridgePermissions.supervised);
+    });
+
     test('delete takes an open session back to the start page, and archive goes through the project', () async {
       await open();
       project.onlyInWorktree = true;
