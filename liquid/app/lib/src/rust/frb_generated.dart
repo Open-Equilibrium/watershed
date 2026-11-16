@@ -9832,7 +9832,8 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
         permissions: permissions,
       );
 
-  /// The session now, to restore the Chat after falling behind (ADR-0290).
+  /// The session now, to restore the Chat after falling behind (ADR-0290). Deltas do not merge
+  /// across its sequence, so the restored Chat never replays text it holds.
   Future<BridgeSnapshot> snapshot() =>
       RustLib.instance.api.crateApiSessionAgentSessionSnapshot(that: this);
 

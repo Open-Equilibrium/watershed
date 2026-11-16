@@ -342,8 +342,7 @@ enum BridgeMutationKind {
   addTextBlock,
 
   /// Replaces `delete` units at `at` in the Text or Code `block` on its home `page` with
-  /// `text`; positions
-  /// count UTF-16 units, as Dart does.
+  /// `text`; positions count UTF-16 units, as Dart does.
   editText,
 
   /// Removes `view` from `page`.
