@@ -127,11 +127,11 @@ Flow validation, Flow-owned write protection and durable lifecycle are the separ
 
 ## Meta-Harness execution ownership
 
-Execution ownership is host-local: the Meta-Harness core, embedded in Liquid (ADR-0184), controls only the whole CLI agent processes it starts on its own host. Remote access and command routing are an [accepted target](docs/concept/V-Spec_MetaHarness.html#remote-control).
+Execution ownership is host-local: the Meta-Harness service controls only the whole CLI agent processes its T3 Code server starts on its own host. Remote access and command routing are an [accepted target](docs/concept/V-Spec_MetaHarness.html#remote-control).
 
 ## Meta-Harness agent sessions
 
-Meta-Harness starts its own T3 Code server at the pinned version (ADR-0281) on 127.0.0.1 only, with telemetry off and without the activity publishing that `t3 connect` would set up. It authenticates as T3's owner with a bearer token it issues locally for each connection and never logs. T3's data folder belongs to one Liquid. Before a new T3 server starts, the process named in the folder's `server-runtime.json` is stopped if it still runs the pinned `t3 serve`; that covers a server a dead Meta-Harness left running and a live server of a second Liquid on the same folder.
+Meta-Harness starts its own T3 Code server at the pinned version (ADR-0281) on 127.0.0.1 only, with telemetry off and without the activity publishing that `t3 connect` would set up. It authenticates as T3's owner with a bearer token it issues locally for each connection and never logs. T3's data folder belongs to one Meta-Harness service. Before a new T3 server starts, the process named in the folder's `server-runtime.json` is stopped if it still runs the pinned `t3 serve`, such as a server a dead Meta-Harness left running.
 
 Meta-Harness leaves governance to the harness (ADR-0252). What an agent may do without asking is T3's Permissions choice, Full access by default as in T3; then the agent and every tool call run with the user's operating-system permissions. The queue to Liquid is bounded by count, not bytes: at most 256 events are sent and unconfirmed and at most 256 more wait, merged; past that, waiting streaming text is dropped and Liquid reloads the Chat from a snapshot (ADR-0272, ADR-0290). A misbehaving agent that sends huge events can still exhaust Liquid's memory, an accepted risk of a trusted agent (ADR-0273).
 
@@ -140,6 +140,16 @@ The tool names and targets, the approval prompts with their reasons, options and
 “Export record” writes T3's record of the session, with its prompts and tool output, into a new folder in Downloads, along with each turn's changed file paths and line counts; it copies no file contents. The copies are plain files with the person's permissions, unencrypted, and Watershed never sends them anywhere; the record claims no completeness (ADR-0257).
 
 The agent can change any file the user can, including settings that run commands, such as shell profiles, launch agents and Git settings. The Diff panel shows what T3's checkpoints captured and claims no completeness (ADR-0222). Hiding whitespace changes also hides changes whose whitespace alters meaning, such as Python indentation.
+
+## Meta-Harness service and configuration
+
+The service listens only on 127.0.0.1 and admits a connection only with its bearer token: 256 random bits, new at every start, never logged, kept with the address in `connection.json` in the data folder, which only the user can read (ADR-0297). Another local account reaches the port but not the token, and a web page cannot send the header that carries it. Every process of the user, agents included, can read the token and do through the service whatever the person can, as it can on the account anyway (ADR-0254). One service holds a data folder at a time.
+
+Configuration changes take effect only once approved, and every proposal, approval and rejection stays in an append-only log in the service's SQLite (ADR-0298). Anyone on the account may approve, so this guards against changes nobody looked at, not against an agent acting as the person: such an agent can approve its own proposal, change the store's file or edit the harness homes directly. The log records the name each client gives itself, which proves nothing.
+
+Approved blocks run with the user's permissions: an MCP server's command and a skill's scripts run whenever a harness uses them. Meta-Harness writes them into homes it owns for Claude Code and Codex, so the person's own `~/.claude` and `~/.codex` do not configure these sessions. Both keep the person's login without a copy: Codex's `auth.json` and `auth.lock` in its home link to the person's Codex home, which Codex follows, and Claude Code gets `CLAUDE_SECURESTORAGE_CONFIG_DIR` set to the person's own configuration folder, empty for the default. That variable is not a published setting: if a Claude Code release drops it, Claude Code asks for a login once in its home instead. Credentials never leave the host.
+
+The installer follows Flow Agent's [download contract](#m12-tool-execution-trust-boundary): one archive per platform with `SHA256SUMS`, which the person checks before unpacking; it installs without administrator rights and carries the pinned T3 release unchanged. Uninstalling keeps the data folder.
 
 ## Liquid workspace access & external-agent edits
 
