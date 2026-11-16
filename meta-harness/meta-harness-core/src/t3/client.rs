@@ -38,10 +38,12 @@ type Issue = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
 
 enum Waiter {
     Call(oneshot::Sender<Result<Value, String>>),
-    /// An open stream and the request frame that opened it, which is sent again on a new connection.
+    /// An open stream and, for a subscription, the request frame that opened it, which is sent
+    /// again on a new connection. An action's stream has none: it ends with its connection, since
+    /// T3 may have done part of it already.
     Stream {
         items: mpsc::UnboundedSender<Value>,
-        frame: Value,
+        frame: Option<Value>,
     },
 }
 
@@ -153,8 +155,19 @@ impl Client {
         self.call(tag, payload).await
     }
 
-    /// Opens the stream `tag`; each received item arrives in order, already acknowledged.
+    /// Opens the subscription `tag`; each received item arrives in order, already acknowledged.
+    /// A new connection opens it again.
     pub async fn stream(&self, tag: &str, payload: Value) -> Result<Subscription, String> {
+        self.open_stream(tag, payload, true)
+    }
+
+    /// Starts the action `tag`, whose progress streams like a subscription's items. A lost
+    /// connection ends it, and it is never sent again, as a call is not.
+    pub async fn action(&self, tag: &str, payload: Value) -> Result<Subscription, String> {
+        self.open_stream(tag, payload, false)
+    }
+
+    fn open_stream(&self, tag: &str, payload: Value, resend: bool) -> Result<Subscription, String> {
         let id = self.next_id();
         let (items, receiver) = mpsc::unbounded_channel();
         let frame = request_frame(&id, tag, payload);
@@ -163,7 +176,7 @@ impl Client {
             &frame,
             Waiter::Stream {
                 items,
-                frame: frame.clone(),
+                frame: resend.then(|| frame.clone()),
             },
         )?;
         Ok(Subscription {
@@ -218,7 +231,10 @@ fn install(link: &Link, socket: Socket) -> JoinHandle<()> {
     {
         let mut state = lock(link);
         for waiter in state.waiters.values() {
-            if let Waiter::Stream { frame, .. } = waiter {
+            if let Waiter::Stream {
+                frame: Some(frame), ..
+            } = waiter
+            {
                 let _ = out.send(frame_message(frame));
             }
         }
@@ -235,6 +251,8 @@ fn lose_connection(state: &mut State) {
             Waiter::Call(reply) => {
                 let _ = reply.send(Err(LOST_CALL.to_owned()));
             }
+            // An action's stream ends here: dropping its sender ends its items.
+            Waiter::Stream { frame: None, .. } => {}
             stream => {
                 state.waiters.insert(id, stream);
             }

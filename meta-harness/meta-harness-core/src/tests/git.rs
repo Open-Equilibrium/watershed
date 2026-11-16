@@ -466,3 +466,31 @@ async fn dropping_the_status_receiver_interrupts_the_watch_on_t3() {
         .await
         .expect("T3 receives the interrupt");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stacked_action_is_never_sent_again_after_t3_drops_the_connection() {
+    let (fake, git) = checkout_in(|_, _, _| Vec::new(), None).await;
+    let receiver = git
+        .run(GitActionRequest {
+            action: GitAction::CommitPush,
+            message: None,
+            files: None,
+            feature_branch: false,
+        })
+        .await
+        .unwrap();
+    fake.received("git.runStackedAction", 1).await;
+    fake.drop_connection();
+    // T3 may have committed or pushed already, so the action ends as failed instead of running
+    // twice.
+    let ended = tokio::time::timeout(std::time::Duration::from_secs(10), progress(receiver))
+        .await
+        .expect("the action ends with the connection");
+    assert!(
+        matches!(ended.as_slice(), [GitProgress::Failed(message)] if message.contains("connection")),
+        "{ended:?}"
+    );
+    fake.accepted(2).await;
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert_eq!(fake.payloads("git.runStackedAction").len(), 1);
+}

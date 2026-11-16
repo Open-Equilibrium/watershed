@@ -354,7 +354,7 @@ impl Git {
         if let Some(thread) = &self.thread {
             payload["threadId"] = json!(thread);
         }
-        let mut stream = self.client.stream("git.runStackedAction", payload).await?;
+        let mut stream = self.client.action("git.runStackedAction", payload).await?;
         let (sender, receiver) = mpsc::channel(64);
         tokio::spawn(async move {
             while let Some(event) = stream.recv().await {
@@ -387,6 +387,14 @@ impl Git {
                     return;
                 }
             }
+            // The connection ended before the action did; T3 may have done part of it.
+            let _ = sender
+                .send(GitProgress::Failed(
+                    "T3 closed the connection before the action finished. Check the branch before \
+                     running it again."
+                        .to_owned(),
+                ))
+                .await;
         });
         Ok(receiver)
     }
