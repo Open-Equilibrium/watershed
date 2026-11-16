@@ -148,7 +148,7 @@ fn statistics_count_tokens_tools_and_turns_as_t3_records_them() {
 
 #[test]
 fn a_turns_tool_time_counts_the_longest_call_of_each_response() {
-    let projection = projection(json!({
+    let timed = projection(json!({
         "runs": [run("r1", 1, "completed", json!("2026-11-15T10:00:10.000Z"))],
         "turnItems": [
             // Two calls of one response ran in parallel: the response counts the longer one.
@@ -161,10 +161,20 @@ fn a_turns_tool_time_counts_the_longest_call_of_each_response() {
              "exitCode": 0, "input": "c", "startedAt": "2026-11-15T10:00:05.000Z", "completedAt": "2026-11-15T10:00:07.000Z"},
         ],
     }));
-    let statistics = statistics(&projection);
+    let statistics = statistics(&timed);
     assert_eq!(statistics.turns[0].tool_ms, Some(5000));
     // Each tool's own time is the sum of its calls.
     assert_eq!(statistics.tools[0].duration_ms, Some(6000));
+
+    // A turn without tool calls took no tool time, which is known, not missing.
+    let chat_only = projection(json!({
+        "runs": [run("r1", 1, "completed", json!("2026-11-15T10:00:10.000Z"))],
+        "turnItems": [],
+    }));
+    assert_eq!(
+        crate::statistics::statistics(&chat_only).turns[0].tool_ms,
+        Some(0)
+    );
 }
 
 #[test]

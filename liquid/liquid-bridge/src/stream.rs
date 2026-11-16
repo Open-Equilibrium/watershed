@@ -30,10 +30,6 @@ pub(crate) fn push(batch: &mut Vec<BridgeEvent>, event: BridgeEvent) {
 /// its stream.
 const STREAM_WINDOW: std::time::Duration = std::time::Duration::from_millis(50);
 
-/// How long a stream waits before it resubscribes after a subscription that closed before any
-/// event; a thread that ended may restart, so the stream keeps trying until its session drops.
-const RESUBSCRIBE_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
-
 /// Most events sent to Dart and not yet applied by Liquid.
 pub(crate) const WINDOW: usize = 256;
 
@@ -224,15 +220,10 @@ pub(crate) async fn forward(
             }
             Some(None) => {
                 if resubscribed {
-                    // The new subscription closed before any event: the thread may have ended.
-                    // Retry after a pause, and not at all once the session dropped.
-                    tokio::select! {
-                        _ = credit.wait() => {}
-                        _ = tokio::time::sleep(RESUBSCRIBE_DELAY) => {}
-                    }
-                    if credit.is_closed() {
-                        return;
-                    }
+                    // The new subscription closed before any event: T3 ended the thread for good
+                    // (a reconnect keeps the core's follow open), so the stream ends after the one
+                    // reload Liquid already has.
+                    return;
                 }
                 receiver = resubscribe();
                 resubscribed = true;

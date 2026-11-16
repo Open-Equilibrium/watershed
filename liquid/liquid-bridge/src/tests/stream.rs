@@ -479,29 +479,29 @@ fn a_thread_that_ended_is_not_resubscribed_in_a_loop() {
     runtime.block_on(async {
         let resubscriptions = Arc::new(AtomicUsize::new(0));
         let counted = resubscriptions.clone();
-        let credit = Arc::<Credit>::default();
+        let reloads = Arc::new(AtomicUsize::new(0));
+        let delivered = reloads.clone();
         let forwarding = tokio::spawn(forward(
             closed(),
             move || {
                 counted.fetch_add(1, Ordering::SeqCst);
                 closed()
             },
-            credit.clone(),
-            |_| true,
+            Arc::<Credit>::default(),
+            move |event| {
+                if event.kind == BridgeEventKind::FellBehind {
+                    delivered.fetch_add(1, Ordering::SeqCst);
+                }
+                true
+            },
         ));
-        settle().await;
-        assert!(
-            resubscriptions.load(Ordering::SeqCst) <= 2,
-            "a closed subscription is resubscribed at most once more"
-        );
-        assert!(
-            !forwarding.is_finished(),
-            "the stream waits for its session to drop"
-        );
-        credit.close();
+        // A subscription that closes again before any event means T3 ended the thread for good:
+        // Liquid reloads once, and the stream ends instead of reloading again and again.
         tokio::time::timeout(Duration::from_secs(1), forwarding)
             .await
-            .expect("forward returns once the session dropped")
+            .expect("forward returns once the thread ended")
             .expect("forward completes");
+        assert_eq!(resubscriptions.load(Ordering::SeqCst), 1);
+        assert!(reloads.load(Ordering::SeqCst) <= 1);
     });
 }

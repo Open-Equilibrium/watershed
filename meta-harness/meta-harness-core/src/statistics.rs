@@ -111,6 +111,7 @@ pub(crate) fn statistics(projection: &Projection) -> Statistics {
         }
         // Each response's longest timed call: the calls of one response may run in parallel.
         let mut response_ms: HashMap<String, u64> = HashMap::new();
+        let mut had_tools = false;
         let mut failures = 0;
         for item in projection
             .turn_items
@@ -120,6 +121,7 @@ pub(crate) fn statistics(projection: &Projection) -> Statistics {
             let Some((_, ItemDetail::Tool { name, .. })) = describe(item) else {
                 continue;
             };
+            had_tools = true;
             let calls = match tools.iter().position(|t| t.name == name) {
                 Some(index) => &mut tools[index],
                 None => {
@@ -162,7 +164,8 @@ pub(crate) fn statistics(projection: &Projection) -> Statistics {
             started_ms: millis(&run["startedAt"]),
             ended_ms: millis(&run["completedAt"]),
             models: turn_models,
-            tool_ms: (!response_ms.is_empty()).then(|| response_ms.values().sum()),
+            // Unknown only when the turn's tool calls carry no timing; no calls take no time.
+            tool_ms: (!response_ms.is_empty() || !had_tools).then(|| response_ms.values().sum()),
             failed: failures,
         });
     }
