@@ -163,7 +163,7 @@ fn listening_origin(text: &str, pid: Option<u32>) -> Result<Option<String>, Stri
     }
     match value["serverVersion"].as_str() {
         Some(version) if version != t3_version() => Err(format!(
-            "LIQUID_T3 runs T3 {version}; Meta-Harness needs {}",
+            "The t3 executable runs T3 {version}; Meta-Harness needs {}",
             t3_version()
         )),
         Some(_) => Ok(value["origin"].as_str().map(str::to_owned)),
@@ -181,7 +181,7 @@ mod tests {
         assert_eq!(
             listening_origin(text, Some(7)),
             Err(format!(
-                "LIQUID_T3 runs T3 0.0.0; Meta-Harness needs {}",
+                "The t3 executable runs T3 0.0.0; Meta-Harness needs {}",
                 t3_version()
             ))
         );
