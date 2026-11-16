@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use serde_json::{Value, json};
-use tokio::sync::mpsc;
+use tokio::sync::{Notify, mpsc};
 use tokio::task::JoinHandle;
 
 use crate::event::{
@@ -14,6 +14,14 @@ use crate::event::{
     Request, RequestId, TurnId, Usage,
 };
 use crate::git::count;
+pub(crate) mod details;
+pub(crate) mod lineage;
+
+pub use details::{
+    Automation, LocalServer, Pace, RunStatus, Schedule, ScheduleKind, UsageLimits, UsageWindow,
+};
+pub use lineage::{Group, Lineage, LineageChanges, LineageRow, Relation};
+
 use crate::t3::{Change, Client, Projection, fresh_id, millis};
 
 /// Events a subscriber may fall behind by before it is dropped; it then restores from a new
@@ -115,6 +123,8 @@ struct State {
     sequence: u64,
     items: HashMap<String, ItemId>,
     subscribers: Vec<mpsc::Sender<ThreadEvent>>,
+    /// Woken when the projection changes what the lineage shows.
+    lineage: Arc<Notify>,
 }
 
 impl State {
@@ -168,6 +178,7 @@ impl Thread {
             sequence: first["snapshotSequence"].as_u64().unwrap_or_default(),
             items: HashMap::new(),
             subscribers: Vec::new(),
+            lineage: Arc::default(),
         }));
         let applied = state.clone();
         let follower = tokio::spawn(async move {
@@ -572,6 +583,9 @@ fn apply(state: &mut State, message: &Value) {
     state.sequence = sequence;
     let event = &message["event"];
     let change = state.projection.apply(event);
+    if matches!(change, Change::Run(_) | Change::Thread | Change::Other) {
+        state.lineage.notify_one();
+    }
     let events = translate(state, change, &event["payload"]);
     state.subscribers.retain(|subscriber| {
         events.iter().all(|event| {

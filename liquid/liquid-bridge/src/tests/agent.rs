@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use meta_harness_core::{AcpAgent, Host, HostConfig};
 
+use crate::api::details::BridgeLineageRelation;
 use crate::api::events::{BridgeChangeStatus, BridgeEvent, BridgeEventKind, BridgeItemKind};
 use crate::api::git::{BridgeGitAction, BridgeGitProgressKind};
 use crate::api::session::RUNTIME;
@@ -345,6 +346,57 @@ fn a_project_starts_finds_opens_archives_and_deletes_its_sessions() {
     assert_eq!(checkout.worktree(), None);
     let forked = checkout.fork(1).expect("forked from the first turn");
     assert_ne!(forked, checkout.id(), "a fork is a session of its own");
+    host.shutdown();
+}
+
+#[test]
+fn the_details_card_reads_and_acts_on_a_session_through_the_bridge() {
+    let fixture = Fixture::new();
+    let host = host(&fixture);
+    assert!(
+        !host
+            .environment_name()
+            .expect("the host has a name")
+            .is_empty()
+    );
+    let project = project_at(&host, &fixture.repo());
+    let session = project
+        .start(
+            "append first".to_owned(),
+            scripted(),
+            Some("main".to_owned()),
+            None,
+            BridgePermissions::FullAccess,
+        )
+        .expect("session starts");
+    follow(&session, completed(1));
+    assert!(session.servers_subscribe().expect("servers").is_empty());
+    assert!(
+        session
+            .automations_subscribe()
+            .expect("automations")
+            .is_empty()
+    );
+    session.usage_limits().expect("usage limits");
+
+    let fork_id = session.fork(1).expect("forked");
+    let fork = project.open(fork_id.clone()).expect("opened");
+    fork.send("append in fork".to_owned(), false).expect("sent");
+    until(|| {
+        fork.turns().iter().any(|t| {
+            t.prompt == "append in fork" && t.status == BridgeTurnStatus::Completed && t.checkpoint
+        })
+    });
+    let parent = session.lineage_subscribe().expect("lineage");
+    assert!(
+        parent
+            .rows
+            .iter()
+            .any(|row| { row.thread_id == fork_id && row.relation == BridgeLineageRelation::Fork })
+    );
+    let lineage = fork.lineage_subscribe().expect("the fork's lineage");
+    assert!(lineage.can_merge && lineage.rows.iter().any(|row| row.merge_target));
+    fork.merge_back().expect("merged back");
     host.shutdown();
 }
 

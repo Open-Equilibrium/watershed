@@ -143,6 +143,15 @@ impl Host {
             .collect())
     }
 
+    /// The name T3 shows for this host, such as the computer's name.
+    pub async fn environment_name(&self) -> Result<String, String> {
+        let config = self.client.call("server.getConfig", json!({})).await?;
+        Ok(config["environment"]["label"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned())
+    }
+
     /// The writer model (ADR-0294), if one is set.
     pub async fn writer_model(&self) -> Result<Option<ModelChoice>, String> {
         let config = self.client.call("server.getConfig", json!({})).await?;

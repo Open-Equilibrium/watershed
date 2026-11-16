@@ -8,8 +8,9 @@ use std::process::Command;
 use std::time::Duration;
 
 use meta_harness_core::{
-    AcpAgent, AgentEvent, GitAction, GitActionRequest, GitProgress, Host, HostConfig, ModelChoice,
-    Permissions, Request, Snapshot, StartThread, Thread, ThreadEvent, TurnStatus, Workspace,
+    AcpAgent, AgentEvent, GitAction, GitActionRequest, GitProgress, Group, Host, HostConfig,
+    LineCount, ModelChoice, Permissions, Relation, Request, Snapshot, StartThread, Thread,
+    ThreadEvent, TurnStatus, Workspace,
 };
 
 const AGENT: &str = "scripted";
@@ -574,6 +575,48 @@ async fn git_commits_branches_and_pushes_as_t3_does() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn branch_changes_and_the_branch_diff_compare_the_branch_with_its_base_as_t3_does() {
+    let (dir, repo, home) = fixture();
+    let origin = dir.path().join("origin.git");
+    git(dir.path(), &["init", "-q", "--bare", "origin.git"]);
+    git(
+        &repo,
+        &["remote", "add", "origin", &origin.to_string_lossy()],
+    );
+    git(&repo, &["push", "-q", "-u", "origin", "main"]);
+    let host = host(&home).await;
+    let checkout = host.project(&repo).await.unwrap().git();
+
+    checkout.create_branch("feature").await.unwrap();
+    std::fs::write(repo.join("README.md"), "contract\nbranch\n").unwrap();
+    git(&repo, &["commit", "-qam", "Change the readme"]);
+    std::fs::write(repo.join("README.md"), "contract\nbranch\nmore\n").unwrap();
+
+    let status = checkout.status().await.unwrap();
+    assert_eq!(
+        status.working_tree_lines,
+        LineCount {
+            added: 1,
+            removed: 0
+        }
+    );
+    let branch = status
+        .branch_changes
+        .expect("T3 counts the branch against its base");
+    assert_eq!(branch.base.as_deref(), Some("origin/main"));
+    assert_eq!(
+        branch.lines,
+        LineCount {
+            added: 2,
+            removed: 0
+        }
+    );
+    let diff = checkout.branch_diff(false).await.unwrap();
+    assert!(diff.contains("+branch") && diff.contains("+more"), "{diff}");
+    host.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn git_initializes_a_folder_without_a_repository() {
     let (dir, _repo, home) = fixture();
     let plain = dir.path().join("plain");
@@ -611,4 +654,41 @@ mod tempdir {
             let _ = std::fs::remove_dir_all(&self.0);
         }
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_thread_details_card_reads_t3_and_a_fork_merges_back() {
+    let (_dir, repo, home) = fixture();
+    let host = host(&home).await;
+    assert!(!host.environment_name().await.unwrap().is_empty());
+    let project = host.project(&repo).await.unwrap();
+    let thread = project
+        .start(start("append first", worktree(), Permissions::FullAccess))
+        .await
+        .unwrap();
+    wait(&thread, completed(1)).await;
+    assert!(thread.servers().await.unwrap().current().is_empty());
+    assert!(thread.automations().await.unwrap().current().is_empty());
+    thread.usage_limits().await.unwrap();
+
+    let fork_id = thread.fork(1).await.unwrap();
+    let fork = project.open(&fork_id).await.unwrap();
+    fork.send("append in fork", false).await.unwrap();
+    wait(&fork, |s| {
+        s.turns.iter().any(|t| {
+            t.prompt == "append in fork" && t.status == TurnStatus::Completed && t.checkpoint
+        })
+    })
+    .await;
+
+    let parent = thread.lineage().await.unwrap();
+    assert!(parent.rows.iter().any(|row| row.thread == fork_id
+        && row.relation == Relation::Fork
+        && row.group == Group::Related));
+    let lineage = fork.lineage().await.unwrap();
+    let parent_row = lineage.rows.iter().find(|row| row.thread == thread.id());
+    assert!(parent_row.is_some_and(|row| row.merge_target));
+    assert!(lineage.can_merge);
+    fork.merge_back().await.unwrap();
+    host.shutdown().await;
 }

@@ -14,13 +14,14 @@ use crate::event::{
 use crate::t3::Client;
 use crate::thread::{ChatItem, Snapshot, Thread, ThreadEvent, TurnStatus};
 use crate::{ModelChoice, Permissions};
+use tokio_tungstenite::tungstenite::Message;
 
 const WAIT: Duration = Duration::from_secs(10);
 const SUBSCRIBE: &str = "orchestration.subscribeThread";
 const COMMAND: &str = "orchestration.dispatchCommand";
 
 /// A T3 projection with `records` in its collections and a default thread.
-fn projection(records: Value) -> Value {
+pub(super) fn projection(records: Value) -> Value {
     let mut projection = json!({
         "thread": {
             "id": "thread-1",
@@ -47,12 +48,21 @@ fn run(id: &str, ordinal: u64, status: &str, message: &str) -> Value {
 }
 
 /// A thread followed on a stand-in whose stream starts with `projection` at `sequence`.
-async fn follow(projection: Value, sequence: u64) -> (Fake, Thread) {
+pub(super) async fn follow(projection: Value, sequence: u64) -> (Fake, Thread) {
+    follow_answering(projection, sequence, |_, _, id| vec![ok(id, json!({}))]).await
+}
+
+/// Like [`follow`], answering every other request with `answer`.
+pub(super) async fn follow_answering(
+    projection: Value,
+    sequence: u64,
+    answer: impl Fn(&str, &Value, &str) -> Vec<Message> + Send + 'static,
+) -> (Fake, Thread) {
     let snapshot =
         json!({"kind": "snapshot", "snapshotSequence": sequence, "projection": projection});
-    let fake = Fake::start(move |tag, _, id| match tag {
+    let fake = Fake::start(move |tag, payload, id| match tag {
         SUBSCRIBE => vec![chunk(id, vec![snapshot.clone()])],
-        _ => vec![ok(id, json!({}))],
+        _ => answer(tag, payload, id),
     })
     .await;
     let client = Client::connect(&fake.origin, "token").await.unwrap();
@@ -63,7 +73,7 @@ async fn follow(projection: Value, sequence: u64) -> (Fake, Thread) {
 }
 
 /// A stream item carrying T3 change `kind` at `sequence`.
-fn event(sequence: u64, kind: &str, payload: Value) -> Value {
+pub(super) fn event(sequence: u64, kind: &str, payload: Value) -> Value {
     json!({"kind": "event", "sequence": sequence, "event": {"type": kind, "payload": payload}})
 }
 
@@ -96,7 +106,7 @@ async fn until(
 }
 
 /// The last command sent to T3, without the ids Meta-Harness makes up.
-fn command(fake: &Fake) -> Value {
+pub(super) fn command(fake: &Fake) -> Value {
     let mut command = fake.payloads(COMMAND).pop().expect("a command was sent");
     for id in ["commandId", "messageId"] {
         command.as_object_mut().unwrap().remove(id);

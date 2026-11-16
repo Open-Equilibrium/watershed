@@ -4,13 +4,15 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
+use std::time::Duration;
 
 use meta_harness_core::{
-    Host, HostConfig, Permissions, Project, StartThread, Thread, ThreadSummary, TurnStatus,
-    Workspace,
+    Automation, Host, HostConfig, LineageChanges, LocalServer, Permissions, Project, StartThread,
+    Thread, ThreadSummary, TurnStatus, Watch, Workspace, visible_name,
 };
 use tokio::runtime::Runtime;
 
+use crate::api::details::{BridgeAutomation, BridgeLineage, BridgeLocalServer, BridgeUsageLimits};
 use crate::api::events::{BridgeEvent, BridgeFileChange};
 use crate::api::git::GitCheckout;
 use crate::api::record::{README, THREAD_FILE, download_dir, record_name, write_folder};
@@ -18,6 +20,9 @@ use crate::api::thread::{BridgeContext, BridgeSnapshot, BridgeStatistics, Bridge
 use crate::convert;
 use crate::frb_generated::StreamSink;
 use crate::stream;
+
+/// How long a burst of lineage changes settles before the lineage is read again.
+const LINEAGE_SETTLE: Duration = Duration::from_millis(250);
 
 pub(crate) static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
@@ -168,6 +173,12 @@ impl AgentHost {
             .collect())
     }
 
+    /// The name T3 shows for this host, such as the computer's name.
+    pub fn environment_name(&self) -> Result<String, String> {
+        let host = self.host()?;
+        run(host.environment_name()).map(|name| visible_name(&name))
+    }
+
     /// The writer model (ADR-0294), if one is set.
     pub fn writer_model(&self) -> Result<Option<BridgeModelChoice>, String> {
         let host = self.host()?;
@@ -302,6 +313,10 @@ pub struct AgentSession {
     receiver: Mutex<Option<tokio::sync::mpsc::Receiver<meta_harness_core::ThreadEvent>>>,
     /// How many of the stream's events Liquid applied, which reopens the window (ADR-0272).
     credit: Arc<stream::Credit>,
+    /// The details card's live reads, each held until its events are streamed or the session drops.
+    servers: Mutex<Option<Watch<Vec<LocalServer>>>>,
+    automations: Mutex<Option<Watch<Vec<Automation>>>>,
+    lineage: Mutex<Option<LineageChanges>>,
 }
 
 impl Drop for AgentSession {
@@ -324,6 +339,9 @@ impl AgentSession {
             root,
             receiver: Mutex::new(None),
             credit: Arc::default(),
+            servers: Mutex::default(),
+            automations: Mutex::default(),
+            lineage: Mutex::default(),
         }
     }
 
@@ -562,6 +580,140 @@ impl AgentSession {
         run(self
             .thread
             .set_branch(&branch, worktree.as_deref().map(Path::new)))
+    }
+
+    /// The local servers this session's terminals and agent started now; the servers' changes
+    /// then stream from [`AgentSession::servers_events`].
+    pub fn servers_subscribe(&self) -> Result<Vec<BridgeLocalServer>, String> {
+        let watch = run(self.thread.servers())?;
+        let current = convert::local_servers(watch.current());
+        *self.servers.lock().unwrap_or_else(PoisonError::into_inner) = Some(watch);
+        Ok(current)
+    }
+
+    /// Streams each change of the servers after the latest [`AgentSession::servers_subscribe`].
+    pub fn servers_events(&self, sink: StreamSink<Vec<BridgeLocalServer>>) -> Result<(), String> {
+        let mut watch = self
+            .servers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+            .ok_or_else(|| "Subscribe to the servers before streaming them.".to_owned())?;
+        RUNTIME.spawn(async move {
+            while let Some(servers) = watch.changed().await {
+                if sink.add(convert::local_servers(servers)).is_err() {
+                    break;
+                }
+            }
+        });
+        Ok(())
+    }
+
+    /// Stops the local server `pid` on `port`.
+    pub fn stop_server(&self, pid: i64, port: i64) -> Result<(), String> {
+        let pid =
+            u32::try_from(pid).map_err(|_| "This server has no process to stop.".to_owned())?;
+        let port = u16::try_from(port).map_err(|_| "This server has no port.".to_owned())?;
+        run(self.thread.stop_server(pid, port))
+    }
+
+    /// The scheduled tasks bound to this session now; their changes then stream from
+    /// [`AgentSession::automations_events`].
+    pub fn automations_subscribe(&self) -> Result<Vec<BridgeAutomation>, String> {
+        let watch = run(self.thread.automations())?;
+        let current = convert::automations(watch.current());
+        *self
+            .automations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(watch);
+        Ok(current)
+    }
+
+    /// Streams each change of the scheduled tasks after the latest
+    /// [`AgentSession::automations_subscribe`].
+    pub fn automations_events(
+        &self,
+        sink: StreamSink<Vec<BridgeAutomation>>,
+    ) -> Result<(), String> {
+        let mut watch = self
+            .automations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+            .ok_or_else(|| "Subscribe to the automations before streaming them.".to_owned())?;
+        RUNTIME.spawn(async move {
+            while let Some(tasks) = watch.changed().await {
+                if sink.add(convert::automations(tasks)).is_err() {
+                    break;
+                }
+            }
+        });
+        Ok(())
+    }
+
+    /// Pauses or resumes the scheduled task `id`.
+    pub fn set_automation_enabled(&self, id: String, enabled: bool) -> Result<(), String> {
+        run(self.thread.set_automation_enabled(&id, enabled))
+    }
+
+    /// Runs the scheduled task `id` now.
+    pub fn run_automation_now(&self, id: String) -> Result<(), String> {
+        run(self.thread.run_automation_now(&id))
+    }
+
+    /// The lineage now: the threads related to this session, as T3's relationships panel shows
+    /// them. Its changes then stream from [`AgentSession::lineage_events`].
+    pub fn lineage_subscribe(&self) -> Result<BridgeLineage, String> {
+        let changes = run(self.thread.lineage_changes())?;
+        let lineage = run(self.thread.lineage())?;
+        *self.lineage.lock().unwrap_or_else(PoisonError::into_inner) = Some(changes);
+        Ok(convert::lineage(lineage))
+    }
+
+    /// Streams the lineage after each change that may have changed it, once the changes settle,
+    /// after the latest [`AgentSession::lineage_subscribe`]. A failed read streams as an error.
+    pub fn lineage_events(&self, sink: StreamSink<BridgeLineage>) -> Result<(), String> {
+        let changes = self
+            .lineage
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+            .ok_or_else(|| "Subscribe to the lineage before streaming it.".to_owned())?;
+        let thread = self.thread.clone();
+        RUNTIME.spawn(async move {
+            loop {
+                changes.changed().await;
+                tokio::time::sleep(LINEAGE_SETTLE).await;
+                let delivered = match thread.lineage().await {
+                    Ok(lineage) => sink.add(convert::lineage(lineage)).is_ok(),
+                    Err(error) => sink.add_error(error).is_ok(),
+                };
+                if !delivered {
+                    break;
+                }
+            }
+        });
+        Ok(())
+    }
+
+    /// T3's "Merge back": merges this fork's latest finished run into the session it forked from.
+    pub fn merge_back(&self) -> Result<(), String> {
+        run(self.thread.merge_back())
+    }
+
+    /// T3's "Disconnect agent session": detaches the session's provider sessions.
+    pub fn disconnect(&self) -> Result<(), String> {
+        run(self.thread.disconnect())
+    }
+
+    /// T3's "Stop subagent": stops the subagent `id`.
+    pub fn stop_subagent(&self, id: String) -> Result<(), String> {
+        run(self.thread.stop_subagent(&id))
+    }
+
+    /// The provider's usage limits, or `None` when it reports none.
+    pub fn usage_limits(&self) -> Result<Option<BridgeUsageLimits>, String> {
+        Ok(run(self.thread.usage_limits())?.map(convert::usage_limits))
     }
 
     /// Writes the session's record into a new folder in Downloads (ADR-0257); returns it.

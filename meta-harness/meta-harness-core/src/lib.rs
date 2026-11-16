@@ -18,16 +18,21 @@ pub use event::{
     Request, RequestId, TurnId, Usage,
 };
 pub use git::{
-    BranchPullRequest, ChangedFile, Git, GitAction, GitActionRequest, GitProgress, GitStatus, Ref,
-    Refs, ResolvedPullRequest,
+    BranchChanges, BranchPullRequest, ChangedFile, Git, GitAction, GitActionRequest, GitProgress,
+    GitStatus, LineCount, Ref, Refs, ResolvedPullRequest,
 };
+pub use git::{PullRequestCheck, PullRequestDetail};
 pub use host::{
     AcpAgent, Host, HostConfig, Model, ModelChoice, ModelOption, Permissions, Project, Provider,
     StartThread, ThreadSummary, Workspace,
 };
 pub use statistics::{ModelUsage, Statistics, ToolCalls, TurnStatistics};
-pub use t3::t3_version;
-pub use thread::{ChatItem, Snapshot, Thread, ThreadEvent, Turn, TurnFile, TurnStatus};
+pub use t3::{Watch, t3_version};
+pub use thread::{
+    Automation, ChatItem, Group, Lineage, LineageChanges, LineageRow, LocalServer, Pace, Relation,
+    RunStatus, Schedule, ScheduleKind, Snapshot, Thread, ThreadEvent, Turn, TurnFile, TurnStatus,
+    UsageLimits, UsageWindow,
+};
 pub use visible::{visible, visible_lines, visible_name};
 
 #[cfg(test)]

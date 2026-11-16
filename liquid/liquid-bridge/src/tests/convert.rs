@@ -4,17 +4,18 @@
 use std::path::PathBuf;
 
 use meta_harness_core::{
-    AgentEvent, ApprovalOption, BranchPullRequest, ChangedFile, ChatItem, Context, GitStatus,
-    ItemDetail, ItemId, ItemKind, ItemStatus, Model, ModelChoice, ModelOption, ModelUsage,
-    PendingRequest, Provider, Question, Request, RequestId, Snapshot, Statistics, ThreadEvent,
-    ThreadSummary, ToolCalls, Turn, TurnFile, TurnId, TurnStatistics, TurnStatus, Usage,
+    AgentEvent, ApprovalOption, BranchChanges, BranchPullRequest, ChangedFile, ChatItem, Context,
+    GitStatus, ItemDetail, ItemId, ItemKind, ItemStatus, LineCount, Model, ModelChoice,
+    ModelOption, ModelUsage, PendingRequest, Provider, PullRequestCheck, PullRequestDetail,
+    Question, Request, RequestId, Snapshot, Statistics, ThreadEvent, ThreadSummary, ToolCalls,
+    Turn, TurnFile, TurnId, TurnStatistics, TurnStatus, Usage,
 };
 
 use crate::api::events::{
     BridgeApproval, BridgeApprovalOption, BridgeChangeStatus, BridgeEvent, BridgeEventKind,
     BridgeFileChange, BridgeItem, BridgeItemKind, BridgeQuestion, BridgeRequest, BridgeUsage,
 };
-use crate::api::git::{BridgeBranchPullRequest, BridgeGitStatus};
+use crate::api::git::{BridgeBranchPullRequest, BridgeGitStatus, BridgePullRequestCheck};
 use crate::api::session::{BridgeModelChoice, BridgeModelOption, BridgeThreadSummary};
 use crate::api::thread::{
     BridgeContext, BridgeModelUsage, BridgeToolCalls, BridgeTurnStatistics, BridgeTurnStatus,
@@ -673,6 +674,11 @@ fn a_git_status_crosses_with_its_changes_counts_and_pull_request() {
                 added: 2,
                 removed: 1,
             }],
+            working_added: 0,
+            working_removed: 0,
+            branch_base: None,
+            branch_added: 0,
+            branch_removed: 0,
             upstream: true,
             ahead: 1,
             behind: 0,
@@ -687,6 +693,80 @@ fn a_git_status_crosses_with_its_changes_counts_and_pull_request() {
             }),
         }
     );
+}
+
+#[test]
+fn a_git_status_crosses_with_the_working_tree_totals_and_the_branch_changes_against_its_base() {
+    let status = convert::git_status(GitStatus {
+        working_tree_lines: LineCount {
+            added: 5,
+            removed: 3,
+        },
+        branch_changes: Some(BranchChanges {
+            base: Some("origin/main\u{202e}".to_owned()),
+            lines: LineCount {
+                added: 9,
+                removed: 4,
+            },
+        }),
+        ..GitStatus::default()
+    });
+    assert_eq!((status.working_added, status.working_removed), (5, 3));
+    assert_eq!(status.branch_base.as_deref(), Some("origin/main<U+202E>"));
+    assert_eq!((status.branch_added, status.branch_removed), (9, 4));
+}
+
+#[test]
+fn a_pull_request_crosses_with_its_checks_action_and_prompts_with_hidden_characters_written_out() {
+    let detail = convert::pull_request_detail(PullRequestDetail {
+        number: 42,
+        title: "Add\u{200b}it".to_owned(),
+        url: "https://example.invalid/42".to_owned(),
+        state: "open".to_owned(),
+        draft: false,
+        base: "main".to_owned(),
+        head: "feature".to_owned(),
+        conflicting: false,
+        files: 3,
+        lines: LineCount {
+            added: 12,
+            removed: 4,
+        },
+        checks: vec![PullRequestCheck {
+            name: "build\u{202e}".to_owned(),
+            status: "failure".to_owned(),
+            description: Some("exit\u{200b}1".to_owned()),
+            url: None,
+        }],
+        checks_state: "failing".to_owned(),
+        checks_summary: "1 of 1 failing".to_owned(),
+        action: Some("fix".to_owned()),
+        merge_method: "merge".to_owned(),
+    });
+    assert_eq!(
+        (detail.number, detail.files, detail.added, detail.removed),
+        (42, 3, 12, 4)
+    );
+    assert_eq!(detail.title, "Add<U+200B>it");
+    assert_eq!(
+        detail.checks,
+        vec![BridgePullRequestCheck {
+            name: "build<U+202E>".to_owned(),
+            status: "failure".to_owned(),
+            description: Some("exit<U+200B>1".to_owned()),
+            url: None,
+        }]
+    );
+    assert_eq!(detail.action.as_deref(), Some("fix"));
+    assert!(detail.fix_prompt.contains("titled `Add<U+200B>it`"));
+    assert!(
+        detail
+            .fix_prompt
+            .ends_with("\nFailing checks:\n> build<U+202E>: exit<U+200B>1")
+    );
+    assert!(detail.resolve_prompt.starts_with(
+        "PR #42 (https://example.invalid/42) conflicts with its base branch `main`. Its branch `feature` is"
+    ));
 }
 
 #[test]

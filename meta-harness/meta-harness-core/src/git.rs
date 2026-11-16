@@ -8,6 +8,19 @@ use tokio::sync::mpsc;
 
 use crate::t3::{Client, fresh_id};
 
+mod pull_request;
+
+pub use pull_request::{PullRequestCheck, PullRequestDetail};
+
+/// Added and removed lines.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LineCount {
+    /// Added lines.
+    pub added: u32,
+    /// Removed lines.
+    pub removed: u32,
+}
+
 /// One file's uncommitted line counts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChangedFile {
@@ -17,6 +30,15 @@ pub struct ChangedFile {
     pub added: u32,
     /// Removed lines.
     pub removed: u32,
+}
+
+/// The branch's changes against its base, as T3 counts them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BranchChanges {
+    /// The branch the changes are compared with; `None` when T3 found none.
+    pub base: Option<String>,
+    /// The lines the branch adds and removes against `base`.
+    pub lines: LineCount,
 }
 
 /// The pull request of the checked-out branch.
@@ -51,6 +73,10 @@ pub struct GitStatus {
     pub provider: Option<String>,
     /// Uncommitted files.
     pub changes: Vec<ChangedFile>,
+    /// The lines the uncommitted files add and remove, in total.
+    pub working_tree_lines: LineCount,
+    /// The branch's changes against its base; `None` when T3 sends none.
+    pub branch_changes: Option<BranchChanges>,
     /// Whether the branch has an upstream.
     pub upstream: bool,
     /// Commits the upstream lacks.
@@ -365,15 +391,30 @@ impl Git {
         Ok(receiver)
     }
 
+    /// The branch's changes against its base, as T3's Changes tap compares them, as one unified
+    /// diff.
+    pub async fn branch_diff(&self, ignore_whitespace: bool) -> Result<String, String> {
+        self.review_diff("branch-range", ignore_whitespace).await
+    }
+
     /// The uncommitted changes against `HEAD` as one unified diff.
     pub async fn uncommitted_diff(&self, ignore_whitespace: bool) -> Result<String, String> {
+        self.review_diff("working-tree", ignore_whitespace).await
+    }
+
+    /// The patch of T3's review source `source_kind`: `working-tree` or `branch-range`.
+    async fn review_diff(
+        &self,
+        source_kind: &str,
+        ignore_whitespace: bool,
+    ) -> Result<String, String> {
         let result = self
             .client
             .call(
                 "review.getDiffPreview",
                 json!({
                     "cwd": self.cwd,
-                    "sourceKind": "working-tree",
+                    "sourceKind": source_kind,
                     "ignoreWhitespace": ignore_whitespace,
                 }),
             )
@@ -488,6 +529,19 @@ fn status(local: &Value, remote: &Value) -> GitStatus {
                 removed: count(&f["deletions"]),
             })
             .collect(),
+        working_tree_lines: LineCount {
+            added: count(&local["workingTree"]["insertions"]),
+            removed: count(&local["workingTree"]["deletions"]),
+        },
+        branch_changes: local["branchChanges"].is_object().then(|| BranchChanges {
+            base: local["branchChanges"]["baseRef"]
+                .as_str()
+                .map(str::to_owned),
+            lines: LineCount {
+                added: count(&local["branchChanges"]["insertions"]),
+                removed: count(&local["branchChanges"]["deletions"]),
+            },
+        }),
         upstream: remote["hasUpstream"].as_bool().unwrap_or_default(),
         ahead: count(&remote["aheadCount"]),
         behind: count(&remote["behindCount"]),

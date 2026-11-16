@@ -7,15 +7,15 @@ use tokio_tungstenite::tungstenite::Message;
 
 use super::fake_t3::{Fake, ok};
 use crate::git::{
-    BranchPullRequest, ChangedFile, Git, GitAction, GitActionRequest, GitProgress, GitStatus, Ref,
-    Refs, ResolvedPullRequest,
+    BranchChanges, BranchPullRequest, ChangedFile, Git, GitAction, GitActionRequest, GitProgress,
+    GitStatus, LineCount, Ref, Refs, ResolvedPullRequest,
 };
 use crate::t3::Client;
 
 const CWD: &str = "/repo";
 
 /// A stand-in whose replies come from `answer`, and Git for the checkout `CWD` of `thread`.
-async fn checkout_in(
+pub(super) async fn checkout_in(
     answer: impl Fn(&str, &Value, &str) -> Vec<Message> + Send + 'static,
     thread: Option<&str>,
 ) -> (Fake, Git) {
@@ -77,6 +77,11 @@ async fn status_reports_the_checkout_and_its_pull_request() {
                 added: 2,
                 removed: 1
             }],
+            working_tree_lines: LineCount {
+                added: 2,
+                removed: 1,
+            },
+            branch_changes: None,
             upstream: true,
             ahead: 0,
             behind: 3,
@@ -94,6 +99,51 @@ async fn status_reports_the_checkout_and_its_pull_request() {
     assert_eq!(
         fake.payloads("vcs.refreshStatus"),
         vec![json!({"cwd": CWD})]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn status_maps_the_branch_changes_and_the_working_tree_totals_as_t3_sends_them() {
+    let mut status = local("README.md");
+    status["workingTree"]["insertions"] = json!(5);
+    status["workingTree"]["deletions"] = json!(3);
+    status["branchChanges"] = json!({"baseRef": "origin/main", "insertions": 9, "deletions": 4});
+    let status = merged(status, remote(0, Value::Null));
+    let (_, git) = checkout(move |_, _, id| vec![ok(id, status.clone())]).await;
+    let status = git.status().await.unwrap();
+    assert_eq!(
+        status.working_tree_lines,
+        LineCount {
+            added: 5,
+            removed: 3
+        }
+    );
+    assert_eq!(
+        status.branch_changes,
+        Some(BranchChanges {
+            base: Some("origin/main".to_owned()),
+            lines: LineCount {
+                added: 9,
+                removed: 4
+            },
+        })
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn branch_diff_asks_t3_for_the_patch_of_the_branch_range() {
+    let patch = "diff --git a/src/lib.rs b/src/lib.rs\n+added\n";
+    let preview = json!({
+        "cwd": CWD, "generatedAt": "2026-11-16T10:00:00.000Z",
+        "sources": [{"id": "branch-range", "kind": "branch-range", "title": "Changes vs main",
+            "baseRef": "main", "headRef": "feature", "diff": patch, "diffHash": "h",
+            "truncated": false}],
+    });
+    let (fake, git) = checkout(move |_, _, id| vec![ok(id, preview.clone())]).await;
+    assert_eq!(git.branch_diff(true).await.unwrap(), patch);
+    assert_eq!(
+        fake.payloads("review.getDiffPreview"),
+        vec![json!({"cwd": CWD, "sourceKind": "branch-range", "ignoreWhitespace": true})]
     );
 }
 

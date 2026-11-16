@@ -2,16 +2,25 @@
 //! shows cross with hiding characters written out.
 
 use meta_harness_core::{
-    AgentEvent, ChatItem, Context, GitStatus, ItemDetail, ItemKind, ItemStatus, ModelChoice,
-    PendingRequest, Provider, Question, Request, Snapshot, Statistics, ThreadEvent, ThreadSummary,
-    Turn, TurnStatus, Usage, visible, visible_lines, visible_name,
+    AgentEvent, Automation, ChatItem, Context, GitStatus, Group, ItemDetail, ItemKind, ItemStatus,
+    Lineage, LineageRow, LocalServer, ModelChoice, Pace, PendingRequest, Provider,
+    PullRequestCheck, PullRequestDetail, Question, Relation, Request, RunStatus, ScheduleKind,
+    Snapshot, Statistics, ThreadEvent, ThreadSummary, Turn, TurnStatus, Usage, UsageLimits,
+    visible, visible_lines, visible_name,
 };
 
+use crate::api::details::{
+    BridgeAutomation, BridgeLineage, BridgeLineageGroup, BridgeLineageRelation, BridgeLineageRow,
+    BridgeLocalServer, BridgePace, BridgeRunStatus, BridgeSchedule, BridgeScheduleKind,
+    BridgeUsageLimits, BridgeUsageWindow,
+};
 use crate::api::events::{
     BridgeApproval, BridgeApprovalOption, BridgeChangeStatus, BridgeEvent, BridgeEventKind,
     BridgeFileChange, BridgeItem, BridgeItemKind, BridgeQuestion, BridgeRequest, BridgeUsage,
 };
-use crate::api::git::{BridgeBranchPullRequest, BridgeGitStatus};
+use crate::api::git::{
+    BridgeBranchPullRequest, BridgeGitStatus, BridgePullRequestCheck, BridgePullRequestDetail,
+};
 use crate::api::session::{
     BridgeModel, BridgeModelChoice, BridgeModelOption, BridgeProvider, BridgeThreadSummary,
 };
@@ -386,6 +395,21 @@ pub(crate) fn git_status(status: GitStatus) -> BridgeGitStatus {
                 removed: int(f.removed),
             })
             .collect(),
+        working_added: int(status.working_tree_lines.added),
+        working_removed: int(status.working_tree_lines.removed),
+        branch_base: status
+            .branch_changes
+            .as_ref()
+            .and_then(|b| b.base.as_deref())
+            .map(visible_name),
+        branch_added: status
+            .branch_changes
+            .as_ref()
+            .map_or(0, |b| int(b.lines.added)),
+        branch_removed: status
+            .branch_changes
+            .as_ref()
+            .map_or(0, |b| int(b.lines.removed)),
         upstream: status.upstream,
         ahead: int(status.ahead),
         behind: int(status.behind),
@@ -398,6 +422,42 @@ pub(crate) fn git_status(status: GitStatus) -> BridgeGitStatus {
             draft: p.draft,
             base: visible_name(&p.base),
         }),
+    }
+}
+
+pub(crate) fn pull_request_detail(detail: PullRequestDetail) -> BridgePullRequestDetail {
+    // The prompts quote the host's names and checks, so hiding characters are written out in
+    // them too (SECURITY.md). They are built before the fields move out.
+    let fix_prompt = visible(&detail.fix_prompt());
+    let resolve_prompt = visible(&detail.resolve_prompt());
+    BridgePullRequestDetail {
+        number: int(detail.number),
+        title: visible_name(&detail.title),
+        url: detail.url,
+        state: detail.state,
+        draft: detail.draft,
+        base: visible_name(&detail.base),
+        head: visible_name(&detail.head),
+        conflicting: detail.conflicting,
+        files: int(detail.files),
+        added: int(detail.lines.added),
+        removed: int(detail.lines.removed),
+        checks: detail.checks.into_iter().map(pull_request_check).collect(),
+        checks_state: detail.checks_state,
+        checks_summary: detail.checks_summary,
+        action: detail.action,
+        merge_method: detail.merge_method,
+        fix_prompt,
+        resolve_prompt,
+    }
+}
+
+fn pull_request_check(check: PullRequestCheck) -> BridgePullRequestCheck {
+    BridgePullRequestCheck {
+        name: visible_name(&check.name),
+        status: check.status,
+        description: check.description.map(|d| visible_name(&d)),
+        url: check.url,
     }
 }
 
@@ -449,6 +509,111 @@ pub(crate) fn diff_files(diff: &str) -> Vec<(BridgeFileChange, String)> {
             )
         })
         .collect()
+}
+
+pub(crate) fn local_servers(servers: Vec<LocalServer>) -> Vec<BridgeLocalServer> {
+    servers
+        .into_iter()
+        .map(|server| BridgeLocalServer {
+            host: visible_name(&server.host),
+            port: int(server.port),
+            url: server.url,
+            process: server.process.map(|name| visible_name(&name)),
+            pid: server.pid.map(int),
+            terminal: server.terminal,
+        })
+        .collect()
+}
+
+pub(crate) fn automations(tasks: Vec<Automation>) -> Vec<BridgeAutomation> {
+    tasks
+        .into_iter()
+        .map(|task| BridgeAutomation {
+            id: task.id,
+            title: visible_name(&task.title),
+            schedule: BridgeSchedule {
+                kind: match task.schedule.kind {
+                    ScheduleKind::Interval => BridgeScheduleKind::Interval,
+                    ScheduleKind::FixedTime => BridgeScheduleKind::FixedTime,
+                    ScheduleKind::Once => BridgeScheduleKind::Once,
+                    ScheduleKind::Webhook => BridgeScheduleKind::Webhook,
+                },
+                every_ms: task.schedule.every_ms.map(int),
+                time_of_day: task.schedule.time_of_day.map(|time| visible_name(&time)),
+                weekdays: task.schedule.weekdays.into_iter().map(int).collect(),
+                run_at: task.schedule.run_at,
+            },
+            enabled: task.enabled,
+            next_run_ms: task.next_run_ms.map(int),
+            last_run: match task.last_run {
+                RunStatus::Never => BridgeRunStatus::Never,
+                RunStatus::Running => BridgeRunStatus::Running,
+                RunStatus::Succeeded => BridgeRunStatus::Succeeded,
+                RunStatus::Failed => BridgeRunStatus::Failed,
+            },
+            blocked_by_policy: task.blocked_by_policy.map(|reason| visible(&reason)),
+        })
+        .collect()
+}
+
+pub(crate) fn lineage(lineage: Lineage) -> BridgeLineage {
+    BridgeLineage {
+        rows: lineage.rows.into_iter().map(lineage_row).collect(),
+        running: int(lineage.running),
+        side_chats_running: int(lineage.side_chats_running),
+        can_disconnect: lineage.can_disconnect,
+        merge_target_title: lineage.merge_target_title.map(|title| visible_name(&title)),
+        merge_ready: lineage.merge_ready,
+        can_merge: lineage.can_merge,
+    }
+}
+
+fn lineage_row(row: LineageRow) -> BridgeLineageRow {
+    BridgeLineageRow {
+        thread_id: row.thread,
+        relation: match row.relation {
+            Relation::ContextTransfer => BridgeLineageRelation::ContextTransfer,
+            Relation::Subagent => BridgeLineageRelation::Subagent,
+            Relation::ParentAgent => BridgeLineageRelation::ParentAgent,
+            Relation::Fork => BridgeLineageRelation::Fork,
+            Relation::ParentThread => BridgeLineageRelation::ParentThread,
+            Relation::SideChat => BridgeLineageRelation::SideChat,
+        },
+        group: match row.group {
+            Group::Related => BridgeLineageGroup::Related,
+            Group::Active => BridgeLineageGroup::Active,
+            Group::Previous => BridgeLineageGroup::Previous,
+            Group::SideChats => BridgeLineageGroup::SideChats,
+        },
+        title: visible_name(&row.title),
+        status: row.status.map(|status| visible_name(&status)),
+        status_label: row.status_label,
+        failed: row.failed,
+        started_ms: row.started_ms.map(int),
+        ended_ms: row.ended_ms.map(int),
+        merge_target: row.merge_target,
+        stop_subagent: row.stop_subagent,
+    }
+}
+
+pub(crate) fn usage_limits(limits: UsageLimits) -> BridgeUsageLimits {
+    BridgeUsageLimits {
+        notice: limits.notice.map(|notice| visible(&notice)),
+        windows: limits
+            .windows
+            .into_iter()
+            .map(|window| BridgeUsageWindow {
+                label: visible_name(&window.label),
+                remaining_percent: window.remaining_percent,
+                resets_at_ms: window.resets_at_ms.map(int),
+                pace: window.pace.map(|pace| match pace {
+                    Pace::Ahead => BridgePace::Ahead,
+                    Pace::On => BridgePace::On,
+                    Pace::Under => BridgePace::Under,
+                }),
+            })
+            .collect(),
+    }
 }
 
 /// The changed file's path: a rename's new name, else the second half of `a/<path> b/<path>`,

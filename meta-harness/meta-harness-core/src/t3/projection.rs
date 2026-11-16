@@ -15,6 +15,9 @@ pub(crate) struct Projection {
     pub messages: Vec<Value>,
     pub turn_items: Vec<Value>,
     pub checkpoints: Vec<Value>,
+    pub subagents: Vec<Value>,
+    pub provider_sessions: Vec<Value>,
+    pub context_transfers: Vec<Value>,
     /// Items a fork shows from its source thread, which never change.
     pub inherited: Vec<Value>,
 }
@@ -47,6 +50,9 @@ impl Projection {
             messages: list("messages"),
             turn_items: list("turnItems"),
             checkpoints: list("checkpoints"),
+            subagents: list("subagents"),
+            provider_sessions: list("providerSessions"),
+            context_transfers: list("contextTransfers"),
             inherited: list("visibleTurnItems")
                 .into_iter()
                 .filter(|row| row["visibility"] != "local")
@@ -93,6 +99,35 @@ impl Projection {
             "checkpoint.captured" => {
                 upsert(&mut self.checkpoints, payload);
                 Change::Checkpoint
+            }
+            "subagent.updated" => {
+                // T3 keeps a subagent's prompt and result when a later record omits them.
+                let mut payload = payload;
+                let before = find(&self.subagents, &payload["id"]).cloned();
+                if let Some(before) = before {
+                    for (omitted, body) in
+                        [("promptOmitted", "prompt"), ("resultOmitted", "result")]
+                    {
+                        if payload[omitted] == true && before[omitted] != true {
+                            payload[body] = before[body].clone();
+                        }
+                    }
+                }
+                upsert(&mut self.subagents, payload);
+                Change::Other
+            }
+            "provider-session.attached" | "provider-session.updated" => {
+                upsert(&mut self.provider_sessions, payload);
+                Change::Other
+            }
+            "provider-session.detached" => {
+                self.provider_sessions
+                    .retain(|session| session["id"] != payload["providerSessionId"]);
+                Change::Other
+            }
+            "context-transfer.created" | "context-transfer.updated" => {
+                upsert(&mut self.context_transfers, payload);
+                Change::Other
             }
             "thread.pull-request-link-updated" => {
                 self.link_pull_request(&payload);

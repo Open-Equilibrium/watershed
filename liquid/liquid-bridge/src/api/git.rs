@@ -40,6 +40,17 @@ pub struct BridgeGitStatus {
     pub provider: Option<String>,
     /// Uncommitted files.
     pub changes: Vec<BridgeFileChange>,
+    /// Lines the uncommitted files add, in total.
+    pub working_added: i64,
+    /// Lines the uncommitted files remove, in total.
+    pub working_removed: i64,
+    /// The base the branch's changes are counted against, with hiding characters written out;
+    /// `None` when T3 names none.
+    pub branch_base: Option<String>,
+    /// Lines the branch adds against its base.
+    pub branch_added: i64,
+    /// Lines the branch removes against its base.
+    pub branch_removed: i64,
     /// Whether the branch has an upstream.
     pub upstream: bool,
     /// Commits the upstream lacks.
@@ -50,6 +61,61 @@ pub struct BridgeGitStatus {
     pub ahead_of_default: Option<i64>,
     /// The branch's pull request.
     pub pull_request: Option<BridgeBranchPullRequest>,
+}
+
+/// One check of a pull request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgePullRequestCheck {
+    /// Its name, with hiding characters written out.
+    pub name: String,
+    /// T3's status: `pending`, `action-required`, `success`, `failure`, `skipped`, `neutral` or
+    /// `cancelled`.
+    pub status: String,
+    /// What it reports, with hiding characters written out.
+    pub description: Option<String>,
+    /// Its web address.
+    pub url: Option<String>,
+}
+
+/// The checkout's pull request, as T3's thread details card shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgePullRequestDetail {
+    /// Its number.
+    pub number: i64,
+    /// Its title, with hiding characters written out.
+    pub title: String,
+    /// Its web address.
+    pub url: String,
+    /// `open`, `closed` or `merged`.
+    pub state: String,
+    /// Whether it is a draft.
+    pub draft: bool,
+    /// The branch it merges into, with hiding characters written out.
+    pub base: String,
+    /// Its branch, with hiding characters written out.
+    pub head: String,
+    /// Whether it is open and conflicts with its base.
+    pub conflicting: bool,
+    /// How many files it changes.
+    pub files: i64,
+    /// Lines it adds.
+    pub added: i64,
+    /// Lines it removes.
+    pub removed: i64,
+    /// Its checks, as T3 lists them.
+    pub checks: Vec<BridgePullRequestCheck>,
+    /// T3's rollup of the checks: `none`, `pending`, `failing` or `passing`.
+    pub checks_state: String,
+    /// T3's summary of the checks, such as "1 of 2 failing".
+    pub checks_summary: String,
+    /// The action the card offers: `resolve`, `ready`, `fix` or `merge`; `None` when none.
+    pub action: Option<String>,
+    /// The merge method a merge uses: `merge`, `squash` or `rebase`.
+    pub merge_method: String,
+    /// The prompt of the Fix action, with hiding characters written out.
+    pub fix_prompt: String,
+    /// The prompt of the Resolve action, with hiding characters written out.
+    pub resolve_prompt: String,
 }
 
 /// T3's stacked Git actions.
@@ -312,20 +378,59 @@ impl GitCheckout {
         hide_whitespace: bool,
     ) -> Result<Vec<BridgeFileChange>, String> {
         let diff = RUNTIME.block_on(self.git.uncommitted_diff(hide_whitespace))?;
-        Ok(convert::diff_files(&diff)
-            .into_iter()
-            .map(|(file, _)| file)
-            .collect())
+        Ok(changed_files(&diff))
     }
 
     /// One uncommitted file's unified diff against `HEAD`.
     pub fn uncommitted_patch(&self, path: String, hide_whitespace: bool) -> Result<String, String> {
         let diff = RUNTIME.block_on(self.git.uncommitted_diff(hide_whitespace))?;
-        Ok(convert::diff_files(&diff)
-            .into_iter()
-            .find(|(file, _)| file.path == path)
-            .map(|(_, patch)| patch)
-            .unwrap_or_default())
+        Ok(file_patch(&diff, &path))
+    }
+
+    /// The branch's files changed against its base, as T3's Changes tap lists them.
+    pub fn branch_files(&self, hide_whitespace: bool) -> Result<Vec<BridgeFileChange>, String> {
+        let diff = RUNTIME.block_on(self.git.branch_diff(hide_whitespace))?;
+        Ok(changed_files(&diff))
+    }
+
+    /// One file's unified diff against the branch's base.
+    pub fn branch_patch(&self, path: String, hide_whitespace: bool) -> Result<String, String> {
+        let diff = RUNTIME.block_on(self.git.branch_diff(hide_whitespace))?;
+        Ok(file_patch(&diff, &path))
+    }
+
+    /// Pull request `number` of the checkout's branch, with its checks and the actions the card
+    /// offers.
+    pub fn pull_request(&self, number: i64) -> Result<BridgePullRequestDetail, String> {
+        let detail = RUNTIME.block_on(
+            self.git
+                .pull_request(u64::try_from(number).unwrap_or_default()),
+        )?;
+        Ok(convert::pull_request_detail(detail))
+    }
+
+    /// Runs `action` (`ready` or `merge`) on pull request `number`; a merge uses `merge_method`.
+    pub fn run_pull_request_action(
+        &self,
+        number: i64,
+        action: String,
+        merge_method: Option<String>,
+    ) -> Result<(), String> {
+        RUNTIME.block_on(self.git.run_pull_request_action(
+            u64::try_from(number).unwrap_or_default(),
+            &action,
+            merge_method.as_deref(),
+        ))
+    }
+
+    /// Checks pull request `url` out into a new worktree for a new thread; returns its branch and
+    /// worktree.
+    pub fn pull_request_worktree(&self, url: String) -> Result<BridgeCheckedOut, String> {
+        let (branch, path) = RUNTIME.block_on(self.git.pull_request_worktree(&url))?;
+        Ok(BridgeCheckedOut {
+            branch,
+            worktree: path.map(|p| p.to_string_lossy().into_owned()),
+        })
     }
 
     /// Resolves a pull request reference: a URL, a checkout command, `123` or `#123`.
@@ -367,4 +472,19 @@ impl GitCheckout {
     ) -> Result<(), String> {
         RUNTIME.block_on(self.git.publish(&provider, &repository, public))
     }
+}
+
+fn changed_files(diff: &str) -> Vec<BridgeFileChange> {
+    convert::diff_files(diff)
+        .into_iter()
+        .map(|(file, _)| file)
+        .collect()
+}
+
+fn file_patch(diff: &str, path: &str) -> String {
+    convert::diff_files(diff)
+        .into_iter()
+        .find(|(file, _)| file.path == path)
+        .map(|(_, patch)| patch)
+        .unwrap_or_default()
 }
