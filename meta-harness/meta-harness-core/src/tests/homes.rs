@@ -198,3 +198,80 @@ fn a_tampered_skill_list_never_removes_folders_outside_the_skills() {
         .unwrap();
     assert!(relative.is_dir() && absolute.is_dir());
 }
+
+/// Every path under `root`, relative to it, sorted.
+fn listing(root: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut folders = vec![root.to_path_buf()];
+    while let Some(folder) = folders.pop() {
+        for entry in std::fs::read_dir(&folder).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                folders.push(path.clone());
+            }
+            found.push(path.strip_prefix(root).unwrap().to_path_buf());
+        }
+    }
+    found.sort();
+    found
+}
+
+#[cfg(unix)]
+#[test]
+fn a_linked_home_or_skills_folder_is_replaced_and_nothing_outside_changes() {
+    // A link to a folder outside the home, once as `<home>/skills` and once as the home itself.
+    for link_home in [false, true] {
+        let dir = Dir::new();
+        let external = dir.0.join("external");
+        std::fs::create_dir_all(external.join("example")).unwrap();
+        std::fs::write(external.join("example/sentinel"), "keep").unwrap();
+        let before = listing(&external);
+        let homes = Homes::under(&dir.0.join("meta"));
+        std::fs::create_dir_all(homes.claude.parent().unwrap()).unwrap();
+        if link_home {
+            std::os::unix::fs::symlink(&external, &homes.claude).unwrap();
+        } else {
+            std::fs::create_dir(&homes.claude).unwrap();
+            std::os::unix::fs::symlink(&external, homes.claude.join("skills")).unwrap();
+        }
+        let example = BTreeMap::from([(
+            "SKILL.md".to_owned(),
+            "---\nname: example\n---\n".to_owned(),
+        )]);
+        let blocks = Blocks {
+            skills: BTreeMap::from([("example".to_owned(), example)]),
+            ..Blocks::default()
+        };
+        homes.write(&blocks, &dir.0.join("person")).unwrap();
+
+        assert_eq!(listing(&external), before, "link_home={link_home}");
+        let real_folder = |path: PathBuf| std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir());
+        assert!(real_folder(homes.claude.clone()) && real_folder(homes.claude.join("skills")));
+        assert_eq!(
+            read(&homes.claude.join("skills/example/SKILL.md")),
+            "---\nname: example\n---\n"
+        );
+    }
+}
+
+#[test]
+fn a_skill_file_named_like_a_temporary_file_is_written_whole() {
+    let dir = Dir::new();
+    let homes = Homes::under(&dir.0.join("meta"));
+    let files = BTreeMap::from([
+        ("a.meta-harness-tmp".to_owned(), "kept".to_owned()),
+        ("a.txt".to_owned(), "text".to_owned()),
+    ]);
+    let blocks = Blocks {
+        skills: BTreeMap::from([("example".to_owned(), files)]),
+        ..Blocks::default()
+    };
+    homes.write(&blocks, &dir.0.join("person")).unwrap();
+    for home in [&homes.claude, &homes.codex] {
+        assert_eq!(
+            read(&home.join("skills/example/a.meta-harness-tmp")),
+            "kept"
+        );
+        assert_eq!(read(&home.join("skills/example/a.txt")), "text");
+    }
+}

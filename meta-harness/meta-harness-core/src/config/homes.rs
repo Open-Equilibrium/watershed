@@ -51,7 +51,7 @@ impl Homes {
             format!("{}\n", texts.join("\n\n"))
         });
         for (home, file) in [(&self.claude, "CLAUDE.md"), (&self.codex, "AGENTS.md")] {
-            std::fs::create_dir_all(home).map_err(|e| failed(home, &e))?;
+            real_folder(home)?;
             match &instructions {
                 Some(text) => write(&home.join(file), text)?,
                 None => remove(&home.join(file))?,
@@ -129,6 +129,7 @@ fn write_skills(
         .filter(|name| super::check_name(name).is_ok())
         .collect();
     let root = home.join("skills");
+    real_folder(&root)?;
     // Each name is one plain folder name: proposals and the list above were checked.
     for name in managed.iter().chain(skills.keys()) {
         let folder = root.join(name);
@@ -211,11 +212,28 @@ fn toml_string(value: &str) -> String {
     out
 }
 
-/// Writes `text` to `path` through a temporary file, so a harness never reads half of it.
+/// Makes `path` a real folder. A link in its place is removed, never followed, so nothing outside
+/// the home changes.
+fn real_folder(path: &Path) -> Result<(), String> {
+    if std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        // A link to a folder is a folder on Windows, which only `remove_dir` takes away.
+        std::fs::remove_file(path)
+            .or_else(|_| std::fs::remove_dir(path))
+            .map_err(|e| failed(path, &e))?;
+    }
+    std::fs::create_dir_all(path).map_err(|e| failed(path, &e))
+}
+
+/// Writes `text` to `path` through a hidden temporary file beside it, so a harness never reads
+/// half of it. Skill paths have no hidden parts, so the name clashes with none.
 fn write(path: &Path, text: &str) -> Result<(), String> {
     let parent = path.parent().expect("a home file has a folder");
     std::fs::create_dir_all(parent).map_err(|e| failed(parent, &e))?;
-    let temporary = path.with_extension("meta-harness-tmp");
+    let name = path
+        .file_name()
+        .expect("a home file has a name")
+        .to_string_lossy();
+    let temporary = parent.join(format!(".{name}.meta-harness-tmp"));
     std::fs::write(&temporary, text).map_err(|e| failed(&temporary, &e))?;
     std::fs::rename(&temporary, path).map_err(|e| failed(path, &e))
 }
