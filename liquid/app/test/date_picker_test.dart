@@ -5,10 +5,10 @@ import 'package:intl/intl.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 
-import 'table_kit.dart';
+import 'page_kit.dart';
 
 void main() {
-  final kit = TableKit();
+  final kit = PageKit();
 
   Finder cell(String row, String field) =>
       kit.inTable(find.byKey(ValueKey('cell $row $field')));
