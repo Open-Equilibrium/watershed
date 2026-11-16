@@ -277,6 +277,13 @@ jobs:
       - *node
       - *mac-host
 
+      # The native coverage below tests the whole workspace, Meta-Harness's T3 contract tests included.
+      - name: Install pinned T3 Code for the workspace coverage
+        shell: bash
+        run: |
+          t3="$(node scripts/install-t3.mjs "$RUNNER_TEMP/t3")"
+          echo "META_HARNESS_T3=$t3" >> "$GITHUB_ENV"
+
       - name: Establish experimental Mac unprotected red control
         if: matrix.os == 'xcode-27' && github.event_name == 'workflow_dispatch' && inputs.mac_flow_owned_write_protection_evaluation
         timeout-minutes: 2

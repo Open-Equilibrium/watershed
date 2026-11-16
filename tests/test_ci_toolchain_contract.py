@@ -477,6 +477,14 @@ class CiWorkflowContractTest(unittest.TestCase):
             't3="$(node scripts/install-t3.mjs "$RUNNER_TEMP/t3")"\n'
             'echo "META_HARNESS_T3=$t3" >> "$GITHUB_ENV"',
         )
+        # Flow Agent's coverage tests the whole workspace, Meta-Harness's T3 contract tests included.
+        assert_step_state(
+            self, workflow, "Install pinned T3 Code for the workspace coverage", job="flow-agent",
+        )
+        self.assertEqual(
+            step_run(workflow, "Install pinned T3 Code for the workspace coverage"),
+            step_run(workflow, "Install pinned T3 Code"),
+        )
 
         assert_step_state(self, workflow, "Run M1.2 installer contract tests", job="flow-agent")
         self.assertEqual(
