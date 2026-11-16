@@ -12,9 +12,9 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 import 'thread.dart';
 
-// These functions are ignored because they are not marked as `pub`: `export_record_to`, `new`, `permissions_of`, `pump`, `range_diff`, `resubscribe`, `run`, `spawn_stream`, `stream`, `subscribe_again`, `summary`
+// These functions are ignored because they are not marked as `pub`: `export_record_to`, `new`, `permissions_of`, `pump`, `range_diff`, `resubscribe`, `run`, `spawn_stream`, `subscribe_again`, `summary`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
-// These functions are ignored (category: IgnoreBecauseExplicitAttribute): `automations_with`, `follow`, `forward`, `lineage_with`, `servers_with`
+// These functions are ignored (category: IgnoreBecauseExplicitAttribute): `automations_with`, `events_with`, `follow`, `forward`, `lineage_with`, `servers_with`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentHost>>
 abstract class AgentHost implements RustOpaqueInterface {
@@ -106,8 +106,12 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Replaces a queued turn's prompt.
   Future<void> editQueued({required PlatformInt64 turn, required String text});
 
-  /// Streams the events after the latest [`AgentSession::subscribe`].
-  Stream<BridgeEvent> events();
+  /// Streams the events after subscription `id`, from [`AgentSession::subscribe`]. A subscription
+  /// streams once; an unknown or streamed one is an error.
+  Stream<BridgeEvent> events({required PlatformInt64 id});
+
+  /// Ends the Chat's event stream now, without waiting for its next event.
+  Future<void> eventsStop();
 
   /// Writes the session's record into a new folder in Downloads (ADR-0257); returns it.
   Future<String> exportRecord({required String host, required String day});
@@ -124,6 +128,9 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Streams the lineage after each change that may have changed it, once the changes settle,
   /// after the latest [`AgentSession::lineage_subscribe`]. A failed read streams as an error.
   Stream<BridgeLineage> lineageEvents();
+
+  /// Ends the lineage stream now, without waiting for its next change.
+  Future<void> lineageStop();
 
   /// The lineage now: the threads related to this session, as T3's relationships panel shows
   /// them. Its changes then stream from [`AgentSession::lineage_events`].
@@ -200,7 +207,7 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// The session now; [`AgentSession::events`] then streams the events after it, with no gap.
   /// Liquid shows the snapshot and applies each event whose sequence is past it (ADR-0290).
-  Future<BridgeSnapshot> subscribe();
+  Future<BridgeSubscription> subscribe();
 
   /// Its title.
   Future<String> title();
@@ -412,6 +419,29 @@ class BridgeQuestionAnswer {
           runtimeType == other.runtimeType &&
           question == other.question &&
           values == other.values;
+}
+
+/// A session as one subscription begins: its snapshot, and the id [`AgentSession::events`] streams
+/// the events after it by.
+class BridgeSubscription {
+  /// The id.
+  final PlatformInt64 id;
+
+  /// The session now.
+  final BridgeSnapshot snapshot;
+
+  const BridgeSubscription({required this.id, required this.snapshot});
+
+  @override
+  int get hashCode => id.hashCode ^ snapshot.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeSubscription &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          snapshot == other.snapshot;
 }
 
 /// A session as the sidebar lists it.

@@ -537,10 +537,10 @@ class SessionState {
         final generation = ++_generation;
         try {
           _setGit(next.git());
-          final snapshot = await next.subscribe();
+          final subscribed = await next.subscribe();
           if (generation != _generation) return;
-          _restore(snapshot);
-          _subscription = next.events().listen(_receive);
+          _restore(subscribed.snapshot);
+          _subscription = next.events(subscribed.id).listen(_receive);
           final title = await next.title();
           if (generation != _generation) return;
           sessionTitle.value = title;

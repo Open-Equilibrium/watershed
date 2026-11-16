@@ -483,6 +483,110 @@ fn a_followed_session_resumes_after_meta_harness_restarts() {
     stop(service);
 }
 
+#[test]
+fn an_event_stream_takes_the_subscription_it_names() {
+    let fixture = Fixture::new();
+    let (service, host) = host(&fixture);
+    let session = project_at(&host, &fixture.repo())
+        .start(
+            "append first".to_owned(),
+            scripted(),
+            Some("main".to_owned()),
+            None,
+            BridgePermissions::FullAccess,
+        )
+        .expect("session starts");
+    let first = session.subscribe().expect("the first subscription");
+    session
+        .send("append second".to_owned(), false)
+        .expect("second turn");
+    follow_turns(&session, 2);
+    let second = session.subscribe().expect("the second subscription");
+    assert_ne!(first.id, second.id);
+
+    // The turn ran between the two snapshots, so only the first subscription streams its events:
+    // its first event comes after its snapshot and no later than the second's.
+    let (sender, received) = mpsc::channel();
+    session
+        .events_with(first.id, move |event| sender.send(event).is_ok())
+        .expect("the first subscription streams");
+    let event = received
+        .recv_timeout(Duration::from_secs(60))
+        .expect("the first subscription's events");
+    assert!(
+        first.snapshot.sequence < event.sequence && event.sequence <= second.snapshot.sequence,
+        "{event:?} is not between the snapshots"
+    );
+    assert!(
+        session.events_with(first.id, |_| true).is_err(),
+        "a subscription streams once"
+    );
+    assert!(
+        session.events_with(first.id + 1000, |_| true).is_err(),
+        "an unknown subscription is an error"
+    );
+    // Subscriptions nobody streamed end once enough newer ones replace them.
+    for _ in 0..4 {
+        session.subscribe().expect("a newer subscription");
+    }
+    assert!(
+        session.events_with(second.id, |_| true).is_err(),
+        "an abandoned subscription ends"
+    );
+    stop(service);
+}
+
+#[test]
+fn servers_automations_and_lineage_follows_resume_after_meta_harness_restarts() {
+    let fixture = Fixture::new();
+    let (service, bridge) = host(&fixture);
+    let session = project_at(&bridge, &fixture.repo())
+        .start(
+            "append first".to_owned(),
+            scripted(),
+            Some("main".to_owned()),
+            None,
+            BridgePermissions::FullAccess,
+        )
+        .expect("session starts");
+    let (servers, servers_seen) = mpsc::channel();
+    session.servers_subscribe().expect("the servers");
+    session
+        .servers_with(move |list| servers.send(list).is_ok())
+        .expect("the servers follow");
+    let (tasks, tasks_seen) = mpsc::channel();
+    session
+        .automations_subscribe()
+        .expect("the scheduled tasks");
+    session
+        .automations_with(move |list| tasks.send(list).is_ok())
+        .expect("the scheduled tasks follow");
+    let (lineage, lineage_seen) = mpsc::channel();
+    session.lineage_subscribe().expect("the lineage");
+    session
+        .lineage_with(move |result| lineage.send(result).is_ok())
+        .expect("the lineage follows");
+
+    stop(service);
+    // Nothing answers for a while, as a restart takes time; each follow retries meanwhile.
+    std::thread::sleep(Duration::from_secs(1));
+    let (service, _) = host(&fixture);
+    // Nothing changes meanwhile, so each follow's first delivery is the one after its reconnect.
+    let wait = Duration::from_secs(60);
+    servers_seen.recv_timeout(wait).expect("the servers resume");
+    tasks_seen
+        .recv_timeout(wait)
+        .expect("the scheduled tasks resume");
+    // A change that came as the service stopped may read the lineage during the outage, which
+    // fails; the follow then reads again once Meta-Harness answers.
+    let mut lineage_reads = std::iter::from_fn(|| lineage_seen.recv_timeout(wait).ok());
+    assert!(
+        lineage_reads.any(|read| read.is_ok()),
+        "the lineage resumes"
+    );
+    stop(service);
+}
+
 const FOLLOWERS: usize = 8;
 const ROUNDS: usize = 4;
 
@@ -805,6 +909,60 @@ fn a_stopped_or_replaced_follow_ends_its_task_while_the_session_stays_open() {
             .recv_timeout(Duration::from_secs(10))
             .expect("a stopped follow ends");
     }
+    stop(service);
+}
+
+#[test]
+fn a_stopped_or_replaced_lineage_or_chat_follow_ends_while_the_session_stays_open() {
+    let fixture = Fixture::new();
+    let (service, host) = host(&fixture);
+    let project = project_at(&host, &fixture.repo());
+    let session = project
+        .start(
+            "append first".to_owned(),
+            scripted(),
+            Some("main".to_owned()),
+            None,
+            BridgePermissions::FullAccess,
+        )
+        .expect("session starts");
+    follow_turns(&session, 1);
+    let (sender, ended) = mpsc::channel();
+    let wait = Duration::from_secs(10);
+    session.lineage_subscribe().expect("the lineage");
+    session
+        .lineage_with(holding(Ends(sender.clone())))
+        .expect("the lineage follows");
+    // Nothing changes, so the first follow would run on; a newer one replaces it.
+    session.lineage_subscribe().expect("the lineage");
+    session
+        .lineage_with(holding(Ends(sender.clone())))
+        .expect("the lineage follows");
+    ended
+        .recv_timeout(wait)
+        .expect("the replaced lineage follow ends");
+    session.lineage_stop();
+    ended
+        .recv_timeout(wait)
+        .expect("the stopped lineage follow ends");
+
+    // The Chat's events follow the same rule: each subscription streams once, and a newer stream
+    // replaces the one before it.
+    let first = session.subscribe().expect("the first subscription");
+    session
+        .events_with(first.id, holding(Ends(sender.clone())))
+        .expect("the first subscription streams");
+    let second = session.subscribe().expect("the second subscription");
+    session
+        .events_with(second.id, holding(Ends(sender)))
+        .expect("the second subscription streams");
+    ended
+        .recv_timeout(wait)
+        .expect("the replaced Chat stream ends");
+    session.events_stop();
+    ended
+        .recv_timeout(wait)
+        .expect("the stopped Chat stream ends");
     stop(service);
 }
 

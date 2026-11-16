@@ -281,6 +281,11 @@ impl Thread {
     pub fn subscribe(&self) -> (Snapshot, mpsc::Receiver<ThreadEvent>) {
         let (sender, receiver) = mpsc::channel(BACKLOG);
         let mut state = self.state();
+        // Subscribers that left are dropped here too, not only at the next event, so an idle
+        // thread that Liquid subscribes to again and again keeps no closed channels.
+        state
+            .subscribers
+            .retain(|subscriber| !subscriber.is_closed());
         // Once T3 ended the stream no event comes, so the receiver ends at once.
         if !state.ended {
             state.subscribers.push(sender);

@@ -41,9 +41,9 @@ abstract interface class ProjectBackend {
 abstract interface class SessionBackend {
   String get id;
 
-  /// The session now; [events] then streams the events after it (ADR-0290).
-  Future<BridgeSnapshot> subscribe();
-  Stream<BridgeEvent> events();
+  /// The session now, with the id that [events] streams the events after it by (ADR-0290).
+  Future<BridgeSubscription> subscribe();
+  Stream<BridgeEvent> events(int subscription);
 
   /// Confirms that the first [applied] events were applied, so the bridge may send more
   /// (ADR-0272).
@@ -228,9 +228,12 @@ class RustSessionBackend implements SessionBackend {
   final String id;
 
   @override
-  Future<BridgeSnapshot> subscribe() => _session.subscribe();
+  Future<BridgeSubscription> subscribe() => _session.subscribe();
   @override
-  Stream<BridgeEvent> events() => _session.events();
+  Stream<BridgeEvent> events(int subscription) => stopOnCancel(
+    _session.events(id: subscription),
+    _session.eventsStop,
+  );
   @override
   Future<void> confirmApplied(int applied) =>
       _session.confirmApplied(applied: applied);
@@ -328,7 +331,8 @@ class RustSessionBackend implements SessionBackend {
   @override
   Future<BridgeLineage> lineage() => _session.lineageSubscribe();
   @override
-  Stream<BridgeLineage> lineageChanges() => _session.lineageEvents();
+  Stream<BridgeLineage> lineageChanges() =>
+      stopOnCancel(_session.lineageEvents(), _session.lineageStop);
   @override
   Future<void> mergeBack() => _session.mergeBack();
   @override

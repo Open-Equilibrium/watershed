@@ -129,12 +129,13 @@ class FakeSession implements SessionBackend {
   void close() => closed = true;
 
   @override
-  Future<BridgeSnapshot> subscribe() async => current;
+  Future<BridgeSubscription> subscribe() async =>
+      BridgeSubscription(id: 1, snapshot: current);
 
   /// Like the bridge's stream, its cancel completes in the caller's zone, so widget tests that
   /// leave a session finish.
   @override
-  Stream<BridgeEvent> events() {
+  Stream<BridgeEvent> events(int subscription) {
     late final StreamSubscription<BridgeEvent> source;
     late final StreamController<BridgeEvent> controller;
     controller = StreamController(

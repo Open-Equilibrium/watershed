@@ -40,6 +40,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Configuration revision** — One state of the central configuration: 0 before the first approval, then one more with each approved proposal (ADR-0298).
 - **Harness home** — The configuration folder Meta-Harness owns for one harness, such as Claude Code's `CLAUDE_CONFIG_DIR` or Codex's `CODEX_HOME`, which T3 Code starts the harness with; the person's own harness configuration stays untouched (ADR-0298).
 - **Meta-Harness service** — The `meta serve` process that owns a data folder (`META_HARNESS_HOME`, else `~/.meta-harness`), runs the pinned T3 Code server and serves Meta-Harness's API to clients such as `meta` and Liquid (ADR-0297).
+- **Meta-Harness API version** — The number a client names in the `meta-harness-api` header of its handshake; the service admits only its own ([V-Spec](docs/concept/V-Spec_MetaHarness.html#surfaces)).
 - **Login service** — The per-user launchd agent or systemd user unit that keeps `meta serve` running (ADR-0286).
 - **BYOA** — "Bring Your Own Agent"; plugging an external agent in as the Meta-Agent.
 - **AgentPulse** — Meta-Harness subsystem measuring rework ratio, first-attempt success rate, and cost-per-productive-outcome. Meta-Harness computes/stores the metrics; Liquid only renders them.

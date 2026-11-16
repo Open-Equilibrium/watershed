@@ -4,6 +4,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use meta_harness_core::remote::connection_lost;
 use meta_harness_core::{ThreadEvent, Watch};
 use tokio::sync::{Notify, mpsc, watch};
 
@@ -208,17 +209,18 @@ pub(crate) async fn until_ended<S, T>(
 const RETRY_FIRST: std::time::Duration = std::time::Duration::from_millis(500);
 const RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Asks Meta-Harness through `attempt` until it answers. A failed attempt means Meta-Harness cannot
-/// be reached now, such as while it restarts, so the next comes after a pause. Gives `None` once
-/// `ended` ends (see [`until_ended`]).
-pub(crate) async fn reconnect<S, T, E, Fut: Future<Output = Result<T, E>>>(
+/// Asks Meta-Harness through `attempt` until it answers. A lost or missing connection means
+/// Meta-Harness cannot be reached now, such as while it restarts, so the next attempt comes after a
+/// pause. Any other error is the answer. Gives `None` once `ended` ends (see [`until_ended`]).
+pub(crate) async fn reconnect<S, T, Fut: Future<Output = Result<T, String>>>(
     ended: &mut watch::Receiver<S>,
     mut attempt: impl FnMut() -> Fut,
-) -> Option<T> {
+) -> Option<Result<T, String>> {
     let mut pause = RETRY_FIRST;
     loop {
-        if let Ok(value) = until_ended(ended, attempt()).await? {
-            return Some(value);
+        match until_ended(ended, attempt()).await? {
+            Err(error) if connection_lost(&error) => {}
+            answer => return Some(answer),
         }
         until_ended(ended, tokio::time::sleep(pause)).await?;
         pause = (pause * 2).min(RETRY_MAX);
@@ -227,7 +229,8 @@ pub(crate) async fn reconnect<S, T, E, Fut: Future<Output = Result<T, E>>>(
 
 /// Forwards each change of `watch` to `deliver` until `deliver` refuses one or `ended` ends (see
 /// [`until_ended`]). Once the watch's stream ended, `open` reopens it (see [`reconnect`]), and its
-/// current value goes out, since changes may have been missed meanwhile.
+/// current value goes out, since changes may have been missed meanwhile. Any other error ends the
+/// follow, as a watch has no channel to report it.
 pub(crate) async fn follow_watch<S, T: Clone, Fut: Future<Output = Result<Watch<T>, String>>>(
     mut watch: Watch<T>,
     ended: &mut watch::Receiver<S>,
@@ -243,7 +246,7 @@ pub(crate) async fn follow_watch<S, T: Clone, Fut: Future<Output = Result<Watch<
                 }
             }
             Some(None) => {
-                let Some(reopened) = reconnect(ended, &mut open).await else {
+                let Some(Ok(reopened)) = reconnect(ended, &mut open).await else {
                     return;
                 };
                 watch = reopened;

@@ -2,7 +2,9 @@
 //! thread (ADR-0280, ADR-0297). Calls run on flutter_rust_bridge's worker threads, never on the
 //! Dart main isolate, and events stream to Dart as they arrive (ADR-0182).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -310,25 +312,41 @@ async fn subscribe_again(
     Ok(Some(pump(events)))
 }
 
-/// The subscription that replaces a lost one. It gives `None` once the thread ended for good or the
-/// session was dropped. While Meta-Harness cannot be reached, it is asked again (see
-/// [`stream::reconnect`]), since it restarts after an update, a crash or `meta service install`.
+/// The subscription that replaces a lost one. It gives `None` once the thread ended for good, the
+/// session was dropped, or the error is not a lost connection, which the stream cannot report. While
+/// Meta-Harness cannot be reached, it is asked again (see [`stream::reconnect`]), since it restarts
+/// after an update, a crash or `meta service install`.
 async fn resubscribe(
     thread: Thread,
     mut ended: tokio::sync::watch::Receiver<()>,
 ) -> Option<tokio::sync::mpsc::Receiver<ThreadEvent>> {
     stream::reconnect(&mut ended, || subscribe_again(&thread))
-        .await
+        .await?
+        .ok()
         .flatten()
 }
+
+/// A session as one subscription begins: its snapshot, and the id [`AgentSession::events`] streams
+/// the events after it by.
+pub struct BridgeSubscription {
+    /// The id.
+    pub id: i64,
+    /// The session now.
+    pub snapshot: BridgeSnapshot,
+}
+
+/// How many subscriptions a session keeps that nobody streamed yet.
+const UNSTREAMED: usize = 4;
 
 /// One followed session.
 #[flutter_rust_bridge::frb(opaque)]
 pub struct AgentSession {
     thread: Thread,
     root: String,
-    /// The events after the latest [`AgentSession::subscribe`] snapshot, until streamed.
-    receiver: Mutex<Option<tokio::sync::mpsc::Receiver<meta_harness_core::ThreadEvent>>>,
+    /// The events of each subscription, until [`AgentSession::events`] takes them by its id.
+    subscriptions: Mutex<HashMap<i64, tokio::sync::mpsc::Receiver<ThreadEvent>>>,
+    /// The id the latest subscription got.
+    last_subscription: AtomicI64,
     /// How many of the stream's events Liquid applied, which reopens the window (ADR-0272).
     credit: Arc<stream::Credit>,
     /// Dropped with the session, which ends the card's follows (see [`until_ended`]).
@@ -340,6 +358,10 @@ pub struct AgentSession {
     servers_generation: stream::Generation,
     automations_generation: stream::Generation,
     lineage: Mutex<Option<LineageChanges>>,
+    /// The current Chat events and lineage streams, each ended by its next one or its stop. A
+    /// stream also ends with the session, since the generation's sender is dropped with it.
+    events_generation: stream::Generation,
+    lineage_generation: stream::Generation,
 }
 
 impl Drop for AgentSession {
@@ -360,7 +382,8 @@ impl AgentSession {
         Self {
             thread,
             root,
-            receiver: Mutex::new(None),
+            subscriptions: Mutex::default(),
+            last_subscription: AtomicI64::default(),
             credit: Arc::default(),
             ended: tokio::sync::watch::channel(()).0,
             servers: Mutex::default(),
@@ -368,6 +391,8 @@ impl AgentSession {
             servers_generation: stream::Generation::default(),
             automations_generation: stream::Generation::default(),
             lineage: Mutex::default(),
+            events_generation: stream::Generation::default(),
+            lineage_generation: stream::Generation::default(),
         }
     }
 
@@ -388,15 +413,54 @@ impl AgentSession {
 
     /// The session now; [`AgentSession::events`] then streams the events after it, with no gap.
     /// Liquid shows the snapshot and applies each event whose sequence is past it (ADR-0290).
-    pub fn subscribe(&self) -> Result<BridgeSnapshot, String> {
+    pub fn subscribe(&self) -> Result<BridgeSubscription, String> {
         let (snapshot, events) = run(self.thread.subscribe())?;
-        *self.receiver.lock().unwrap_or_else(PoisonError::into_inner) = Some(pump(events));
-        Ok(convert::snapshot(snapshot))
+        let id = self.last_subscription.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut subscriptions = self
+            .subscriptions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        subscriptions.insert(id, pump(events));
+        // Subscriptions nobody streamed, such as an attach Dart abandoned, end once newer ones
+        // replace them, so their T3 subscriptions do not stay open with the session. The oldest
+        // go, whichever call inserted last.
+        while subscriptions.len() > UNSTREAMED {
+            let oldest = *subscriptions.keys().min().expect("the map is not empty");
+            subscriptions.remove(&oldest);
+        }
+        drop(subscriptions);
+        Ok(BridgeSubscription {
+            id,
+            snapshot: convert::snapshot(snapshot),
+        })
     }
 
-    /// Streams the events after the latest [`AgentSession::subscribe`].
-    pub fn events(&self, sink: StreamSink<BridgeEvent>) -> Result<(), String> {
-        self.stream(move |event| sink.add(event).is_ok())
+    /// Streams the events after subscription `id`, from [`AgentSession::subscribe`]. A subscription
+    /// streams once; an unknown or streamed one is an error.
+    pub fn events(&self, id: i64, sink: StreamSink<BridgeEvent>) -> Result<(), String> {
+        self.events_with(id, move |event| sink.add(event).is_ok())
+    }
+
+    /// As [`AgentSession::events`], to a Rust consumer.
+    #[flutter_rust_bridge::frb(ignore)]
+    pub fn events_with(
+        &self,
+        id: i64,
+        deliver: impl FnMut(BridgeEvent) -> bool + Send + 'static,
+    ) -> Result<(), String> {
+        let receiver = self
+            .subscriptions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&id)
+            .ok_or_else(|| "This subscription is not open.".to_owned())?;
+        self.spawn_stream(receiver, deliver, Some(self.events_generation.replace()));
+        Ok(())
+    }
+
+    /// Ends the Chat's event stream now, without waiting for its next event.
+    pub fn events_stop(&self) {
+        self.events_generation.stop();
     }
 
     /// Subscribes and streams to a Rust consumer; returns the snapshot.
@@ -407,38 +471,34 @@ impl AgentSession {
     ) -> Result<BridgeSnapshot, String> {
         // Its own subscription, so concurrent calls never take each other's events.
         let (snapshot, events) = run(self.thread.subscribe())?;
-        self.spawn_stream(pump(events), deliver);
+        self.spawn_stream(pump(events), deliver, None);
         Ok(convert::snapshot(snapshot))
     }
 
-    fn stream(
-        &self,
-        deliver: impl FnMut(BridgeEvent) -> bool + Send + 'static,
-    ) -> Result<(), String> {
-        let receiver = self
-            .receiver
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-            .ok_or_else(|| "Subscribe before streaming the session's events.".to_owned())?;
-        self.spawn_stream(receiver, deliver);
-        Ok(())
-    }
-
-    /// Forwards `receiver`'s events to `deliver`, resubscribing when the subscription is lost.
+    /// Forwards `receiver`'s events to `deliver`, resubscribing when the subscription is lost. With
+    /// `replaced`, the forwarding also ends once that generation changes.
     fn spawn_stream(
         &self,
         receiver: tokio::sync::mpsc::Receiver<ThreadEvent>,
         deliver: impl FnMut(BridgeEvent) -> bool + Send + 'static,
+        replaced: Option<tokio::sync::watch::Receiver<u64>>,
     ) {
         let thread = self.thread.clone();
         let ended = self.ended.subscribe();
-        RUNTIME.spawn(stream::forward(
+        let forwarding = stream::forward(
             receiver,
             move || resubscribe(thread.clone(), ended.clone()),
             self.credit.clone(),
             deliver,
-        ));
+        );
+        RUNTIME.spawn(async move {
+            match replaced {
+                Some(mut replaced) => {
+                    until_ended(&mut replaced, forwarding).await;
+                }
+                None => forwarding.await,
+            }
+        });
     }
 
     /// Confirms that Liquid applied the stream's first `applied` events (ADR-0272).
@@ -764,7 +824,8 @@ impl AgentSession {
             .take()
             .ok_or_else(|| "Subscribe to the lineage before streaming it.".to_owned())?;
         let thread = self.thread.clone();
-        let mut ended = self.ended.subscribe();
+        // Replaces the lineage stream before it, and ends with the session.
+        let mut ended = self.lineage_generation.replace();
         RUNTIME.spawn(async move {
             loop {
                 match until_ended(&mut ended, changes.changed()).await {
@@ -780,16 +841,22 @@ impl AgentSession {
                     // The changes' stream ended, such as when Meta-Harness restarted: they are
                     // opened again, and the lineage read below catches up with what was missed.
                     Some(false) => {
-                        let Some(reopened) =
-                            stream::reconnect(&mut ended, || thread.lineage_changes()).await
-                        else {
-                            break;
-                        };
-                        changes = reopened;
+                        match stream::reconnect(&mut ended, || thread.lineage_changes()).await {
+                            None => break,
+                            Some(Ok(reopened)) => changes = reopened,
+                            // Another error ends the lineage, which reports it once.
+                            Some(Err(error)) => {
+                                deliver(Err(error));
+                                break;
+                            }
+                        }
                     }
                 }
                 let delivered = match until_ended(&mut ended, thread.lineage()).await {
                     Some(Ok(lineage)) => deliver(Ok(convert::lineage(lineage))),
+                    // Meta-Harness is restarting: the changes' stream ends too, and the read
+                    // after it reconnects catches up, so the card shows no passing warning.
+                    Some(Err(error)) if meta_harness_core::remote::connection_lost(&error) => true,
                     Some(Err(error)) => deliver(Err(error)),
                     None => break,
                 };
@@ -799,6 +866,11 @@ impl AgentSession {
             }
         });
         Ok(())
+    }
+
+    /// Ends the lineage stream now, without waiting for its next change.
+    pub fn lineage_stop(&self) {
+        self.lineage_generation.stop();
     }
 
     /// T3's "Merge back": merges this fork's latest finished run into the session it forked from.

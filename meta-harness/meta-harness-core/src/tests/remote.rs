@@ -4,10 +4,11 @@
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::remote::Host;
+use crate::remote::{Host, connection_lost};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn dropping_the_last_handle_closes_the_connection_to_the_service() {
@@ -29,4 +30,36 @@ async fn dropping_the_last_handle_closes_the_connection_to_the_service() {
         .await
         .expect("the service sees the connection end")
         .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_service_of_another_api_version_refuses_the_connection_with_the_version_it_speaks() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}", listener.local_addr().unwrap());
+    // Answers the handshake as a service of API version 2 does.
+    tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let (reader, mut writer) = socket.into_split();
+        let mut lines = BufReader::new(reader).lines();
+        while let Some(line) = lines.next_line().await.unwrap() {
+            if line.is_empty() {
+                break;
+            }
+        }
+        writer
+            .write_all(
+                b"HTTP/1.1 426 Upgrade Required\r\nmeta-harness-api: 2\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+            )
+            .await
+            .unwrap();
+    });
+    let error = Host::connect_to(&url, "token", "test")
+        .await
+        .err()
+        .expect("the connection is refused");
+    assert_eq!(
+        error,
+        "Meta-Harness speaks API version 2; this client needs 1. Update Meta-Harness or Liquid."
+    );
+    assert!(!connection_lost(&error), "a refusal is not retried");
 }

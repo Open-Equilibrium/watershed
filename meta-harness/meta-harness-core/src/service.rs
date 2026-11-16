@@ -249,6 +249,20 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream) {
             *refused.status_mut() = StatusCode::UNAUTHORIZED;
             return Err(refused);
         }
+        let version = request
+            .headers()
+            .get(api::API_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u32>().ok());
+        if version != Some(api::API_VERSION) {
+            let body = format!("Meta-Harness speaks API version {}.", api::API_VERSION);
+            let mut refused = ErrorResponse::new(Some(body));
+            *refused.status_mut() = StatusCode::UPGRADE_REQUIRED;
+            refused
+                .headers_mut()
+                .insert(api::API_HEADER, api::API_VERSION.into());
+            return Err(refused);
+        }
         client = request
             .headers()
             .get(api::CLIENT_HEADER)
@@ -325,7 +339,11 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream) {
                         let _ = out.send(frame_of(&Reply::Error { id, error })).await;
                     }
                 });
-                streams.insert(id, task.abort_handle());
+                // A client that reuses a live stream's id ends that stream, so none is left
+                // running without a way to cancel it.
+                if let Some(earlier) = streams.insert(id, task.abort_handle()) {
+                    earlier.abort();
+                }
             }
             api::Request::Cancel { cancel } => {
                 if let Some(task) = streams.remove(&cancel) {

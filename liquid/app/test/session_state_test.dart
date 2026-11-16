@@ -91,7 +91,7 @@ class GatedActions extends FakeSession {
 /// A session whose stream cannot be subscribed to.
 class UnsubscribableSession extends FakeSession {
   @override
-  Future<BridgeSnapshot> subscribe() => Future.error('the stream is gone');
+  Future<BridgeSubscription> subscribe() => Future.error('the stream is gone');
 }
 
 void main() {

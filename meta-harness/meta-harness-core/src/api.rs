@@ -15,6 +15,13 @@ use crate::{GitActionRequest, ModelChoice, Permissions, StartThread, ThreadSumma
 /// The header a client names itself with; the configuration log records it (ADR-0298).
 pub const CLIENT_HEADER: &str = "meta-harness-client";
 
+/// The header a client names its API version with. A service of another version, or a client that
+/// names none, is refused at the handshake, since it would misread the frames.
+pub const API_HEADER: &str = "meta-harness-api";
+
+/// The API version this build speaks: the calls, streams and frames below.
+pub const API_VERSION: u32 = 1;
+
 /// A call with one answer.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
