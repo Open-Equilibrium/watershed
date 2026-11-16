@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use meta_harness_core::{AcpAgent, Service, ServiceConfig};
+use meta_harness_core::{AcpAgent, CONNECTION_FILE, Service, ServiceConfig};
 
 use crate::api::details::BridgeLineageRelation;
 use crate::api::events::{BridgeChangeStatus, BridgeEvent, BridgeEventKind, BridgeItemKind};
@@ -126,6 +126,24 @@ fn follow_until(
         session.confirm_applied(i64::try_from(events.len()).expect("count"));
     }
     (snapshot, events)
+}
+
+/// Receives events until one satisfies `done`, and gives every event received, that one included.
+fn receive_until(
+    receiver: &mpsc::Receiver<BridgeEvent>,
+    done: impl Fn(&BridgeEvent) -> bool,
+) -> Vec<BridgeEvent> {
+    let mut events = Vec::new();
+    loop {
+        let event = receiver
+            .recv_timeout(Duration::from_secs(60))
+            .expect("the session goes on");
+        let last = done(&event);
+        events.push(event);
+        if last {
+            return events;
+        }
+    }
 }
 
 /// Follows `session` until `done` holds for its state.
@@ -354,6 +372,79 @@ fn connecting_says_when_meta_harness_is_not_running_and_where_it_looked() {
         error.contains(&home) && error.contains("META_HARNESS_HOME"),
         "{error}"
     );
+
+    // A connection file whose address refuses connections is left by a service that stopped
+    // without removing it.
+    let closed = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("a port")
+        .local_addr()
+        .expect("an address");
+    let file = fixture.home().join(CONNECTION_FILE);
+    std::fs::create_dir_all(fixture.home()).expect("the folder");
+    std::fs::write(
+        &file,
+        format!(r#"{{"url":"ws://{closed}","token":"unused"}}"#),
+    )
+    .expect("the file");
+    let error = AgentHost::connect(Some(home.clone()))
+        .err()
+        .expect("the address refuses");
+    assert!(error.starts_with("Meta-Harness is not running"), "{error}");
+
+    // A damaged file is not a missing service: the error keeps its own text.
+    std::fs::write(&file, "{").expect("the file");
+    let error = AgentHost::connect(Some(home.clone()))
+        .err()
+        .expect("the file is damaged");
+    assert!(
+        error.contains("damaged") && !error.contains("not running") && error.contains(&home),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_followed_session_resumes_after_meta_harness_restarts() {
+    let fixture = Fixture::new();
+    let (service, bridge) = host(&fixture);
+    let session = project_at(&bridge, &fixture.repo())
+        .start(
+            "append first".to_owned(),
+            scripted(),
+            Some("main".to_owned()),
+            None,
+            BridgePermissions::FullAccess,
+        )
+        .expect("session starts");
+    let (sender, receiver) = mpsc::channel();
+    session
+        .forward(move |event| sender.send(event).is_ok())
+        .expect("the session follows");
+    receive_until(&receiver, |e| e.kind == BridgeEventKind::TurnCompleted);
+
+    stop(service);
+    // Nothing answers for a while, as a restart takes time; the stream retries meanwhile.
+    std::thread::sleep(Duration::from_secs(1));
+    let (service, _) = host(&fixture);
+    // The stream resubscribes once Meta-Harness answers, and marks the gap with a fell-behind event.
+    receive_until(&receiver, |e| e.kind == BridgeEventKind::FellBehind);
+    session
+        .send("append second".to_owned(), false)
+        .expect("second turn");
+    // The scripted agent cannot load its session, so T3 aborts the turn after the restart; the
+    // turn's events reach Liquid all the same.
+    let events = receive_until(&receiver, |e| {
+        matches!(
+            e.kind,
+            BridgeEventKind::TurnCompleted | BridgeEventKind::TurnAborted
+        )
+    });
+    assert!(
+        events.iter().any(|e| {
+            e.kind == BridgeEventKind::ItemCompleted && e.text.as_deref() == Some("append second")
+        }),
+        "the second turn reaches Liquid: {events:?}"
+    );
+    stop(service);
 }
 
 #[test]

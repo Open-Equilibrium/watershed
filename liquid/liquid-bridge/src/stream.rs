@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use meta_harness_core::ThreadEvent;
+use meta_harness_core::{ThreadEvent, Watch};
 use tokio::sync::{Notify, mpsc, watch};
 
 use crate::api::events::{BridgeEvent, BridgeEventKind};
@@ -170,6 +170,58 @@ pub(crate) async fn until_ended<T>(
         biased;
         _ = ended.changed() => None,
         value = next => Some(value),
+    }
+}
+
+/// The first pause before Meta-Harness is asked again, doubling after each failed attempt up to
+/// `RETRY_MAX`.
+const RETRY_FIRST: std::time::Duration = std::time::Duration::from_millis(500);
+const RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Asks Meta-Harness through `attempt` until it answers. A failed attempt means Meta-Harness cannot
+/// be reached now, such as while it restarts, so the next comes after a pause. Gives `None` once
+/// the session is dropped.
+pub(crate) async fn reconnect<T, E, Fut: Future<Output = Result<T, E>>>(
+    ended: &mut watch::Receiver<()>,
+    mut attempt: impl FnMut() -> Fut,
+) -> Option<T> {
+    let mut pause = RETRY_FIRST;
+    loop {
+        if let Ok(value) = until_ended(ended, attempt()).await? {
+            return Some(value);
+        }
+        until_ended(ended, tokio::time::sleep(pause)).await?;
+        pause = (pause * 2).min(RETRY_MAX);
+    }
+}
+
+/// Forwards each change of `watch` to `deliver` until `deliver` refuses one or the session is
+/// dropped. Once the watch's stream ended, `open` reopens it (see [`reconnect`]), and its current
+/// value goes out, since changes may have been missed meanwhile.
+pub(crate) async fn follow_watch<T: Clone, Fut: Future<Output = Result<Watch<T>, String>>>(
+    mut watch: Watch<T>,
+    ended: &mut watch::Receiver<()>,
+    mut open: impl FnMut() -> Fut,
+    mut deliver: impl FnMut(T) -> bool,
+) {
+    loop {
+        match until_ended(ended, watch.changed()).await {
+            None => return,
+            Some(Some(value)) => {
+                if !deliver(value) {
+                    return;
+                }
+            }
+            Some(None) => {
+                let Some(reopened) = reconnect(ended, &mut open).await else {
+                    return;
+                };
+                watch = reopened;
+                if !deliver(watch.current()) {
+                    return;
+                }
+            }
+        }
     }
 }
 

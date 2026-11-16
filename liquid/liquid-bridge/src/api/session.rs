@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use meta_harness_core::remote::{Host, Project, Stream, Thread};
 use meta_harness_core::{
-    Automation, LineageChanges, LocalServer, Permissions, StartThread, ThreadEvent, ThreadSummary,
-    TurnStatus, Watch, Workspace, default_home, visible_name,
+    Automation, CONNECTION_FILE, LineageChanges, LocalServer, Permissions, StartThread,
+    ThreadEvent, ThreadSummary, TurnStatus, Watch, Workspace, default_home, visible_name,
 };
 use tokio::runtime::Runtime;
 
@@ -147,10 +147,12 @@ impl AgentHost {
             ),
         };
         let host = run(Host::connect(&folder, "liquid")).map_err(|error| {
-            format!(
-                "Meta-Harness is not running. Liquid looked in {} ({found}). {error}",
-                folder.display()
-            )
+            let looked = format!("Liquid looked in {} ({found}).", folder.display());
+            if not_running(&folder) {
+                format!("Meta-Harness is not running. {looked} {error}")
+            } else {
+                format!("{error} {looked}")
+            }
         })?;
         Ok(Self { host })
     }
@@ -306,24 +308,48 @@ fn pump(mut events: Stream<ThreadEvent>) -> tokio::sync::mpsc::Receiver<ThreadEv
     receiver
 }
 
-/// The subscription that replaces a lost one. It gives `None` once the thread ended for good, once
-/// T3 cannot be asked (the stream then ends rather than retries), or once the session was dropped.
+/// Whether no service runs for the data folder `home`: its connection file is missing, or the
+/// address it names refuses connections, as after a service stopped without removing the file.
+fn not_running(home: &Path) -> bool {
+    let text = match std::fs::read_to_string(home.join(CONNECTION_FILE)) {
+        Ok(text) => text,
+        Err(error) => return error.kind() == std::io::ErrorKind::NotFound,
+    };
+    let address = serde_json::from_str::<serde_json::Value>(&text)
+        .ok()
+        .and_then(|value| {
+            value["url"]
+                .as_str()?
+                .strip_prefix("ws://")
+                .map(str::to_owned)
+        });
+    address.is_some_and(|address| {
+        std::net::TcpStream::connect(address)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionRefused)
+    })
+}
+
+/// One attempt at the subscription that replaces a lost one; `None` once the thread ended for good.
+async fn subscribe_again(
+    thread: &Thread,
+) -> Result<Option<tokio::sync::mpsc::Receiver<ThreadEvent>>, String> {
+    if thread.ended().await? {
+        return Ok(None);
+    }
+    let (_, events) = thread.subscribe().await?;
+    Ok(Some(pump(events)))
+}
+
+/// The subscription that replaces a lost one. It gives `None` once the thread ended for good or the
+/// session was dropped. While Meta-Harness cannot be reached, it is asked again (see
+/// [`stream::reconnect`]), since it restarts after an update, a crash or `meta service install`.
 async fn resubscribe(
     thread: Thread,
     mut ended: tokio::sync::watch::Receiver<()>,
 ) -> Option<tokio::sync::mpsc::Receiver<ThreadEvent>> {
-    until_ended(&mut ended, async {
-        match thread.ended().await {
-            Ok(false) => thread
-                .subscribe()
-                .await
-                .ok()
-                .map(|(_, events)| pump(events)),
-            _ => None,
-        }
-    })
-    .await
-    .flatten()
+    stream::reconnect(&mut ended, || subscribe_again(&thread))
+        .await
+        .flatten()
 }
 
 /// One followed session.
@@ -627,19 +653,22 @@ impl AgentSession {
         &self,
         mut deliver: impl FnMut(Vec<BridgeLocalServer>) -> bool + Send + 'static,
     ) -> Result<(), String> {
-        let mut watch = self
+        let watch = self
             .servers
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take()
             .ok_or_else(|| "Subscribe to the servers before streaming them.".to_owned())?;
+        let thread = self.thread.clone();
         let mut ended = self.ended.subscribe();
         RUNTIME.spawn(async move {
-            while let Some(Some(servers)) = until_ended(&mut ended, watch.changed()).await {
-                if !deliver(convert::local_servers(servers)) {
-                    break;
-                }
-            }
+            stream::follow_watch(
+                watch,
+                &mut ended,
+                || thread.servers(),
+                |servers| deliver(convert::local_servers(servers)),
+            )
+            .await;
         });
         Ok(())
     }
@@ -679,19 +708,22 @@ impl AgentSession {
         &self,
         mut deliver: impl FnMut(Vec<BridgeAutomation>) -> bool + Send + 'static,
     ) -> Result<(), String> {
-        let mut watch = self
+        let watch = self
             .automations
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take()
             .ok_or_else(|| "Subscribe to the automations before streaming them.".to_owned())?;
+        let thread = self.thread.clone();
         let mut ended = self.ended.subscribe();
         RUNTIME.spawn(async move {
-            while let Some(Some(tasks)) = until_ended(&mut ended, watch.changed()).await {
-                if !deliver(convert::automations(tasks)) {
-                    break;
-                }
-            }
+            stream::follow_watch(
+                watch,
+                &mut ended,
+                || thread.automations(),
+                |tasks| deliver(convert::automations(tasks)),
+            )
+            .await;
         });
         Ok(())
     }
@@ -730,7 +762,7 @@ impl AgentSession {
         &self,
         mut deliver: impl FnMut(Result<BridgeLineage, String>) -> bool + Send + 'static,
     ) -> Result<(), String> {
-        let changes = self
+        let mut changes = self
             .lineage
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -740,14 +772,26 @@ impl AgentSession {
         let mut ended = self.ended.subscribe();
         RUNTIME.spawn(async move {
             loop {
-                if until_ended(&mut ended, changes.changed()).await.is_none() {
-                    break;
-                }
-                if until_ended(&mut ended, tokio::time::sleep(LINEAGE_SETTLE))
-                    .await
-                    .is_none()
-                {
-                    break;
+                match until_ended(&mut ended, changes.changed()).await {
+                    None => break,
+                    Some(true) => {
+                        if until_ended(&mut ended, tokio::time::sleep(LINEAGE_SETTLE))
+                            .await
+                            .is_none()
+                        {
+                            break;
+                        }
+                    }
+                    // The changes' stream ended, such as when Meta-Harness restarted: they are
+                    // opened again, and the lineage read below catches up with what was missed.
+                    Some(false) => {
+                        let Some(reopened) =
+                            stream::reconnect(&mut ended, || thread.lineage_changes()).await
+                        else {
+                            break;
+                        };
+                        changes = reopened;
+                    }
                 }
                 let delivered = match until_ended(&mut ended, thread.lineage()).await {
                     Some(Ok(lineage)) => deliver(Ok(convert::lineage(lineage))),
