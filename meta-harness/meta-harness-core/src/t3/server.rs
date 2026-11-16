@@ -223,16 +223,19 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("t3-start-{}", std::process::id()));
         let home = dir.join("home");
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(home.join("userdata")).unwrap();
         let binary = dir.join("t3");
         let script = format!(
             "#!/bin/sh\n\
              [ \"$1\" = serve ] || exit 1\n\
+             echo start >> \"{starts}\"\n\
              if [ ! -e \"{started}\" ]; then : > \"{started}\"; exit 1; fi\n\
              printf '{{\"pid\":%s,\"serverVersion\":\"{version}\",\"origin\":\"http://127.0.0.1:1\"}}' $$ \
              > \"$T3CODE_HOME/userdata/server-runtime.json\"\n\
              exec sleep 30\n",
             started = dir.join("started").display(),
+            starts = dir.join("starts").display(),
             version = t3_version(),
         );
         std::fs::write(&binary, script).unwrap();
@@ -248,6 +251,8 @@ mod tests {
             "{:?}",
             started.elapsed()
         );
+        let starts = std::fs::read_to_string(dir.join("starts")).unwrap();
+        assert_eq!(starts.lines().count(), 2, "started again once");
         server.stop().await;
         let _ = std::fs::remove_dir_all(&dir);
     }
