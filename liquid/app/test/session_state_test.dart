@@ -94,6 +94,21 @@ class UnsubscribableSession extends FakeSession {
   Future<BridgeSubscription> subscribe() => Future.error('the stream is gone');
 }
 
+/// A session whose event stream takes until `cancelGate` completes to cancel, so a switch can happen
+/// while the session it leaves is still being released.
+class SlowCancel extends FakeSession {
+  SlowCancel({super.id});
+
+  Completer<void>? cancelGate;
+
+  @override
+  Stream<BridgeEvent> events(int subscription) => StreamController<BridgeEvent>(
+    onCancel: () async {
+      await cancelGate?.future;
+    },
+  ).stream;
+}
+
 void main() {
   late FakeSession session;
   late FakeProject project;
@@ -241,6 +256,88 @@ void main() {
       expect(first.closed, isTrue);
       expect(first.gitBackend.closed, isTrue);
       expect(project.session.closed, isFalse);
+    });
+
+    test('an open that returns after a newer open is closed, and the newer session stays open', () async {
+      final older = FakeSession(id: 'thread-1');
+      final newer = FakeSession(id: 'thread-2');
+      final gate = Completer<void>();
+      project.session = older;
+      project.hold = gate;
+      unawaited(state.open('thread-1'));
+      await pumpEventQueue();
+
+      project.hold = null;
+      project.session = newer;
+      await state.open('thread-2');
+      gate.complete();
+      await pumpEventQueue();
+
+      expect(state.session, same(newer));
+      expect(older.closed, isTrue);
+      expect(newer.closed, isFalse);
+    });
+
+    test(
+      'an open that returns after the user went to the start page is closed',
+      () async {
+        final older = FakeSession(id: 'thread-1');
+        final gate = Completer<void>();
+        project.session = older;
+        project.hold = gate;
+        unawaited(state.open('thread-1'));
+        await pumpEventQueue();
+
+        await state.newSession();
+        gate.complete();
+        await pumpEventQueue();
+
+        expect(state.session, isNull);
+        expect(older.closed, isTrue);
+      },
+    );
+
+    test(
+      'a start that returns after the user opened another session is closed',
+      () async {
+        await state.loadStart();
+        final started = FakeSession(id: 'thread-3');
+        final gate = Completer<void>();
+        project.session = started;
+        project.hold = gate;
+        unawaited(state.send('Fix it'));
+        await pumpEventQueue();
+
+        project.hold = null;
+        project.session = session;
+        await state.open('thread-1');
+        gate.complete();
+        await pumpEventQueue();
+
+        expect(state.session, same(session));
+        expect(started.closed, isTrue);
+      },
+    );
+
+    test('a switch that returns while the session it replaces is still releasing is not installed', () async {
+      final slow = SlowCancel(id: 'thread-1');
+      project.session = slow;
+      await state.open('thread-1');
+      await pumpEventQueue();
+
+      final release = Completer<void>();
+      final newer = FakeSession(id: 'thread-2')..sessionTitle = 'Stale title';
+      slow.cancelGate = release;
+      project.session = newer;
+      unawaited(state.open('thread-2'));
+      await pumpEventQueue();
+      unawaited(state.newSession());
+      release.complete();
+      await pumpEventQueue();
+
+      expect(state.session, isNull);
+      expect(state.sessionTitle.value, isNull);
+      expect(newer.closed, isTrue);
     });
 
     test('opening restores the snapshot and skips the events it already holds (ADR-0290)', () async {

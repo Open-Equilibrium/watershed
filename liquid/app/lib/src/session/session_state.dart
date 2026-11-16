@@ -51,6 +51,10 @@ class SessionState {
   /// Incremented on each switch, so reads of an earlier session never land.
   int _generation = 0;
 
+  /// Counts the switches the user asked for, so an open or start that returns after a later switch
+  /// is released, not shown.
+  int _switchRequests = 0;
+
   /// The open session, or null on the start page.
   SessionBackend? get session => _session;
 
@@ -161,6 +165,7 @@ class SessionState {
 
   /// Leaves the open session for the start page.
   Future<void> newSession() async {
+    _switchRequests++;
     await _detach();
     worktree.value = null;
     _setGit(_project.git());
@@ -169,8 +174,9 @@ class SessionState {
 
   /// Opens the stored session `id`.
   Future<void> open(String id) async {
+    final switchRequest = ++_switchRequests;
     try {
-      _attach(await _project.open(id));
+      _attach(await _project.open(id), switchRequest);
     } on Object catch (error) {
       notify(NoticeLevel.error, 'Could not open the session: $error');
     }
@@ -191,6 +197,7 @@ class SessionState {
         notify(NoticeLevel.error, 'No model is available.');
         return;
       }
+      final switchRequest = ++_switchRequests;
       _attach(
         await _project.start(
           text,
@@ -199,6 +206,7 @@ class SessionState {
           worktree: newWorktree.value ? null : worktree.value,
           permissions: permissions.value,
         ),
+        switchRequest,
       );
       unawaited(loadStart());
     } on Object catch (error) {
@@ -530,9 +538,18 @@ class SessionState {
 
   // Following the open session.
 
-  void _attach(SessionBackend next) {
+  /// Shows `next` unless a later switch was asked for meanwhile, then releases it.
+  void _attach(SessionBackend next, int switchRequest) {
+    if (switchRequest != _switchRequests) {
+      next.close();
+      return;
+    }
     unawaited(
       _detach().then((_) async {
+        if (switchRequest != _switchRequests) {
+          next.close();
+          return;
+        }
         _session = next;
         final generation = ++_generation;
         try {

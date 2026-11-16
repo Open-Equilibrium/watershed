@@ -27,6 +27,9 @@ class FakeProject implements ProjectBackend {
   /// What [start] and [open] fail with.
   Object? openError;
 
+  /// Holds what [start] and [open] return until it completes, so a later call can return first.
+  Completer<void>? hold;
+
   /// What [onlySessionInWorktree] fails with.
   Object? onlyInWorktreeError;
 
@@ -44,15 +47,21 @@ class FakeProject implements ProjectBackend {
     calls.add(
       'start $text ${model.model} base=$base worktree=$worktree ${permissions.name}',
     );
+    final gate = hold;
+    final next = session;
     if (openError case final error?) throw error;
-    return session;
+    await gate?.future;
+    return next;
   }
 
   @override
   Future<SessionBackend> open(String id) async {
     calls.add('open $id');
+    final gate = hold;
+    final next = session;
     if (openError case final error?) throw error;
-    return session;
+    await gate?.future;
+    return next;
   }
 
   @override
