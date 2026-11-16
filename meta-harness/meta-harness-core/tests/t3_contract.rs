@@ -806,6 +806,27 @@ async fn the_service_admits_only_clients_with_its_token_and_owns_its_folder() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_dropped_service_stops_serving_its_clients() {
+    let (dir, _repo, _) = fixture();
+    let home = dir.path().join("meta");
+    let service = Service::start(service_config(&home)).await.unwrap();
+    let (url, token) = (service.url.clone(), service.token.clone());
+    let client = remote::Host::connect(&home, "test").await.unwrap();
+    drop(service);
+    assert!(!home.join(CONNECTION_FILE).exists());
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while client.status().await.is_ok() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        while remote::Host::connect_to(&url, &token, "test").await.is_ok() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("a dropped service ends its connections and stops listening");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn an_approved_configuration_reaches_the_harness_homes_t3_runs_them_in() {
     let (dir, _repo, _) = fixture();
     let home = dir.path().join("meta");

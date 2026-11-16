@@ -70,8 +70,6 @@ pub struct Service {
     accept: JoinHandle<()>,
     stopping: tokio::sync::watch::Sender<bool>,
     connection_file: PathBuf,
-    // Held for its lock until the service stops.
-    _lock: std::fs::File,
 }
 
 struct Shared {
@@ -82,6 +80,8 @@ struct Shared {
     token: String,
     /// Turns true when the service stops, which ends every connection.
     stopping: tokio::sync::watch::Receiver<bool>,
+    /// Held until the last connection and call ends, so a new service waits for them.
+    _lock: std::fs::File,
 }
 
 impl Service {
@@ -134,6 +134,7 @@ impl Service {
             person_codex,
             token: token.clone(),
             stopping: stopped,
+            _lock: lock,
         });
         let accept = tokio::spawn(async move {
             loop {
@@ -151,16 +152,24 @@ impl Service {
             accept,
             stopping,
             connection_file,
-            _lock: lock,
         })
     }
 
     /// Stops listening, ends every connection, removes the connection file and stops T3.
     pub async fn stop(self) {
+        let host = self.host.clone();
+        drop(self);
+        host.shutdown().await;
+    }
+}
+
+/// A dropped service stops as [`Service::stop`] does, except that it does not stop T3: T3's host
+/// stops when its last handle is dropped.
+impl Drop for Service {
+    fn drop(&mut self) {
         self.accept.abort();
         let _ = self.stopping.send(true);
         let _ = std::fs::remove_file(&self.connection_file);
-        self.host.shutdown().await;
     }
 }
 
