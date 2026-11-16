@@ -39,10 +39,13 @@ pub(crate) const WINDOW: usize = 256;
 /// goes and Liquid falls behind; other events are never dropped (ADR-0272).
 pub(crate) const PENDING_LIMIT: usize = 256;
 
-/// How many of the stream's events Liquid applied, as `AgentSession::confirm_applied` reports,
-/// and whether the session that owns the stream was dropped and no confirmation will come.
+/// The session's window (ADR-0272): how many events its streams sent to Dart, how many Liquid
+/// applied (as `AgentSession::confirm_applied` reports), and whether the session was dropped and no
+/// confirmation will come.
 pub(crate) struct Credit {
     applied: AtomicU64,
+    /// Events sent to Dart by the session's streams, which the window counts from.
+    sent: Mutex<u64>,
     /// Set once the session was dropped, which every waiter sees, including a later one.
     closed: watch::Sender<bool>,
     notify: Notify,
@@ -52,6 +55,7 @@ impl Default for Credit {
     fn default() -> Self {
         Self {
             applied: AtomicU64::default(),
+            sent: Mutex::default(),
             closed: watch::channel(false).0,
             notify: Notify::default(),
         }
@@ -75,6 +79,26 @@ impl Credit {
         self.applied.load(Ordering::Acquire)
     }
 
+    fn lock_sent(&self) -> MutexGuard<'_, u64> {
+        self.sent.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Takes room for up to `wanted` events and gives how many it took: the session's events sent
+    /// and not yet applied stay within `WINDOW`, whichever of its streams sent them.
+    fn reserve(&self, wanted: usize) -> usize {
+        let mut sent = self.lock_sent();
+        let unconfirmed = sent.saturating_sub(self.applied());
+        let room = (WINDOW as u64).saturating_sub(unconfirmed);
+        let count = room.min(wanted as u64);
+        *sent += count;
+        count as usize
+    }
+
+    /// Gives back `count` events that `reserve` took but that were not sent.
+    fn release(&self, count: usize) {
+        *self.lock_sent() -= count as u64;
+    }
+
     /// Whether the session was dropped.
     fn is_closed(&self) -> bool {
         *self.closed.borrow()
@@ -94,14 +118,11 @@ impl Credit {
     }
 }
 
-/// What the forwarder holds for Liquid: merged events waiting for room in the window, and how
-/// many events it sent.
+/// What the forwarder holds for Liquid: merged events waiting for room in the window.
 #[derive(Default)]
 pub(crate) struct Outbox {
     /// Events waiting for room, merged where they can be.
     pub(crate) pending: Vec<BridgeEvent>,
-    /// Events handed to Dart so far.
-    sent: u64,
     /// Set from dropping partial output until its fell-behind event goes out; further drops
     /// then add no second event.
     behind: bool,
@@ -137,20 +158,22 @@ impl Outbox {
         self.pending.len() <= PENDING_LIMIT
     }
 
-    /// Hands pending events to `deliver` in order, as far as the window has room. Returns
+    /// Hands pending events to `deliver` in order, as far as the session's window has room. Returns
     /// `false` once `deliver` refused one.
-    fn send(&mut self, applied: u64, deliver: &mut impl FnMut(BridgeEvent) -> bool) -> bool {
-        let unconfirmed = self.sent.saturating_sub(applied);
-        let room = (WINDOW as u64).saturating_sub(unconfirmed);
-        let count = room.min(self.pending.len() as u64) as usize;
+    fn send(&mut self, credit: &Credit, deliver: &mut impl FnMut(BridgeEvent) -> bool) -> bool {
+        let count = credit.reserve(self.pending.len());
+        let mut delivered = 0;
         for event in self.pending.drain(..count) {
             if event.kind == BridgeEventKind::FellBehind {
                 self.behind = false;
             }
-            self.sent += 1;
             if !deliver(event) {
+                // What was not handed over leaves the window, so the session's other streams can
+                // use it.
+                credit.release(count - delivered);
                 return false;
             }
+            delivered += 1;
         }
         true
     }
@@ -293,7 +316,7 @@ pub(crate) async fn forward<Next: Future<Output = Option<mpsc::Receiver<ThreadEv
             // The session was dropped, so no confirmation comes; what waits is released with it.
             return;
         }
-        if !outbox.send(credit.applied(), &mut deliver) {
+        if !outbox.send(&credit, &mut deliver) {
             // Dart closed the stream.
             return;
         }
@@ -346,10 +369,7 @@ async fn send_waiting(
     credit: &Credit,
     deliver: &mut impl FnMut(BridgeEvent) -> bool,
 ) {
-    while !credit.is_closed()
-        && outbox.send(credit.applied(), deliver)
-        && !outbox.pending.is_empty()
-    {
+    while !credit.is_closed() && outbox.send(credit, deliver) && !outbox.pending.is_empty() {
         credit.wait().await;
     }
 }

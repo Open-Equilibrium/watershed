@@ -286,6 +286,31 @@ fn holds_events_beyond_the_window_until_liquid_confirms() {
 }
 
 #[test]
+fn a_replacement_stream_gets_only_the_room_the_session_has_left() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let (events, mut deliveries) = start_forwarding(credit.clone());
+        for item in 1..=WINDOW as u64 {
+            events.send(started(item)).await.expect("sent");
+        }
+        settle().await;
+        assert_eq!(taken(&mut deliveries).len(), WINDOW);
+        credit.confirm(WINDOW as u64);
+        // A replacement stream of the same session, with more events than one window.
+        let (replacement, mut replaced) = start_forwarding(credit.clone());
+        for item in 1..=2 * WINDOW as u64 {
+            replacement.send(started(item)).await.expect("sent");
+        }
+        settle().await;
+        assert_eq!(
+            taken(&mut replaced).len(),
+            WINDOW,
+            "the window counts every event the session sent, so the replacement waits after one window"
+        );
+    });
+}
+
+#[test]
 fn closing_the_credit_releases_a_forwarder_that_waits_on_a_dropped_session() {
     paused_runtime().block_on(async {
         let credit = Arc::new(Credit::default());
