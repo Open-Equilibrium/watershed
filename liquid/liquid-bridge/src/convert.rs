@@ -621,11 +621,15 @@ pub(crate) fn usage_limits(limits: UsageLimits) -> BridgeUsageLimits {
     }
 }
 
-/// The changed file's path: a rename's new name, else the second half of `a/<path> b/<path>`,
-/// which also holds for a path with ` b/` in it. Git C-quotes a half it cannot write raw, such as
-/// one with a non-ASCII byte, so a quoted half is decoded first.
+/// The changed file's path: a rename's or copy's new name, else the second half of
+/// `a/<path> b/<path>`, which also holds for a path with ` b/` in it. Git C-quotes a half it cannot
+/// write raw, such as one with a non-ASCII byte, so a quoted half is decoded first.
 fn path_of(header: &str, section: &str) -> String {
-    if let Some(to) = section.lines().find_map(|l| l.strip_prefix("rename to ")) {
+    let moved = section.lines().find_map(|l| {
+        l.strip_prefix("rename to ")
+            .or_else(|| l.strip_prefix("copy to "))
+    });
+    if let Some(to) = moved {
         return unquote(to).map_or_else(|| to.to_owned(), |(path, _)| path);
     }
     // A quoted first half is followed by a space and the second half. A raw first half cannot

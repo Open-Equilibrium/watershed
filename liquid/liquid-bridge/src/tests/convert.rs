@@ -116,6 +116,20 @@ diff --git a/a b/c.txt b/a b/c.txt
 }
 
 #[test]
+fn a_copied_path_with_b_slash_in_its_name_keeps_all_of_it() {
+    // The header of a copy names its source and destination, and an unquoted destination
+    // with " b/" in it makes the header alone ambiguous; the "copy to" line decides.
+    let diff = "\
+diff --git a/src b/x b/dst
+similarity index 100%
+copy from src
+copy to x b/dst
+";
+    let files = convert::diff_files(diff);
+    assert_eq!(files[0].0.path, "x b/dst");
+}
+
+#[test]
 fn git_quoted_paths_are_decoded_in_headers_and_renames() {
     // Git C-quotes a header half that holds a non-ASCII byte, a tab, a quote or a backslash.
     let diff = r#"diff --git "a/caf\303\251.txt" "b/caf\303\251.txt"
