@@ -91,7 +91,10 @@ impl Service {
             .map(PathBuf::from)
             .or_else(|| std::env::home_dir().map(|h| h.join(".codex")))
             .ok_or("The home folder is unknown.")?;
-        homes.write(&store.current()?.blocks, &person_codex)?;
+        // A revision the homes cannot take must not keep the service from serving its revert.
+        if let Err(error) = homes.write(&store.current()?.blocks, &person_codex) {
+            eprintln!("meta: {error}");
+        }
         let host = Arc::new(
             Host::start(HostConfig {
                 binary: config.t3,
@@ -449,11 +452,10 @@ impl Session {
             )?),
             ConfigCall::Pending => to(store.pending()?),
             ConfigCall::Approve(number) => {
-                let current = store.approve(client, number)?;
-                self.shared
-                    .homes
-                    .write(&current.blocks, &self.shared.person_codex)?;
-                to(current)
+                let shared = &self.shared;
+                to(store.approve(client, number, |blocks| {
+                    shared.homes.write(blocks, &shared.person_codex)
+                })?)
             }
             ConfigCall::Reject(number) => to(store.reject(client, number)?),
             ConfigCall::Log => to(store.log()?),

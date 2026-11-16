@@ -177,3 +177,24 @@ fn t3_runs_claude_code_and_codex_in_the_homes_and_keeps_its_other_settings() {
     // A home whose path T3 could not pass on as one argument is refused.
     assert!(provider_instances(&json!({}), &Homes::under(Path::new("/a\"b")), None).is_err());
 }
+
+#[test]
+fn a_tampered_skill_list_never_removes_folders_outside_the_skills() {
+    let dir = Dir::new();
+    let homes = Homes::under(&dir.0.join("meta"));
+    homes
+        .write(&Blocks::default(), &dir.0.join("person"))
+        .unwrap();
+    let (relative, absolute) = (dir.0.join("meta/harness/keep"), dir.0.join("absolute"));
+    for folder in [&relative, &absolute] {
+        std::fs::create_dir_all(folder).unwrap();
+    }
+    let names = serde_json::to_string(&["../../keep", &absolute.to_string_lossy(), ".."]).unwrap();
+    for home in [&homes.claude, &homes.codex] {
+        std::fs::write(home.join(".meta-harness-skills.json"), &names).unwrap();
+    }
+    homes
+        .write(&Blocks::default(), &dir.0.join("person"))
+        .unwrap();
+    assert!(relative.is_dir() && absolute.is_dir());
+}

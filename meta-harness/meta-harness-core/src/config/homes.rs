@@ -120,12 +120,16 @@ fn write_skills(
     skills: &BTreeMap<String, BTreeMap<String, String>>,
 ) -> Result<(), String> {
     let manifest = home.join(MANAGED);
+    // The list sits in a folder the harness writes too, so only plain names count.
     let managed: Vec<String> = std::fs::read_to_string(&manifest)
         .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default();
+        .and_then(|text| serde_json::from_str::<Vec<String>>(&text).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|name| super::check_name(name).is_ok())
+        .collect();
     let root = home.join("skills");
-    // Names were checked when proposed, so each is one plain folder name.
+    // Each name is one plain folder name: proposals and the list above were checked.
     for name in managed.iter().chain(skills.keys()) {
         let folder = root.join(name);
         match std::fs::remove_dir_all(&folder) {

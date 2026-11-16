@@ -93,7 +93,7 @@ fn a_proposal_takes_effect_only_once_approved_and_every_step_is_logged() {
         vec![number]
     );
 
-    let current = store.approve("liquid", number).unwrap();
+    let current = store.approve("liquid", number, |_| Ok(())).unwrap();
     assert_eq!(current.revision, 1);
     assert_eq!(current.blocks.instructions["rules"], "Run the tests.");
     assert!(current.blocks.skills["review"].contains_key("SKILL.md"));
@@ -123,10 +123,13 @@ fn a_decided_or_unknown_proposal_cannot_be_decided_again() {
     let store = &fixture.store;
     let approved = propose(store, vec![instruction("a", "x")]);
     let rejected = propose(store, vec![instruction("b", "y")]);
-    store.approve("cli", approved).unwrap();
+    store.approve("cli", approved, |_| Ok(())).unwrap();
     store.reject("cli", rejected).unwrap();
     for number in [approved, rejected, 99] {
-        assert!(store.approve("cli", number).is_err(), "{number}");
+        assert!(
+            store.approve("cli", number, |_| Ok(())).is_err(),
+            "{number}"
+        );
         assert!(store.reject("cli", number).is_err(), "{number}");
     }
     assert_eq!(store.current().unwrap().revision, 1);
@@ -145,7 +148,7 @@ fn a_restore_brings_back_an_earlier_revision_exactly() {
     let fixture = Fixture::new();
     let store = &fixture.store;
     let first = propose(store, vec![instruction("rules", "one"), server("docs")]);
-    let kept = store.approve("cli", first).unwrap();
+    let kept = store.approve("cli", first, |_| Ok(())).unwrap();
     let second = propose(
         store,
         vec![
@@ -157,15 +160,15 @@ fn a_restore_brings_back_an_earlier_revision_exactly() {
             },
         ],
     );
-    store.approve("cli", second).unwrap();
+    store.approve("cli", second, |_| Ok(())).unwrap();
 
     let restore = store
         .propose("cli", "back", Proposed::Restore(kept.revision))
         .unwrap();
     // A change approved after the restore was proposed is undone by it too.
     let third = propose(store, vec![instruction("late", "x")]);
-    store.approve("cli", third).unwrap();
-    let restored = store.approve("cli", restore).unwrap();
+    store.approve("cli", third, |_| Ok(())).unwrap();
+    let restored = store.approve("cli", restore, |_| Ok(())).unwrap();
     assert_eq!(restored.revision, 4);
     assert_eq!(restored.blocks, kept.blocks);
     assert!(
@@ -179,7 +182,7 @@ fn a_restore_brings_back_an_earlier_revision_exactly() {
 fn the_log_and_revisions_refuse_changes_in_place() {
     let fixture = Fixture::new();
     let number = propose(&fixture.store, vec![instruction("a", "x")]);
-    fixture.store.approve("cli", number).unwrap();
+    fixture.store.approve("cli", number, |_| Ok(())).unwrap();
     drop(fixture.store.log());
     let raw = rusqlite::Connection::open(fixture.dir.join("meta-harness.sqlite")).unwrap();
     for statement in [
@@ -233,6 +236,21 @@ fn an_invalid_change_is_refused_with_its_reason() {
             "path",
         ),
         (
+            Change::Skill {
+                name: "s".to_owned(),
+                files: files(&[("SKILL.md", "x"), ("x", "x"), ("x/y", "x")]),
+            },
+            "clash",
+        ),
+        // Case-insensitive file systems, such as macOS's default, make these one folder.
+        (
+            Change::Skill {
+                name: "s".to_owned(),
+                files: files(&[("SKILL.md", "x"), ("A/b", "x"), ("a", "x")]),
+            },
+            "clash",
+        ),
+        (
             Change::McpServer {
                 name: "m".to_owned(),
                 server: Some(McpServer::Command {
@@ -272,4 +290,32 @@ fn an_invalid_change_is_refused_with_its_reason() {
         assert!(error.contains(reason), "{error} lacks {reason}");
     }
     assert!(fixture.store.pending().unwrap().is_empty());
+}
+
+#[test]
+fn a_revision_the_homes_cannot_take_is_not_approved() {
+    let fixture = Fixture::new();
+    let store = &fixture.store;
+    let number = propose(store, vec![instruction("a", "x")]);
+    let written = std::cell::RefCell::new(Vec::new());
+    let failed = store.approve("cli", number, |blocks| {
+        written
+            .borrow_mut()
+            .push(blocks.instructions.contains_key("a"));
+        // The new revision fails to write; the current one is put back.
+        if blocks.instructions.is_empty() {
+            Ok(())
+        } else {
+            Err("The disk is full.".to_owned())
+        }
+    });
+    assert_eq!(written.into_inner(), [true, false]);
+    assert_eq!(failed, Err("The disk is full.".to_owned()));
+    assert_eq!(store.current().unwrap().revision, 0);
+    assert_eq!(
+        store.pending().unwrap().len(),
+        1,
+        "it can be approved again"
+    );
+    assert_eq!(store.log().unwrap().len(), 1, "only the proposal is logged");
 }

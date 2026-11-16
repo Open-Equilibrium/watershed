@@ -251,15 +251,22 @@ impl Store {
     }
 
     /// Approves proposal `number` for `client`: its changes apply to the current revision, which
-    /// makes a new one.
-    pub fn approve(&self, client: &str, number: u64) -> Result<Current, String> {
+    /// makes a new one once `write` put its blocks into the harness homes. While `write` runs, no
+    /// other approval does, so the homes always end on the current revision; if it fails, nothing
+    /// is approved and `write` puts the current revision back.
+    pub fn approve(
+        &self,
+        client: &str,
+        number: u64,
+        write: impl Fn(&Blocks) -> Result<(), String>,
+    ) -> Result<Current, String> {
         let mut db = self.db();
         let tx = db.transaction().map_err(failed)?;
         let proposed: Proposed = parse(&undecided(&tx, number)?)?;
         let base = current(&tx)?;
         let blocks = match proposed {
             Proposed::Changes(changes) => {
-                let mut blocks = base.blocks;
+                let mut blocks = base.blocks.clone();
                 for change in changes {
                     apply(&mut blocks, change);
                 }
@@ -270,6 +277,10 @@ impl Store {
                 blocks_of(&tx, revision)?.ok_or("The revision to restore is gone.")?
             }
         };
+        if let Err(error) = write(&blocks) {
+            let _ = write(&base.blocks);
+            return Err(error);
+        }
         let revision = base.revision + 1;
         tx.execute(
             "INSERT INTO revision (number, blocks) VALUES (?1, ?2)",
@@ -447,7 +458,7 @@ fn check_change(change: &Change) -> Result<(), String> {
 
 /// A block name doubles as a folder, table key and file name in each harness home, so it uses
 /// only letters, digits, `-` and `_`.
-fn check_name(name: &str) -> Result<(), String> {
+pub(crate) fn check_name(name: &str) -> Result<(), String> {
     let fine = !name.is_empty()
         && name.len() <= MAX_NAME
         && name
@@ -478,6 +489,23 @@ fn check_skill(files: &BTreeMap<String, String>) -> Result<(), String> {
     }
     if files.len() > MAX_ENTRIES {
         return Err(format!("A skill holds at most {MAX_ENTRIES} files."));
+    }
+    // A path that is a folder of another, ignoring case as macOS's default file system does,
+    // could not be written next to it.
+    let folded: std::collections::BTreeSet<String> =
+        files.keys().map(|p| p.to_ascii_lowercase()).collect();
+    if folded.len() < files.len()
+        || folded.iter().any(|p| {
+            folded
+                .range(format!("{p}/")..)
+                .next()
+                .is_some_and(|q| q.starts_with(&format!("{p}/")))
+        })
+    {
+        return Err(
+            "Two skill paths clash: one names the other's folder, or they differ only in case."
+                .to_owned(),
+        );
     }
     for (path, text) in files {
         let fine = path.len() <= 255
