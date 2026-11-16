@@ -339,7 +339,11 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream) {
                         let _ = out.send(frame_of(&Reply::Error { id, error })).await;
                     }
                 });
-                streams.insert(id, task.abort_handle());
+                // A client that reuses a live stream's id ends that stream, so none is left
+                // running without a way to cancel it.
+                if let Some(earlier) = streams.insert(id, task.abort_handle()) {
+                    earlier.abort();
+                }
             }
             api::Request::Cancel { cancel } => {
                 if let Some(task) = streams.remove(&cancel) {

@@ -336,7 +336,7 @@ pub struct BridgeSubscription {
 }
 
 /// How many subscriptions a session keeps that nobody streamed yet.
-const UNSTREAMED: i64 = 4;
+const UNSTREAMED: usize = 4;
 
 /// One followed session.
 #[flutter_rust_bridge::frb(opaque)]
@@ -422,8 +422,12 @@ impl AgentSession {
             .unwrap_or_else(PoisonError::into_inner);
         subscriptions.insert(id, pump(events));
         // Subscriptions nobody streamed, such as an attach Dart abandoned, end once newer ones
-        // replace them, so their T3 subscriptions do not stay open with the session.
-        subscriptions.retain(|kept, _| *kept > id - UNSTREAMED);
+        // replace them, so their T3 subscriptions do not stay open with the session. The oldest
+        // go, whichever call inserted last.
+        while subscriptions.len() > UNSTREAMED {
+            let oldest = *subscriptions.keys().min().expect("the map is not empty");
+            subscriptions.remove(&oldest);
+        }
         drop(subscriptions);
         Ok(BridgeSubscription {
             id,
