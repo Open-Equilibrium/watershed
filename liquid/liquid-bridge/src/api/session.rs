@@ -394,9 +394,10 @@ impl AgentSession {
         &self,
         deliver: impl FnMut(BridgeEvent) -> bool + Send + 'static,
     ) -> Result<BridgeSnapshot, String> {
-        let snapshot = self.subscribe()?;
-        self.stream(deliver).expect("just subscribed");
-        Ok(snapshot)
+        // Its own subscription, so concurrent calls never take each other's events.
+        let (snapshot, events) = run(self.thread.subscribe())?;
+        self.spawn_stream(pump(events), deliver);
+        Ok(convert::snapshot(snapshot))
     }
 
     fn stream(
@@ -409,6 +410,16 @@ impl AgentSession {
             .unwrap_or_else(PoisonError::into_inner)
             .take()
             .ok_or_else(|| "Subscribe before streaming the session's events.".to_owned())?;
+        self.spawn_stream(receiver, deliver);
+        Ok(())
+    }
+
+    /// Forwards `receiver`'s events to `deliver`, resubscribing when the subscription is lost.
+    fn spawn_stream(
+        &self,
+        receiver: tokio::sync::mpsc::Receiver<ThreadEvent>,
+        deliver: impl FnMut(BridgeEvent) -> bool + Send + 'static,
+    ) {
         let thread = self.thread.clone();
         let ended = self.ended.subscribe();
         RUNTIME.spawn(stream::forward(
@@ -417,7 +428,6 @@ impl AgentSession {
             self.credit.clone(),
             deliver,
         ));
-        Ok(())
     }
 
     /// Confirms that Liquid applied the stream's first `applied` events (ADR-0272).

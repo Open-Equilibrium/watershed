@@ -2,7 +2,7 @@
 //! agent; needs `META_HARNESS_T3`, as the core's contract tests do.
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{Arc, Barrier, mpsc};
 use std::time::Duration;
 
 use meta_harness_core::{AcpAgent, CONNECTION_FILE, Service, ServiceConfig};
@@ -416,10 +416,17 @@ fn a_followed_session_resumes_after_meta_harness_restarts() {
         )
         .expect("session starts");
     let (sender, receiver) = mpsc::channel();
-    session
+    let snapshot = session
         .forward(move |event| sender.send(event).is_ok())
         .expect("the session follows");
-    receive_until(&receiver, |e| e.kind == BridgeEventKind::TurnCompleted);
+    // A first turn that finished before the follow has its end in the snapshot, not the stream.
+    if !snapshot
+        .turns
+        .iter()
+        .any(|t| t.status == BridgeTurnStatus::Completed)
+    {
+        receive_until(&receiver, |e| e.kind == BridgeEventKind::TurnCompleted);
+    }
 
     stop(service);
     // Nothing answers for a while, as a restart takes time; the stream retries meanwhile.
@@ -444,6 +451,79 @@ fn a_followed_session_resumes_after_meta_harness_restarts() {
         }),
         "the second turn reaches Liquid: {events:?}"
     );
+    stop(service);
+}
+
+const FOLLOWERS: usize = 8;
+const ROUNDS: usize = 4;
+
+/// Starts `FOLLOWERS` forwards of `session` at once; gives each follow's snapshot sequence and
+/// its receiver.
+fn follow_together(session: &Arc<AgentSession>) -> Vec<(i64, mpsc::Receiver<BridgeEvent>)> {
+    let together = Arc::new(Barrier::new(FOLLOWERS));
+    let threads: Vec<_> = (0..FOLLOWERS)
+        .map(|_| {
+            let (session, together) = (session.clone(), together.clone());
+            std::thread::spawn(move || {
+                let (sender, receiver) = mpsc::channel();
+                together.wait();
+                let snapshot = session
+                    .forward(move |event| sender.send(event).is_ok())
+                    .expect("the session follows");
+                (snapshot.sequence, receiver)
+            })
+        })
+        .collect();
+    threads
+        .into_iter()
+        .map(|thread| thread.join().expect("no concurrent follow panics"))
+        .collect()
+}
+
+#[test]
+fn concurrent_forwards_of_one_session_each_stream_their_own_events() {
+    let fixture = Fixture::new();
+    let (service, host) = host(&fixture);
+    let session = Arc::new(
+        project_at(&host, &fixture.repo())
+            .start(
+                "append first".to_owned(),
+                scripted(),
+                Some("main".to_owned()),
+                None,
+                BridgePermissions::FullAccess,
+            )
+            .expect("session starts"),
+    );
+    until(|| completed(1)(&session));
+    // Rounds of followers that start together, so their subscriptions interleave.
+    let followers: Vec<_> = (0..ROUNDS)
+        .flat_map(|_| follow_together(&session))
+        .collect();
+    session
+        .send("append second".to_owned(), false)
+        .expect("second turn");
+    for (after, receiver) in followers {
+        let events = receive_until(&receiver, |e| {
+            matches!(
+                e.kind,
+                BridgeEventKind::TurnCompleted | BridgeEventKind::TurnAborted
+            )
+        });
+        assert!(
+            events
+                .iter()
+                .all(|e| e.sequence > after || e.kind == BridgeEventKind::FellBehind),
+            "every event is past the follow's snapshot: {events:?}"
+        );
+        assert!(
+            events.iter().any(|e| {
+                e.kind == BridgeEventKind::ItemCompleted
+                    && e.text.as_deref() == Some("append second")
+            }),
+            "the second turn reaches every follow: {events:?}"
+        );
+    }
     stop(service);
 }
 
