@@ -11,15 +11,59 @@ const UNIT: &str = "meta-harness.service";
 /// What the login service runs.
 pub struct Plan {
     /// The installed `meta`.
-    pub program: PathBuf,
+    program: PathBuf,
     /// Meta-Harness's data folder, where the service also logs.
-    pub home: PathBuf,
-    /// The `PATH` the service gets, so T3 finds the harnesses the user installed; a login
-    /// service does not read the user's shell profile.
-    pub path: String,
+    home: PathBuf,
+    /// The variables the service gets. A login service reads no shell profile, so they come from
+    /// the installing shell.
+    environment: Vec<(&'static str, String)>,
 }
 
+/// Variables the service takes from the installing shell when set: where the person keeps the
+/// harnesses' own logins, which the harness homes link to (SECURITY.md).
+const PASSED: [&str; 2] = ["CODEX_HOME", "CLAUDE_CONFIG_DIR"];
+
 impl Plan {
+    /// The plan for `program` and `home`, with variables from `var`. `PATH` keeps only absolute
+    /// folders, so the service never runs a program from whatever folder it works in.
+    pub fn new(
+        program: PathBuf,
+        home: PathBuf,
+        var: impl Fn(&str) -> Option<String>,
+    ) -> Result<Self, String> {
+        let path: Vec<String> = var("PATH")
+            .unwrap_or_default()
+            .split(':')
+            .filter(|folder| folder.starts_with('/'))
+            .map(str::to_owned)
+            .collect();
+        let mut environment = vec![
+            ("PATH", path.join(":")),
+            ("META_HARNESS_HOME", home.to_string_lossy().into_owned()),
+        ];
+        for name in PASSED {
+            if let Some(value) = var(name).filter(|v| v.starts_with('/')) {
+                environment.push((name, value));
+            }
+        }
+        // A service file is line-based; a control character would end or break an entry.
+        let program_text = program.to_string_lossy();
+        for value in std::iter::once(program_text.as_ref())
+            .chain(environment.iter().map(|(_, v)| v.as_str()))
+        {
+            if value.chars().any(char::is_control) {
+                return Err(format!(
+                    "{value:?} holds a control character, which a login service cannot carry."
+                ));
+            }
+        }
+        Ok(Self {
+            program,
+            home,
+            environment,
+        })
+    }
+
     fn log(&self) -> PathBuf {
         self.home.join("service.log")
     }
@@ -163,9 +207,17 @@ fn xml(value: &str) -> String {
 /// The launch agent: it starts at login and again 5 seconds after `meta serve` ends.
 fn plist_of(plan: &Plan) -> String {
     let program = xml(&plan.program.to_string_lossy());
-    let home = xml(&plan.home.to_string_lossy());
     let log = xml(&plan.log().to_string_lossy());
-    let path = xml(&plan.path);
+    let environment: String = plan
+        .environment
+        .iter()
+        .map(|(name, value)| {
+            format!(
+                "    <key>{name}</key>\n    <string>{}</string>\n",
+                xml(value)
+            )
+        })
+        .collect();
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -180,11 +232,7 @@ fn plist_of(plan: &Plan) -> String {
   </array>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key>
-    <string>{path}</string>
-    <key>META_HARNESS_HOME</key>
-    <string>{home}</string>
-  </dict>
+{environment}  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
@@ -229,8 +277,7 @@ fn unit_of(plan: &Plan) -> String {
          Type=simple\n\
          WorkingDirectory=%h\n\
          ExecStart={} serve\n\
-         Environment={}\n\
-         Environment={}\n\
+         {}\
          KillMode=mixed\n\
          Restart=always\n\
          RestartSec=5\n\
@@ -240,11 +287,13 @@ fn unit_of(plan: &Plan) -> String {
          [Install]\n\
          WantedBy=default.target\n",
         systemd_value(&plan.program.to_string_lossy()),
-        systemd_value(&format!("PATH={}", plan.path)),
-        systemd_value(&format!(
-            "META_HARNESS_HOME={}",
-            plan.home.to_string_lossy()
-        )),
+        plan.environment
+            .iter()
+            .map(|(name, value)| format!(
+                "Environment={}\n",
+                systemd_value(&format!("{name}={value}"))
+            ))
+            .collect::<String>(),
     )
 }
 
@@ -272,11 +321,37 @@ mod tests {
     }
 
     fn plan(dir: &Path) -> Plan {
-        Plan {
-            program: dir.join("A & B/bin/meta"),
-            home: dir.join("data 100%"),
-            path: "/usr/bin:/Users/p/.local/bin".to_owned(),
-        }
+        Plan::new(dir.join("A & B/bin/meta"), dir.join("data 100%"), |name| {
+            (name == "PATH").then(|| "/usr/bin:/Users/p/.local/bin".to_owned())
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn the_service_gets_absolute_folders_and_the_person_s_harness_logins() {
+        let dir = Dir::new();
+        let variables = |name: &str| match name {
+            "PATH" => Some("/usr/bin:.::bin:/opt/homebrew/bin".to_owned()),
+            "CODEX_HOME" => Some("/Users/p/.codex-work".to_owned()),
+            "CLAUDE_CONFIG_DIR" => Some("relative".to_owned()),
+            _ => None,
+        };
+        let plan = Plan::new(dir.0.join("meta"), dir.0.join("data"), variables).unwrap();
+        let names: Vec<_> = plan
+            .environment
+            .iter()
+            .map(|(n, v)| format!("{n}={v}"))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "PATH=/usr/bin:/opt/homebrew/bin".to_owned(),
+                format!("META_HARNESS_HOME={}", dir.0.join("data").display()),
+                "CODEX_HOME=/Users/p/.codex-work".to_owned(),
+            ]
+        );
+        let broken = Plan::new(dir.0.join("meta"), dir.0.join("da\nta"), |_| None);
+        assert!(broken.is_err_and(|e| e.contains("control character")));
     }
 
     fn installed(manager: &Manager, plan: &Plan) -> (String, Vec<String>) {

@@ -171,11 +171,7 @@ fn pinned_t3() -> Result<PathBuf, String> {
 
 fn install(home: PathBuf) -> Result<(), String> {
     let program = prefix()?.join("bin/meta");
-    let plan = login::Plan {
-        program,
-        home,
-        path: std::env::var("PATH").unwrap_or_default(),
-    };
+    let plan = login::Plan::new(program, home, |name| std::env::var(name).ok())?;
     login::Manager::current()?.install(&plan, run_step)?;
     if cfg!(target_os = "linux") && !lingering() {
         eprintln!(
@@ -198,13 +194,22 @@ fn lingering() -> bool {
 fn uninstall() -> Result<(), String> {
     let prefix = prefix()?;
     login::Manager::current()?.uninstall(run_step)?;
-    for path in [prefix.join("lib/meta-harness"), prefix.join("bin/meta")] {
+    for path in [
+        prefix.join("lib/meta-harness"),
+        prefix.join("share/meta-harness"),
+        prefix.join("bin/meta"),
+    ] {
         let removed = if path.is_dir() {
             std::fs::remove_dir_all(&path)
         } else {
             std::fs::remove_file(&path)
         };
-        removed.map_err(|e| format!("Could not remove {}: {e}", path.display()))?;
+        match removed {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(format!("Could not remove {}: {e}", path.display()));
+            }
+            _ => {}
+        }
     }
     println!(
         "Meta-Harness is uninstalled; its data stays in {}.",

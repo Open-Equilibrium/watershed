@@ -624,25 +624,40 @@ fn str_of(value: &Value) -> Option<String> {
 /// lineage shows, or when any thread's shell changes. Dropping it closes the shell stream.
 pub struct LineageChanges {
     wake: Arc<Notify>,
+    /// Set once the stream behind it ended, after which no change comes.
+    ended: Arc<std::sync::atomic::AtomicBool>,
     task: JoinHandle<()>,
+}
+
+/// Marks the changes `ended` and wakes their reader, which then learns no change comes.
+fn end(wake: &Notify, ended: &std::sync::atomic::AtomicBool) {
+    ended.store(true, std::sync::atomic::Ordering::SeqCst);
+    wake.notify_one();
 }
 
 impl LineageChanges {
     /// Wakes on each item of a stream of the Meta-Harness service.
     pub(crate) fn from_stream(mut stream: crate::remote::Stream<()>) -> Self {
         let wake = Arc::new(Notify::new());
-        let woken = wake.clone();
+        let ended = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (woken, done) = (wake.clone(), ended.clone());
         let task = tokio::spawn(async move {
             while stream.recv().await.is_some() {
                 woken.notify_one();
             }
+            end(&woken, &done);
         });
-        Self { wake, task }
+        Self { wake, ended, task }
     }
 
-    /// Waits for a change; read the lineage again after each.
-    pub async fn changed(&self) {
+    /// Waits for a change, then says whether one came: `false` once the stream behind it ended,
+    /// such as when the connection to Meta-Harness was lost. Read the lineage again after each.
+    pub async fn changed(&self) -> bool {
+        if self.ended.load(std::sync::atomic::Ordering::SeqCst) {
+            return false;
+        }
         self.wake.notified().await;
+        !self.ended.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -693,13 +708,15 @@ impl Thread {
             .client
             .stream("orchestration.subscribeShell", json!({}))
             .await?;
-        let shell_wake = wake.clone();
+        let ended = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (shell_wake, done) = (wake.clone(), ended.clone());
         let task = tokio::spawn(async move {
             while shells.recv().await.is_some() {
                 shell_wake.notify_one();
             }
+            end(&shell_wake, &done);
         });
-        Ok(LineageChanges { wake, task })
+        Ok(LineageChanges { wake, ended, task })
     }
 
     /// T3's "Merge back": merges this fork's latest finished run into the thread it forked from.

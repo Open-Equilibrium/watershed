@@ -174,7 +174,8 @@ impl Host {
             }
         });
         let read = waiters.clone();
-        let cancel = out.clone();
+        // Held weakly, so dropping every handle of this client closes the connection.
+        let cancel = out.downgrade();
         tokio::spawn(async move {
             while let Some(Ok(frame)) = frames.next().await {
                 if let Message::Text(text) = frame
@@ -324,14 +325,15 @@ fn send(link: &Link, id: u64, waiter: Waiter, request: &api::Request) -> Result<
         .ok_or("Meta-Harness closed the connection")?;
     waiters.insert(id, waiter);
     let text = serde_json::to_string(request).expect("requests serialize");
-    link.out
-        .send(Message::Text(text.into()))
-        .map_err(|_| "Meta-Harness closed the connection".to_owned())
+    link.out.send(Message::Text(text.into())).map_err(|_| {
+        waiters.remove(&id);
+        "Meta-Harness closed the connection".to_owned()
+    })
 }
 
 fn deliver(
     waiters: &Mutex<Option<HashMap<u64, Waiter>>>,
-    out: &mpsc::UnboundedSender<Message>,
+    out: &mpsc::WeakUnboundedSender<Message>,
     reply: Reply,
 ) {
     let mut guard = lock(waiters);
@@ -369,7 +371,9 @@ fn deliver(
                 waiters.remove(&id);
                 let text = serde_json::to_string(&api::Request::Cancel { cancel: id })
                     .expect("requests serialize");
-                let _ = out.send(Message::Text(text.into()));
+                if let Some(out) = out.upgrade() {
+                    let _ = out.send(Message::Text(text.into()));
+                }
             }
         }
         Reply::End { id, .. } => {

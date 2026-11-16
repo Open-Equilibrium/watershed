@@ -278,8 +278,19 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream) {
         };
         let Some(Ok(frame)) = frame else { break };
         let Message::Text(text) = frame else { continue };
-        let Ok(request) = serde_json::from_str::<api::Request>(&text) else {
-            continue;
+        let request = match serde_json::from_str::<api::Request>(&text) {
+            Ok(request) => request,
+            // Such as a call a newer client knows and this service does not: it fails at once.
+            Err(error) => {
+                let id = serde_json::from_str::<Value>(&text)
+                    .ok()
+                    .and_then(|v| v["id"].as_u64());
+                if let Some(id) = id {
+                    let error = format!("Meta-Harness does not understand this request: {error}");
+                    let _ = out.send(frame_of(&Reply::Error { id, error })).await;
+                }
+                continue;
+            }
         };
         streams.retain(|_, task| !task.is_finished());
         match request {
@@ -523,8 +534,7 @@ impl Session {
                     ok: Value::Null,
                 })
                 .await;
-                loop {
-                    changes.changed().await;
+                while changes.changed().await {
                     if !send(item(Ok(Value::Null))).await {
                         return Ok(());
                     }

@@ -859,3 +859,34 @@ async fn an_approved_configuration_reaches_the_harness_homes_t3_runs_them_in() {
     );
     service.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_goes_on_after_the_service_restarts() {
+    let (dir, repo, _) = fixture();
+    let home = dir.path().join("meta");
+    let (service, client) = start_service(&home).await;
+    let mut statuses = client
+        .project(&repo)
+        .await
+        .unwrap()
+        .git()
+        .watch()
+        .await
+        .unwrap();
+    let before = client.status().await.unwrap();
+
+    service.stop().await;
+    assert!(client.status().await.is_err(), "nothing answers meanwhile");
+    let ended = tokio::time::timeout(Duration::from_secs(10), async {
+        while statuses.recv().await.is_some() {}
+    })
+    .await;
+    assert!(ended.is_ok(), "a stream of the lost connection ends");
+
+    // The login service starts it again with a new port and token; the client finds both.
+    let service = Service::start(service_config(&home)).await.unwrap();
+    let after = client.status().await.unwrap();
+    assert_eq!(after.revision, before.revision);
+    assert!(client.project(&repo).await.is_ok());
+    service.stop().await;
+}
