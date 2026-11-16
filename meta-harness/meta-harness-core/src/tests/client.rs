@@ -89,6 +89,9 @@ async fn frames_without_a_request_and_batches_are_read_and_malformed_ones_skippe
     .await;
     let client = connect(&fake).await;
     assert_eq!(client.call("x", json!({})).await, Ok(json!(7)));
+    // The client answers the Ping on the same connection, which stays open for the next call.
+    assert_eq!(client.call("x", json!({})).await, Ok(json!(7)));
+    assert_eq!(fake.connections(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]

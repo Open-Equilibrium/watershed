@@ -300,3 +300,49 @@ async fn the_lineage_changes_when_the_thread_or_its_shell_changes() {
         .await
         .expect("a subagent update wakes the watch");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn every_lineage_watch_wakes_for_a_change_of_the_thread() {
+    let (fake, thread) = follow_answering(projection(json!({})), 1, |tag, _, id| match tag {
+        "orchestration.subscribeShell" => vec![chunk(id, vec![])],
+        _ => vec![ok(id, json!({}))],
+    })
+    .await;
+    let (first, second) = (
+        thread.lineage_changes().await.unwrap(),
+        thread.lineage_changes().await.unwrap(),
+    );
+    fake.push(
+        "orchestration.subscribeThread",
+        vec![event(
+            2,
+            "subagent.updated",
+            json!({"id": "sub-1", "threadId": "thread-1", "status": "running"}),
+        )],
+    );
+    tokio::time::timeout(WAIT, async {
+        first.changed().await;
+        second.changed().await;
+    })
+    .await
+    .expect("both watches wake");
+}
+
+#[test]
+fn a_fork_s_merge_target_takes_its_title_from_t3_s_titles_when_the_shell_does_not_list_it() {
+    let fork = thread(
+        "t-fork",
+        "Root fork",
+        "2026-11-15T10:05:00.000Z",
+        Some(("t-root", "fork")),
+        false,
+        "idle",
+    );
+    let projection = Projection::from_snapshot(&json!({
+        "thread": fork,
+        "runs": [{"id": "r2", "ordinal": 1, "status": "completed"}],
+    }));
+    let titles = HashMap::from([("t-root".to_owned(), "Root".to_owned())]);
+    let lineage = derive(&projection, &[fork], &titles).lineage;
+    assert_eq!(lineage.merge_target_title.as_deref(), Some("Root"));
+}

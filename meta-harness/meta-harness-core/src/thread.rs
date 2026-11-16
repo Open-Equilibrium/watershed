@@ -123,11 +123,21 @@ struct State {
     sequence: u64,
     items: HashMap<String, ItemId>,
     subscribers: Vec<mpsc::Sender<ThreadEvent>>,
-    /// Woken when the projection changes what the lineage shows.
-    lineage: Arc<Notify>,
+    /// The lineage watches, each woken when the projection changes what the lineage shows.
+    lineage: Vec<std::sync::Weak<Notify>>,
 }
 
 impl State {
+    /// Wakes every lineage watch still open, and forgets the dropped ones.
+    fn wake_lineage(&mut self) {
+        self.lineage.retain(|watch| {
+            watch
+                .upgrade()
+                .inspect(|watch| watch.notify_one())
+                .is_some()
+        });
+    }
+
     fn item(&mut self, id: &Value) -> ItemId {
         let next = ItemId(self.items.len() as u64 + 1);
         *self
@@ -178,7 +188,7 @@ impl Thread {
             sequence: first["snapshotSequence"].as_u64().unwrap_or_default(),
             items: HashMap::new(),
             subscribers: Vec::new(),
-            lineage: Arc::default(),
+            lineage: Vec::new(),
         }));
         let applied = state.clone();
         let follower = tokio::spawn(async move {
@@ -187,7 +197,7 @@ impl Thread {
                 if message["kind"] == "snapshot" {
                     // T3 sent the thread again on a new connection; its events go on from there.
                     restore(&mut state, &message);
-                    state.lineage.notify_one();
+                    state.wake_lineage();
                 } else {
                     apply(&mut state, &message);
                 }
@@ -597,7 +607,7 @@ fn apply(state: &mut State, message: &Value) {
     let event = &message["event"];
     let change = state.projection.apply(event);
     if matches!(change, Change::Run(_) | Change::Thread | Change::Other) {
-        state.lineage.notify_one();
+        state.wake_lineage();
     }
     let events = translate(state, change, &event["payload"]);
     state.subscribers.retain(|subscriber| {

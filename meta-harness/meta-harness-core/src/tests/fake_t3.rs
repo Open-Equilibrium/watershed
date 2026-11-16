@@ -80,7 +80,14 @@ impl Fake {
                 loop {
                     tokio::select! {
                         incoming = socket.next() => {
-                            let Some(Ok(Message::Text(text))) = incoming else { break };
+                            let Some(Ok(message)) = incoming else { break };
+                            // Ping and Pong concern the connection only; Close or anything else
+                            // ends it.
+                            let text = match message {
+                                Message::Text(text) => text,
+                                Message::Ping(_) | Message::Pong(_) => continue,
+                                _ => break,
+                            };
                             let frames = match serde_json::from_str::<Value>(&text).unwrap() {
                                 Value::Array(frames) => frames,
                                 frame => vec![frame],

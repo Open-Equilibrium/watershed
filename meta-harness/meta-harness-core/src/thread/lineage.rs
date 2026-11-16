@@ -356,11 +356,13 @@ pub(crate) fn derive(
         side_chats_running,
         can_disconnect: provider_session(projection)
             .is_some_and(|s| s["status"] != "stopped" && s["status"] != "error"),
-        merge_target_title: merge_target
-            .as_deref()
-            .and_then(|target| nodes.get(target))
-            .and_then(|shell| shell["title"].as_str())
-            .map(str::to_owned),
+        // Titled as its row is: T3's titles first, then the shell.
+        merge_target_title: merge_target.as_deref().and_then(|target| {
+            titles
+                .get(target)
+                .cloned()
+                .or_else(|| nodes.get(target)?["title"].as_str().map(str::to_owned))
+        }),
         merge_ready: merge_run.is_some(),
         can_merge: merge_target.is_some() && merge_run.is_some(),
     };
@@ -672,7 +674,9 @@ impl Thread {
 
     /// Follows the changes that can change the lineage; see [`LineageChanges`].
     pub async fn lineage_changes(&self) -> Result<LineageChanges, String> {
-        let wake = self.state().lineage.clone();
+        // Each watch has its own wake, so one watch never takes another's change.
+        let wake = Arc::new(Notify::new());
+        self.state().lineage.push(Arc::downgrade(&wake));
         let mut shells = self
             .client
             .stream("orchestration.subscribeShell", json!({}))

@@ -473,7 +473,9 @@ class CiWorkflowContractTest(unittest.TestCase):
         )
         self.assertEqual(
             step_run(workflow, "Install pinned T3 Code"),
-            'echo "META_HARNESS_T3=$(node scripts/install-t3.mjs "$RUNNER_TEMP/t3")" >> "$GITHUB_ENV"',
+            # A plain assignment stops the step when the installer fails; inside echo it would not.
+            't3="$(node scripts/install-t3.mjs "$RUNNER_TEMP/t3")"\n'
+            'echo "META_HARNESS_T3=$t3" >> "$GITHUB_ENV"',
         )
 
         assert_step_state(self, workflow, "Run M1.2 installer contract tests", job="flow-agent")

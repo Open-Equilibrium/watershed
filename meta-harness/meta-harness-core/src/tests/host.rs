@@ -1,7 +1,6 @@
 //! T3's settings file: the agents Meta-Harness writes into it, and what happens to the rest
 //! (ADR-0282).
 
-use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 use serde_json::Value;
@@ -30,9 +29,10 @@ impl Home {
 impl Drop for Home {
     fn drop(&mut self) {
         // A test may have made the folder read-only.
+        #[cfg(unix)]
         let _ = std::fs::set_permissions(
             self.0.join("userdata"),
-            std::fs::Permissions::from_mode(0o755),
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
         );
         let _ = std::fs::remove_dir_all(&self.0);
     }
@@ -57,8 +57,12 @@ fn an_unreadable_settings_file_is_kept_and_reported() {
     }
 }
 
+// A read-only folder needs Unix permissions; the other settings tests run on every platform.
+#[cfg(unix)]
 #[test]
 fn a_settings_write_that_cannot_finish_keeps_the_previous_settings() {
+    use std::os::unix::fs::PermissionsExt;
+
     let home = Home::new();
     let previous = r#"{"theme":"dark"}"#;
     std::fs::write(home.settings(), previous).unwrap();

@@ -204,7 +204,9 @@ jobs:
       - name: Install pinned T3 Code
         if: needs.scope.outputs.meta_harness == 'true' || needs.scope.outputs.liquid == 'true'
         shell: bash
-        run: echo "META_HARNESS_T3=$(node scripts/install-t3.mjs "$RUNNER_TEMP/t3")" >> "$GITHUB_ENV"
+        run: |
+          t3="$(node scripts/install-t3.mjs "$RUNNER_TEMP/t3")"
+          echo "META_HARNESS_T3=$t3" >> "$GITHUB_ENV"
 
       - *rust
 
