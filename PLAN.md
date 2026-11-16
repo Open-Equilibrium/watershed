@@ -28,10 +28,10 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 
 **Deliverables:**
 
-- Meta-Harness CLI run, session, schedule and metrics commands; `meta serve`, `status` and `config` exist (ADR-0296).
-- The service's authenticated remote connection, with host links (ADR-0285); the local one exists (ADR-0297).
+- Meta-Harness CLI run, session, schedule and metrics commands.
+- The service's authenticated remote connection, with host links (ADR-0285).
 - API/protocol surface for Liquid and BYOA: session registry, live event and transcript streams, artifact/log/handoff queries, config read/write proposals, agent schedule/trigger control, answers to a harness's own approvals and questions, revert.
-- Central configuration for Flow Agent, which receives only its global authority and explicit Flows rather than a project-local config layer; device-local Runtime bindings remain owned by the execution host. Claude Code and Codex are configured centrally already (ADR-0298); Liquid edits the configuration across devices after sync and approved mockups.
+- Central configuration for Flow Agent, which receives only its global authority and explicit Flows rather than a project-local config layer; device-local Runtime bindings remain owned by the execution host. Liquid edits the configuration across devices after sync and approved mockups.
 - Control plane: session registry, routing, task state, attention state and agent schedule/trigger skeleton.
 - Reference scenario for schedules: a scheduled agent keeps a news feed as a database page in Liquid and changes it only with the approval its Workspace Role requires, as `disler/pi-durable-news-agent` does with its own app.
 - Host-local Meta-Harness agent executor that rejects cross-host agent-process control (on T3 Code: ADR-0280 to ADR-0291).
