@@ -8,8 +8,8 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'turn_scope.dart';
 
-/// The Diff's scope menu: the latest turn, each turn, all turns and the uncommitted changes, as
-/// T3's Diff panel lists them, with the revert action for the shown turn.
+/// The Diff's scope menu: the latest turn, each turn, all turns, the branch's changes and the
+/// uncommitted changes, as T3's Diff panel lists them, with the revert action for the shown turn.
 class TurnHeader extends StatelessWidget {
   const TurnHeader({
     super.key,
@@ -42,6 +42,7 @@ class TurnHeader extends StatelessWidget {
       LatestTurn() => 'Latest turn',
       OneTurn(:final number) => 'Turn $number',
       AllTurns() => 'All turns',
+      BranchChanges() => 'Changes',
       UncommittedChanges() => 'Uncommitted',
     };
     return Wrap(
@@ -103,6 +104,7 @@ class TurnHeader extends StatelessWidget {
         ],
         if (repository) ...[
           if (ended.isNotEmpty) const PopupMenuDivider(),
+          item(const BranchChanges(), 'Changes', ''),
           item(const UncommittedChanges(), 'Uncommitted', ''),
         ],
       ],

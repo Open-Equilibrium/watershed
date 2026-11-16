@@ -132,6 +132,7 @@ void main() {
         'Turn 2',
         'Turn 1',
         'All turns',
+        'Changes',
         'Uncommitted',
       ]) {
         expect(
@@ -178,6 +179,42 @@ void main() {
       find.textContaining('written today', findRichText: true),
       findsOneWidget,
     );
+  });
+
+  testWidgets(
+    'Changes shows the branch\'s changes against its base, and re-reads them when the branch moves',
+    (tester) async {
+      await show(tester, turns: twoTurns);
+      project.session.gitBackend
+        ..branchFiles = [fileOf('feature.txt')]
+        ..patches = {'feature.txt': '@@ -1 +1 @@\n-old\n+on the branch\n'};
+      await openMenu(tester, 'Latest turn');
+      await tester.tap(
+        find.widgetWithText(PopupMenuItem<DiffScope>, 'Changes'),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('feature.txt'), findsWidgets);
+      expect(
+        find.textContaining('on the branch', findRichText: true),
+        findsOneWidget,
+      );
+      project.session.gitBackend
+        ..branchFiles = [fileOf('feature.txt'), fileOf('more.txt')]
+        ..change(gitStatusOf(branch: 'feature', defaultBranch: false));
+      await tester.pumpAndSettle();
+      expect(find.text('more.txt'), findsWidgets);
+    },
+  );
+
+  testWidgets('a branch with no changes against its base says so', (
+    tester,
+  ) async {
+    await show(tester, turns: twoTurns);
+    await openMenu(tester, 'Latest turn');
+    await tester.tap(find.widgetWithText(PopupMenuItem<DiffScope>, 'Changes'));
+    await tester.pumpAndSettle();
+    expect(find.text('No changes on this branch'), findsOneWidget);
+    expect(find.text('The branch is the same as its base.'), findsOneWidget);
   });
 
   testWidgets('choosing another file shows its patch', (tester) async {

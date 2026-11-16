@@ -11,6 +11,7 @@ import 'package:liquid/src/rust/api/thread.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
 
+import 'card_harness.dart';
 import 'fake_backend.dart';
 
 const info = SessionInfo(project: 'acme-api');
@@ -69,6 +70,9 @@ BridgeStatistics sessionStatistics({int? toolMs = 261000}) => BridgeStatistics(
     ),
   ],
 );
+
+/// The card with its Context row turned on, which T3 Code leaves off by default.
+const contextShown = SessionCardSettings(shown: {CardItem.context});
 
 FakeSession sessionWith({
   BridgeContext? window = const BridgeContext(
@@ -129,9 +133,9 @@ void main() {
   testWidgets(
     'the rows show the tokens, working time, tool calls and context window',
     (tester) async {
-      await show(tester, sessionWith());
+      await show(tester, sessionWith(), settings: contextShown);
 
-      expect(inCard(find.text('Context window')), findsOneWidget);
+      expect(inCard(find.text('Context')), findsOneWidget);
       expect(inCard(find.text('68.2 k / 200 k')), findsOneWidget);
       expect(inCard(find.text('1.85 M')), findsOneWidget);
       expect(inCard(find.text('14m 32s')), findsOneWidget);
@@ -146,6 +150,7 @@ void main() {
       await show(
         tester,
         sessionWith(window: const BridgeContext(window: 200000), toolMs: null),
+        settings: contextShown,
       );
 
       expect(inCard(find.text('T3 Code reports no cost')), findsOneWidget);
@@ -239,13 +244,69 @@ void main() {
     await show(
       tester,
       sessionWith(),
-      settings: const SessionCardSettings(hidden: {CardItem.statistics}),
+      settings: const SessionCardSettings(
+        hidden: {CardItem.statistics},
+        shown: {CardItem.context},
+      ),
     );
 
     expect(inCard(find.text('Tokens')), findsNothing);
     expect(inCard(find.text('Statistics')), findsNothing);
-    expect(inCard(find.text('Context window')), findsOneWidget);
+    expect(inCard(find.text('Context')), findsOneWidget);
   });
+
+  testWidgets('the Context row is off until the card shows it', (tester) async {
+    await show(tester, sessionWith());
+    expect(inCard(find.text('Context')), findsNothing);
+  });
+
+  testWidgets('the Context row warns from 80 % used', (tester) async {
+    await show(
+      tester,
+      sessionWith(window: const BridgeContext(tokens: 170000, window: 200000)),
+      settings: contextShown,
+    );
+    expect(
+      tester.widget<Text>(inCard(find.text('170 k / 200 k'))).style?.color,
+      toneOf((palette) => palette.warning),
+    );
+  });
+
+  testWidgets('the Context row is an error from 90 % used', (tester) async {
+    await show(
+      tester,
+      sessionWith(window: const BridgeContext(tokens: 190000, window: 200000)),
+      settings: contextShown,
+    );
+    expect(
+      tester.widget<Text>(inCard(find.text('190 k / 200 k'))).style?.color,
+      toneOf((palette) => palette.danger),
+    );
+  });
+
+  testWidgets(
+    'the Context tooltip gives the share, the tokens and the compaction point',
+    (tester) async {
+      await show(
+        tester,
+        sessionWith(
+          window: const BridgeContext(
+            tokens: 170000,
+            window: 200000,
+            compactsAt: 180000,
+          ),
+        ),
+        settings: contextShown,
+      );
+      await hover(tester, inCard(find.text('170 k / 200 k')));
+      expect(find.textContaining('Context: 85% used'), findsOneWidget);
+      expect(find.textContaining('170 k of 200 k tokens'), findsOneWidget);
+      expect(
+        find.textContaining('Compacts automatically at about 180 k tokens.'),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets('a statistics row explains itself when the keyboard focuses it', (
     tester,

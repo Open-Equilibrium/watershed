@@ -174,5 +174,6 @@ class TurnStatistics {
     if (start == null || end == null) return null;
     return math.max(0, end - start);
   }
+
   int? get toolMs => stats.toolMs;
 }

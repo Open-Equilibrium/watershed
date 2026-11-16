@@ -145,8 +145,9 @@ class _StatisticsRowState extends State<StatisticsRow> {
   }
 }
 
-/// The Context row: the share of the window the next request fills, with a tick where the
-/// agent compacts. Its value is a dash while the tokens are not known.
+/// The Context row: the share of the window the next request fills, with a tick where the agent
+/// compacts. It warns from 80 % used and is an error from 90 %, as T3 Code's row does. Its value is
+/// a dash while the tokens are not known.
 class ContextRow extends StatelessWidget {
   const ContextRow({super.key, required this.window});
 
@@ -158,27 +159,37 @@ class ContextRow extends StatelessWidget {
     final used = window.tokens;
     final limit = window.window;
     final compacts = window.compactsAt;
+    final share = used == null || limit == 0 ? null : used / limit;
+    final tone = share == null
+        ? null
+        : share >= 0.9
+        ? ws.danger
+        : share >= 0.8
+        ? ws.warning
+        : null;
     return StatisticsRow(
-      label: 'Context window',
+      label: 'Context',
       bar: FillBar(
-        fraction: used == null || limit == 0 ? null : used / limit,
+        fraction: share,
         tick: compacts == null || limit == 0 ? null : compacts / limit,
         track: ws.borderStrong,
-        fill: ws.textFaint,
+        fill: tone ?? ws.textFaint,
         mark: ws.textMuted,
       ),
       value: Text(
         used == null ? '—' : '${formatTokens(used)} / ${formatTokens(limit)}',
+        style: tone == null ? null : TextStyle(color: tone),
       ),
       tip: [
-        'Context window',
-        if (used == null)
-          'Not known right after a compaction'
-        else ...[
-          '${formatShare(used, limit)} used',
+        if (used == null) ...[
+          'Context',
+          'Not known right after a compaction',
+        ] else ...[
+          'Context: ${formatShare(used, limit)} used',
           '${formatTokens(used)} of ${formatTokens(limit)} tokens',
         ],
-        if (compacts != null) 'Compacts at ${formatTokens(compacts)} tokens',
+        if (compacts != null)
+          'Compacts automatically at about ${formatTokens(compacts)} tokens.',
       ],
     );
   }

@@ -1,7 +1,10 @@
 import 'dart:async';
 
+import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
+    show Int64List;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/diff/turn_scope.dart';
+import 'package:liquid/src/rust/api/details.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/rust/api/session.dart';
@@ -723,17 +726,20 @@ void main() {
       );
     });
 
-    test('a session that cannot subscribe is a notice, not an unhandled error', () async {
-      project.session = UnsubscribableSession();
+    test(
+      'a session that cannot subscribe is a notice, not an unhandled error',
+      () async {
+        project.session = UnsubscribableSession();
 
-      await state.open('thread-1');
-      await pumpEventQueue();
+        await state.open('thread-1');
+        await pumpEventQueue();
 
-      expect(
-        state.notice.value?.text,
-        'Could not open the session: the stream is gone',
-      );
-    });
+        expect(
+          state.notice.value?.text,
+          'Could not open the session: the stream is gone',
+        );
+      },
+    );
 
     test('a session list that cannot be read is a notice', () async {
       state = SessionState(UnreachableProject());
@@ -762,4 +768,92 @@ void main() {
       },
     );
   });
+
+  group('the card sections', () {
+    BridgeLocalServer server(int port) => BridgeLocalServer(
+      host: 'localhost',
+      port: port,
+      url: 'http://localhost:$port',
+      pid: 7,
+      terminal: false,
+    );
+
+    test('the servers, scheduled tasks, related threads, usage limits and host name follow the open session', () async {
+      session
+        ..serverList = [server(3000)]
+        ..automationList = [
+          BridgeAutomation(
+            id: 'a1',
+            title: 'Check',
+            schedule: BridgeSchedule(
+              kind: BridgeScheduleKind.webhook,
+              weekdays: Int64List(0),
+            ),
+            enabled: true,
+            lastRun: BridgeRunStatus.never,
+          ),
+        ]
+        ..family = lineageOf()
+        ..limits = BridgeUsageLimits(
+          windows: [BridgeUsageWindow(label: '5-hour', remainingPercent: 42)],
+        );
+      await open();
+      expect(state.servers.value.single.port, 3000);
+      expect(state.automations.value.single.id, 'a1');
+      expect(state.lineage.value?.rows, isEmpty);
+      expect(state.limits.value?.windows.single.label, '5-hour');
+      expect(state.hostName.value, 'Mac mini');
+
+      session.serverUpdates.add([server(3000), server(4000)]);
+      await pumpEventQueue();
+      expect(state.servers.value, hasLength(2));
+    });
+
+    test('a switch stops following the session it left', () async {
+      await open();
+      final other = FakeSession(id: 'thread-2');
+      project.session = other;
+      await state.open('thread-2');
+      await pumpEventQueue();
+
+      session.serverUpdates.add([server(3000)]);
+      await pumpEventQueue();
+      expect(state.servers.value, isEmpty);
+    });
+
+    test('the card actions run on the open session', () async {
+      await open();
+      await state.stopServer(7, 3000);
+      await state.setAutomationEnabled('a1', false);
+      await state.runAutomation('a1');
+      await state.mergeBack();
+      await state.disconnect();
+      await state.stopSubagent('sub-1');
+      expect(
+        session.calls,
+        containsAll([
+          'stop server 7 3000',
+          'automation a1 enabled=false',
+          'run automation a1',
+          'merge back',
+          'disconnect',
+          'stop subagent sub-1',
+        ]),
+      );
+    });
+
+    test('a refused action is reported as the card names it', () async {
+      session = RefusedActions();
+      project.session = session;
+      await open();
+      await state.mergeBack();
+      expect(state.notice.value?.text, 'Could not merge back: not ready');
+    });
+  });
+}
+
+/// A session that refuses to merge back.
+class RefusedActions extends FakeSession {
+  @override
+  Future<void> mergeBack() => Future.error('not ready');
 }

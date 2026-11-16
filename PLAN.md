@@ -54,6 +54,7 @@ The target product is canonical in [`docs/concept/V-Spec_Liquid.html`](docs/conc
 The macOS Liquid app runs its agent sessions on a pinned T3 Code server through an embedded Meta-Harness core (ADR-0184, ADR-0280). Open:
 
 - Say in the Diff panel exactly what it covers (ADR-0222), copying T3 Code's wording where it has one.
+- Project scripts in the session card, once Liquid has a terminal (ADR-0295).
 - Service mode, remote access and Android follow with the installer and service (ADR-0286) and multi-device.
 
 #### M3a — Local Workspace foundation

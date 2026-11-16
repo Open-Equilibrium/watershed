@@ -33,6 +33,11 @@ class UncommittedChanges extends DiffScope {
   const UncommittedChanges();
 }
 
+/// The checkout's branch compared with its base, as T3's Changes scope.
+class BranchChanges extends DiffScope {
+  const BranchChanges();
+}
+
 /// The turns a scope compares: from the start of `from` to the end of `to`.
 typedef Compared = ({BridgeTurn from, BridgeTurn to});
 
@@ -57,7 +62,7 @@ Compared? compared(List<BridgeTurn> turns, DiffScope scope) {
           ].firstOrNull ??
           latest,
     AllTurns() => (from: ended.first, to: ended.last),
-    UncommittedChanges() => null,
+    UncommittedChanges() || BranchChanges() => null,
   };
 }
 

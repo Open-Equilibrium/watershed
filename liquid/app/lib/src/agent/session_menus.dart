@@ -222,13 +222,22 @@ runOpener = Process.run;
 Future<void> openInFileManager(SessionState state, String path) =>
     _openWithSystem(state, path);
 
-/// Opens a GitHub page in the system's browser; only HTTPS pages, and a failure is reported.
+/// Opens a page in the system's browser: an HTTPS page, or a server on this computer, which the
+/// session card's servers are; a failure is reported.
 Future<void> openInBrowser(SessionState state, String url) async {
-  if (!url.startsWith('https://')) {
+  if (!url.startsWith('https://') && !_isLoopbackHttp(url)) {
     state.notify(NoticeLevel.error, 'Could not open $url: not an HTTPS page.');
     return;
   }
   await _openWithSystem(state, url);
+}
+
+/// Whether `url` is plain HTTP to this computer.
+bool _isLoopbackHttp(String url) {
+  final uri = Uri.tryParse(url);
+  return uri != null &&
+      uri.scheme == 'http' &&
+      const {'localhost', '127.0.0.1', '::1'}.contains(uri.host);
 }
 
 /// Opens `target` with the system's default application; a failure is reported.

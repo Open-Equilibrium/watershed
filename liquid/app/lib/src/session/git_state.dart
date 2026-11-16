@@ -32,7 +32,7 @@ class QuickAction {
 enum MenuItem { commit, push, createPullRequest }
 
 /// A finished action's result, shown in place of the button for ten seconds.
-typedef GitResult = ({String title, String? description, String? url});
+typedef GitResult = ({String title, String? description});
 
 /// What runs: its phase label, the latest hook line, and when it started.
 typedef GitRunning = ({String label, String? output, DateTime since});
@@ -110,11 +110,7 @@ class GitState {
               );
             }
           case BridgeGitProgressKind.finished:
-            _showResult((
-              title: step.text,
-              description: step.description,
-              url: step.pullRequest,
-            ));
+            _showResult((title: step.text, description: step.description));
           case BridgeGitProgressKind.failed:
             onError('Action failed', step.text);
         }
@@ -136,7 +132,7 @@ class GitState {
     );
     try {
       final (title, description) = await _git.pull();
-      _showResult((title: title, description: description, url: null));
+      _showResult((title: title, description: description));
     } on Object catch (error) {
       onError('Pull failed', '$error');
     } finally {

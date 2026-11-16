@@ -118,7 +118,7 @@ Flow Agent runs inside normal Git projects in the MVP, but it does not own proje
 Git on agent projects is T3 Code's, with its behavior as shipped (ADR-0282): Meta-Harness's own T3 server runs it on its host, and Liquid only presents it. Watershed adds no Git rule of its own and claims none of T3's behavior as its guarantee.
 
 - **Checkpoints:** T3 stores each turn's files as commits under `refs/t3/` in the project's repository and restores files only for a session in its own worktree, which T3 keeps under its data folder.
-- **Writes:** T3 runs the host's `git`, its hooks and the provider login it finds (for GitHub, `gh`'s token); Watershed never reads these credentials. Commit, push, pull request and publish run only on the person's action; T3's background fetch updates remote-tracking branches.
+- **Writes:** T3 runs the host's `git`, its hooks and the provider login it finds (for GitHub, `gh`'s token); Watershed never reads these credentials. Commit, push, pull request, its Ready and Merge actions, and publish run only on the person's action; T3's background fetch updates remote-tracking branches.
 - **Writer model:** a commit message left blank, a pull request's title and description and a session's title are written by the one writer model the person chose (ADR-0294), so the staged changes, the branch's commits and diff go to that model's provider, whichever provider the session uses.
 
 ## Enforcement (per flow)
@@ -135,7 +135,7 @@ Meta-Harness starts its own T3 Code server at the pinned version (ADR-0281) on 1
 
 Meta-Harness leaves governance to the harness (ADR-0252). What an agent may do without asking is T3's Permissions choice, Full access by default as in T3; then the agent and every tool call run with the user's operating-system permissions. The queue to Liquid is bounded by count, not bytes: at most 256 events are sent and unconfirmed and at most 256 more wait, merged; past that, waiting streaming text is dropped and Liquid reloads the Chat from a snapshot (ADR-0272, ADR-0290). A misbehaving agent that sends huge events can still exhaust Liquid's memory, an accepted risk of a trusted agent (ADR-0273).
 
-The tool names and targets, the approval prompts with their reasons, options and warnings, the questions with their headers, options and descriptions the Chat shows, and the Diff panel's file names and lines, write out the characters that could hide or reorder what a call does or changed, such as `<U+202E>`.
+The tool names and targets, the approval prompts with their reasons, options and warnings, the questions with their headers, options and descriptions the Chat shows, and the Diff panel's file names and lines, write out the characters that could hide or reorder what a call does or changed, such as `<U+202E>`. Links from the session card open in the default browser only over `https`, or over `http` to the loopback for the servers the agent runs.
 
 “Export record” writes T3's record of the session, with its prompts and tool output, into a new folder in Downloads, along with each turn's changed file paths and line counts; it copies no file contents. The copies are plain files with the person's permissions, unencrypted, and Watershed never sends them anywhere; the record claims no completeness (ADR-0257).
 

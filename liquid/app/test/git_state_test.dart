@@ -432,11 +432,7 @@ void main() {
         ),
       );
       await pumpEventQueue();
-      expect(state.result.value, (
-        title: 'Committed',
-        description: '1 file',
-        url: 'https://example.com/pr/1',
-      ));
+      expect(state.result.value, (title: 'Committed', description: '1 file'));
 
       await git.progress.close();
       await run;
@@ -493,11 +489,7 @@ void main() {
     addTearDown(state.dispose);
     await state.pull();
     expect(git.calls, ['pull']);
-    expect(state.result.value, (
-      title: 'Pulled',
-      description: 'Up to date',
-      url: null,
-    ));
+    expect(state.result.value, (title: 'Pulled', description: 'Up to date'));
     expect(state.running.value, isNull);
 
     final offline = gitState(PullFailingGit());

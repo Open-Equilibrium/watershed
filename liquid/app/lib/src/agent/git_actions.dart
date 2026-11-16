@@ -11,7 +11,6 @@ import '../theme/tokens.g.dart';
 import 'commit_dialog.dart';
 import 'publish_dialog.dart';
 import 'session_card_rows.dart';
-import 'session_menus.dart';
 
 /// T3 Code's GitActionsControl: a split button whose main part runs the quick action and whose
 /// chevron opens the Git action options. While an action runs it shows the progress, and after it
@@ -34,11 +33,7 @@ class GitActionsControl extends StatelessWidget {
         if (status != null) {
           if (!status.repository) return _InitializeRow(git: git);
           if (git.result.value case final result?) {
-            return _Result(
-              state: state,
-              result: result,
-              terms: terminologyFor(status),
-            );
+            return _Result(result: result);
           }
         }
         return _SplitRow(state: state, git: git);
@@ -57,7 +52,7 @@ class _InitializeRow extends StatelessWidget {
   Widget build(BuildContext context) => CardRow(
     onTap: () => unawaited(git.initialize()),
     children: [
-      Icon(LucideIcons.plus, size: 16, color: context.ws.textFaint),
+      Icon(LucideIcons.gitBranchPlus, size: 16, color: context.ws.textFaint),
       const Text('Initialize Git'),
     ],
   );
@@ -129,17 +124,11 @@ class _Progress extends StatelessWidget {
   }
 }
 
-/// A finished action's title and description, with the pull request it opened or pushed.
+/// A finished action's title and description; the pull request row carries the link.
 class _Result extends StatelessWidget {
-  const _Result({
-    required this.state,
-    required this.result,
-    required this.terms,
-  });
+  const _Result({required this.result});
 
-  final SessionState state;
   final GitResult result;
-  final Terminology terms;
 
   @override
   Widget build(BuildContext context) {
@@ -177,11 +166,6 @@ class _Result extends StatelessWidget {
               ],
             ),
           ),
-          if (result.url case final url?)
-            SecondaryButton(
-              label: 'Open ${terms.short}',
-              onPressed: () => unawaited(openInBrowser(state, url)),
-            ),
         ],
       ),
     );
@@ -258,6 +242,18 @@ class _SplitRow extends StatelessWidget {
                     null => _EntryLabel(entry),
                   },
                 ),
+              if (status != null)
+                for (final notice in _notices(status))
+                  PopupMenuItem<VoidCallback>(
+                    enabled: false,
+                    child: Text(
+                      notice,
+                      style: TextStyle(
+                        color: ws.warning,
+                        fontSize: WsMetrics.fsSmall,
+                      ),
+                    ),
+                  ),
             ],
           ),
         ),
@@ -310,7 +306,7 @@ List<_Entry> _menu(
         ),
         MenuItem.push => _Entry(
           'Push',
-          LucideIcons.arrowUp,
+          LucideIcons.cloudUpload,
           () => unawaited(_run(context, state, BridgeGitAction.push)),
           reason: reason,
         ),
@@ -326,20 +322,34 @@ List<_Entry> _menu(
     if (!status.remote)
       _Entry(
         'Publish repository...',
-        LucideIcons.arrowUp,
+        LucideIcons.cloudUpload,
         () => unawaited(showPublishDialog(context, state)),
       ),
   ];
 }
 
+/// T3 Code's notices under the Git action options: a detached HEAD, and a clean checkout behind
+/// its upstream.
+List<String> _notices(BridgeGitStatus status) => [
+  if (status.branch == null)
+    'Detached HEAD: create and check out a branch to enable push and '
+        '${terminologyFor(status).singular} actions.',
+  if (status.branch != null &&
+      status.changes.isEmpty &&
+      status.behind > 0 &&
+      status.ahead == 0)
+    'Behind upstream. Pull/rebase first.',
+];
+
 IconData _quickIcon(QuickAction quick) => switch (quick.kind) {
-  QuickKind.runPull => LucideIcons.arrowDown,
+  QuickKind.runPull => LucideIcons.cloudDownload,
   QuickKind.runAction => switch (quick.action) {
     BridgeGitAction.commit => LucideIcons.gitCommit,
-    BridgeGitAction.push || BridgeGitAction.commitPush => LucideIcons.arrowUp,
+    BridgeGitAction.push ||
+    BridgeGitAction.commitPush => LucideIcons.cloudUpload,
     _ => LucideIcons.gitPullRequest,
   },
-  QuickKind.openPublish => LucideIcons.arrowUp,
+  QuickKind.openPublish => LucideIcons.cloudUpload,
   QuickKind.showHint => LucideIcons.info,
 };
 

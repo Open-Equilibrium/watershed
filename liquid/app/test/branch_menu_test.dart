@@ -237,9 +237,25 @@ void main() {
     },
   );
 
-  testWidgets('right-clicking the branch name offers to copy it', (
+  testWidgets('right-clicking the branch name copies it, and says so', (
     tester,
   ) async {
+    final copied = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
     await pump(tester);
     await tester.tap(
       find.byKey(const Key('branch-name')),
@@ -247,6 +263,10 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Copy branch name'), findsOneWidget);
+    await tester.tap(find.text('Copy branch name'));
+    await tester.pumpAndSettle();
+    expect(copied, ['feature']);
+    expect(state.notice.value?.text, 'Branch name copied: feature');
   });
 
   testWidgets('a checkout Git cannot read says so in the branch row', (

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../diff/turn_scope.dart';
+import '../rust/api/details.dart';
 import '../rust/api/events.dart';
 import '../rust/api/git.dart';
 import '../rust/api/session.dart';
@@ -44,6 +45,9 @@ class SessionState {
   SessionBackend? _session;
   StreamSubscription<BridgeEvent>? _subscription;
 
+  /// The follows of the open session's card lists, cancelled when the session changes.
+  final _follows = <StreamSubscription<dynamic>>[];
+
   /// Incremented on each switch, so reads of an earlier session never land.
   int _generation = 0;
 
@@ -76,6 +80,14 @@ class SessionState {
   final contextWindow = ValueNotifier<BridgeContext?>(null);
   final statisticsOpen = ValueNotifier(false);
 
+  /// What the session card lists for the open session: its local servers, its scheduled tasks,
+  /// and its related threads; the provider's usage limits; and the host's name.
+  final servers = ValueNotifier<List<BridgeLocalServer>>(const []);
+  final automations = ValueNotifier<List<BridgeAutomation>>(const []);
+  final lineage = ValueNotifier<BridgeLineage?>(null);
+  final limits = ValueNotifier<BridgeUsageLimits?>(null);
+  final hostName = ValueNotifier<String?>(null);
+
   /// Asks the Chat to scroll to a turn, by its number.
   final scrollChatTo = ValueNotifier<int?>(null);
 
@@ -107,7 +119,10 @@ class SessionState {
     );
     // Uncommitted changes have no event of their own; the checkout's status says they moved.
     state.status.addListener(() {
-      if (diffScope.value is UncommittedChanges) unawaited(readChanges());
+      final scope = diffScope.value;
+      if (scope is UncommittedChanges || scope is BranchChanges) {
+        unawaited(readChanges());
+      }
     });
     return state;
   }
@@ -321,6 +336,31 @@ class SessionState {
     }
   }
 
+  /// Stops the server `pid` listens on at `port`, from the card's Servers.
+  Future<void> stopServer(int pid, int port) =>
+      _act(() => _session!.stopServer(pid, port), 'stop server');
+
+  /// Pauses or resumes the scheduled task `id`, from the card's Automations.
+  Future<void> setAutomationEnabled(String id, bool enabled) => _act(
+    () => _session!.setAutomationEnabled(id, enabled: enabled),
+    'update automation',
+  );
+
+  /// Runs the scheduled task `id` now.
+  Future<void> runAutomation(String id) =>
+      _act(() => _session!.runAutomationNow(id), 'run automation');
+
+  /// Merges the session back into its parent, from the card's Lineage.
+  Future<void> mergeBack() => _act(() => _session!.mergeBack(), 'merge back');
+
+  /// Disconnects the agent session, from the card's Lineage.
+  Future<void> disconnect() =>
+      _act(() => _session!.disconnect(), 'disconnect agent session');
+
+  /// Stops the subagent `id`, from the card's Lineage.
+  Future<void> stopSubagent(String id) =>
+      _act(() => _session!.stopSubagent(id), 'stop subagent');
+
   Future<void> _act(Future<void> Function() action, String what) async {
     try {
       await action();
@@ -349,10 +389,13 @@ class SessionState {
     final session = _session;
     try {
       final scope = diffScope.value;
-      if (scope is UncommittedChanges) {
-        final files = await git.value.backend.uncommittedChanges(
-          hideWhitespace: hideWhitespace.value,
-        );
+      if (scope is UncommittedChanges || scope is BranchChanges) {
+        final checkout = git.value.backend;
+        final files = scope is BranchChanges
+            ? await checkout.branchChanges(hideWhitespace: hideWhitespace.value)
+            : await checkout.uncommittedChanges(
+                hideWhitespace: hideWhitespace.value,
+              );
         if (generation != _generation) return;
         shownScope.value = scope;
         shown.value = null;
@@ -398,7 +441,14 @@ class SessionState {
 
   /// One file's unified diff for the shown Diff scope.
   Future<String> patch(String path) {
-    if (shownScope.value is UncommittedChanges) {
+    final scope = shownScope.value;
+    if (scope is BranchChanges) {
+      return git.value.backend.branchPatch(
+        path,
+        hideWhitespace: hideWhitespace.value,
+      );
+    }
+    if (scope is UncommittedChanges) {
       return git.value.backend.uncommittedPatch(
         path,
         hideWhitespace: hideWhitespace.value,
@@ -437,6 +487,12 @@ class SessionState {
     } on Object catch (error) {
       notify(NoticeLevel.warning, 'Could not read the context window: $error');
     }
+    await _read(
+      generation,
+      'the usage limits',
+      session.usageLimits,
+      (value) => limits.value = value,
+    );
   }
 
   void notify(NoticeLevel level, String text) {
@@ -480,6 +536,7 @@ class SessionState {
         }
         unawaited(readStatistics());
         unawaited(readChanges());
+        unawaited(_follow(next, generation));
       }),
     );
   }
@@ -488,6 +545,15 @@ class SessionState {
     _generation++;
     await _subscription?.cancel();
     _subscription = null;
+    for (final follow in _follows) {
+      unawaited(follow.cancel());
+    }
+    _follows.clear();
+    servers.value = const [];
+    automations.value = const [];
+    lineage.value = null;
+    limits.value = null;
+    hostName.value = null;
     _session = null;
     _sequence = 0;
     _applied = 0;
@@ -507,6 +573,61 @@ class SessionState {
     diffScope.value = const LatestTurn();
     changed.value = null;
     shown.value = null;
+  }
+
+  /// Follows the open session's servers, scheduled tasks and related threads, and reads the host's
+  /// name; a switch cancels the follows and drops what a read brings late.
+  Future<void> _follow(SessionBackend next, int generation) async {
+    _follows
+      ..add(next.serverChanges().listen((value) => servers.value = value))
+      ..add(
+        next.automationChanges().listen((value) => automations.value = value),
+      )
+      ..add(next.lineageChanges().listen((value) => lineage.value = value));
+    await Future.wait([
+      _read(
+        generation,
+        'the servers',
+        next.servers,
+        (value) => servers.value = value,
+      ),
+      _read(
+        generation,
+        'the scheduled tasks',
+        next.automations,
+        (value) => automations.value = value,
+      ),
+      _read(
+        generation,
+        'the related threads',
+        next.lineage,
+        (value) => lineage.value = value,
+      ),
+      _read(
+        generation,
+        'the host name',
+        _project.environmentName,
+        (value) => hostName.value = value,
+      ),
+    ]);
+  }
+
+  /// Passes a read's value to `set` unless the session changed meanwhile; a failed read is a
+  /// warning.
+  Future<void> _read<T>(
+    int generation,
+    String what,
+    Future<T> Function() read,
+    void Function(T value) set,
+  ) async {
+    try {
+      final value = await read();
+      if (generation == _generation) set(value);
+    } on Object catch (error) {
+      if (generation == _generation) {
+        notify(NoticeLevel.warning, 'Could not read $what: $error');
+      }
+    }
   }
 
   void _setGit(GitBackend backend) {

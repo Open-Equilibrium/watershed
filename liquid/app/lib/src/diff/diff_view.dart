@@ -401,6 +401,7 @@ class _DiffViewState extends State<DiffView> {
       final scope = widget.state.shownScope.value;
       final title = switch (scope) {
         UncommittedChanges() => 'No uncommitted changes',
+        BranchChanges() => 'No changes on this branch',
         AllTurns() => 'No changes in these turns',
         _ => 'No changes in this turn',
       };
@@ -414,6 +415,7 @@ class _DiffViewState extends State<DiffView> {
           : _empty(context, repository, title, switch (scope) {
               UncommittedChanges() =>
                 'The checkout is the same as its last commit.',
+              BranchChanges() => 'The branch is the same as its base.',
               _ => 'The project was the same at its end as at its start.',
             });
     }

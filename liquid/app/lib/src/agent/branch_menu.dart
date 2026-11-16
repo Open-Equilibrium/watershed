@@ -72,7 +72,12 @@ class _BranchRowState extends State<BranchRow> {
                 Flexible(
                   child: GestureDetector(
                     onSecondaryTapUp: (details) => unawaited(
-                      _copyName(context, name, details.globalPosition),
+                      _copyName(
+                        context,
+                        widget.state,
+                        name,
+                        details.globalPosition,
+                      ),
                     ),
                     child: Tooltip(
                       message: name,
@@ -120,18 +125,33 @@ class _BranchRowState extends State<BranchRow> {
 }
 
 /// Offers to copy `name` where the pointer right-clicked, as T3 Code's branch menu does.
-Future<void> _copyName(BuildContext context, String name, Offset at) async {
+Future<void> _copyName(
+  BuildContext context,
+  SessionState state,
+  String name,
+  Offset at,
+) async {
   final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
   await showMenu<void>(
     context: context,
     position: RelativeRect.fromRect(at & Size.zero, Offset.zero & overlay.size),
     items: [
       PopupMenuItem<void>(
-        onTap: () => unawaited(Clipboard.setData(ClipboardData(text: name))),
+        onTap: () => unawaited(_copy(state, name)),
         child: const Text('Copy branch name'),
       ),
     ],
   );
+}
+
+/// Copies `name` and says so, as T3 Code's toast does.
+Future<void> _copy(SessionState state, String name) async {
+  try {
+    await Clipboard.setData(ClipboardData(text: name));
+    state.notify(NoticeLevel.info, 'Branch name copied: $name');
+  } on Object catch (error) {
+    state.notify(NoticeLevel.error, 'Failed to copy branch name. $error');
+  }
 }
 
 /// What the ref picker was closed with.
@@ -434,8 +454,9 @@ class _BranchPickerState extends State<_BranchPicker> {
   Widget _ref(BridgeRef ref, bool running) {
     final ws = context.ws;
     return GestureDetector(
-      onSecondaryTapUp: (details) =>
-          unawaited(_copyName(context, ref.name, details.globalPosition)),
+      onSecondaryTapUp: (details) => unawaited(
+        _copyName(context, widget.state, ref.name, details.globalPosition),
+      ),
       child: _MenuRow(
         leading: ref.current
             ? Icon(LucideIcons.check, size: 14, color: ws.accent)

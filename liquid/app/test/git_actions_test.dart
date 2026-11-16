@@ -13,6 +13,7 @@ import 'package:liquid/src/controls.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/session/session_state.dart';
+import 'package:liquid/src/theme/icons.dart';
 import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
@@ -102,6 +103,71 @@ BridgeBranchPullRequest prOf({
   base: 'main',
 );
 
+/// Git that counts the pull request reads.
+class _CountingGit extends FakeGit {
+  _CountingGit({super.status});
+
+  int reads = 0;
+
+  @override
+  Future<BridgePullRequestDetail> pullRequest(int number) {
+    reads++;
+    return super.pullRequest(number);
+  }
+}
+
+/// Git whose host refuses every pull request action.
+class _RefusingGit extends FakeGit {
+  _RefusingGit({super.status});
+
+  @override
+  Future<void> runPullRequestAction(
+    int number,
+    String action, {
+    String? mergeMethod,
+  }) async => throw Exception('host refused');
+}
+
+/// A pull request's detail as the host reports it: its checks, the action its row offers and
+/// whether it conflicts with its base.
+BridgePullRequestDetail detailOf({
+  String state = 'open',
+  bool draft = false,
+  bool conflicting = false,
+  List<BridgePullRequestCheck> checks = const [],
+  String checksState = 'none',
+  String checksSummary = '',
+  String? action,
+}) => BridgePullRequestDetail(
+  number: 7,
+  title: 'Add a feature',
+  url: 'https://github.com/o/r/pull/7',
+  state: state,
+  draft: draft,
+  base: 'main',
+  head: 'feature',
+  conflicting: conflicting,
+  files: 1,
+  added: 1,
+  removed: 0,
+  checks: checks,
+  checksState: checksState,
+  checksSummary: checksSummary,
+  action: action,
+  mergeMethod: 'squash',
+  fixPrompt: 'Fix the checks',
+  resolvePrompt: 'Resolve the conflicts',
+);
+
+BridgePullRequestCheck checkOf(String name, String status, {String? url}) =>
+    BridgePullRequestCheck(name: name, status: status, url: url);
+
+/// The tooltip with a line that reads `line`; a tooltip's lines are separated by newlines.
+Finder tooltipLine(String line) => find.byWidgetPredicate(
+  (widget) =>
+      widget is Tooltip && (widget.message ?? '').split('\n').contains(line),
+);
+
 /// Records what the browser opener is asked to open, instead of opening it.
 List<String> recordOpens() {
   final opened = <String>[];
@@ -133,7 +199,7 @@ Future<SessionState> pumpGit(WidgetTester tester, FakeGit git) async {
       ),
     ),
   );
-  await tester.pump();
+  await tester.pumpAndSettle();
   return state;
 }
 
@@ -258,32 +324,29 @@ void main() {
     },
   );
 
-  testWidgets(
-    'a result stays ten seconds, and Open PR opens the pull request',
-    (tester) async {
-      final opened = recordOpens();
-      final git = FakeGit(status: featureOf(ahead: 1))
-        ..steps = [
-          progressOf(
-            BridgeGitProgressKind.finished,
-            'Pull request created',
-            description: 'feature into main',
-            pullRequest: 'https://github.com/o/r/pull/9',
-          ),
-        ];
-      await pumpGit(tester, git);
-      await tester.tap(find.text('Push & create PR'));
-      await tester.pumpAndSettle();
-      await tester.pump(const Duration(seconds: 9));
-      expect(find.text('Pull request created'), findsOneWidget);
-      await tester.tap(find.text('Open PR'));
-      await tester.pumpAndSettle();
-      expect(opened, ['https://github.com/o/r/pull/9']);
-      await tester.pump(const Duration(seconds: 1));
-      expect(find.text('Pull request created'), findsNothing);
-      expect(find.text('Push & create PR'), findsOneWidget);
-    },
-  );
+  testWidgets('a result stays ten seconds, with no button beside it', (
+    tester,
+  ) async {
+    final git = FakeGit(status: featureOf(ahead: 1))
+      ..steps = [
+        progressOf(
+          BridgeGitProgressKind.finished,
+          'Pull request created',
+          description: 'feature into main',
+          pullRequest: 'https://github.com/o/r/pull/9',
+        ),
+      ];
+    await pumpGit(tester, git);
+    await tester.tap(find.text('Push & create PR'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 9));
+    expect(find.text('Pull request created'), findsOneWidget);
+    expect(find.text('feature into main'), findsOneWidget);
+    expect(find.text('Open PR'), findsNothing);
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('Pull request created'), findsNothing);
+    expect(find.text('Push & create PR'), findsOneWidget);
+  });
 
   testWidgets(
     'an action on the default branch asks first: Abort runs nothing, Continue runs it there',
@@ -464,22 +527,247 @@ void main() {
     },
   );
 
-  testWidgets('the pull request row names the state the checkout reports', (
+  testWidgets(
+    'the pull request row shows its state as an icon, and its tooltip names the state',
+    (tester) async {
+      final git = FakeGit();
+      await pumpGit(tester, git);
+      for (final (pr, detail, icon, label) in [
+        (prOf(), detailOf(), LucideIcons.gitPullRequestArrow, 'Open'),
+        (
+          prOf(draft: true),
+          detailOf(draft: true),
+          LucideIcons.gitPullRequestDraft,
+          'Draft',
+        ),
+        (
+          prOf(state: 'closed'),
+          detailOf(state: 'closed'),
+          LucideIcons.gitPullRequestClosed,
+          'Closed',
+        ),
+        (
+          prOf(state: 'merged'),
+          detailOf(state: 'merged'),
+          LucideIcons.gitMerge,
+          'Merged',
+        ),
+      ]) {
+        git.detail = detail;
+        git.change(gitStatusOf(pullRequest: pr));
+        await tester.pumpAndSettle();
+        expect(find.byIcon(icon), findsOneWidget, reason: label);
+        expect(find.text(label), findsNothing, reason: label);
+        expect(tooltipLine(label), findsOneWidget, reason: label);
+      }
+    },
+  );
+
+  testWidgets(
+    'the checks badge counts the checks that finished, and its popover lists each check with its details',
+    (tester) async {
+      final opened = recordOpens();
+      await pumpGit(
+        tester,
+        FakeGit(status: gitStatusOf(pullRequest: prOf()))
+          ..detail = detailOf(
+            checks: [checkOf('build', 'success'), checkOf('lint', 'failure')],
+            checksState: 'failing',
+            checksSummary: '1 of 2 failing',
+          ),
+      );
+      expect(find.text('1 failed'), findsOneWidget);
+
+      final git = FakeGit(status: gitStatusOf(pullRequest: prOf()))
+        ..detail = detailOf(
+          checks: [
+            checkOf('build', 'success'),
+            checkOf('lint', 'failure', url: 'https://ci.example/lint'),
+            checkOf('deploy', 'pending'),
+          ],
+          checksState: 'failing',
+          checksSummary: '1 of 3 failing',
+        );
+      await pumpGit(tester, git);
+      expect(find.text('2/3 checks'), findsOneWidget);
+
+      await tester.tap(find.text('2/3 checks'));
+      await tester.pumpAndSettle();
+      expect(find.text('Some checks were not successful'), findsOneWidget);
+      expect(find.text('lint'), findsOneWidget);
+      expect(find.text('deploy'), findsOneWidget);
+      expect(find.text('build'), findsNothing, reason: 'finished checks wait');
+      await tester.tap(find.text('Show all'));
+      await tester.pumpAndSettle();
+      expect(find.text('build'), findsOneWidget);
+      await tester.tap(find.text('Details'));
+      await tester.pumpAndSettle();
+      expect(opened, ['https://ci.example/lint']);
+    },
+  );
+
+  testWidgets('Ready marks a draft ready for review', (tester) async {
+    final git = FakeGit(status: gitStatusOf(pullRequest: prOf(draft: true)))
+      ..detail = detailOf(draft: true, action: 'ready');
+    final state = await pumpGit(tester, git);
+    expect(
+      find.byTooltip('Mark this pull request as ready for review'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Ready'));
+    await tester.pumpAndSettle();
+    expect(git.calls, ['pr 7 ready merge=null']);
+    expect(state.notice.value?.text, 'Marked ready for review');
+  });
+
+  testWidgets('Merge asks first, then merges with the repository\'s method', (
     tester,
   ) async {
-    final git = FakeGit();
+    final git = FakeGit(status: gitStatusOf(pullRequest: prOf()))
+      ..detail = detailOf(action: 'merge');
     await pumpGit(tester, git);
-    for (final (pr, label) in [
-      (prOf(), 'Open'),
-      (prOf(draft: true), 'Draft'),
-      (prOf(state: 'closed'), 'Closed'),
-      (prOf(state: 'merged'), 'Merged'),
-    ]) {
-      git.change(gitStatusOf(pullRequest: pr));
-      await tester.pumpAndSettle();
-      expect(find.text(label), findsOneWidget);
-    }
+    await tester.tap(find.text('Merge'));
+    await tester.pumpAndSettle();
+    expect(find.text('Merge pull request?'), findsOneWidget);
+    expect(find.text('This merges #7 using squash.'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(git.calls, isEmpty);
+    await tester.tap(find.text('Merge'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(PrimaryButton, 'Merge'));
+    await tester.pumpAndSettle();
+    expect(git.calls, ['pr 7 merge merge=squash']);
   });
+
+  testWidgets(
+    'a merge the host refuses says why and leaves the row as it was',
+    (tester) async {
+      final git = _RefusingGit(status: gitStatusOf(pullRequest: prOf()))
+        ..detail = detailOf(action: 'merge');
+      final state = await pumpGit(tester, git);
+      await tester.tap(find.text('Merge'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PrimaryButton, 'Merge'));
+      await tester.pumpAndSettle();
+      expect(
+        state.notice.value?.text,
+        'Could not merge this pull request. Exception: host refused',
+      );
+      expect(find.text('Merge'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'Fix checks the pull request out in a worktree and opens the start page with the fix in the composer',
+    (tester) async {
+      final git = FakeGit(status: gitStatusOf(pullRequest: prOf()))
+        ..detail = detailOf(
+          action: 'fix',
+          checks: [checkOf('lint', 'failure')],
+          checksState: 'failing',
+        );
+      final state = await pumpGit(tester, git);
+      await tester.tap(find.text('Fix'));
+      await tester.pumpAndSettle();
+      expect(git.calls, ['pr worktree https://github.com/o/r/pull/7']);
+      expect(state.session, isNull);
+      expect(state.worktree.value, '/worktrees/pr');
+      expect(state.newWorktree.value, isFalse);
+      expect(state.draft.value, 'Fix the checks');
+    },
+  );
+
+  testWidgets(
+    'Resolve puts the conflict prompt in the composer of its worktree',
+    (tester) async {
+      final git = FakeGit(status: gitStatusOf(pullRequest: prOf()))
+        ..detail = detailOf(action: 'resolve', conflicting: true);
+      final state = await pumpGit(tester, git);
+      await tester.tap(find.text('Resolve'));
+      await tester.pumpAndSettle();
+      expect(git.calls, ['pr worktree https://github.com/o/r/pull/7']);
+      expect(state.draft.value, 'Resolve the conflicts');
+    },
+  );
+
+  testWidgets('the checks still running are read again after 45 seconds', (
+    tester,
+  ) async {
+    final git = _CountingGit(status: gitStatusOf(pullRequest: prOf()))
+      ..detail = detailOf(
+        checks: [checkOf('deploy', 'pending')],
+        checksState: 'pending',
+      );
+    final state = await pumpGit(tester, git);
+    final reads = git.reads;
+    await tester.pump(const Duration(seconds: 44));
+    expect(git.reads, reads);
+    await tester.pump(const Duration(seconds: 1));
+    expect(git.reads, reads + 1);
+    await state.dispose();
+  });
+
+  testWidgets('the quick action and the options carry T3 Code\'s icons', (
+    tester,
+  ) async {
+    final git = FakeGit(status: featureOf(behind: 3));
+    await pumpGit(tester, git);
+    expect(find.byIcon(LucideIcons.cloudDownload), findsOneWidget);
+
+    git.change(featureOf(ahead: 1));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(LucideIcons.gitPullRequest), findsOneWidget);
+    await tester.tap(find.byTooltip('Git action options'));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.widgetWithText(PopupMenuItem<VoidCallback>, 'Push'),
+        matching: find.byIcon(LucideIcons.cloudUpload),
+      ),
+      findsOneWidget,
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    git.change(featureOf(upstream: false, remote: false));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(LucideIcons.cloudUpload), findsOneWidget);
+
+    git.change(gitStatusOf(repository: false));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(LucideIcons.gitBranchPlus), findsOneWidget);
+  });
+
+  testWidgets(
+    'the options name a detached HEAD and a checkout behind its upstream, as T3 Code does',
+    (tester) async {
+      final git = FakeGit(
+        status: gitStatusOf(
+          branch: null,
+          defaultBranch: false,
+          changes: [fileOf('a.dart')],
+        ),
+      );
+      await pumpGit(tester, git);
+      await tester.tap(find.byTooltip('Git action options'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text(
+          'Detached HEAD: create and check out a branch to enable push and pull request actions.',
+        ),
+        findsOneWidget,
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+
+      git.change(featureOf(behind: 3));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Git action options'));
+      await tester.pumpAndSettle();
+      expect(find.text('Behind upstream. Pull/rebase first.'), findsOneWidget);
+    },
+  );
 
   testWidgets(
     'a click opens an https pull request in the browser, and refuses any other link',
