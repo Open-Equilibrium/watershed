@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid/src/highlight.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
+import 'package:liquid/src/theme/theme.dart';
 import 'package:liquid/src/workspace/code_block.dart';
 import 'package:liquid/src/workspace/text_block.dart';
 
@@ -231,6 +233,19 @@ void main() {
     );
     expect(codeOf(0), long);
     expect(tester.getSize(code).height, line, reason: 'still one line');
+  });
+
+  testWidgets('a lone quote colors no later line as a string', (tester) async {
+    await kit.show(tester, [const CodePart('')]);
+    final context = tester.element(find.byType(CodeBlock));
+    final spans = highlight(
+      context,
+      "fn f(s: &'a str) {}\nlet n = 1;\nlet c = 'x';",
+    ).children!.cast<TextSpan>();
+    expect(
+      spans.firstWhere((span) => span.text == 'let').style?.color,
+      context.ws.synKw,
+    );
   });
 
   testWidgets('code past 24 lines scrolls inside the Block', (tester) async {

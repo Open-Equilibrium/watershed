@@ -3,8 +3,9 @@ import 'package:flutter/widgets.dart';
 import 'theme/theme.dart';
 
 final _token = RegExp(
-  r'(//.*$)|("(?:[^"\\]|\\.)*"|'
-  r"'(?:[^'\\]|\\.)*')"
+  // A string ends on its line, so a lone quote, as in `&'a str`, colors no later line.
+  r'(//.*$)|("(?:[^"\\\n]|\\.)*"|'
+  r"'(?:[^'\\\n]|\\.)*')"
   r'|\b(import|from|export|const|let|var|async|await|return|if|else|function|fn|pub|use|mut|impl|struct|enum|match|class|new)\b|\b(\d[\d_.]*)\b',
   multiLine: true,
 );
