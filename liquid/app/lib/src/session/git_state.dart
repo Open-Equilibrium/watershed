@@ -171,6 +171,7 @@ class GitState {
   void dispose() {
     _resultTimer?.cancel();
     unawaited(_watch.cancel());
+    _git.close();
   }
 }
 

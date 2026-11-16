@@ -19,7 +19,7 @@ use crate::api::record::{README, THREAD_FILE, download_dir, record_name, write_f
 use crate::api::thread::{BridgeContext, BridgeSnapshot, BridgeStatistics, BridgeTurn};
 use crate::convert;
 use crate::frb_generated::StreamSink;
-use crate::stream;
+use crate::stream::{self, until_ended};
 
 /// How long a burst of lineage changes settles before the lineage is read again.
 const LINEAGE_SETTLE: Duration = Duration::from_millis(250);
@@ -313,6 +313,8 @@ pub struct AgentSession {
     receiver: Mutex<Option<tokio::sync::mpsc::Receiver<meta_harness_core::ThreadEvent>>>,
     /// How many of the stream's events Liquid applied, which reopens the window (ADR-0272).
     credit: Arc<stream::Credit>,
+    /// Dropped with the session, which ends the card's follows (see [`until_ended`]).
+    ended: tokio::sync::watch::Sender<()>,
     /// The details card's live reads, each held until its events are streamed or the session drops.
     servers: Mutex<Option<Watch<Vec<LocalServer>>>>,
     automations: Mutex<Option<Watch<Vec<Automation>>>>,
@@ -339,6 +341,7 @@ impl AgentSession {
             root,
             receiver: Mutex::new(None),
             credit: Arc::default(),
+            ended: tokio::sync::watch::channel(()).0,
             servers: Mutex::default(),
             automations: Mutex::default(),
             lineage: Mutex::default(),
@@ -593,15 +596,25 @@ impl AgentSession {
 
     /// Streams each change of the servers after the latest [`AgentSession::servers_subscribe`].
     pub fn servers_events(&self, sink: StreamSink<Vec<BridgeLocalServer>>) -> Result<(), String> {
+        self.servers_with(move |servers| sink.add(servers).is_ok())
+    }
+
+    /// As [`AgentSession::servers_events`], to a Rust consumer.
+    #[flutter_rust_bridge::frb(ignore)]
+    pub fn servers_with(
+        &self,
+        mut deliver: impl FnMut(Vec<BridgeLocalServer>) -> bool + Send + 'static,
+    ) -> Result<(), String> {
         let mut watch = self
             .servers
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take()
             .ok_or_else(|| "Subscribe to the servers before streaming them.".to_owned())?;
+        let mut ended = self.ended.subscribe();
         RUNTIME.spawn(async move {
-            while let Some(servers) = watch.changed().await {
-                if sink.add(convert::local_servers(servers)).is_err() {
+            while let Some(Some(servers)) = until_ended(&mut ended, watch.changed()).await {
+                if !deliver(convert::local_servers(servers)) {
                     break;
                 }
             }
@@ -635,15 +648,25 @@ impl AgentSession {
         &self,
         sink: StreamSink<Vec<BridgeAutomation>>,
     ) -> Result<(), String> {
+        self.automations_with(move |tasks| sink.add(tasks).is_ok())
+    }
+
+    /// As [`AgentSession::automations_events`], to a Rust consumer.
+    #[flutter_rust_bridge::frb(ignore)]
+    pub fn automations_with(
+        &self,
+        mut deliver: impl FnMut(Vec<BridgeAutomation>) -> bool + Send + 'static,
+    ) -> Result<(), String> {
         let mut watch = self
             .automations
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take()
             .ok_or_else(|| "Subscribe to the automations before streaming them.".to_owned())?;
+        let mut ended = self.ended.subscribe();
         RUNTIME.spawn(async move {
-            while let Some(tasks) = watch.changed().await {
-                if sink.add(convert::automations(tasks)).is_err() {
+            while let Some(Some(tasks)) = until_ended(&mut ended, watch.changed()).await {
+                if !deliver(convert::automations(tasks)) {
                     break;
                 }
             }
@@ -673,6 +696,18 @@ impl AgentSession {
     /// Streams the lineage after each change that may have changed it, once the changes settle,
     /// after the latest [`AgentSession::lineage_subscribe`]. A failed read streams as an error.
     pub fn lineage_events(&self, sink: StreamSink<BridgeLineage>) -> Result<(), String> {
+        self.lineage_with(move |result| match result {
+            Ok(lineage) => sink.add(lineage).is_ok(),
+            Err(error) => sink.add_error(error).is_ok(),
+        })
+    }
+
+    /// As [`AgentSession::lineage_events`], to a Rust consumer.
+    #[flutter_rust_bridge::frb(ignore)]
+    pub fn lineage_with(
+        &self,
+        mut deliver: impl FnMut(Result<BridgeLineage, String>) -> bool + Send + 'static,
+    ) -> Result<(), String> {
         let changes = self
             .lineage
             .lock()
@@ -680,13 +715,22 @@ impl AgentSession {
             .take()
             .ok_or_else(|| "Subscribe to the lineage before streaming it.".to_owned())?;
         let thread = self.thread.clone();
+        let mut ended = self.ended.subscribe();
         RUNTIME.spawn(async move {
             loop {
-                changes.changed().await;
-                tokio::time::sleep(LINEAGE_SETTLE).await;
-                let delivered = match thread.lineage().await {
-                    Ok(lineage) => sink.add(convert::lineage(lineage)).is_ok(),
-                    Err(error) => sink.add_error(error).is_ok(),
+                if until_ended(&mut ended, changes.changed()).await.is_none() {
+                    break;
+                }
+                if until_ended(&mut ended, tokio::time::sleep(LINEAGE_SETTLE))
+                    .await
+                    .is_none()
+                {
+                    break;
+                }
+                let delivered = match until_ended(&mut ended, thread.lineage()).await {
+                    Some(Ok(lineage)) => deliver(Ok(convert::lineage(lineage))),
+                    Some(Err(error)) => deliver(Err(error)),
+                    None => break,
                 };
                 if !delivered {
                     break;

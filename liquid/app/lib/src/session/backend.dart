@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import '../rust/api/details.dart';
 import '../rust/api/events.dart';
 import '../rust/api/git.dart';
@@ -110,6 +112,9 @@ abstract interface class SessionBackend {
 
   /// The provider's usage limits, if it reports any.
   Future<BridgeUsageLimits?> usageLimits();
+
+  /// Releases the session once Liquid left it, which ends its follows on T3.
+  void close();
 }
 
 /// Git for one checkout, as T3 runs it.
@@ -156,6 +161,9 @@ abstract interface class GitBackend {
 
   /// Checks out the pull request at `url` in a worktree, as T3's Fix and Resolve do.
   Future<BridgeCheckedOut> pullRequestWorktree(String url);
+
+  /// Releases the checkout once Liquid no longer shows it, which ends its status watch.
+  void close();
 }
 
 /// The project on Meta-Harness's T3 server, reached through the Rust bridge.
@@ -328,6 +336,8 @@ class RustSessionBackend implements SessionBackend {
   Future<void> stopSubagent(String id) => _session.stopSubagent(id: id);
   @override
   Future<BridgeUsageLimits?> usageLimits() => _session.usageLimits();
+  @override
+  void close() => _session.dispose();
 }
 
 /// Git through the Rust bridge; the checkout arrives from the bridge's worker threads.
@@ -432,4 +442,6 @@ class RustGitBackend implements GitBackend {
   @override
   Future<BridgeCheckedOut> pullRequestWorktree(String url) async =>
       (await _git).pullRequestWorktree(url: url);
+  @override
+  void close() => unawaited(_git.then((git) => git.dispose()));
 }

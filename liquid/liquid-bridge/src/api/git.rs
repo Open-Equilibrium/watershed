@@ -7,6 +7,7 @@ use crate::api::events::BridgeFileChange;
 use crate::api::session::RUNTIME;
 use crate::convert;
 use crate::frb_generated::StreamSink;
+use crate::stream::until_ended;
 
 /// The branch's pull request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -219,11 +220,16 @@ pub struct BridgeCheckedOut {
 #[flutter_rust_bridge::frb(opaque)]
 pub struct GitCheckout {
     git: Git,
+    /// Dropped with the checkout, which ends its status watch (see [`until_ended`]).
+    ended: tokio::sync::watch::Sender<()>,
 }
 
 impl GitCheckout {
     pub(crate) fn new(git: Git) -> Self {
-        Self { git }
+        Self {
+            git,
+            ended: tokio::sync::watch::channel(()).0,
+        }
     }
 
     /// The checkout's status now.
@@ -243,8 +249,9 @@ impl GitCheckout {
         mut deliver: impl FnMut(BridgeGitStatus) -> bool + Send + 'static,
     ) -> Result<(), String> {
         let mut statuses = RUNTIME.block_on(self.git.watch())?;
+        let mut ended = self.ended.subscribe();
         RUNTIME.spawn(async move {
-            while let Some(status) = statuses.recv().await {
+            while let Some(Some(status)) = until_ended(&mut ended, statuses.recv()).await {
                 if !deliver(convert::git_status(status)) {
                     return;
                 }

@@ -210,6 +210,21 @@ void main() {
       expect(state.model.value, choiceOf('new-model'));
     });
 
+    test('a switch releases the session it left and its Git, so their T3 follows end', () async {
+      final first = FakeSession();
+      project.session = first;
+      await state.open('thread-1');
+      await pumpEventQueue();
+
+      project.session = FakeSession(id: 'thread-2');
+      await state.open('thread-2');
+      await pumpEventQueue();
+
+      expect(first.closed, isTrue);
+      expect(first.gitBackend.closed, isTrue);
+      expect(project.session.closed, isFalse);
+    });
+
     test('opening restores the snapshot and skips the events it already holds (ADR-0290)', () async {
       await open(
         snapshotOf(
@@ -692,6 +707,22 @@ void main() {
       },
     );
 
+    test('a late statistics failure of the session left is not shown on the one open', () async {
+      final late = LateStatistics();
+      project.session = late;
+      await state.open('thread-1');
+      await pumpEventQueue();
+      project.session = session;
+      await state.open('thread-2');
+      await pumpEventQueue();
+
+      late.gate.complete();
+      await pumpEventQueue();
+
+      expect(state.statisticsProblem.value, isNull);
+      expect(state.notices.value, isEmpty);
+    });
+
     test('a failed context read keeps the statistics and says why', () async {
       final failing = FailingReads()
         ..contextError = 'the model has no window size';
@@ -809,6 +840,55 @@ void main() {
       expect(state.servers.value, hasLength(2));
     });
 
+    test(
+      'each live section follows its changes once its first read has run',
+      () async {
+        BridgeAutomation automation(String id) => BridgeAutomation(
+          id: id,
+          title: 'Check',
+          schedule: BridgeSchedule(
+            kind: BridgeScheduleKind.webhook,
+            weekdays: Int64List(0),
+          ),
+          enabled: true,
+          lastRun: BridgeRunStatus.never,
+        );
+        await open();
+
+        session
+          ..serverUpdates.add([server(3000)])
+          ..automationUpdates.add([automation('a2')])
+          ..lineageUpdates.add(
+            BridgeLineage(
+              rows: const [],
+              running: 1,
+              sideChatsRunning: 0,
+              canDisconnect: false,
+              mergeReady: false,
+              canMerge: false,
+            ),
+          );
+        await pumpEventQueue();
+
+        expect(state.servers.value.single.port, 3000);
+        expect(state.automations.value.single.id, 'a2');
+        expect(state.lineage.value?.running, 1);
+      },
+    );
+
+    test('a failed live stream is a warning that names its section', () async {
+      await open();
+
+      session.serverUpdates.addError('the stream dropped');
+      await pumpEventQueue();
+
+      expect(state.notice.value?.level, NoticeLevel.warning);
+      expect(
+        state.notice.value?.text,
+        'Could not follow the servers: the stream dropped',
+      );
+    });
+
     test('a switch stops following the session it left', () async {
       await open();
       final other = FakeSession(id: 'thread-2');
@@ -819,6 +899,31 @@ void main() {
       session.serverUpdates.add([server(3000)]);
       await pumpEventQueue();
       expect(state.servers.value, isEmpty);
+    });
+
+    test('merging back opens the thread it merged into, as T3 does', () async {
+      session.family = lineageOf(
+        rows: [
+          BridgeLineageRow(
+            threadId: 'thread-parent',
+            relation: BridgeLineageRelation.fork,
+            group: BridgeLineageGroup.related,
+            title: 'Parent',
+            statusLabel: 'Idle',
+            failed: false,
+            mergeTarget: true,
+          ),
+        ],
+      );
+      await open();
+      project.session = FakeSession(id: 'thread-parent');
+
+      await state.mergeBack();
+      await pumpEventQueue();
+
+      expect(session.calls, contains('merge back'));
+      expect(project.calls, contains('open thread-parent'));
+      expect(state.session?.id, 'thread-parent');
     });
 
     test('the card actions run on the open session', () async {
@@ -856,4 +961,15 @@ void main() {
 class RefusedActions extends FakeSession {
   @override
   Future<void> mergeBack() => Future.error('not ready');
+}
+
+/// A session whose statistics read fails once `gate` completes.
+class LateStatistics extends FakeSession {
+  final gate = Completer<void>();
+
+  @override
+  Future<BridgeStatistics> statistics() async {
+    await gate.future;
+    throw 'the session file is unreadable';
+  }
 }

@@ -400,6 +400,71 @@ fn the_details_card_reads_and_acts_on_a_session_through_the_bridge() {
     host.shutdown();
 }
 
+/// Reports to its test when it is dropped, which is when the task that owns it ends.
+struct Ends(mpsc::Sender<()>);
+
+impl Drop for Ends {
+    fn drop(&mut self) {
+        let _ = self.0.send(());
+    }
+}
+
+/// A delivery that holds `ends` for as long as the task that runs it lives.
+fn holding<T>(ends: Ends) -> impl FnMut(T) -> bool + Send + 'static {
+    move |_| {
+        let _ = &ends;
+        true
+    }
+}
+
+#[test]
+fn dropping_the_session_or_checkout_ends_its_live_follows() {
+    let fixture = Fixture::new();
+    let host = host(&fixture);
+    let project = project_at(&host, &fixture.repo());
+    let session = project
+        .start(
+            "append first".to_owned(),
+            scripted(),
+            Some("main".to_owned()),
+            None,
+            BridgePermissions::FullAccess,
+        )
+        .expect("session starts");
+    follow(&session, completed(1));
+    let (sender, ended) = mpsc::channel();
+    session.servers_subscribe().expect("the servers");
+    session
+        .servers_with(holding(Ends(sender.clone())))
+        .expect("the servers follow");
+    session
+        .automations_subscribe()
+        .expect("the scheduled tasks");
+    session
+        .automations_with(holding(Ends(sender.clone())))
+        .expect("the scheduled tasks follow");
+    session.lineage_subscribe().expect("the lineage");
+    session
+        .lineage_with(holding(Ends(sender.clone())))
+        .expect("the lineage follows");
+    drop(session);
+    for section in ["servers", "scheduled tasks", "lineage"] {
+        ended
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap_or_else(|_| panic!("the {section} follow ends with its session"));
+    }
+
+    let git = project.git();
+    let (sender, ended) = mpsc::channel();
+    git.watch_with(holding(Ends(sender)))
+        .expect("the status watch");
+    drop(git);
+    ended
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the status watch ends with its checkout");
+    host.shutdown();
+}
+
 /// Starts a session that runs until stopped and queues one follow-up behind it.
 fn queued_behind_a_running_turn(project: &AgentProject, prompt: &str) -> AgentSession {
     let session = project

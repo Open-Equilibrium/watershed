@@ -1,11 +1,11 @@
-//! How the event forwarder batches what crosses to Dart, and how far ahead of Liquid it sends
-//! (ADR-0272).
+//! How streams cross to Dart: how the event forwarder batches them and how far ahead of Liquid it
+//! sends (ADR-0272), and when the follows of a session or checkout end (`until_ended`).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use meta_harness_core::ThreadEvent;
-use tokio::sync::{Notify, mpsc};
+use tokio::sync::{Notify, mpsc, watch};
 
 use crate::api::events::{BridgeEvent, BridgeEventKind};
 
@@ -157,6 +157,20 @@ async fn next_or_wake(
         receiver.poll_recv(context).map(Some)
     })
     .await
+}
+
+/// Waits for `next` unless the owner of the stream drops first, which gives `None`. The owner
+/// holds the sender of `ended` and never sends on it, so its drop ends the wait at once; the
+/// stream then ends with its owner instead of at its next change.
+pub(crate) async fn until_ended<T>(
+    ended: &mut watch::Receiver<()>,
+    next: impl Future<Output = T>,
+) -> Option<T> {
+    tokio::select! {
+        biased;
+        _ = ended.changed() => None,
+        value = next => Some(value),
+    }
 }
 
 /// Hands the thread's events to `deliver` until it returns `false` or the session is dropped.

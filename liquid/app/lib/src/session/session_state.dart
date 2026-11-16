@@ -350,8 +350,21 @@ class SessionState {
   Future<void> runAutomation(String id) =>
       _act(() => _session!.runAutomationNow(id), 'run automation');
 
-  /// Merges the session back into its parent, from the card's Lineage.
-  Future<void> mergeBack() => _act(() => _session!.mergeBack(), 'merge back');
+  /// Merges the session back into its parent, from the card's Lineage; then opens the parent, as
+  /// T3 does.
+  Future<void> mergeBack() async {
+    final target = lineage.value?.rows
+        .where((row) => row.mergeTarget)
+        .firstOrNull
+        ?.threadId;
+    try {
+      await _session!.mergeBack();
+    } on Object catch (error) {
+      notify(NoticeLevel.error, 'Could not merge back: $error');
+      return;
+    }
+    if (target != null) await open(target);
+  }
 
   /// Disconnects the agent session, from the card's Lineage.
   Future<void> disconnect() =>
@@ -476,6 +489,7 @@ class SessionState {
       statistics.value = read;
       statisticsProblem.value = null;
     } on Object catch (error) {
+      if (generation != _generation) return;
       final text = 'Could not read the statistics: $error';
       statisticsProblem.value = (title: 'No statistics shown', text: text);
       notify(NoticeLevel.warning, text);
@@ -485,6 +499,7 @@ class SessionState {
       if (generation != _generation) return;
       contextWindow.value = window;
     } on Object catch (error) {
+      if (generation != _generation) return;
       notify(NoticeLevel.warning, 'Could not read the context window: $error');
     }
     await _read(
@@ -549,6 +564,8 @@ class SessionState {
       unawaited(follow.cancel());
     }
     _follows.clear();
+    // Releasing the session ends its follows on T3 at once, not when Dart collects it.
+    _session?.close();
     servers.value = const [];
     automations.value = const [];
     lineage.value = null;
@@ -578,29 +595,26 @@ class SessionState {
   /// Follows the open session's servers, scheduled tasks and related threads, and reads the host's
   /// name; a switch cancels the follows and drops what a read brings late.
   Future<void> _follow(SessionBackend next, int generation) async {
-    _follows
-      ..add(next.serverChanges().listen((value) => servers.value = value))
-      ..add(
-        next.automationChanges().listen((value) => automations.value = value),
-      )
-      ..add(next.lineageChanges().listen((value) => lineage.value = value));
     await Future.wait([
-      _read(
+      _watch(
         generation,
         'the servers',
         next.servers,
+        next.serverChanges,
         (value) => servers.value = value,
       ),
-      _read(
+      _watch(
         generation,
         'the scheduled tasks',
         next.automations,
+        next.automationChanges,
         (value) => automations.value = value,
       ),
-      _read(
+      _watch(
         generation,
         'the related threads',
         next.lineage,
+        next.lineageChanges,
         (value) => lineage.value = value,
       ),
       _read(
@@ -611,6 +625,28 @@ class SessionState {
       ),
     ]);
   }
+
+  /// Reads a live section, then follows its changes: the bridge streams them only after the
+  /// read subscribed to them. A failed change stream is a warning.
+  Future<void> _watch<T>(
+    int generation,
+    String what,
+    Future<T> Function() read,
+    Stream<T> Function() changes,
+    void Function(T value) set,
+  ) => _read(generation, what, read, (value) {
+    set(value);
+    _follows.add(
+      changes().listen(
+        set,
+        onError: (Object error) {
+          if (generation == _generation) {
+            notify(NoticeLevel.warning, 'Could not follow $what: $error');
+          }
+        },
+      ),
+    );
+  });
 
   /// Passes a read's value to `set` unless the session changed meanwhile; a failed read is a
   /// warning.

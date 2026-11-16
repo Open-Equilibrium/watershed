@@ -122,6 +122,12 @@ class FakeSession implements SessionBackend {
 
   void emit(BridgeEvent event) => _events.add(event);
 
+  /// Whether Liquid released the session.
+  bool closed = false;
+
+  @override
+  void close() => closed = true;
+
   @override
   Future<BridgeSnapshot> subscribe() async => current;
 
@@ -238,7 +244,9 @@ class FakeSession implements SessionBackend {
   }
 
   /// What the card's live sections show; [serverUpdates], [automationUpdates] and
-  /// [lineageUpdates] stream their changes.
+  /// [lineageUpdates] stream their changes. As the bridge does, a section's changes fail
+  /// unless its first read ran first.
+  final _firstRead = <String>{};
   List<BridgeLocalServer> serverList = [];
   final serverUpdates = StreamController<List<BridgeLocalServer>>.broadcast();
   List<BridgeAutomation> automationList = [];
@@ -248,18 +256,34 @@ class FakeSession implements SessionBackend {
   final lineageUpdates = StreamController<BridgeLineage>.broadcast();
   BridgeUsageLimits? limits;
 
+  Stream<T> _changes<T>(String section, Stream<T> Function() changes) =>
+      _firstRead.contains(section)
+      ? changes()
+      : Stream.error(
+          StateError('Subscribe to the $section before streaming them.'),
+        );
+
   @override
-  Future<List<BridgeLocalServer>> servers() async => serverList;
+  Future<List<BridgeLocalServer>> servers() async {
+    _firstRead.add('servers');
+    return serverList;
+  }
+
   @override
-  Stream<List<BridgeLocalServer>> serverChanges() => serverUpdates.stream;
+  Stream<List<BridgeLocalServer>> serverChanges() =>
+      _changes('servers', () => serverUpdates.stream);
   @override
   Future<void> stopServer(int pid, int port) async =>
       calls.add('stop server $pid $port');
   @override
-  Future<List<BridgeAutomation>> automations() async => automationList;
+  Future<List<BridgeAutomation>> automations() async {
+    _firstRead.add('automations');
+    return automationList;
+  }
+
   @override
   Stream<List<BridgeAutomation>> automationChanges() =>
-      automationUpdates.stream;
+      _changes('automations', () => automationUpdates.stream);
   @override
   Future<void> setAutomationEnabled(String id, {required bool enabled}) async =>
       calls.add('automation $id enabled=$enabled');
@@ -267,9 +291,14 @@ class FakeSession implements SessionBackend {
   Future<void> runAutomationNow(String id) async =>
       calls.add('run automation $id');
   @override
-  Future<BridgeLineage> lineage() async => family;
+  Future<BridgeLineage> lineage() async {
+    _firstRead.add('lineage');
+    return family;
+  }
+
   @override
-  Stream<BridgeLineage> lineageChanges() => lineageUpdates.stream;
+  Stream<BridgeLineage> lineageChanges() =>
+      _changes('lineage', () => lineageUpdates.stream);
   @override
   Future<void> mergeBack() async => calls.add('merge back');
   @override
@@ -298,6 +327,12 @@ class FakeGit implements GitBackend {
 
   /// What [refs], [switchTo] and [createBranch] fail with.
   Object? refError;
+
+  /// Whether Liquid released the checkout.
+  bool closed = false;
+
+  @override
+  void close() => closed = true;
 
   /// Changes the status, as T3's status stream reports it.
   void change(BridgeGitStatus next) {
