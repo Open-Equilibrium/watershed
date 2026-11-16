@@ -144,7 +144,7 @@ class Sidebar extends StatelessWidget {
                               padding: const EdgeInsets.only(
                                 top: WsMetrics.space3,
                               ),
-                              child: WarningNotice(problem),
+                              child: WarningNotice(problem, danger: true),
                             ),
                             _ => const SizedBox.shrink(),
                           },

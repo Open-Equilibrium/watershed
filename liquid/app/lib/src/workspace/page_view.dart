@@ -291,7 +291,7 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                   padding: const EdgeInsets.symmetric(
                     horizontal: WsMetrics.space7,
                   ),
-                  child: WarningNotice(problem),
+                  child: WarningNotice(problem, danger: true),
                 ),
         ),
         Expanded(
@@ -346,7 +346,6 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                     WsMetrics.space7,
                     WsMetrics.space8,
                   ),
-                  // The line stays until its Text Block took over what was typed.
                   // The first line stays, out of sight, until its Text Block took the
                   // caret, so typing meanwhile still reaches it.
                   sliver: SliverMainAxisGroup(

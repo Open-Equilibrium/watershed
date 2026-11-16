@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/chat_view.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
+import 'package:liquid/src/controls.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/session/session_state.dart';
@@ -90,7 +91,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(title()).controller!.text, 'Plan now');
-    expect(find.text('the replica is read-only'), findsOneWidget);
+    expect(
+      find.text('Liquid did not save this change: the replica is read-only'),
+      findsOneWidget,
+    );
   });
 
   testWidgets(
@@ -273,7 +277,22 @@ void main() {
       await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
       await tester.pumpAndSettle();
-      expect(inSidebar('the replica is read-only'), findsOneWidget);
+      expect(
+        inSidebar('Liquid did not save this change: the replica is read-only'),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<WarningNotice>(
+              find.descendant(
+                of: find.byType(Sidebar),
+                matching: find.byType(WarningNotice),
+              ),
+            )
+            .danger,
+        isTrue,
+        reason: 'a failure shows as one',
+      );
     },
   );
 

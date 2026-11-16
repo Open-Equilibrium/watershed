@@ -141,7 +141,7 @@ class _AgentShellState extends State<AgentShell> {
     for (final settings in _saved.nonNulls) {
       settings.report = (problem) => widget.state != null
           ? widget.state!.notify(NoticeLevel.error, problem)
-          : widget.workspace?.problem.value = problem;
+          : widget.workspace?.report(problem);
       settings.saveOutcome = (failure) => _saveOutcome(settings, failure);
     }
     if (_shortcuts.firstStart) {
