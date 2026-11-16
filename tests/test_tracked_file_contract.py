@@ -9,6 +9,7 @@ import time
 import unittest
 from pathlib import Path
 
+from git_fixture import git_environment
 from test_ci_toolchain_contract import step_run, workflow_text
 
 
@@ -20,7 +21,7 @@ class TrackedFileContractTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             repo = Path(temporary_directory)
             subprocess.run(
-                ["git", "init", "--quiet"], cwd=repo, check=True
+                ["git", "init", "--quiet"], cwd=repo, check=True, env=git_environment()
             )
             tracked_paths = [
                 "-leading.md",
@@ -41,6 +42,7 @@ class TrackedFileContractTest(unittest.TestCase):
                     input=b"tracked\n",
                     capture_output=True,
                     check=True,
+                    env=git_environment(),
                 ).stdout.decode("ascii").strip()
                 subprocess.run(
                     [
@@ -52,6 +54,7 @@ class TrackedFileContractTest(unittest.TestCase):
                     ],
                     cwd=repo,
                     check=True,
+                    env=git_environment(),
                 )
 
             result = subprocess.run(
@@ -63,6 +66,7 @@ class TrackedFileContractTest(unittest.TestCase):
                 cwd=repo,
                 encoding="utf-8",
                 capture_output=True,
+                env=git_environment(),
             )
             link_step = step_run(workflow_text(), "Check documentation links")
             manifest_line = next(

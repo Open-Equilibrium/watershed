@@ -7,6 +7,7 @@ import tomllib
 import unittest
 from pathlib import Path
 
+from git_fixture import git_environment
 from test_ci_toolchain_contract import ROOT, job_steps, jobs, step_lines, step_run, workflow_text
 
 PRODUCTS = ("flow_agent", "meta_harness", "liquid")
@@ -48,7 +49,12 @@ class CiProductScopeTest(unittest.TestCase):
 
     def git(self, *args: str) -> str:
         return subprocess.run(
-            ["git", *args], cwd=self.repo, check=True, capture_output=True, text=True
+            ["git", *args],
+            cwd=self.repo,
+            check=True,
+            capture_output=True,
+            text=True,
+            env=git_environment(),
         ).stdout.strip()
 
     def commit(self, files: dict[str, str]) -> str:
@@ -69,7 +75,7 @@ class CiProductScopeTest(unittest.TestCase):
             ["node", str(ROOT / "scripts" / "ci-product-scope.mjs")],
             cwd=self.repo,
             env={
-                **os.environ,
+                **git_environment(),
                 "GITHUB_EVENT_NAME": event_name,
                 "GITHUB_EVENT_PATH": str(event_path),
                 "GITHUB_OUTPUT": str(output_path),

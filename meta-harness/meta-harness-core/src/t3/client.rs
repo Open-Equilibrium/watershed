@@ -42,9 +42,16 @@ enum Waiter {
     /// again on a new connection. An action's stream has none: it ends with its connection, since
     /// T3 may have done part of it already.
     Stream {
-        items: mpsc::UnboundedSender<Value>,
+        items: mpsc::UnboundedSender<Item>,
         frame: Option<Value>,
     },
+}
+
+/// One item of a stream. The last item of a chunk carries the connection that receives the chunk's
+/// acknowledgement, which the consumer sends once it takes that item.
+struct Item {
+    value: Value,
+    ack: Option<mpsc::UnboundedSender<Message>>,
 }
 
 /// The state that the client's handles and subscriptions share.
@@ -76,15 +83,20 @@ pub(crate) struct Client {
 /// An open stream request and its items, as T3 sends them. Dropped, it tells T3 to stop the request
 /// (Effect RPC's `Interrupt`) and forgets it.
 pub(crate) struct Subscription {
-    items: mpsc::UnboundedReceiver<Value>,
+    items: mpsc::UnboundedReceiver<Item>,
     id: String,
     link: Link,
 }
 
 impl Subscription {
-    /// The next item T3 sent; `None` once the request ended.
+    /// The next item T3 sent; `None` once the request ended. Taking a chunk's last item
+    /// acknowledges the chunk, so T3 sends the next one only after the consumer took this one.
     pub async fn recv(&mut self) -> Option<Value> {
-        self.items.recv().await
+        let item = self.items.recv().await?;
+        if let Some(ack) = item.ack {
+            let _ = ack.send(frame_message(&json!({"_tag": "Ack", "requestId": self.id})));
+        }
+        Some(item.value)
     }
 }
 
@@ -312,15 +324,23 @@ fn dispatch(link: &Link, ack: &mpsc::UnboundedSender<Message>, frame: Value) {
     };
     match frame["_tag"].as_str() {
         Some("Chunk") => {
-            // T3 waits for an Ack per chunk before it writes more (Effect RPC flow control).
-            let _ = ack.send(frame_message(
-                &json!({"_tag": "Ack", "requestId": request_id}),
-            ));
-            if let Some(Waiter::Stream { items, .. }) = lock(link).waiters.get(request_id)
-                && let Some(values) = frame["values"].as_array()
-            {
-                for value in values {
-                    let _ = items.send(value.clone());
+            let values = frame["values"].as_array().map_or(&[][..], Vec::as_slice);
+            let state = lock(link);
+            match state.waiters.get(request_id) {
+                Some(Waiter::Stream { items, .. }) if !values.is_empty() => {
+                    for (index, value) in values.iter().enumerate() {
+                        let last = index + 1 == values.len();
+                        let _ = items.send(Item {
+                            value: value.clone(),
+                            ack: last.then(|| ack.clone()),
+                        });
+                    }
+                }
+                // Nothing waits for these items, so the chunk is acknowledged at once.
+                _ => {
+                    let _ = ack.send(frame_message(
+                        &json!({"_tag": "Ack", "requestId": request_id}),
+                    ));
                 }
             }
         }

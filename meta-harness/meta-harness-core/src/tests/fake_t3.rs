@@ -49,6 +49,8 @@ pub struct Fake {
     latest: Arc<Mutex<HashMap<String, String>>>,
     /// The request ids the client interrupted; T3 pushes nothing more to them.
     interrupts: Arc<Mutex<Vec<String>>>,
+    /// The request id of each acknowledgement the client sent, in order.
+    acks: Arc<Mutex<Vec<String>>>,
     /// How many connections T3 accepted.
     accepted: Arc<AtomicUsize>,
     out: mpsc::UnboundedSender<Out>,
@@ -65,10 +67,15 @@ impl Fake {
         let log = requests.clone();
         let latest: Arc<Mutex<HashMap<String, String>>> = Arc::default();
         let interrupts: Arc<Mutex<Vec<String>>> = Arc::default();
+        let acks: Arc<Mutex<Vec<String>>> = Arc::default();
         let accepted: Arc<AtomicUsize> = Arc::default();
         // The task owns the originals; the handle keeps the shared state for the test.
-        let (latest_handle, interrupts_handle, accepted_handle) =
-            (latest.clone(), interrupts.clone(), accepted.clone());
+        let (latest_handle, interrupts_handle, acks_handle, accepted_handle) = (
+            latest.clone(),
+            interrupts.clone(),
+            acks.clone(),
+            accepted.clone(),
+        );
         let (out, mut outgoing) = mpsc::unbounded_channel();
         tokio::spawn(async move {
             // Requests keep being answered after the handle is dropped; only `Stop` ends them.
@@ -106,6 +113,10 @@ impl Fake {
                                 let id = interrupt["requestId"].as_str().unwrap().to_owned();
                                 interrupts.lock().unwrap().push(id);
                             }
+                            for ack in frames.iter().filter(|f| f["_tag"] == "Ack") {
+                                let id = ack["requestId"].as_str().unwrap().to_owned();
+                                acks.lock().unwrap().push(id);
+                            }
                         }
                         next = outgoing.recv(), if handle_open => match next {
                             Some(Out::Chunk(tag, values)) => {
@@ -134,6 +145,7 @@ impl Fake {
             requests,
             latest: latest_handle,
             interrupts: interrupts_handle,
+            acks: acks_handle,
             accepted: accepted_handle,
             out,
         }
@@ -147,6 +159,23 @@ impl Fake {
     /// The id of the latest request for `tag`.
     pub fn request_id(&self, tag: &str) -> String {
         self.latest.lock().unwrap()[tag].clone()
+    }
+
+    /// How many acknowledgements the client sent for request `id`.
+    pub fn acks(&self, id: &str) -> usize {
+        self.acks
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|ack| ack.as_str() == id)
+            .count()
+    }
+
+    /// Waits until the client sent `count` acknowledgements for request `id`.
+    pub async fn acked(&self, id: &str, count: usize) {
+        while self.acks(id) < count {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
     }
 
     /// Waits until the client interrupted request `id`.

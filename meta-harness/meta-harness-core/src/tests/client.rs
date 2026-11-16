@@ -224,6 +224,50 @@ async fn a_dropped_stream_interrupts_its_request_after_a_reconnect() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_chunk_is_acknowledged_only_once_its_last_item_is_taken() {
+    // T3 sends a chunk's successor only after its acknowledgement (Effect RPC flow control), so an
+    // item the consumer has not taken holds T3 back. Streams and actions both work this way.
+    for action in [false, true] {
+        let fake = Fake::start(|_, _, _| Vec::new()).await;
+        let client = connect(&fake).await;
+        let opened = if action {
+            client.action("subscribe", json!({})).await
+        } else {
+            client.stream("subscribe", json!({})).await
+        };
+        let mut items = opened.unwrap();
+        fake.received("subscribe", 1).await;
+        let id = fake.request_id("subscribe");
+        fake.push("subscribe", vec![json!("one"), json!("two")]);
+        assert_eq!(items.recv().await, Some(json!("one")));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(fake.acks(&id), 0, "action: {action}");
+        assert_eq!(items.recv().await, Some(json!("two")));
+        tokio::time::timeout(WAIT, fake.acked(&id, 1))
+            .await
+            .expect("T3 receives the acknowledgement");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_resent_stream_is_acknowledged_on_its_new_connection() {
+    let fake = Fake::start(|_, _, _| Vec::new()).await;
+    let client = connect(&fake).await;
+    let mut items = client.stream("subscribe", json!({})).await.unwrap();
+    fake.received("subscribe", 1).await;
+    fake.drop_connection();
+    tokio::time::timeout(WAIT, fake.received("subscribe", 2))
+        .await
+        .expect("the stream is sent again");
+    let id = fake.request_id("subscribe");
+    fake.push("subscribe", vec![json!("one")]);
+    assert_eq!(items.recv().await, Some(json!("one")));
+    tokio::time::timeout(WAIT, fake.acked(&id, 1))
+        .await
+        .expect("T3 receives the acknowledgement on the new connection");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_closed_client_does_not_reconnect_when_its_connection_drops() {
     let fake = Fake::start(|_, _, _| Vec::new()).await;
     let client = connect(&fake).await;

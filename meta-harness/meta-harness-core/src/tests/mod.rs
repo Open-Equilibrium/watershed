@@ -4,6 +4,7 @@ mod fake_t3;
 mod git;
 mod host;
 mod lineage;
+mod projection;
 mod pull_request;
 mod statistics;
 mod thread;

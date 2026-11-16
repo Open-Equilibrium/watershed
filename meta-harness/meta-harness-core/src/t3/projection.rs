@@ -32,7 +32,8 @@ pub(crate) enum Change {
     /// Whether the request was pending before.
     RuntimeRequest(bool),
     Checkpoint,
-    /// Whether an existing message's text changed, as an edit of a queued prompt changes it.
+    /// Whether a message is new or its text changed, which changes a turn's prompt: a queued
+    /// prompt arrives as a message and an edit replaces its text.
     Message(bool),
     Other,
 }
@@ -93,7 +94,7 @@ impl Projection {
             "message.updated" => {
                 let text = payload["text"].clone();
                 let before = upsert(&mut self.messages, payload);
-                Change::Message(before.is_some_and(|m| m["text"] != text))
+                Change::Message(before.is_none_or(|m| m["text"] != text))
             }
             "turn-item.updated" => Change::TurnItem(upsert(&mut self.turn_items, payload)),
             "checkpoint.captured" => {
@@ -110,6 +111,11 @@ impl Projection {
                     {
                         if payload[omitted] == true && before[omitted] != true {
                             payload[body] = before[body].clone();
+                            // The restored body is no longer omitted: as T3's client drops the
+                            // marker too, a later omission restores it again.
+                            if let Some(fields) = payload.as_object_mut() {
+                                fields.remove(omitted);
+                            }
                         }
                     }
                 }

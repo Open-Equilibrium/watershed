@@ -114,6 +114,14 @@ fn issue(binary: &Path, home: &Path) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
+/// Whether `command`, as `ps` prints it, runs `binary` as `binary serve ...`. The executable is the
+/// whole path, so `/x/t3backup serve` runs another program.
+fn runs_t3_serve(binary: &Path, command: &str) -> bool {
+    command
+        .strip_prefix(&*binary.to_string_lossy())
+        .is_some_and(|arguments| arguments.starts_with(" serve "))
+}
+
 /// Stops the `t3 serve` whose pid `runtime` records, if it still runs `binary`.
 async fn stop_left_behind(binary: &Path, runtime: &Path) {
     let Some(pid) = std::fs::read_to_string(runtime)
@@ -128,10 +136,7 @@ async fn stop_left_behind(binary: &Path, runtime: &Path) {
         std::process::Command::new("ps")
             .args(["-o", "command=", "-p", &pid.as_raw_nonzero().to_string()])
             .output()
-            .is_ok_and(|out| {
-                let command = String::from_utf8_lossy(&out.stdout);
-                command.starts_with(&*binary.to_string_lossy()) && command.contains(" serve ")
-            })
+            .is_ok_and(|out| runs_t3_serve(binary, &String::from_utf8_lossy(&out.stdout)))
     };
     if !runs_t3(pid) {
         return;
@@ -184,6 +189,19 @@ fn listening_origin(text: &str, pid: Option<u32>) -> Result<Option<String>, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stale_pid_counts_as_t3_only_when_it_runs_the_binary_as_serve() {
+        let binary = Path::new("/x/t3");
+        for (command, runs) in [
+            ("/x/t3 serve --host 127.0.0.1 --no-browser\n", true),
+            ("/x/t3backup serve --host 127.0.0.1\n", false),
+            ("/x/t3-helper serve --other\n", false),
+            ("/x/t3 auth session issue\n", false),
+        ] {
+            assert_eq!(runs_t3_serve(binary, command), runs, "{command}");
+        }
+    }
 
     #[test]
     fn a_server_of_another_release_fails_at_once_naming_both() {

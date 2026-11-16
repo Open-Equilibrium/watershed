@@ -724,7 +724,7 @@ fn translate(state: &mut State, change: Change, payload: &Value) -> Vec<AgentEve
                 Vec::new()
             }
         }
-        // An edited queued prompt changes a turn's prompt.
+        // A new or edited prompt changes a turn's prompt.
         Change::Message(true) => vec![AgentEvent::TurnsChanged],
         Change::Thread | Change::Message(false) | Change::Other => Vec::new(),
     }
