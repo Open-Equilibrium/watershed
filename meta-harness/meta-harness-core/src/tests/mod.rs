@@ -8,6 +8,7 @@ mod host;
 mod lineage;
 mod projection;
 mod pull_request;
+mod remote;
 mod statistics;
 mod thread;
 mod visible;

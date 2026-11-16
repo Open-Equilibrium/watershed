@@ -185,6 +185,8 @@ impl Host {
                     break;
                 }
             }
+            // The last handle is gone: closing the sink ends the connection for the reader too.
+            let _ = sink.close().await;
         });
         let read = waiters.clone();
         // Held weakly, so dropping every handle of this client closes the connection.
