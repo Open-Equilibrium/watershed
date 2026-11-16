@@ -10,7 +10,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::config::Change;
-use crate::hosts::Kind;
+use crate::hosts::{Access, Kind};
 use crate::{GitActionRequest, ModelChoice, Permissions, StartThread, ThreadSummary};
 
 /// The header a client names itself with; the configuration log records it (ADR-0298).
@@ -23,6 +23,9 @@ pub const API_HEADER: &str = "meta-harness-api";
 /// The header that asks the remote listener to pair a new client with the pairing code it names
 /// (ADR-0299).
 pub const PAIRING_HEADER: &str = "meta-harness-pairing";
+
+/// The header that makes a host's connection a tunnel to its T3 server (ADR-0288).
+pub const TUNNEL_HEADER: &str = "meta-harness-tunnel";
 
 /// The API version this build speaks: the calls, streams and frames below.
 pub const API_VERSION: u32 = 1;
@@ -98,6 +101,19 @@ pub(crate) enum HostsCall {
     T3Pairing,
     /// Revokes the client named so: its token is refused from its next connection on (ADR-0299).
     Revoke(String),
+    /// Links the host at `address` with `code` from its `meta invite --host`, at `access`
+    /// (ADR-0285, ADR-0288). Answers the linked host's name.
+    Add {
+        address: String,
+        code: String,
+        access: Access,
+    },
+    /// The hosts this one links to and the clients paired with it.
+    List,
+    /// Unlinks the host named so.
+    Remove(String),
+    /// Turns agents from other hosts on or off (ADR-0300).
+    Agents(bool),
 }
 
 /// A call to a project.

@@ -16,6 +16,7 @@ mod service;
 mod statistics;
 mod t3;
 mod thread;
+mod tunnel;
 mod visible;
 
 pub use api::RemoteStatus;
@@ -34,7 +35,7 @@ pub use host::{
     AcpAgent, Host, HostConfig, Model, ModelChoice, ModelOption, Permissions, Project, Provider,
     StartThread, ThreadSummary, Workspace,
 };
-pub use hosts::Kind;
+pub use hosts::{Access, ClientInfo, DEFAULT_REMOTE_PORT, HostList, Kind, PeerInfo};
 pub use service::{CONNECTION_FILE, Service, ServiceConfig, default_home};
 pub use statistics::{ModelUsage, Statistics, ToolCalls, TurnStatistics};
 pub use t3::{Watch, t3_version};

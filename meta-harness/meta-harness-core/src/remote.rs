@@ -22,7 +22,7 @@ use crate::api::{
     RemoteStatus, Reply, ThreadCall,
 };
 use crate::config::{Change, Current, LogEntry, Proposal};
-use crate::hosts::Kind;
+use crate::hosts::{Access, HostList, Kind};
 use crate::{
     Automation, Context, GitActionRequest, GitProgress, GitStatus, Lineage, LineageChanges,
     LocalServer, ModelChoice, Permissions, Provider, PullRequestDetail, Refs, RequestId,
@@ -397,10 +397,42 @@ impl Host {
         self.call(Call::Hosts(HostsCall::Revoke(name.to_owned())))
             .await
     }
+
+    /// Links the host at `address` (`ws://…`) with `code` from its `meta invite --host`, at
+    /// `access`, and answers the linked host's name (`meta host add`).
+    pub async fn host_add(
+        &self,
+        address: &str,
+        code: &str,
+        access: Access,
+    ) -> Result<String, String> {
+        self.call(Call::Hosts(HostsCall::Add {
+            address: address.to_owned(),
+            code: code.to_owned(),
+            access,
+        }))
+        .await
+    }
+
+    /// Unlinks the host named `name` (`meta host remove`).
+    pub async fn host_remove(&self, name: &str) -> Result<(), String> {
+        self.call(Call::Hosts(HostsCall::Remove(name.to_owned())))
+            .await
+    }
+
+    /// The hosts this one links to and the clients paired with it (`meta host list`).
+    pub async fn hosts(&self) -> Result<HostList, String> {
+        self.call(Call::Hosts(HostsCall::List)).await
+    }
+
+    /// Turns agents from other hosts on or off (`meta host agents`).
+    pub async fn host_agents(&self, on: bool) -> Result<(), String> {
+        self.call(Call::Hosts(HostsCall::Agents(on))).await
+    }
 }
 
 /// The request for a WebSocket handshake to `url` that carries `headers`.
-fn handshake(url: &str, headers: &[(&'static str, &str)]) -> Result<Request, String> {
+pub(crate) fn handshake(url: &str, headers: &[(&'static str, &str)]) -> Result<Request, String> {
     let mut request = url
         .into_client_request()
         .map_err(|e| format!("Bad Meta-Harness address {url}: {e}"))?;

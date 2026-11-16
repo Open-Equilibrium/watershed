@@ -26,9 +26,9 @@ use crate::api::{
     ThreadCall,
 };
 use crate::config::{Homes, Proposed, Store, now_ms, provider_instances};
-use crate::hosts::{self, Kind};
+use crate::hosts::{self, Kind, Links};
 use crate::t3::pairing_code;
-use crate::{AcpAgent, Host, HostConfig, Project, Thread};
+use crate::{AcpAgent, Host, HostConfig, Project, Thread, tunnel};
 
 /// The file that tells clients where the service listens and which token it accepts.
 pub const CONNECTION_FILE: &str = "connection.json";
@@ -44,6 +44,13 @@ const HANDSHAKE: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The refusal of a call or stream that the caller's kind does not make (ADR-0299).
 const REFUSED_CALL: &str = "This client may not make that call.";
+
+/// The refusal of a link while T3 refuses agents from other hosts here (ADR-0300).
+const LINKS_OFF: &str =
+    "Agents from other hosts are off here. Turn them on first: meta host agents on.";
+
+/// How often linked hosts are checked for links that are due (ADR-0288).
+const RELINK_EVERY: std::time::Duration = std::time::Duration::from_secs(3600);
 
 /// Meta-Harness's data folder: `META_HARNESS_HOME`, which must be absolute, else `.meta-harness`
 /// in the home folder, as T3 Code keeps `~/.t3`.
@@ -78,6 +85,7 @@ pub struct Service {
     host: Arc<Host>,
     shared: Arc<Shared>,
     accept: JoinHandle<()>,
+    relink: JoinHandle<()>,
     stopping: tokio::sync::watch::Sender<bool>,
     connection_file: PathBuf,
 }
@@ -101,6 +109,8 @@ struct Shared {
     t3_home: PathBuf,
     /// The remote listener while remote access is on.
     remote: std::sync::Mutex<Option<remote::Listening>>,
+    /// The hosts this one links to and their tunnels.
+    links: Links,
 }
 
 impl Service {
@@ -130,6 +140,7 @@ impl Service {
             eprintln!("meta: {error}");
         }
         let t3_home = config.home.join("t3");
+        let (links_t3, links_home) = (config.t3.clone(), t3_home.clone());
         let host = Arc::new(
             Host::start(HostConfig {
                 binary: config.t3.clone(),
@@ -139,6 +150,7 @@ impl Service {
             .await?,
         );
         let name = host.environment_name().await?.to_lowercase();
+        let links = Links::new(name.clone(), links_t3, links_home);
         let claude_dir = std::env::var("CLAUDE_CONFIG_DIR").ok();
         let instances = provider_instances(
             &host.provider_instances().await?,
@@ -171,6 +183,7 @@ impl Service {
             t3: config.t3,
             t3_home,
             remote: std::sync::Mutex::new(None),
+            links,
         });
         // Remote access stays on across restarts (ADR-0299); a port it cannot take is reported.
         let remembered = hosts::remote_port(&shared.store.db())?;
@@ -179,13 +192,16 @@ impl Service {
         {
             eprintln!("meta: remote access is off: {error}");
         }
+        shared.links.start_tunnels(&shared.store).await?;
         let accept = tokio::spawn(accept(listener, shared.clone(), Listener::Local));
+        let relink = tokio::spawn(relink(shared.clone()));
         Ok(Self {
             url,
             token,
             host,
             shared,
             accept,
+            relink,
             stopping,
             connection_file,
         })
@@ -204,6 +220,8 @@ impl Service {
 impl Drop for Service {
     fn drop(&mut self) {
         self.accept.abort();
+        self.relink.abort();
+        self.shared.links.stop();
         // The remote listener's tasks hold the shared state, so they end with it.
         drop(
             self.shared
@@ -305,6 +323,8 @@ impl Caller {
 enum Admission {
     /// Calls and streams, as this caller.
     Session(Caller),
+    /// A host's tunnel to its T3 server (ADR-0288).
+    Tunnel,
     /// A new client, which receives its token once before the connection closes.
     Paired(String),
 }
@@ -372,7 +392,13 @@ fn admit(
                     .map_err(|error| refuse(StatusCode::INTERNAL_SERVER_ERROR, error))?,
                 None => None,
             };
+            let tunnel = header(request, api::TUNNEL_HEADER).is_some();
             match kind {
+                Some(Kind::Device) if tunnel => Err(refuse(
+                    StatusCode::FORBIDDEN,
+                    "Only another host may tunnel to this computer's T3 Code.",
+                )),
+                Some(Kind::Host) if tunnel => Ok(Admission::Tunnel),
                 Some(Kind::Device) => Ok(Admission::Session(Caller::Device)),
                 Some(Kind::Host) => Ok(Admission::Session(Caller::Host)),
                 None => Err(refuse(
@@ -381,6 +407,14 @@ fn admit(
                 )),
             }
         }
+    }
+}
+
+/// Makes the links that are due, now and every hour, until the service stops (ADR-0288).
+async fn relink(shared: Arc<Shared>) {
+    loop {
+        shared.links.relink_due(&shared.store).await;
+        tokio::time::sleep(RELINK_EVERY).await;
     }
 }
 
@@ -422,6 +456,12 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream, listener: Listener) {
     };
     let caller = match admission {
         Some(Admission::Session(caller)) => caller,
+        Some(Admission::Tunnel) => {
+            if let Ok(t3) = TcpStream::connect(shared.host.t3_address()).await {
+                tunnel::relay(t3, socket).await;
+            }
+            return;
+        }
         Some(Admission::Paired(token)) => {
             let answer = json!({"token": token, "name": shared.name}).to_string();
             let _ = socket.send(Message::Text(answer.into())).await;
@@ -613,12 +653,31 @@ impl Session {
             Call::Config(call) => self.config_call(call),
             Call::Remote(call) => remote::call(&self.shared, call).await,
             Call::Invite(kind) => to(hosts::invite(&self.shared.store.db(), kind, now_ms())?),
-            Call::Hosts(HostsCall::T3Pairing) => {
-                to(pairing_code(&self.shared.t3, &self.shared.t3_home).await?)
+            Call::Hosts(call) => self.hosts_call(call).await,
+        }
+    }
+
+    async fn hosts_call(&self, call: HostsCall) -> Result<Value, String> {
+        let shared = &self.shared;
+        match call {
+            HostsCall::T3Pairing => to(pairing_code(&shared.t3, &shared.t3_home).await?),
+            HostsCall::Revoke(name) => to(hosts::revoke(&shared.store.db(), &name)?),
+            HostsCall::Add {
+                address,
+                code,
+                access,
+            } => {
+                if !shared.host.linked_environments().await? {
+                    return Err(LINKS_OFF.to_owned());
+                }
+                to(shared
+                    .links
+                    .add(&shared.store, &address, &code, access)
+                    .await?)
             }
-            Call::Hosts(HostsCall::Revoke(name)) => {
-                to(hosts::revoke(&self.shared.store.db(), &name)?)
-            }
+            HostsCall::List => to(shared.links.list(&shared.store).await?),
+            HostsCall::Remove(name) => to(shared.links.remove(&shared.store, &name).await?),
+            HostsCall::Agents(on) => to(shared.host.set_linked_environments(on).await?),
         }
     }
 

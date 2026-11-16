@@ -60,3 +60,66 @@ pub(crate) async fn pairing_code(binary: &Path, home: &Path) -> Result<String, S
         .and_then(|value| value["credential"].as_str().map(str::to_owned))
         .ok_or_else(|| "T3 issued no pairing code.".to_owned())
 }
+
+/// A link that T3 keeps, as its command line lists it.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Linked {
+    /// The linked environment's id, which unlinking names.
+    pub(crate) environment_id: String,
+    /// The addresses the link was made at.
+    pub(crate) urls: Vec<String>,
+    /// `reachable`, `unreachable` or `expired`, as T3 found it now.
+    pub(crate) status: String,
+}
+
+/// The environments linked in T3's data folder `home`.
+pub(crate) async fn links(binary: &Path, home: &Path) -> Result<Vec<Linked>, String> {
+    let text = run(
+        binary,
+        home,
+        "list the linked environments",
+        &["environment", "list", "--json"],
+    )
+    .await?;
+    serde_json::from_str(&text).map_err(|e| format!("T3 listed its links unexpectedly: {e}"))
+}
+
+/// Links T3 in `home` to the environment at `url`, with the pairing code `code` the peer issued
+/// (ADR-0288). The link's agents have `access`, a T3 access level.
+pub(crate) async fn link(
+    binary: &Path,
+    home: &Path,
+    url: &str,
+    code: &str,
+    access: &str,
+) -> Result<(), String> {
+    run(
+        binary,
+        home,
+        "link the environment",
+        &[
+            "environment",
+            "link",
+            url,
+            "--pairing-code",
+            code,
+            "--access",
+            access,
+        ],
+    )
+    .await
+    .map(|_| ())
+}
+
+/// Forgets the linked environment `environment_id` in T3's data folder `home`.
+pub(crate) async fn unlink(binary: &Path, home: &Path, environment_id: &str) -> Result<(), String> {
+    run(
+        binary,
+        home,
+        "unlink the environment",
+        &["environment", "unlink", environment_id],
+    )
+    .await
+    .map(|_| ())
+}

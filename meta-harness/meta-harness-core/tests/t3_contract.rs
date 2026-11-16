@@ -9,12 +9,12 @@ use std::time::Duration;
 
 use futures_util::FutureExt;
 use meta_harness_core::{
+    Access, CONNECTION_FILE, Change, Kind, Service, ServiceConfig, remote, t3_version,
+};
+use meta_harness_core::{
     AcpAgent, AgentEvent, GitAction, GitActionRequest, GitProgress, Group, Host, HostConfig,
     LineCount, ModelChoice, Permissions, Relation, Request, Snapshot, StartThread, Thread,
     ThreadEvent, TurnStatus, Workspace,
-};
-use meta_harness_core::{
-    CONNECTION_FILE, Change, Kind, Service, ServiceConfig, remote, t3_version,
 };
 
 const AGENT: &str = "scripted";
@@ -983,6 +983,7 @@ async fn a_device_pairs_once_and_calls_the_api_remotely_while_a_host_only_asks_f
         "remote access is set here only"
     );
     assert!(device.invite(Kind::Device).await.is_err());
+    assert!(!may_tunnel(&url, &token).await, "a device is no tunnel");
     local.revoke_client("phone").await.unwrap();
     assert!(
         remote::Host::connect_to(&url, &token, "phone")
@@ -1036,4 +1037,149 @@ async fn remote_access_that_is_on_stays_on_across_a_restart() {
             .await
             .is_ok()
     );
+}
+
+/// T3's own list of the environments linked in `home`.
+fn t3_environments(home: &Path) -> Vec<serde_json::Value> {
+    let output = Command::new(t3())
+        .args(["environment", "list", "--json"])
+        .env("T3CODE_HOME", home.join("t3"))
+        .env("T3CODE_TELEMETRY_ENABLED", "false")
+        .output()
+        .unwrap();
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+/// The id T3 gave the environment in `home`.
+fn environment_id(home: &Path) -> String {
+    std::fs::read_to_string(home.join("t3/userdata/environment-id"))
+        .unwrap()
+        .trim()
+        .to_owned()
+}
+
+/// Whether T3's settings file in `home` turns linked environments on. T3 leaves out a setting at
+/// its default, which is off.
+fn linked_environments_setting(home: &Path) -> bool {
+    let text = std::fs::read_to_string(home.join("t3/userdata/settings.json")).unwrap();
+    serde_json::from_str::<serde_json::Value>(&text).unwrap()["linkedEnvironmentsEnabled"]
+        .as_bool()
+        .unwrap_or(false)
+}
+
+/// The tunnel port and link time that Meta-Harness keeps for the host `name` in `home`.
+fn peer_row(home: &Path, name: &str) -> (u16, Option<i64>) {
+    rusqlite::Connection::open(home.join("meta-harness.sqlite"))
+        .unwrap()
+        .query_row(
+            "SELECT tunnel_port, linked_ms FROM peer WHERE name = ?1",
+            [name],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_links_another_hosts_t3_through_a_tunnel_and_removing_it_unlinks_it() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
+    let (_a, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let (port_a, port_b) = (free_port(), free_port());
+    a.remote_on(port_a).await.unwrap();
+    b.remote_on(port_b).await.unwrap();
+    let address = format!("ws://127.0.0.1:{port_b}");
+    let waiting = b.invite(Kind::Host).await.unwrap();
+    let refused = a
+        .host_add(&address, &waiting, Access::Auto)
+        .await
+        .unwrap_err();
+    assert!(refused.contains("meta host agents on"), "{refused}");
+    a.host_agents(true).await.unwrap();
+    b.host_agents(true).await.unwrap();
+
+    let code = b.invite(Kind::Host).await.unwrap();
+    let name = a.host_add(&address, &code, Access::Auto).await.unwrap();
+    assert_eq!(name, b.environment_name().await.unwrap().to_lowercase());
+    let listed = a.hosts().await.unwrap();
+    assert_eq!(listed.peers.len(), 1);
+    assert!(listed.peers[0].reachable);
+    assert_eq!(listed.peers[0].access, Access::Auto);
+    // T3 itself lists the link to B's environment, which answers.
+    let linked = t3_environments(&home_a);
+    assert_eq!(linked.len(), 1);
+    assert_eq!(linked[0]["environmentId"], environment_id(&home_b));
+    assert_eq!(linked[0]["status"], "reachable");
+
+    let (tunnel, _) = peer_row(&home_a, &name);
+    a.host_remove(&name).await.unwrap();
+    assert!(t3_environments(&home_a).is_empty(), "T3 forgets the link");
+    assert!(a.hosts().await.unwrap().peers.is_empty());
+    assert!(std::net::TcpStream::connect(("127.0.0.1", tunnel)).is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_switch_turns_t3s_linked_environments_on_and_off() {
+    let (_dir, _repo, home) = fixture();
+    let (_service, local) = start_service(&home).await;
+    local.host_agents(true).await.unwrap();
+    assert!(linked_environments_setting(&home));
+    local.host_agents(false).await.unwrap();
+    assert!(!linked_environments_setting(&home));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_link_older_than_25_days_is_made_again_when_the_service_starts() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
+    let (a_service, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let port_b = free_port();
+    b.remote_on(port_b).await.unwrap();
+    a.host_agents(true).await.unwrap();
+    b.host_agents(true).await.unwrap();
+    let code = b.invite(Kind::Host).await.unwrap();
+    let name = a
+        .host_add(&format!("ws://127.0.0.1:{port_b}"), &code, Access::ReadOnly)
+        .await
+        .unwrap();
+    drop(a);
+    a_service.stop().await;
+
+    // The link was made 26 days ago; the service makes it again as it starts.
+    let aged = peer_row(&home_a, &name).1.unwrap() - 26 * 24 * 3_600_000;
+    rusqlite::Connection::open(home_a.join("meta-harness.sqlite"))
+        .unwrap()
+        .execute("UPDATE peer SET linked_ms = ?1", [aged])
+        .unwrap();
+    let (_service, a) = start_service(&home_a).await;
+    let relinked = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let linked = a.hosts().await.unwrap().peers[0].linked_ms.unwrap_or(0);
+            if linked > aged as u64 {
+                return linked;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await;
+    assert!(relinked.is_ok(), "linked again within a minute");
+    assert_eq!(t3_environments(&home_a)[0]["status"], "reachable");
+}
+
+/// Whether a connection with `token` to the remote listener at `url` may tunnel: it must name the
+/// tunnel header, which only a host may use.
+async fn may_tunnel(url: &str, token: &str) -> bool {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    let mut request = url.into_client_request().unwrap();
+    request
+        .headers_mut()
+        .insert("authorization", format!("Bearer {token}").parse().unwrap());
+    request
+        .headers_mut()
+        .insert("meta-harness-api", "1".parse().unwrap());
+    request
+        .headers_mut()
+        .insert("meta-harness-tunnel", "t3".parse().unwrap());
+    tokio_tungstenite::connect_async(request).await.is_ok()
 }

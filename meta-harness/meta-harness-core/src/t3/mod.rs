@@ -8,7 +8,7 @@ mod server;
 
 pub use live::Watch;
 
-pub(crate) use cli::pairing_code;
+pub(crate) use cli::{link, links, pairing_code, unlink};
 pub(crate) use client::Client;
 pub(crate) use projection::{Change, Projection, prompt_of};
 pub(crate) use server::Server;

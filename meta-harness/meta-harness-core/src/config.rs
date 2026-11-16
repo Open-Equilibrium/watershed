@@ -597,7 +597,7 @@ pub(crate) fn sql(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
-fn count(value: i64) -> u64 {
+pub(crate) fn count(value: i64) -> u64 {
     u64::try_from(value).unwrap_or_default()
 }
 
