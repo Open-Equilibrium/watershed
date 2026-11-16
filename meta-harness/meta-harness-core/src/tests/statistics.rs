@@ -1,515 +1,263 @@
-use serde_json::Value;
+//! A thread's exact statistics and its context window, from T3's records (ADR-0279, ADR-0293).
 
-use crate::{CostByKind, History, ModelUsage, Statistics, ToolCalls, TurnStatistics, Usage};
+use serde_json::{Value, json};
 
-/// A session with checkpoints: a compaction before the first turn, three turns and a steering
-/// prompt that stays in turn one. Turn one's end checkpoint comes after its last response, so its
-/// unanswered `edit` call was cancelled; turn two's `bash` call was cancelled once turn three
-/// started; turn three's `bash` call is still open. Turn three has no prompt.
-const CHECKPOINTED: &str = r#"{"entries":[
-  {"type":"model_change","id":"m0","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z"},
-  {"type":"compaction","id":"c0","parentId":"m0","timestamp":"2026-11-01T10:00:00.500Z","firstKeptEntryId":"m0","summary":"s","usage":{"input":30,"output":1,"cost":{"total":0}}},
-  {"type":"custom","id":"k1","parentId":"c0","timestamp":"2026-11-01T10:00:01.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T1","phase":"start"}},
-  {"type":"message","id":"u1","parentId":"k1","timestamp":"2026-11-01T10:00:01.100Z","message":{"role":"user","content":"Find why login fails\nin the second test"}},
-  {"type":"custom","id":"t1","parentId":"u1","timestamp":"2026-11-01T10:00:01.200Z","customType":"watershed.timing","data":{"kind":"request","durationMs":2000}},
-  {"type":"message","id":"a1","parentId":"t1","timestamp":"2026-11-01T10:00:03.200Z","message":{"role":"assistant","provider":"anthropic","model":"claude-sonnet-4-5","content":[{"type":"toolCall","id":"c1","name":"read","arguments":{"path":"a.ts"}},{"type":"toolCall","id":"c2","name":"bash","arguments":{"command":"npm test"}}],"usage":{"input":100,"output":10,"cacheRead":900,"cacheWrite":0,"cost":{"total":0.01}}}},
-  {"type":"custom","id":"t2","parentId":"a1","timestamp":"2026-11-01T10:00:03.700Z","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"c1","durationMs":500}},
-  {"type":"custom","id":"t3","parentId":"t2","timestamp":"2026-11-01T10:00:04.200Z","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"c2","durationMs":1500}},
-  {"type":"message","id":"r1","parentId":"t3","timestamp":"2026-11-01T10:00:04.300Z","message":{"role":"toolResult","toolCallId":"c1","toolName":"read","isError":false,"content":[]}},
-  {"type":"message","id":"r2","parentId":"r1","timestamp":"2026-11-01T10:00:04.400Z","message":{"role":"toolResult","toolCallId":"c2","toolName":"bash","isError":true,"content":[]}},
-  {"type":"custom","id":"t4","parentId":"r2","timestamp":"2026-11-01T10:00:04.500Z","customType":"watershed.timing","data":{"kind":"request","durationMs":3000}},
-  {"type":"message","id":"a2","parentId":"t4","timestamp":"2026-11-01T10:00:07.500Z","message":{"role":"assistant","provider":"anthropic","model":"claude-haiku-4-5","content":[{"type":"toolCall","id":"c3","name":"edit","arguments":{}}],"usage":{"input":10,"output":5,"cost":{"total":0}}}},
-  {"type":"custom","id":"k2","parentId":"a2","timestamp":"2026-11-01T10:00:08.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T1","phase":"end","files":0,"added":0,"removed":0}},
-  {"type":"custom","id":"k3","parentId":"k2","timestamp":"2026-11-01T10:00:09.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T2","phase":"start"}},
-  {"type":"message","id":"u2","parentId":"k3","timestamp":"2026-11-01T10:00:09.100Z","message":{"role":"user","content":"Explain the retry policy"}},
-  {"type":"message","id":"a3","parentId":"u2","timestamp":"2026-11-01T10:00:10.000Z","message":{"role":"assistant","provider":"anthropic","model":"claude-sonnet-4-5","content":[{"type":"toolCall","id":"c4","name":"bash","arguments":{}}],"usage":{"input":50,"output":5,"cost":{"total":0.005}}}},
-  {"type":"custom","id":"k4","parentId":"a3","timestamp":"2026-11-01T10:00:11.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T3","phase":"start"}},
-  {"type":"message","id":"a4","parentId":"k4","timestamp":"2026-11-01T10:00:11.500Z","message":{"role":"assistant","provider":"anthropic","model":"claude-sonnet-4-5","content":[{"type":"toolCall","id":"c5","name":"bash","arguments":{}}],"usage":{"input":20,"output":2,"cost":{"total":0}}}}
-],"leafId":"a4"}"#;
+use crate::statistics::{context, statistics};
+use crate::t3::Projection;
+use crate::{Context, ModelUsage, ToolCalls, TurnStatistics, Usage};
 
-/// A session without checkpoints: each prompt starts a turn. Only turn one has timing entries.
-const UNCHECKPOINTED: &str = r#"{"entries":[
-  {"type":"message","id":"u1","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z","message":{"role":"user","content":"Fix it"}},
-  {"type":"custom","id":"t1","parentId":"u1","timestamp":"2026-11-01T10:00:00.100Z","customType":"watershed.timing","data":{"kind":"request","durationMs":2000}},
-  {"type":"message","id":"a1","parentId":"t1","timestamp":"2026-11-01T10:00:02.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[{"type":"toolCall","id":"c1","name":"write","arguments":{}}],"usage":{"input":5,"output":1,"cost":{"total":0.001}}}},
-  {"type":"message","id":"r1","parentId":"a1","timestamp":"2026-11-01T10:00:03.000Z","message":{"role":"toolResult","toolCallId":"c1","toolName":"write","isError":true,"content":[]}},
-  {"type":"message","id":"u2","parentId":"r1","timestamp":"2026-11-01T10:00:04.000Z","message":{"role":"user","content":"Thanks"}},
-  {"type":"message","id":"a2","parentId":"u2","timestamp":"2026-11-01T10:00:05.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[{"type":"toolCall","id":"c2","name":"grep","arguments":{}}],"usage":{"input":5,"output":1,"cost":{"total":0.001}}}}
-],"leafId":"a2"}"#;
-
-fn counted(fixture: &str) -> Statistics {
-    let data: Value = serde_json::from_str(fixture).expect("JSON");
-    History::from_entries(&data).statistics()
+/// T3's records as `statistics` reads them: the given collections, the rest empty.
+fn projection(records: Value) -> Projection {
+    let mut snapshot = json!({"thread": {}, "runs": [], "attempts": [], "providerTurns": [],
+        "turnItems": [], "messages": []});
+    for (key, value) in records.as_object().into_iter().flatten() {
+        snapshot[key] = value.clone();
+    }
+    Projection::from_snapshot(&snapshot)
 }
 
-fn model(model: &str, usage: Usage, responses: u32, unpriced: u32) -> ModelUsage {
-    ModelUsage {
-        model: model.to_owned(),
-        usage,
-        cost_by_kind: CostByKind::default(),
-        responses,
-        unpriced,
+fn run(id: &str, ordinal: u64, status: &str, completed: Value) -> Value {
+    json!({"id": id, "ordinal": ordinal, "status": status, "userMessageId": format!("m-{id}"),
+        "startedAt": "2026-11-15T10:00:00.000Z", "completedAt": completed})
+}
+
+fn turn(id: &str, attempt: &str, model: Value, usage: Value) -> Value {
+    json!({"id": id, "runAttemptId": attempt, "model": model, "status": "completed",
+        "turnTokenUsage": usage})
+}
+
+#[test]
+fn statistics_count_tokens_tools_and_turns_as_t3_records_them() {
+    let projection = projection(json!({
+        "runs": [
+            run("r1", 1, "completed", json!("2026-11-15T10:00:10.000Z")),
+            run("r2", 2, "running", Value::Null),
+            run("r3", 3, "rolled_back", json!("2026-11-15T10:02:00.000Z")),
+        ],
+        "attempts": [{"id": "a1", "runId": "r1"}, {"id": "a2", "runId": "r2"}, {"id": "a3", "runId": "r3"}],
+        "messages": [{"id": "m-r1", "text": "build the thing\nin detail"}, {"id": "m-r2", "text": "second"}],
+        "providerTurns": [
+            turn("t1", "a1", json!("claude/opus"), json!({"usageStatus": "complete", "inputTokens": 100,
+                "cachedInputTokens": 40, "cacheCreationTokens": 10, "outputTokens": 20, "reasoningTokens": 5})),
+            turn("t2", "a1", json!("claude/opus"), json!({"usageStatus": "complete", "inputTokens": 50,
+                "outputTokens": 5})),
+            // Counted by neither: partial usage, no input count, no attempt, a rolled-back run.
+            turn("t3", "a1", json!("claude/opus"), json!({"usageStatus": "partial", "inputTokens": 999,
+                "outputTokens": 999})),
+            turn("t4", "a1", json!("claude/opus"), json!({"usageStatus": "complete", "outputTokens": 9})),
+            turn("t5", "gone", json!("claude/opus"), json!({"usageStatus": "complete", "inputTokens": 9,
+                "outputTokens": 9})),
+            turn("t6", "a3", json!("claude/opus"), json!({"usageStatus": "complete", "inputTokens": 1000,
+                "outputTokens": 1000})),
+            // Turns of r2, the smaller model listed first: each turn lists its models largest first.
+            turn("t7", "a2", Value::Null, json!({"usageStatus": "complete", "inputTokens": 2, "outputTokens": 1})),
+            turn("t8", "a2", json!("codex/gpt"), json!({"usageStatus": "complete", "inputTokens": 7,
+                "outputTokens": 3})),
+        ],
+        "turnItems": [
+            {"id": "u1", "runId": "r1", "type": "user_message", "text": "build the thing"},
+            {"id": "c1", "runId": "r1", "type": "command_execution", "status": "completed", "exitCode": 0,
+             "input": "ls", "startedAt": "2026-11-15T10:00:01.000Z", "completedAt": "2026-11-15T10:00:02.000Z"},
+            {"id": "c2", "runId": "r1", "type": "command_execution", "status": "completed", "exitCode": 1,
+             "input": "make", "startedAt": "2026-11-15T10:00:02.000Z", "completedAt": "2026-11-15T10:00:05.000Z"},
+            {"id": "c3", "runId": "r1", "type": "command_execution", "status": "interrupted", "input": "sleep 9"},
+            {"id": "c4", "runId": "r2", "type": "command_execution", "status": "running", "input": "npm test"},
+            {"id": "f1", "runId": "r1", "type": "file_change", "status": "failed", "fileName": "a.rs"},
+            {"id": "f2", "runId": "r1", "type": "file_change", "status": "completed", "fileName": "b.rs"},
+            {"id": "d1", "runId": "r1", "type": "dynamic_tool", "title": "Read", "status": "completed"},
+            {"id": "d2", "runId": "r3", "type": "dynamic_tool", "title": "Read", "status": "completed"},
+        ],
+    }));
+
+    let statistics = statistics(&projection);
+    let opus = ModelUsage {
+        model: "claude/opus".to_owned(),
+        usage: Usage {
+            input: 100,
+            output: 25,
+            cache_read: 40,
+            cache_write: 10,
+            reasoning: 5,
+        },
+        responses: 2,
+    };
+    let codex = ModelUsage {
+        model: "codex/gpt".to_owned(),
+        usage: Usage {
+            input: 7,
+            output: 3,
+            ..Usage::default()
+        },
+        responses: 1,
+    };
+    let unnamed = ModelUsage {
+        model: String::new(),
+        usage: Usage {
+            input: 2,
+            output: 1,
+            ..Usage::default()
+        },
+        responses: 1,
+    };
+    assert_eq!(
+        statistics.models,
+        vec![opus.clone(), codex.clone(), unnamed.clone()]
+    );
+    let tool = |name: &str, succeeded, failed, cancelled, open, duration_ms| ToolCalls {
+        name: name.to_owned(),
+        succeeded,
+        failed,
+        cancelled,
+        open,
+        duration_ms,
+    };
+    assert_eq!(
+        statistics.tools,
+        vec![
+            tool("bash", 1, 1, 1, 1, Some(4000)),
+            tool("edit", 1, 1, 0, 0, None),
+            tool("Read", 1, 0, 0, 0, None),
+        ]
+    );
+    assert_eq!(
+        statistics.turns,
+        vec![
+            TurnStatistics {
+                entry: "1".to_owned(),
+                prompt: "build the thing".to_owned(),
+                started_ms: Some(1_794_736_800_000),
+                ended_ms: Some(1_794_736_810_000),
+                models: vec![opus],
+                tool_ms: Some(4000),
+                failed: 2,
+            },
+            TurnStatistics {
+                entry: "2".to_owned(),
+                prompt: "second".to_owned(),
+                started_ms: Some(1_794_736_800_000),
+                ended_ms: None,
+                models: vec![codex, unnamed],
+                tool_ms: None,
+                failed: 0,
+            },
+        ]
+    );
+    assert_eq!(statistics.started_ms, Some(1_794_736_800_000));
+    assert_eq!(statistics.ended_ms, Some(1_794_736_800_000));
+}
+
+#[test]
+fn a_turns_tool_time_counts_the_longest_call_of_each_response() {
+    let timed = projection(json!({
+        "runs": [run("r1", 1, "completed", json!("2026-11-15T10:00:10.000Z"))],
+        "turnItems": [
+            // Two calls of one response ran in parallel: the response counts the longer one.
+            {"id": "p1", "runId": "r1", "providerTurnId": "t1", "type": "command_execution", "status": "completed",
+             "exitCode": 0, "input": "a", "startedAt": "2026-11-15T10:00:01.000Z", "completedAt": "2026-11-15T10:00:02.000Z"},
+            {"id": "p2", "runId": "r1", "providerTurnId": "t1", "type": "command_execution", "status": "completed",
+             "exitCode": 0, "input": "b", "startedAt": "2026-11-15T10:00:01.000Z", "completedAt": "2026-11-15T10:00:04.000Z"},
+            // A later response's call adds its own time.
+            {"id": "p3", "runId": "r1", "providerTurnId": "t2", "type": "command_execution", "status": "completed",
+             "exitCode": 0, "input": "c", "startedAt": "2026-11-15T10:00:05.000Z", "completedAt": "2026-11-15T10:00:07.000Z"},
+        ],
+    }));
+    let statistics = statistics(&timed);
+    assert_eq!(statistics.turns[0].tool_ms, Some(5000));
+    // Each tool's own time is the sum of its calls.
+    assert_eq!(statistics.tools[0].duration_ms, Some(6000));
+
+    // A turn without tool calls took no tool time, which is known, not missing.
+    let chat_only = projection(json!({
+        "runs": [run("r1", 1, "completed", json!("2026-11-15T10:00:10.000Z"))],
+        "turnItems": [],
+    }));
+    assert_eq!(
+        crate::statistics::statistics(&chat_only).turns[0].tool_ms,
+        Some(0)
+    );
+}
+
+#[test]
+fn an_unfinished_call_is_open_only_while_its_turn_is_the_last_and_still_runs() {
+    // (the last turn's status, the call's status, whether the call is open)
+    let cases = [
+        ("running", "running", true),
+        ("waiting", "pending", true),
+        ("running", "interrupted", false),
+        ("completed", "running", false),
+        ("interrupted", "running", false),
+        ("failed", "pending", false),
+    ];
+    for (turn_status, call_status, open) in cases {
+        let projection = projection(json!({
+            "runs": [
+                run("r1", 1, "completed", json!("2026-11-15T10:00:10.000Z")),
+                run("r2", 2, turn_status, Value::Null),
+            ],
+            // The call in the earlier turn never got a result either: its turn was followed by another.
+            "turnItems": [
+                {"id": "c1", "runId": "r1", "type": "command_execution", "status": "running", "input": "a"},
+                {"id": "c2", "runId": "r2", "type": "command_execution", "status": call_status, "input": "b"},
+            ],
+        }));
+        let bash = &statistics(&projection).tools[0];
+        assert_eq!(
+            (bash.cancelled, bash.open),
+            if open { (1, 1) } else { (2, 0) },
+            "last turn {turn_status}, call {call_status}"
+        );
     }
 }
 
 #[test]
-fn turns_start_at_checkpoints_and_split_figures_by_model_tool_and_time() {
-    let statistics = counted(CHECKPOINTED);
-    let sonnet = "anthropic/claude-sonnet-4-5";
-    let haiku = "anthropic/claude-haiku-4-5";
+fn the_context_window_is_the_latest_one_t3_reported() {
+    let window = |turns: Value| context(&projection(json!({"providerTurns": turns})));
     assert_eq!(
-        (statistics.started_ms, statistics.ended_ms),
-        (Some(1_793_527_200_000), Some(1_793_527_211_500)),
-        "from the first stored entry to the last"
+        window(json!([
+            {"tokenUsage": {"usedTokens": 10, "maxTokens": 100, "autoCompactThreshold": 80}},
+            {"tokenUsage": {"usedTokens": 20}},
+        ])),
+        Some(Context {
+            tokens: Some(10),
+            window: 100,
+            compacts_at: Some(80)
+        })
     );
+    // After a compaction T3 reports the window without the tokens it holds.
     assert_eq!(
-        statistics.models,
-        [
-            model(
-                sonnet,
-                Usage {
-                    input: 170,
-                    output: 17,
-                    cache_read: 900,
-                    cost_micro_usd: 15_000,
-                    ..Usage::default()
-                },
-                3,
-                1,
-            ),
-            // The compaction before the first turn has no model and is no response. It costs
-            // nothing, so its tokens rank it above the free haiku usage.
-            model(
-                "",
-                Usage {
-                    input: 30,
-                    output: 1,
-                    ..Usage::default()
-                },
-                0,
-                0,
-            ),
-            model(
-                haiku,
-                Usage {
-                    input: 10,
-                    output: 5,
-                    ..Usage::default()
-                },
-                1,
-                1,
-            ),
+        window(json!([{"tokenUsage": {"maxTokens": 200}}])),
+        Some(Context {
+            tokens: None,
+            window: 200,
+            compacts_at: None
+        })
+    );
+    assert_eq!(window(json!([{"tokenUsage": {"usedTokens": 5}}])), None);
+}
+
+#[test]
+fn a_queued_turn_behind_the_running_one_leaves_its_unfinished_calls_open() {
+    let queued = projection(json!({
+        "runs": [
+            run("r1", 1, "running", Value::Null),
+            run("r2", 2, "queued", Value::Null),
         ],
-        "the whole session, the preamble included, sorted by cost and then tokens"
-    );
-    assert_eq!(
-        statistics.turns,
-        [
-            TurnStatistics {
-                entry: "u1".to_owned(),
-                prompt: "Find why login fails".to_owned(),
-                started_ms: Some(1_793_527_201_000),
-                ended_ms: Some(1_793_527_208_000),
-                models: vec![
-                    model(
-                        sonnet,
-                        Usage {
-                            input: 100,
-                            output: 10,
-                            cache_read: 900,
-                            cost_micro_usd: 10_000,
-                            ..Usage::default()
-                        },
-                        1,
-                        0,
-                    ),
-                    model(
-                        haiku,
-                        Usage {
-                            input: 10,
-                            output: 5,
-                            ..Usage::default()
-                        },
-                        1,
-                        1,
-                    ),
-                ],
-                // Two requests; the tools of the first ran in parallel, so the longer one counts.
-                model_ms: Some(5_000),
-                tool_ms: Some(1_500),
-                failed: 1,
-            },
-            TurnStatistics {
-                entry: "u2".to_owned(),
-                prompt: "Explain the retry policy".to_owned(),
-                started_ms: Some(1_793_527_209_000),
-                ended_ms: Some(1_793_527_210_000),
-                models: vec![model(
-                    sonnet,
-                    Usage {
-                        input: 50,
-                        output: 5,
-                        cost_micro_usd: 5_000,
-                        ..Usage::default()
-                    },
-                    1,
-                    0,
-                )],
-                // No timing entry in this turn, so no time is shown rather than a guess.
-                model_ms: None,
-                tool_ms: None,
-                failed: 0,
-            },
-            TurnStatistics {
-                // Without a prompt, the turn is named by its start checkpoint.
-                entry: "k4".to_owned(),
-                prompt: String::new(),
-                started_ms: Some(1_793_527_211_000),
-                ended_ms: Some(1_793_527_211_500),
-                models: vec![model(
-                    sonnet,
-                    Usage {
-                        input: 20,
-                        output: 2,
-                        ..Usage::default()
-                    },
-                    1,
-                    1,
-                )],
-                model_ms: None,
-                tool_ms: None,
-                failed: 0,
-            },
+        "turnItems": [
+            {"id": "c1", "runId": "r1", "type": "command_execution", "status": "running", "input": "a"},
         ],
-        "a turn starts at each start checkpoint; the entries before the first one count only to the session"
-    );
-    assert_eq!(
-        statistics.tools,
-        [
-            ToolCalls {
-                name: "bash".to_owned(),
-                succeeded: 0,
-                failed: 1,
-                cancelled: 1,
-                open: 1,
-                duration_ms: Some(1_500),
-            },
-            ToolCalls {
-                name: "edit".to_owned(),
-                succeeded: 0,
-                failed: 0,
-                cancelled: 1,
-                open: 0,
-                duration_ms: None,
-            },
-            ToolCalls {
-                name: "read".to_owned(),
-                succeeded: 1,
-                failed: 0,
-                cancelled: 0,
-                open: 0,
-                duration_ms: Some(500),
-            },
+    }));
+    let tools = statistics(&queued).tools;
+    assert_eq!((tools[0].open, tools[0].cancelled), (1, 0));
+
+    // A queued prompt the person removed never started: T3 keeps it as cancelled.
+    let mut removed = run("r2", 2, "cancelled", Value::Null);
+    removed["startedAt"] = Value::Null;
+    let removed = projection(json!({
+        "runs": [run("r1", 1, "running", Value::Null), removed],
+        "turnItems": [
+            {"id": "c1", "runId": "r1", "type": "command_execution", "status": "running", "input": "a"},
         ],
-        "a call without a result is cancelled once its turn ended or a later turn started, and open otherwise; ties sort by name"
-    );
-}
-
-#[test]
-fn without_checkpoints_each_prompt_starts_a_turn_and_missing_timing_stays_none() {
-    let statistics = counted(UNCHECKPOINTED);
-    let faux = "faux/faux-1";
-    assert_eq!(
-        statistics.turns,
-        [
-            TurnStatistics {
-                entry: "u1".to_owned(),
-                prompt: "Fix it".to_owned(),
-                started_ms: Some(1_793_527_200_000),
-                ended_ms: Some(1_793_527_203_000),
-                models: vec![model(
-                    faux,
-                    Usage {
-                        input: 5,
-                        output: 1,
-                        cost_micro_usd: 1_000,
-                        ..Usage::default()
-                    },
-                    1,
-                    0,
-                )],
-                // Its request was timed, and its one tool was not: the tools took no time.
-                model_ms: Some(2_000),
-                tool_ms: Some(0),
-                failed: 1,
-            },
-            TurnStatistics {
-                entry: "u2".to_owned(),
-                prompt: "Thanks".to_owned(),
-                started_ms: Some(1_793_527_204_000),
-                ended_ms: Some(1_793_527_205_000),
-                models: vec![model(
-                    faux,
-                    Usage {
-                        input: 5,
-                        output: 1,
-                        cost_micro_usd: 1_000,
-                        ..Usage::default()
-                    },
-                    1,
-                    0,
-                )],
-                model_ms: None,
-                tool_ms: None,
-                failed: 0,
-            },
-        ],
-    );
-    assert_eq!(
-        statistics.models,
-        [model(
-            faux,
-            Usage {
-                input: 10,
-                output: 2,
-                cost_micro_usd: 2_000,
-                ..Usage::default()
-            },
-            2,
-            0,
-        )]
-    );
-    assert_eq!(
-        statistics.tools,
-        [
-            // The last turn has no end checkpoint, so its call is still running.
-            ToolCalls {
-                name: "grep".to_owned(),
-                succeeded: 0,
-                failed: 0,
-                cancelled: 0,
-                open: 1,
-                duration_ms: None,
-            },
-            ToolCalls {
-                name: "write".to_owned(),
-                succeeded: 0,
-                failed: 1,
-                cancelled: 0,
-                open: 0,
-                duration_ms: None,
-            },
-        ]
-    );
-}
-
-#[test]
-fn splits_each_model_cost_by_kind_of_tokens() {
-    let statistics = counted(
-        r#"{"entries":[
-          {"type":"message","id":"u1","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z","message":{"role":"user","content":"Hi"}},
-          {"type":"message","id":"a1","parentId":"u1","timestamp":"2026-11-01T10:00:01.000Z","message":{"role":"assistant","provider":"anthropic","model":"claude-sonnet-4-5","content":[],"usage":{"input":100,"output":10,"cacheRead":900,"cacheWrite":5,"cost":{"input":0.0005,"output":0.0003,"cacheRead":0.0002,"cacheWrite":0.00001,"total":0.00101}}}},
-          {"type":"message","id":"a2","parentId":"a1","timestamp":"2026-11-01T10:00:02.000Z","message":{"role":"assistant","provider":"anthropic","model":"claude-sonnet-4-5","content":[],"usage":{"input":50,"output":5,"cost":{"input":0.00025,"output":0.00015,"total":0.0004}}}}
-        ],"leafId":"a2"}"#,
-    );
-    assert_eq!(
-        statistics.models[0].cost_by_kind,
-        CostByKind {
-            input: 750,
-            output: 450,
-            cache_read: 200,
-            cache_write: 10,
-        },
-        "each kind's cost is summed over the model's responses, in micro-dollars"
-    );
-    assert_eq!(
-        statistics.models[0].usage.cost_micro_usd, 1_410,
-        "the kinds add up to the model's cost"
-    );
-}
-
-/// A turn whose end checkpoint comes before a model change, a label, a request and a response with
-/// a failed call, all stored before the next start. Those entries count only in the session's
-/// totals: they do not move the turn's clock, and their time, usage and calls stay out of the turn.
-const AFTER_END: &str = r#"{"entries":[
-  {"type":"custom","id":"k1","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T1","phase":"start"}},
-  {"type":"message","id":"u1","parentId":"k1","timestamp":"2026-11-01T10:00:01.000Z","message":{"role":"user","content":"Fix it"}},
-  {"type":"message","id":"a1","parentId":"u1","timestamp":"2026-11-01T10:00:02.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[],"usage":{"input":10,"output":1,"cost":{"total":0.001}}}},
-  {"type":"custom","id":"k2","parentId":"a1","timestamp":"2026-11-01T10:00:03.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T1","phase":"end","files":0,"added":0,"removed":0}},
-  {"type":"model_change","id":"m1","parentId":"k2","timestamp":"2026-11-01T10:00:30.000Z"},
-  {"type":"custom","id":"t1","parentId":"m1","timestamp":"2026-11-01T10:00:31.000Z","customType":"watershed.timing","data":{"kind":"request","durationMs":5000}},
-  {"type":"message","id":"a2","parentId":"t1","timestamp":"2026-11-01T10:00:40.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[{"type":"toolCall","id":"c1","name":"bash","arguments":{}}],"usage":{"input":20,"output":2,"cost":{"total":0.002}}}},
-  {"type":"message","id":"r1","parentId":"a2","timestamp":"2026-11-01T10:00:41.000Z","message":{"role":"toolResult","toolCallId":"c1","toolName":"bash","isError":true,"content":[]}},
-  {"type":"label","id":"l1","parentId":"r1","timestamp":"2026-11-01T10:00:45.000Z","targetId":"a1","label":"mark"},
-  {"type":"custom","id":"k3","parentId":"l1","timestamp":"2026-11-01T10:01:00.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T2","phase":"start"}},
-  {"type":"message","id":"u2","parentId":"k3","timestamp":"2026-11-01T10:01:01.000Z","message":{"role":"user","content":"Next"}},
-  {"type":"message","id":"a3","parentId":"u2","timestamp":"2026-11-01T10:01:02.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[],"usage":{"input":5,"output":1,"cost":{"total":0.0005}}}},
-  {"type":"custom","id":"k4","parentId":"a3","timestamp":"2026-11-01T10:01:03.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T2","phase":"end","files":0,"added":0,"removed":0}}
-],"leafId":"k4"}"#;
-
-#[test]
-fn a_turn_clock_stops_at_its_end_and_later_entries_count_only_in_the_totals() {
-    let statistics = counted(AFTER_END);
-    let faux = "faux/faux-1";
-    assert_eq!(
-        statistics.turns,
-        [
-            TurnStatistics {
-                entry: "u1".to_owned(),
-                prompt: "Fix it".to_owned(),
-                started_ms: Some(1_793_527_200_000),
-                ended_ms: Some(1_793_527_203_000),
-                models: vec![model(
-                    faux,
-                    Usage {
-                        input: 10,
-                        output: 1,
-                        cost_micro_usd: 1_000,
-                        ..Usage::default()
-                    },
-                    1,
-                    0,
-                )],
-                model_ms: None,
-                tool_ms: None,
-                ..TurnStatistics::default()
-            },
-            TurnStatistics {
-                entry: "u2".to_owned(),
-                prompt: "Next".to_owned(),
-                started_ms: Some(1_793_527_260_000),
-                ended_ms: Some(1_793_527_263_000),
-                models: vec![model(
-                    faux,
-                    Usage {
-                        input: 5,
-                        output: 1,
-                        cost_micro_usd: 500,
-                        ..Usage::default()
-                    },
-                    1,
-                    0,
-                )],
-                model_ms: None,
-                tool_ms: None,
-                ..TurnStatistics::default()
-            },
-        ],
-        "a turn ends at its end checkpoint, and nothing stored before the next start is in it"
-    );
-    assert_eq!(
-        statistics.models,
-        [model(
-            faux,
-            Usage {
-                input: 35,
-                output: 4,
-                cost_micro_usd: 3_500,
-                ..Usage::default()
-            },
-            3,
-            0,
-        )],
-        "the session's totals keep what the entries after the end spent"
-    );
-    assert_eq!(
-        statistics.tools,
-        [ToolCalls {
-            name: "bash".to_owned(),
-            failed: 1,
-            ..ToolCalls::default()
-        }],
-        "and their calls, whose turn is over"
-    );
-}
-
-#[test]
-fn a_response_with_a_recorded_cost_is_priced_however_small_the_cost_rounds() {
-    let statistics = counted(
-        r#"{"entries":[
-          {"type":"message","id":"u1","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z","message":{"role":"user","content":"Hi"}},
-          {"type":"message","id":"a1","parentId":"u1","timestamp":"2026-11-01T10:00:01.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[],"usage":{"input":10,"output":1,"cost":{"total":0.0000004}}}},
-          {"type":"message","id":"a2","parentId":"a1","timestamp":"2026-11-01T10:00:02.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[],"usage":{"input":10,"output":1}}},
-          {"type":"message","id":"a3","parentId":"a2","timestamp":"2026-11-01T10:00:03.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[],"usage":{"input":10,"output":1,"cost":{"total":0}}}}
-        ],"leafId":"a3"}"#,
-    );
-    assert_eq!(
-        statistics.models,
-        [model(
-            "faux/faux-1",
-            Usage {
-                input: 30,
-                output: 3,
-                ..Usage::default()
-            },
-            3,
-            2,
-        )],
-        "a recorded cost above zero is priced, though it rounds to no micro-dollar; no cost or a zero one is not"
-    );
-}
-
-#[test]
-fn a_model_name_shows_hidden_characters_written_out() {
-    let statistics = counted(
-        r#"{"entries":[
-          {"type":"message","id":"u1","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z","message":{"role":"user","content":"Hi"}},
-          {"type":"message","id":"a1","parentId":"u1","timestamp":"2026-11-01T10:00:01.000Z","message":{"role":"assistant","provider":"fa\u202eux","model":"faux-1","content":[],"usage":{"input":1,"output":1,"cost":{"total":0.001}}}}
-        ],"leafId":"a1"}"#,
-    );
-    assert_eq!(statistics.models[0].model, "fa<U+202E>ux/faux-1");
-    assert_eq!(statistics.turns[0].models[0].model, "fa<U+202E>ux/faux-1");
-}
-
-/// The duration a tool's total shows, by tool name.
-fn tool_duration(statistics: &Statistics, name: &str) -> Option<u64> {
-    statistics
-        .tools
-        .iter()
-        .find(|tool| tool.name == name)
-        .and_then(|tool| tool.duration_ms)
-}
-
-#[test]
-fn repeated_call_ids_pair_each_timing_with_the_result_after_it() {
-    let statistics = counted(
-        r#"{"entries":[
-          {"type":"message","id":"u1","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z","message":{"role":"user","content":"Hi"}},
-          {"type":"message","id":"a1","parentId":"u1","timestamp":"2026-11-01T10:00:01.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[{"type":"toolCall","id":"","name":"read","arguments":{}},{"type":"toolCall","id":"","name":"bash","arguments":{}}],"usage":{"input":5,"output":1,"cost":{"total":0.001}}}},
-          {"type":"custom","id":"t1","parentId":"a1","timestamp":"2026-11-01T10:00:01.100Z","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"","durationMs":50}},
-          {"type":"message","id":"r1","parentId":"t1","timestamp":"2026-11-01T10:00:01.200Z","message":{"role":"toolResult","toolCallId":"","toolName":"read","isError":false,"content":[]}},
-          {"type":"custom","id":"t2","parentId":"r1","timestamp":"2026-11-01T10:00:01.300Z","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"","durationMs":2000}},
-          {"type":"message","id":"r2","parentId":"t2","timestamp":"2026-11-01T10:00:01.400Z","message":{"role":"toolResult","toolCallId":"","toolName":"bash","isError":false,"content":[]}}
-        ],"leafId":"r2"}"#,
-    );
-    assert_eq!(
-        (
-            tool_duration(&statistics, "read"),
-            tool_duration(&statistics, "bash"),
-        ),
-        (Some(50), Some(2000)),
-        "a result takes the earliest timing waiting for its id, as the transcript does"
-    );
-}
-
-#[test]
-fn repeated_call_ids_with_two_timings_before_their_results_get_no_duration() {
-    let statistics = counted(
-        r#"{"entries":[
-          {"type":"message","id":"u1","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z","message":{"role":"user","content":"Hi"}},
-          {"type":"message","id":"a1","parentId":"u1","timestamp":"2026-11-01T10:00:01.000Z","message":{"role":"assistant","provider":"faux","model":"faux-1","content":[{"type":"toolCall","id":"","name":"read","arguments":{}},{"type":"toolCall","id":"","name":"bash","arguments":{}}],"usage":{"input":5,"output":1,"cost":{"total":0.001}}}},
-          {"type":"custom","id":"t1","parentId":"a1","timestamp":"2026-11-01T10:00:01.100Z","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"","durationMs":50}},
-          {"type":"custom","id":"t2","parentId":"t1","timestamp":"2026-11-01T10:00:01.200Z","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"","durationMs":2000}},
-          {"type":"message","id":"r1","parentId":"t2","timestamp":"2026-11-01T10:00:01.300Z","message":{"role":"toolResult","toolCallId":"","toolName":"read","isError":false,"content":[]}},
-          {"type":"message","id":"r2","parentId":"r1","timestamp":"2026-11-01T10:00:01.400Z","message":{"role":"toolResult","toolCallId":"","toolName":"bash","isError":false,"content":[]}}
-        ],"leafId":"r2"}"#,
-    );
-    assert_eq!(
-        (
-            tool_duration(&statistics, "read"),
-            tool_duration(&statistics, "bash"),
-        ),
-        (None, None),
-        "two timings waiting for one id cannot be told apart, so neither call gets one"
-    );
+    }));
+    let tools = statistics(&removed).tools;
+    assert_eq!((tools[0].open, tools[0].cancelled), (1, 0));
 }

@@ -69,7 +69,7 @@ class TurnChart extends StatefulWidget {
   /// The colour of each part, bottom up.
   final List<Color> colors;
 
-  /// The axis label of a value, such as `$0.25`.
+  /// The axis label of a value, such as `12k`.
   final String Function(int value) axis;
 
   @override

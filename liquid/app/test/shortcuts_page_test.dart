@@ -14,28 +14,26 @@ import 'package:liquid/src/theme/theme.dart';
 import 'fake_backend.dart';
 import 'fake_host.dart';
 
-const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
+const info = SessionInfo(project: 'acme-api');
 
 void main() {
   late FakeHost host;
   late MemoryStore store;
   late ShortcutController shortcuts;
-  late FakeBackend backend;
+  late FakeProject project;
 
   Future<void> show(WidgetTester tester, ShortcutSettings? stored) async {
     await tester.binding.setSurfaceSize(const Size(1600, 1000));
-    backend = FakeBackend();
+    project = FakeProject();
     host = FakeHost();
     store = MemoryStore(stored);
     shortcuts = await ShortcutController.load(store, host);
+    final state = SessionState(project);
+    await state.open('thread-1');
     await tester.pumpWidget(
       MaterialApp(
         theme: liquidTheme(Brightness.light),
-        home: AgentShell(
-          state: SessionState(backend),
-          info: info,
-          shortcuts: shortcuts,
-        ),
+        home: AgentShell(state: state, info: info, shortcuts: shortcuts),
       ),
     );
     await tester.pumpAndSettle();
@@ -77,22 +75,6 @@ void main() {
     await press(tester, LogicalKeyboardKey.escape);
     expect(find.text('tap ⇪'), findsNothing);
     expect(find.text('Chat'), findsOneWidget);
-  });
-
-  testWidgets("Settings › Worktrees lists the session's worktrees", (
-    tester,
-  ) async {
-    await show(tester, ShortcutSettings.liquidKey());
-    backend.worktreeList = [
-      worktreeOf('/code/api', branch: 'main', main: true, current: true),
-    ];
-    await openSettings(tester);
-
-    await tester.tap(find.text('Worktrees'));
-    await tester.pumpAndSettle();
-
-    expect(backend.calls, contains('worktrees'));
-    expect(find.text('main checkout · this window'), findsOneWidget);
   });
 
   testWidgets(
@@ -498,29 +480,19 @@ void main() {
   ) async {
     await show(tester, null);
     const asks = 'How do you want to use the keyboard?';
-    backend.controller.add(
+    project.session.emit(
       event(
-        BridgeEventKind.userInputRequested,
-        request: BridgeRequest(
-          id: 'q1',
-          question: BridgeQuestion(
-            kind: BridgeQuestionKind.confirm,
-            title: 'Sure?',
-            detail: '',
-            options: const [],
-          ),
-        ),
+        BridgeEventKind.requestOpened,
+        901,
+        request: questionsOf('q1', [questionOf('q1', 'Sure?')]),
       ),
     );
     await tester.pumpAndSettle();
     expect(find.text(asks), findsNothing, reason: 'the question goes first');
     expect(store.saved, isNull, reason: 'nobody chose a profile');
 
-    backend.controller.add(
-      event(
-        BridgeEventKind.userInputResolved,
-        request: BridgeRequest(id: 'q1'),
-      ),
+    project.session.emit(
+      event(BridgeEventKind.requestResolved, 900, requestId: 'q1'),
     );
     await tester.pumpAndSettle();
     expect(find.text(asks), findsOneWidget);

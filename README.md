@@ -8,7 +8,7 @@ Nothing is released yet; status is canonical in [PLAN.md](PLAN.md).
 
 - **Flow Agent:** [trusted Tools with Flow-owned write protection](SECURITY.md#flow-agent-security-contract) are implemented on Linux x86_64 and macOS ARM64; native acceptance, installation and closeout remain ([M1.2](PLAN.md#m12--flow-owned-write-protection)).
 - **Meta-Harness:** its core runs embedded in Liquid's macOS app (ADR-0184); the separate service and CLI follow with [M2](PLAN.md#m2--meta-harness-mvp).
-- **Liquid:** a macOS app in development with the agent surface for pi, its Git integration and the local Workspace with Pages and Tables ([M3a](PLAN.md#m3a--local-workspace-foundation)).
+- **Liquid:** a macOS app in development with the agent surface on T3 Code through Meta-Harness, its Git integration and the local Workspace with Pages and Tables ([M3a](PLAN.md#m3a--local-workspace-foundation)).
 
 [PLATFORMS.md](PLATFORMS.md) defines each product's native release targets, current capabilities and required verification; compilation alone is not a support claim.
 
@@ -124,7 +124,7 @@ Each topic's canonical home; other files link there.
 | Durability | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#durability) |
 | Session record export | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#boundary) |
 | MVP VCS boundary, Git integration and checkpoints | [SECURITY.md](SECURITY.md#mvp-vcs-boundary); target: [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#git-integration) |
-| Adapter requirements for another agent harness | [meta-harness/README.md](meta-harness/README.md#adapter-requirements) |
+| Another agent harness, as a T3 Code provider | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#t3-stack) |
 | Liquid sync, replicas and areas | [Liquid V-Spec](docs/concept/V-Spec_Liquid.html#sync) |
 | Roles and grants | [SECURITY.md](SECURITY.md#liquid-workspace-access--external-agent-edits); target: [Liquid V-Spec](docs/concept/V-Spec_Liquid.html#agent-grants) |
 | Liquid Pages, Blocks and Tables | [Liquid V-Spec](docs/concept/V-Spec_Liquid.html#model) |

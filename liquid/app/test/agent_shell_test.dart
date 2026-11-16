@@ -1,1909 +1,910 @@
-import 'dart:async';
-import 'dart:ui';
+import 'dart:io';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:liquid/src/diff/diff_view.dart';
-import 'package:liquid/src/agent/action_area.dart';
-import 'package:liquid/src/agent/chat_view.dart';
+import 'package:liquid/src/controls.dart';
+import 'package:liquid/src/agent/session_card.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
-import 'package:liquid/src/agent/status_bar.dart';
 import 'package:liquid/src/diff/diff_model.dart';
 import 'package:liquid/src/diff/diff_settings.dart';
+import 'package:liquid/src/diff/diff_panel.dart';
 import 'package:liquid/src/rust/api/events.dart';
-import 'package:liquid/src/rust/api/git.dart';
-import 'package:liquid/src/rust/api/worktrees.dart';
-import 'package:liquid/src/rust/api/history.dart';
+import 'package:liquid/src/rust/api/session.dart';
+import 'package:liquid/src/rust/api/thread.dart';
 import 'package:liquid/src/session/session_state.dart';
-import 'package:liquid/src/shortcuts/keymap.dart';
-import 'package:liquid/src/shortcuts/shortcut_store.dart';
+import 'package:liquid/src/settings_file.dart';
 import 'package:liquid/src/theme/icons.dart';
-import 'package:liquid/src/theme/logo.dart';
 import 'package:liquid/src/theme/theme.dart';
-import 'package:liquid/src/theme/tokens.g.dart';
+import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'fake_backend.dart';
-import 'fake_host.dart';
-import 'focus_kit.dart';
+import 'fake_workspace.dart';
 
-const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
+const info = SessionInfo(project: 'acme-api');
+
+/// A disk that is always full.
+class _FullDisk extends SettingsFile {
+  _FullDisk() : super(File('unused'));
+
+  @override
+  Future<void> save(Map<String, Object?> json) async =>
+      throw const FileSystemException('disk full');
+}
+
+/// T3 as the app stops it: only `shutdown` is answered.
+class FakeAgentHost implements AgentHost {
+  bool stopped = false;
+
+  @override
+  Future<void> shutdown() async {
+    stopped = true;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
 void main() {
-  late FakeBackend backend;
+  late FakeProject project;
   late SessionState state;
+  var sequence = 0;
 
+  /// Shows an open session whose chat, turns and requests are `transcript`, `turns` and
+  /// `requests`, as Meta-Harness's snapshot holds them. Events sent later are numbered after it.
   Future<void> show(
     WidgetTester tester, {
-    DiffSettingsController? diffSettings,
+    List<BridgeTranscriptItem> transcript = const [],
+    List<BridgeTurn> turns = const [],
+    List<BridgeRequest> requests = const [],
+    Size size = const Size(1600, 900),
+    AgentHost? host,
   }) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 900));
-    backend = FakeBackend();
-    state = SessionState(backend);
+    await tester.binding.setSurfaceSize(size);
+    sequence = 0;
+    project = FakeProject();
+    project.session
+      ..current = snapshotOf(
+        transcript: transcript,
+        turns: turns,
+        requests: requests,
+      )
+      ..turnList = turns
+      ..chosen = choiceOf('claude-opus-5-5')
+      ..sessionTitle = 'Login work';
+    state = SessionState(project);
+    await state.open('thread-1');
     await tester.pumpWidget(
       MaterialApp(
         theme: liquidTheme(Brightness.light),
-        home: AgentShell(state: state, info: info, diffSettings: diffSettings),
+        home: AgentShell(
+          state: state,
+          info: info,
+          host: host,
+          parseDiff: parsePatch,
+        ),
       ),
     );
-  }
-
-  /// Holds ⌘ long enough for the contextual shortcuts to show.
-  Future<void> holdCommand(WidgetTester tester) async {
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pump(const Duration(milliseconds: 700));
-  }
-
-  Future<void> emit(WidgetTester tester, BridgeEvent event) async {
-    backend.controller.add(event);
     await tester.pumpAndSettle();
   }
 
-  /// Presses ⌘ with `key`, as the shortcuts do, and lets the shell answer.
-  Future<void> press(WidgetTester tester, LogicalKeyboardKey key) async {
+  /// Sends a live event of the open session and lets the Chat show it.
+  Future<void> emit(
+    WidgetTester tester,
+    BridgeEvent Function(int) build,
+  ) async {
+    project.session.emit(build(++sequence));
+    await tester.pumpAndSettle();
+  }
+
+  bool focused(WidgetTester tester, Key key) =>
+      tester.widget<TextField>(find.byKey(key)).focusNode?.hasFocus ?? false;
+
+  /// Lets a question take clicks and keys, as it does 0.5 s after it could be read.
+  Future<void> read(WidgetTester tester) =>
+      tester.pump(const Duration(milliseconds: 500));
+
+  String composerText(WidgetTester tester) => tester
+      .widget<TextField>(find.byKey(const Key('composer')))
+      .controller!
+      .text;
+
+  /// Types `text` into the composer and sends it with the button that shows then.
+  Future<void> typeAndSend(
+    WidgetTester tester,
+    String text,
+    String button,
+  ) async {
+    await tester.enterText(find.byKey(const Key('composer')), text);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(button));
+    await tester.pumpAndSettle();
+  }
+
+  /// What the session was asked to do, without the Diff's reads of the changes.
+  List<String> actions() => [
+    for (final call in project.session.calls)
+      if (!call.startsWith('changes')) call,
+  ];
+
+  /// Points at `finder`, which shows a message's actions while the pointer is over it.
+  Future<void> hover(WidgetTester tester, Finder finder) async {
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: tester.getCenter(finder));
+    addTearDown(mouse.removePointer);
+    await tester.pumpAndSettle();
+  }
+
+  /// Presses `key` with ⌘ held, and with ⌥ too when `option` is set.
+  Future<void> chord(
+    WidgetTester tester,
+    LogicalKeyboardKey key, {
+    bool option = false,
+  }) async {
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    if (option) await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
     await tester.sendKeyEvent(key);
+    if (option) await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
   }
 
-  BridgeEvent confirm(String id) => event(
-    BridgeEventKind.userInputRequested,
-    request: BridgeRequest(
-      id: id,
-      question: BridgeQuestion(
-        kind: BridgeQuestionKind.confirm,
-        title: 'Deploy now?',
-        detail: '',
-        options: const [],
+  /// Gives the session's Chat a turn in progress.
+  BridgeTurn running(int number) =>
+      turnOf(number, status: BridgeTurnStatus.running);
+
+  BridgeTranscriptItem userMessage(int turn, String text) => chatItem(
+    item(turn * 10 + 1, BridgeItemKind.userMessage, ended: true),
+    turn,
+    text,
+  );
+
+  BridgeTranscriptItem reply(int turn, String text) => chatItem(
+    item(turn * 10 + 2, BridgeItemKind.assistantMessage, ended: true),
+    turn,
+    text,
+  );
+
+  testWidgets('the header names the session, its project and its model', (
+    tester,
+  ) async {
+    await show(tester);
+    expect(find.text('Login work'), findsWidgets);
+    expect(find.text('acme-api'), findsWidgets);
+    expect(find.text('Claude Opus 5.5'), findsWidgets);
+  });
+
+  testWidgets('a streamed reply appears in the chat as it arrives', (
+    tester,
+  ) async {
+    await show(tester);
+    await emit(
+      tester,
+      (seq) => event(
+        BridgeEventKind.itemStarted,
+        seq,
+        turn: 1,
+        item: item(7, BridgeItemKind.assistantMessage),
       ),
-    ),
-  );
-
-  testWidgets('a turn\'s end in the chat offers to revert its files', (
-    tester,
-  ) async {
-    await show(tester);
-    BridgeTreeNode node(String id, String? parent, BridgeEntryKind kind) =>
-        BridgeTreeNode(id: id, parent: parent, kind: kind);
-    backend
-      ..stored = historyOf(
-        tree: [
-          node('c1', null, BridgeEntryKind.custom),
-          node('u1', 'c1', BridgeEntryKind.user),
-          node('a1', 'u1', BridgeEntryKind.assistant),
-          node('c2', 'a1', BridgeEntryKind.custom),
-        ],
-        leaf: 'c2',
-      )
-      ..transcripts[''] = BridgeTranscript(
-        items: [
-          chatItem('u1', BridgeItemKind.userMessage, text: 'Go'),
-          chatItem('a1', BridgeItemKind.assistantMessage, text: 'Done'),
-        ],
-        more: false,
-      )
-      ..turnList = [
-        turnOf(
-          'T1',
-          number: 1,
-          startEntry: 'c1',
-          endEntry: 'c2',
-          added: 2,
-          removed: 1,
-        ),
-      ]
-      ..revertPlanned = revertPlanOf(
-        files: [revertedFile('a.txt', BridgeChangeStatus.modified)],
-      );
-    await state.loadChat();
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Revert files to before this turn…'));
-    await tester.pumpAndSettle();
-    expect(find.text('Revert to before turn 1?'), findsOneWidget);
-    await tester.tap(find.text('Revert and branch'));
-    await tester.pumpAndSettle();
-    expect(backend.calls, contains('revert T1'));
-  });
-
-  testWidgets('Open diff for another turn switches the open Diff panel to it', (
-    tester,
-  ) async {
-    await show(tester);
-    BridgeTreeNode node(String id, String? parent, BridgeEntryKind kind) =>
-        BridgeTreeNode(id: id, parent: parent, kind: kind);
-    backend
-      ..stored = historyOf(
-        tree: [
-          node('c1', null, BridgeEntryKind.custom),
-          node('u1', 'c1', BridgeEntryKind.user),
-          node('a1', 'u1', BridgeEntryKind.assistant),
-          node('c2', 'a1', BridgeEntryKind.custom),
-          node('u2', 'c2', BridgeEntryKind.user),
-          node('a2', 'u2', BridgeEntryKind.assistant),
-          node('c3', 'a2', BridgeEntryKind.custom),
-        ],
-        leaf: 'c3',
-      )
-      ..transcripts[''] = BridgeTranscript(
-        items: [
-          chatItem('u1', BridgeItemKind.userMessage, text: 'First'),
-          chatItem('a1', BridgeItemKind.assistantMessage, text: 'One'),
-          chatItem('u2', BridgeItemKind.userMessage, text: 'Second'),
-          chatItem('a2', BridgeItemKind.assistantMessage, text: 'Two'),
-        ],
-        more: false,
-      )
-      ..turnList = [
-        turnOf(
-          'T1',
-          number: 1,
-          startEntry: 'c1',
-          endEntry: 'c2',
-          added: 2,
-          removed: 1,
-        ),
-        turnOf(
-          'T2',
-          number: 2,
-          startEntry: 'c2',
-          endEntry: 'c3',
-          added: 1,
-          removed: 0,
-        ),
-      ];
-    await state.loadChat();
-    await tester.pumpAndSettle();
-    Finder openDiffOf(String turn) => find.descendant(
-      of: find.byWidgetPredicate((w) => w is TurnChanges && w.turn.id == turn),
-      matching: find.text('Open diff'),
     );
-    await tester.tap(openDiffOf('T1'));
-    await tester.pumpAndSettle();
-    expect(backend.compared.last, 'T1..T1');
-    await tester.tap(openDiffOf('T2'));
-    await tester.pumpAndSettle();
-    expect(backend.compared.last, 'T2..T2', reason: 'the open panel reads T2');
-    expect(find.text('Turn 2'), findsWidgets, reason: 'the panel shows T2');
+    await emit(
+      tester,
+      (seq) => event(
+        BridgeEventKind.contentDelta,
+        seq,
+        item: item(7, BridgeItemKind.assistantMessage),
+        text: 'Hel',
+      ),
+    );
+    await emit(
+      tester,
+      (seq) => event(
+        BridgeEventKind.contentDelta,
+        seq,
+        item: item(7, BridgeItemKind.assistantMessage),
+        text: 'lo',
+      ),
+    );
+    expect(find.text('Hello'), findsOneWidget);
+  });
+
+  testWidgets('Submit message sends the composer text and clears it', (
+    tester,
+  ) async {
+    await show(tester);
+    expect(
+      tester
+          .widget<PrimaryButton>(
+            find.widgetWithText(PrimaryButton, 'Submit message'),
+          )
+          .onPressed,
+      isNull,
+      reason: 'nothing to send yet',
+    );
+    await typeAndSend(tester, 'Fix login', 'Submit message');
+    expect(actions(), ['send Fix login']);
+    expect(composerText(tester), isEmpty);
   });
 
   testWidgets(
-    'a question that arrives while a revert is prepared keeps the keys',
+    'while the agent runs, Enter steers it and ⌥⏎ queues a follow-up',
     (tester) async {
-      await show(tester);
-      BridgeTreeNode node(String id, String? parent, BridgeEntryKind kind) =>
-          BridgeTreeNode(id: id, parent: parent, kind: kind);
-      backend
-        ..stored = historyOf(
-          tree: [
-            node('c1', null, BridgeEntryKind.custom),
-            node('u1', 'c1', BridgeEntryKind.user),
-            node('a1', 'u1', BridgeEntryKind.assistant),
-            node('c2', 'a1', BridgeEntryKind.custom),
-          ],
-          leaf: 'c2',
-        )
-        ..transcripts[''] = BridgeTranscript(
-          items: [
-            chatItem('u1', BridgeItemKind.userMessage, text: 'Go'),
-            chatItem('a1', BridgeItemKind.assistantMessage, text: 'Done'),
-          ],
-          more: false,
-        )
-        ..turnList = [
-          turnOf(
-            'T1',
-            number: 1,
-            startEntry: 'c1',
-            endEntry: 'c2',
-            added: 2,
-            removed: 1,
-          ),
-        ]
-        ..revertPlanned = revertPlanOf(
-          files: [revertedFile('a.txt', BridgeChangeStatus.modified)],
-        )
-        ..revertPlanGate = Completer();
-      await state.loadChat();
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Revert files to before this turn…'));
-      await tester.pump();
-      await emit(tester, confirm('q1'));
-      backend.revertPlanGate!.complete();
-      await tester.pumpAndSettle();
-      expect(find.text('Revert to before turn 1?'), findsNothing);
-      expect(backend.calls, isNot(contains('revert T1')));
-    },
-  );
-
-  testWidgets(
-    'the input area floats at the bottom of the Chat and stays with it',
-    (tester) async {
-      await show(tester);
-      await tester.pumpAndSettle();
-      Future<void> openTab(LogicalKeyboardKey digit) async {
-        await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-        await tester.sendKeyEvent(digit);
-        await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-        await tester.pumpAndSettle();
-      }
-
-      final composer = find.byKey(const Key('composer'));
-      final area = find.byType(ActionArea);
-      await tester.enterText(composer, 'draft');
-      double center(Finder finder) => tester.getCenter(finder).dx;
-      expect(
-        center(area),
-        closeTo(center(find.byType(ChatView)), 1),
-        reason: 'in the reading width with the messages',
-      );
-      expect(
-        tester.getRect(find.byType(ChatView)).bottom,
-        greaterThan(tester.getRect(area).bottom),
-        reason: 'the content runs on under the input area',
-      );
-
-      await openTab(LogicalKeyboardKey.keyD);
-      expect(
-        tester.getRect(area).right,
-        lessThanOrEqualTo(tester.getRect(find.byType(DiffView)).left),
-        reason: 'the input area stays with the Chat beside the Diff panel',
-      );
-      expect(
-        tester.widget<TextField>(composer).controller?.text,
-        'draft',
-        reason: 'and keeps its text',
-      );
-    },
-  );
-
-  testWidgets(
-    'names the session in the header and sidebar as the start page does',
-    (tester) async {
-      await show(tester);
-      await tester.pumpAndSettle();
-      expect(find.text('New session'), findsNWidgets(2));
-
+      await show(tester, turns: [running(1)]);
       await tester.enterText(
         find.byKey(const Key('composer')),
-        'Add a limiter\nto /login',
+        'Use the faster API',
       );
+      await tester.pumpAndSettle();
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pumpAndSettle();
-      expect(
-        find.text('Add a limiter'),
-        findsNWidgets(2),
-        reason: 'the first line of the first prompt, at once',
-      );
+      expect(actions(), ['steer Use the faster API']);
 
-      backend.sessionTitle = 'Rate limit for /login';
-      await emit(tester, event(BridgeEventKind.turnStarted));
-      await emit(tester, event(BridgeEventKind.turnCompleted));
-      expect(
-        find.text('Rate limit for /login'),
-        findsNWidgets(2),
-        reason: 'the name pi stored',
-      );
-
-      backend.sessionTitle = null;
-      await state.newSession();
+      await tester.enterText(find.byKey(const Key('composer')), 'Add a test');
       await tester.pumpAndSettle();
-      expect(find.text('New session'), findsNWidgets(2));
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+      await tester.pumpAndSettle();
+      expect(actions().last, 'send Add a test');
     },
   );
 
-  testWidgets('heads the sidebar with the Liquid mark and name', (
-    tester,
-  ) async {
-    await show(tester);
-    await tester.pumpAndSettle();
-    final sidebar = find.byType(Sidebar);
-    final mark = find.descendant(
-      of: sidebar,
-      matching: find.byType(LiquidMark),
-    );
-    final name = find.descendant(of: sidebar, matching: find.text('Liquid'));
-    expect(tester.getSize(mark), const Size.square(18));
-    expect(tester.getCenter(mark).dy, closeTo(tester.getCenter(name).dy, 1));
-    expect(tester.getRect(mark).right, lessThan(tester.getRect(name).left));
-    expect(
-      tester.getRect(name).bottom,
-      lessThan(tester.getRect(find.text('Agent sessions')).top),
-      reason: 'above the sessions',
-    );
-  });
-
-  testWidgets('the Diff panel counts the files the shown turn changed', (
-    tester,
-  ) async {
-    await show(tester);
-    await tester.pumpAndSettle();
-    backend.changed = [
-      for (final path in ['a.txt', 'b.txt'])
-        BridgeFileChange(
-          path: path,
-          shown: path,
-          status: BridgeChangeStatus.modified,
-          added: 1,
-          removed: 1,
-        ),
-    ];
-    await emit(tester, event(BridgeEventKind.turnStarted));
-    await emit(tester, event(BridgeEventKind.turnCompleted));
-    await press(tester, LogicalKeyboardKey.keyD);
-    expect(find.text('2 files · +2 −2'), findsOneWidget);
-  });
+  testWidgets(
+    'Stop generation replaces the send button when nothing is typed',
+    (tester) async {
+      await show(tester, turns: [running(1)]);
+      await tester.tap(find.text('Stop generation'));
+      await tester.pumpAndSettle();
+      expect(actions(), ['stop']);
+    },
+  );
 
   testWidgets(
-    'counts changes as the whitespace choice says, kept or switched',
+    'a queued message shows its place and can be sent now or removed',
     (tester) async {
       await show(
         tester,
-        diffSettings: DiffSettingsController(
-          const DiffSettings(hideWhitespace: true),
-        ),
+        turns: [
+          running(1),
+          turnOf(2, status: BridgeTurnStatus.queued, prompt: 'Add a test'),
+        ],
       );
+      expect(find.text('Queued message 1 of 1, not sent'), findsOneWidget);
+      await tester.tap(find.text('Send now'));
       await tester.pumpAndSettle();
-      BridgeFileChange change(String path) => BridgeFileChange(
-        path: path,
-        shown: path,
-        status: BridgeChangeStatus.modified,
-        added: 1,
-        removed: 1,
+      expect(actions(), ['send now 2']);
+
+      await tester.tap(find.byTooltip('Remove from queue'));
+      await tester.pumpAndSettle();
+      expect(actions().last, 'cancel 2');
+    },
+  );
+
+  testWidgets(
+    'Edit from here rewinds the chat and returns the prompt to the composer',
+    (tester) async {
+      await show(
+        tester,
+        transcript: [userMessage(1, 'Fix login')],
+        turns: [turnOf(1, prompt: 'Fix login', files: 1, added: 1)],
       );
-      backend
-        ..changed = [change('code.ts'), change('spaced.ts')]
-        ..changedWithoutWhitespace = [change('code.ts')];
-      await emit(tester, event(BridgeEventKind.turnStarted));
-      await emit(tester, event(BridgeEventKind.turnCompleted));
-      await press(tester, LogicalKeyboardKey.keyD);
+      project.session.revertedPrompt = 'Fix login';
+      await hover(tester, find.text('Fix login'));
+      await tester.tap(find.text('Edit from here'));
+      await tester.pumpAndSettle();
+      expect(find.text('Edit from here?'), findsOneWidget);
       expect(
-        find.text('1 file · +1 −1'),
+        find.text('Revert files too'),
         findsOneWidget,
-        reason: 'the kept choice counts before the Diff opens',
+        reason: 'the checkpoint is ready',
       );
-      await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
+
+      await tester.tap(find.text('Revert and keep changes'));
       await tester.pumpAndSettle();
-      expect(
-        find.text('2 files · +2 −2'),
-        findsOneWidget,
-        reason: 'W shows whitespace changes again',
-      );
+      expect(actions(), ['revert 1 files=false']);
+      expect(composerText(tester), 'Fix login');
     },
-  );
-
-  testWidgets('says why the agent stopped', (tester) async {
-    await show(tester);
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.exited,
-        success: false,
-        text: 'Error: No models available',
-      ),
-    );
-    expect(find.textContaining('Error: No models available'), findsOneWidget);
-  });
-
-  testWidgets('keeps a failed agent\'s whole output readable in the list', (
-    tester,
-  ) async {
-    await show(tester);
-    const output =
-        '(node:4242) ExperimentalWarning: Type stripping is an experimental feature\n'
-        'Error: Failed to load extension /w/watershed.ts\n'
-        "  Cannot find module '@earendil-works/pi-coding-agent'";
-    await emit(
-      tester,
-      event(BridgeEventKind.exited, success: false, text: output),
-    );
-    await tester.tap(find.byKey(const Key('status')));
-    await tester.pumpAndSettle();
-    final entry = find.descendant(
-      of: find.byType(ListView),
-      matching: find.textContaining('ExperimentalWarning'),
-    );
-    expect(find.byType(SelectableText), findsNothing);
-
-    await tester.tap(entry.first);
-    await tester.pumpAndSettle();
-    expect(
-      tester.widget<SelectableText>(find.byType(SelectableText)).data,
-      output,
-      reason: 'the whole output shows, selectable',
-    );
-
-    Focus.of(tester.element(entry.first)).requestFocus();
-    await tester.pump();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    expect(
-      find.byType(SelectableText),
-      findsNothing,
-      reason: '⏎ on the entry closes it',
-    );
-  });
-
-  testWidgets('focuses the input area with ⌘L from any tab', (tester) async {
-    await show(tester);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
-    // The tab opens and takes the keys before the next key arrives.
-    await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
-    final composer = tester.widget<TextField>(
-      find.byKey(const Key('composer')),
-    );
-    expect(composer.focusNode?.hasFocus, isTrue);
-  });
-
-  testWidgets('Focus Input from Settings focuses the composer in each tab', (
-    tester,
-  ) async {
-    await show(tester);
-    Future<void> press(LogicalKeyboardKey key) async {
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-      await tester.sendKeyEvent(key);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-      await tester.pumpAndSettle();
-    }
-
-    for (final tab in [LogicalKeyboardKey.digit1, LogicalKeyboardKey.keyD]) {
-      await press(tab);
-      await press(LogicalKeyboardKey.comma);
-      await press(LogicalKeyboardKey.keyL);
-      expect(
-        tester
-            .widget<TextField>(find.byKey(const Key('composer')))
-            .focusNode
-            ?.hasFocus,
-        isTrue,
-        reason: 'the tab that opens again does not take the keys back',
-      );
-    }
-  });
-
-  testWidgets('keeps what the user typed when a message comes back', (
-    tester,
-  ) async {
-    await show(tester);
-    backend
-      ..sendGate = Completer()
-      ..sendError = 'busy';
-    final composer = find.byKey(const Key('composer'));
-    await tester.enterText(composer, 'first');
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pump();
-    await tester.enterText(composer, 'second');
-    backend.sendGate!.complete();
-    await tester.pumpAndSettle();
-    expect(
-      tester.widget<TextField>(composer).controller?.text,
-      'first\n\nsecond',
-      reason: 'the failed message comes back before the typed text',
-    );
-  });
-
-  testWidgets('keeps the indentation and line ends typed while a send fails', (
-    tester,
-  ) async {
-    await show(tester);
-    backend
-      ..sendGate = Completer()
-      ..sendError = 'busy';
-    final composer = find.byKey(const Key('composer'));
-    await tester.enterText(composer, 'first');
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pump();
-    await tester.enterText(composer, '    nested_call()\n');
-    backend.sendGate!.complete();
-    await tester.pumpAndSettle();
-    expect(
-      tester.widget<TextField>(composer).controller?.text,
-      'first\n\n    nested_call()\n',
-      reason: 'the typed text comes back exactly as it was typed',
-    );
-  });
-
-  testWidgets(
-    'keeps the formatting of the same text typed again while it was sent',
-    (tester) async {
-      await show(tester);
-      backend
-        ..sendGate = Completer()
-        ..sendError = 'busy';
-      final composer = find.byKey(const Key('composer'));
-      await tester.enterText(composer, 'nested_call()');
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pump();
-      await tester.enterText(composer, '    nested_call()\n');
-      backend.sendGate!.complete();
-      await tester.pumpAndSettle();
-      expect(
-        tester.widget<TextField>(composer).controller?.text,
-        '    nested_call()\n',
-        reason: 'the message is not doubled, and its retyped form keeps its whitespace',
-      );
-    },
-  );
-
-  testWidgets('takes the same handed-back text again after it was sent', (
-    tester,
-  ) async {
-    await show(tester);
-    final composer = find.byKey(const Key('composer'));
-    for (var round = 0; round < 2; round++) {
-      await emit(tester, event(BridgeEventKind.inputTextSet, text: 'Retry'));
-      expect(
-        tester.widget<TextField>(composer).controller?.text,
-        'Retry',
-        reason: 'round $round',
-      );
-      await tester.enterText(composer, '');
-    }
-  });
-
-  testWidgets('⌘Z after a sent message does not bring the message back', (
-    tester,
-  ) async {
-    await show(tester);
-    final composer = find.byKey(const Key('composer'));
-    await tester.enterText(composer, 'Say hi');
-    await tester.pump(const Duration(milliseconds: 600));
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pump(const Duration(milliseconds: 600));
-    await tester.tap(composer);
-    await undo(tester);
-    expect(tester.widget<TextField>(composer).controller?.text, '');
-  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
-
-  testWidgets(
-    '⌘Z after text handed back to the composer does not bring back what it replaced',
-    (tester) async {
-      await show(tester);
-      final composer = find.byKey(const Key('composer'));
-      await tester.enterText(composer, 'Plan');
-      await tester.pump(const Duration(milliseconds: 600));
-      await emit(tester, event(BridgeEventKind.inputTextSet, text: 'Retry'));
-      expect(
-        tester.widget<TextField>(composer).controller?.text,
-        'Retry\n\nPlan',
-      );
-      await tester.pump(const Duration(milliseconds: 600));
-      await tester.tap(composer);
-      await undo(tester);
-      expect(
-        tester.widget<TextField>(composer).controller?.text,
-        'Retry\n\nPlan',
-      );
-    },
-    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
   );
 
   testWidgets(
-    'typing before the next frame after text is handed back keeps the typed text',
+    'Revert files too is offered only once the turn\'s checkpoint is ready',
     (tester) async {
-      await show(tester);
-      final composer = find.byKey(const Key('composer'));
-      await tester.enterText(composer, 'Plan');
-      await tester.tap(composer);
-      state.draft.value = 'Retry';
-      tester.testTextInput.updateEditingValue(
-        const TextEditingValue(
-          text: 'Retry\n\nPlanx',
-          selection: TextSelection.collapsed(offset: 12),
-        ),
+      await show(
+        tester,
+        transcript: [userMessage(1, 'Fix login')],
+        turns: [turnOf(1, prompt: 'Fix login', checkpoint: false)],
       );
+      await hover(tester, find.text('Fix login'));
+      await tester.tap(find.text('Edit from here'));
       await tester.pumpAndSettle();
-      expect(
-        tester.widget<TextField>(composer).controller?.text,
-        'Retry\n\nPlanx',
-      );
+      expect(find.text('Revert files too'), findsNothing);
+
+      await tester.tap(find.text('Revert and keep changes'));
+      await tester.pumpAndSettle();
+      expect(actions(), ['revert 1 files=false']);
     },
   );
 
-  testWidgets('a hand-back that changes no text keeps the undo history', (
+  testWidgets('Revert files too also undoes the files of the turn', (
     tester,
   ) async {
-    await show(tester);
-    final composer = find.byKey(const Key('composer'));
-    await tester.enterText(composer, 'Hello');
-    await tester.pump(const Duration(milliseconds: 600));
-    await tester.enterText(composer, 'Hello there');
-    await tester.pump(const Duration(milliseconds: 600));
-    state.draft.value = 'Hello there';
-    await tester.pump(const Duration(milliseconds: 600));
-    await tester.tap(composer);
-    await undo(tester);
-    expect(tester.widget<TextField>(composer).controller?.text, 'Hello');
-  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+    await show(
+      tester,
+      transcript: [userMessage(1, 'Fix login')],
+      turns: [turnOf(1, prompt: 'Fix login', files: 1, added: 1)],
+    );
+    await hover(tester, find.text('Fix login'));
+    await tester.tap(find.text('Edit from here'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Revert files too'));
+    await tester.pumpAndSettle();
+    expect(actions(), ['revert 1 files=true']);
+  });
 
-  testWidgets('marks the branch in the rebuilt chat and reads earlier items', (
+  testWidgets('a turn ends with its changes, Open diff and the revert', (
     tester,
   ) async {
-    await show(tester);
-    backend.stored = historyOf(
-      tree: [
-        const BridgeTreeNode(id: 'u1', kind: BridgeEntryKind.user),
-        const BridgeTreeNode(
-          id: 'a1',
-          parent: 'u1',
-          kind: BridgeEntryKind.assistant,
-        ),
-        const BridgeTreeNode(
-          id: 'a2',
-          parent: 'a1',
-          kind: BridgeEntryKind.assistant,
-        ),
-        const BridgeTreeNode(
-          id: 'b1',
-          parent: 'a1',
-          kind: BridgeEntryKind.user,
-        ),
-      ],
-      leaf: 'b1',
+    await show(
+      tester,
+      transcript: [userMessage(1, 'Fix login'), reply(1, 'Done')],
+      turns: [turnOf(1, prompt: 'Fix login', files: 2, added: 5, removed: 1)],
     );
-    backend.transcripts[''] = BridgeTranscript(
-      items: [
-        for (var index = 0; index < 30; index++)
-          chatItem('u1', BridgeItemKind.assistantMessage, text: 'Line $index'),
-        chatItem('a1', BridgeItemKind.assistantMessage, text: 'Looked'),
-        chatItem('b1', BridgeItemKind.userMessage, text: 'Instead'),
-      ],
-      more: true,
-      start: 'u1',
-    );
-    await state.loadChat();
-    await tester.pumpAndSettle();
-    expect(find.text('continues after step 2'), findsOneWidget);
-    expect(find.text('A: 1 more'), findsOneWidget);
+    expect(find.text('2 changed files'), findsOneWidget);
+    expect(find.text('+5'), findsOneWidget);
+    expect(find.text('−1'), findsOneWidget);
+    expect(find.text('Revert files to before this turn…'), findsOneWidget);
 
-    await tester.drag(
-      find
-          .descendant(
-            of: find.byType(ChatView),
-            matching: find.byType(ListView),
-          )
-          .first,
-      const Offset(0, 4000),
-    );
+    await tester.tap(find.text('Open diff'));
     await tester.pumpAndSettle();
-    expect(backend.calls, contains('transcript u1'));
+    expect(find.byType(DiffPanel), findsOneWidget);
   });
 
-  testWidgets('a short newest page reads earlier messages without scrolling', (
+  testWidgets('Fork from this response opens the new session it returns', (
     tester,
   ) async {
-    await show(tester);
-    backend.transcripts[''] = BridgeTranscript(
-      items: [chatItem('u2', BridgeItemKind.userMessage, text: 'Later')],
-      more: true,
-      start: 'u2',
-    );
-    backend.transcripts['u2'] = BridgeTranscript(
-      items: [chatItem('u1', BridgeItemKind.userMessage, text: 'First')],
-      more: false,
-      start: 'u1',
-    );
-    await state.loadChat();
-    await tester.pumpAndSettle();
-    expect(
-      find.text('First'),
-      findsOneWidget,
-      reason: 'the newest page fits the viewport, so nothing can scroll',
-    );
-  });
-
-  testWidgets('a streamed reply at the newest messages reads no earlier page', (
-    tester,
-  ) async {
-    await show(tester);
-    backend.transcripts[''] = BridgeTranscript(
-      items: [
-        for (var index = 0; index < 40; index++)
-          chatItem(
-            'm$index',
-            BridgeItemKind.userMessage,
-            text: 'Message $index',
-          ),
-      ],
-      more: true,
-      start: 'm0',
-    );
-    backend.transcripts['m0'] = BridgeTranscript(
-      items: [chatItem('e0', BridgeItemKind.userMessage, text: 'Earliest')],
-      more: false,
-      start: 'e0',
-    );
-    await state.loadChat();
-    await tester.pumpAndSettle();
-    backend.calls.clear();
-
-    await emit(tester, event(BridgeEventKind.turnStarted));
-    await emit(
+    await show(
       tester,
-      event(
-        BridgeEventKind.itemStarted,
-        item: item(1, kind: BridgeItemKind.assistantMessage),
-      ),
+      transcript: [userMessage(1, 'Fix login'), reply(1, 'Done')],
+      turns: [turnOf(1, prompt: 'Fix login')],
     );
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.contentDelta,
-        item: item(1),
-        text: 'Streamed reply',
-      ),
-    );
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.contentDelta,
-        item: item(1),
-        text: ' keeps growing.',
-      ),
-    );
-    expect(
-      backend.calls,
-      isNot(contains('transcript m0')),
-      reason: 'the reply\'s own selectable text does not scroll the chat',
-    );
-  });
-
-  testWidgets('shows notifications in the status bar', (tester) async {
-    await show(tester);
-    Future<void> notify(BridgeLevel level, String text) => emit(
-      tester,
-      event(
-        BridgeEventKind.notification,
-        display: BridgeDisplay(key: '', level: level),
-        text: text,
-      ),
-    );
-    final status = find.byKey(const Key('status'));
-    String shown() => tester.widget<Text>(status).data!;
-
-    await notify(BridgeLevel.info, 'Tests passed');
-    expect(shown(), 'Tests passed');
-    await tester.pump(const Duration(seconds: 7));
-    expect(shown(), contains('idle'), reason: 'information fades');
-
-    await notify(BridgeLevel.warning, 'lint: 2 warnings');
-    await notify(BridgeLevel.error, 'Could not branch: compacting');
-    await tester.pump(const Duration(seconds: 7));
-    expect(shown(), 'Could not branch: compacting', reason: 'errors stay');
-    expect(find.byIcon(LucideIcons.triangleAlert), findsOneWidget);
-    expect(find.text('· 2 more'), findsOneWidget);
-
-    await tester.tap(status);
-    await tester.pumpAndSettle();
-    expect(find.text('Notifications'), findsOneWidget);
-    expect(find.text('lint: 2 warnings'), findsOneWidget);
-    await tester.tap(find.text('Clear all'));
-    await tester.pumpAndSettle();
-    expect(find.text('Notifications'), findsNothing);
-    expect(shown(), contains('idle'));
-
-    await notify(BridgeLevel.error, 'Again');
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-    expect(shown(), contains('idle'), reason: 'Esc dismisses');
-  });
-
-  testWidgets('the notification list closes for a question, a click or esc', (
-    tester,
-  ) async {
-    await show(tester);
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.notification,
-        display: BridgeDisplay(key: '', level: BridgeLevel.warning),
-        text: 'lint: 2 warnings',
-      ),
-    );
-    final status = find.byKey(const Key('status'));
-    Future<void> open() async {
-      await tester.tap(status);
-      await tester.pumpAndSettle();
-      expect(find.text('Notifications'), findsOneWidget);
-    }
-
-    await open();
-    await tester.tapAt(const Offset(800, 200));
-    await tester.pumpAndSettle();
-    expect(
-      find.text('Notifications'),
-      findsNothing,
-      reason: 'a click elsewhere',
-    );
-
-    await open();
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-    expect(find.text('Notifications'), findsNothing, reason: 'esc');
-
-    await open();
-    await emit(tester, confirm('q1'));
-    expect(
-      find.text('Notifications'),
-      findsNothing,
-      reason: 'it would hide the question',
-    );
-    await tester.pump(const Duration(seconds: 7));
-  });
-
-  testWidgets('opens and clears the notifications from the keyboard', (
-    tester,
-  ) async {
-    await show(tester);
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.notification,
-        display: BridgeDisplay(key: '', level: BridgeLevel.warning),
-        text: 'lint: 2 warnings',
-      ),
-    );
-    Focus.of(tester.element(find.byKey(const Key('status')))).requestFocus();
-    await tester.pump();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    expect(find.text('Notifications'), findsOneWidget);
-    Focus.of(tester.element(find.text('Clear all'))).requestFocus();
-    await tester.pump();
-    await tester.sendKeyEvent(LogicalKeyboardKey.space);
-    await tester.pumpAndSettle();
-    expect(find.text('Notifications'), findsNothing);
-  });
-
-  testWidgets('takes no click or key before a question could be read', (
-    tester,
-  ) async {
-    await show(tester);
-    await emit(tester, confirm('q1'));
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.tap(find.text('Yes'));
-    await tester.tap(find.text('Dismiss'));
-    await tester.pump();
-    expect(backend.calls.where((call) => call.contains('q1')), isEmpty);
-    await tester.pump(const Duration(milliseconds: 500));
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    expect(backend.calls.last, 'confirm q1 true');
-  });
-
-  testWidgets(
-    'counts the wait for an answer from its first frame, however late',
-    (tester) async {
-      await show(tester);
-      backend.controller.add(confirm('q1'));
-      await tester.idle();
-      // The card is built and laid out now, but its frame, slow to lay out, ends 20 s later.
-      tester.binding.buildOwner!.buildScope(tester.binding.rootElement!);
-      tester.binding.rootPipelineOwner.flushLayout();
-      // Layout builders create their children in layout, so build and layout alternate until
-      // the question is in the tree; no frame ends, so no read delay starts yet.
-      for (
-        var pass = 0;
-        pass < 10 && find.text('Yes', skipOffstage: false).evaluate().isEmpty;
-        pass++
-      ) {
-        tester.binding.buildOwner!.buildScope(tester.binding.rootElement!);
-        tester.binding.rootPipelineOwner.flushLayout();
-      }
-      expect(find.text('Yes', skipOffstage: false), findsOneWidget);
-      await tester.pump(const Duration(seconds: 20));
-      await tester.tap(find.text('Yes'));
-      await tester.pump();
-      expect(
-        backend.calls.where((call) => call.startsWith('confirm')),
-        isEmpty,
-      );
-      await tester.pump(const Duration(milliseconds: 500));
-      await tester.tap(find.text('Yes'));
-      expect(backend.calls.last, 'confirm q1 true');
-    },
-  );
-
-  testWidgets('keeps a key held from before out of a question field', (
-    tester,
-  ) async {
-    await show(tester);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyA);
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.userInputRequested,
-        request: BridgeRequest(
-          id: 'q1',
-          question: BridgeQuestion(
-            kind: BridgeQuestionKind.input,
-            title: 'Name',
-            detail: '',
-            options: const [],
-          ),
-        ),
-      ),
-    );
-    await tester.pump(const Duration(milliseconds: 500));
-    expect(
-      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyA),
-      isTrue,
-      reason: 'the repeat never reaches the field',
-    );
-    expect(await tester.sendKeyUpEvent(LogicalKeyboardKey.keyA), isTrue);
-    expect(
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.keyB),
-      isFalse,
-      reason: 'a key pressed for the question types',
-    );
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyB);
-  });
-
-  testWidgets('typing in the input area never runs a tab\'s own keys', (
-    tester,
-  ) async {
-    final diffSettings = DiffSettingsController();
-    await show(tester, diffSettings: diffSettings);
-    await tester.pumpAndSettle();
-    final composer = find.byKey(const Key('composer'));
-    Future<void> openTab(LogicalKeyboardKey digit) async {
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-      await tester.sendKeyEvent(digit);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-      await tester.pumpAndSettle();
-    }
-
-    await openTab(LogicalKeyboardKey.keyD);
-    expect(find.byType(DiffView), findsOneWidget);
-    await tester.tap(composer);
-    await tester.pump();
-    final before = diffSettings.value;
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyU);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
-    await tester.pumpAndSettle();
-    expect(diffSettings.value, before, reason: 'u and w typed, not switched');
-  });
-
-  testWidgets('the session header names the project and the model', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 900));
-    backend = FakeBackend()..model = 'faux/faux-1';
-    state = SessionState(backend);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: AgentShell(state: state, info: info),
-      ),
+    await hover(tester, find.text('Done'));
+    await tester.tap(find.text('Fork from this response'));
+    // Opening replaces the attached session, which waits on the real event loop.
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 10)),
     );
     await tester.pumpAndSettle();
-    Finder inHeader(String text) => find.descendant(
-      of: find.byKey(const Key('session-header')),
-      matching: find.text(text),
-    );
-    expect(inHeader('acme-api'), findsOneWidget);
-    expect(inHeader('faux-1'), findsOneWidget);
+    expect(actions(), ['fork 1']);
+    expect(project.calls, contains('open fork-of-thread-1'));
   });
 
-  testWidgets(
-    'the PR row sits in the card between the branch and the Git action, and refreshes on focus',
-    (tester) async {
-      await tester.binding.setSurfaceSize(const Size(1600, 900));
-      backend = FakeBackend()
-        ..git = gitStatusOf(
-          branch: 'feature/retry-after',
-          upstream: 'origin/feature/retry-after',
-        )
-        ..current = pullRequestOutcomeOf(pullRequest: pullRequestOf());
-      state = SessionState(backend);
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: liquidTheme(Brightness.light),
-          home: AgentShell(state: state, info: info),
-        ),
-      );
-      await tester.pumpAndSettle();
-      double top(Finder finder) => tester
-          .getTopLeft(
-            find.descendant(
-              of: find.byKey(const Key('session-card-frame')),
-              matching: finder,
-            ),
-          )
-          .dy;
-      expect(
-        top(find.byKey(const Key('branch-row'))),
-        lessThan(top(find.byKey(const Key('pull-request-chip')))),
-      );
-      expect(
-        top(find.byKey(const Key('pull-request-chip'))),
-        lessThan(top(find.byKey(const Key('git-next')))),
-      );
-      int reads() => backend.pullRequestReads;
-      final before = reads();
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-      await tester.pumpAndSettle();
-      expect(reads(), before + 1);
-      state.git.stop();
-    },
-  );
-
-  testWidgets('messages start at the top and flow down', (tester) async {
-    await show(tester);
-    await emit(tester, event(BridgeEventKind.turnStarted));
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.itemStarted,
-        item: item(1, kind: BridgeItemKind.assistantMessage),
-      ),
-    );
-    await emit(
-      tester,
-      event(BridgeEventKind.contentDelta, item: item(1), text: 'Pong!'),
-    );
-    final chat = tester.getRect(find.byType(ChatView));
-    expect(
-      tester.getRect(find.text('Pong!')).top - chat.top,
-      lessThan(80),
-      reason: 'the first message sits at the top, not above the input',
-    );
-  });
-
-  testWidgets('sends, steers and queues from the composer', (tester) async {
-    await show(tester);
-    final composer = find.byKey(const Key('composer'));
-    await tester.enterText(composer, 'Say hi');
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pump();
-    expect(backend.calls, ['send Say hi']);
-    expect(
-      find.text('Start'),
-      findsOneWidget,
-      reason: 'a session without a conversation starts with its first message',
-    );
-
-    await emit(tester, event(BridgeEventKind.turnStarted));
-    expect(find.text('Steer'), findsOneWidget, reason: 'Enter steers a run');
-    expect(
-      find.text('⌥⏎ queue'),
-      findsNothing,
-      reason: 'shown while ⌘ is held',
-    );
-    await holdCommand(tester);
-    expect(find.text('⌥⏎ queue'), findsOneWidget);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.enterText(composer, 'Shorter');
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pump();
-    expect(backend.calls.last, 'send Shorter');
-    await tester.enterText(composer, 'Also docs');
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
-    await tester.pump();
-    expect(backend.calls.last, 'follow-up Also docs');
-
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.queueChanged,
-        queue: const BridgeQueue(steering: [], followUp: ['Also docs']),
-      ),
-    );
-    expect(find.text('Queued: Also docs'), findsOneWidget);
-    backend.queued = const BridgeQueue(steering: [], followUp: ['Also docs']);
-    await tester.tap(find.byKey(const Key('unqueue 0')));
-    await tester.pumpAndSettle();
-    expect(backend.calls.last, 'clear queue');
-
-    await tester.tap(find.text('Stop'));
-    await tester.pumpAndSettle();
-    expect(backend.calls.last, 'abort');
-  });
-
-  testWidgets('removing a repeated queued message keeps the others in order', (
-    tester,
-  ) async {
-    await show(tester);
-    const queue = BridgeQueue(
-      steering: [],
-      followUp: ['build', 'test', 'build'],
-    );
-    backend.queued = queue;
-    await emit(tester, event(BridgeEventKind.queueChanged, queue: queue));
-    await tester.tap(find.byKey(const Key('unqueue 2')));
-    await tester.pumpAndSettle();
-    expect(backend.calls, [
-      'clear queue',
-      'follow-up build',
-      'follow-up test',
-    ], reason: 'the last build leaves; the first one keeps its place');
-  });
-
-  testWidgets(
-    'shows streamed text, tool rows, widgets and the waiting status',
-    (tester) async {
-      await show(tester);
-      await emit(tester, event(BridgeEventKind.turnStarted));
-      await emit(
-        tester,
-        event(
-          BridgeEventKind.itemStarted,
-          item: item(1, kind: BridgeItemKind.assistantMessage),
-        ),
-      );
-      await emit(
-        tester,
-        event(
-          BridgeEventKind.contentDelta,
-          item: item(1),
-          text: 'Now I run the tests.',
-        ),
-      );
-      await emit(
-        tester,
-        event(
-          BridgeEventKind.itemStarted,
-          item: BridgeItem(
-            id: 2,
-            kind: BridgeItemKind.commandExecution,
-            tool: 'bash',
-            target: 'npm test -- login',
-            failed: false,
-          ),
-        ),
-      );
-      await emit(
-        tester,
-        event(
-          BridgeEventKind.widgetChanged,
-          display: BridgeDisplay(
-            key: 'todo',
-            lines: ['✓ limiter', '○ run tests'],
-          ),
-        ),
-      );
-      await emit(tester, confirm('q1'));
-      expect(find.text('Now I run the tests.'), findsOneWidget);
-      expect(find.text('todo  ✓ limiter  ○ run tests'), findsOneWidget);
-      expect(find.text('● waiting'), findsOneWidget);
-    },
-  );
-
-  testWidgets('the post-push offer keeps the last diff line in view', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 900));
-    backend = FakeBackend()
-      ..git = gitStatusOf(
-        branch: 'feature/retry-after',
-        upstream: 'origin/feature/retry-after',
-        ahead: 2,
-      )
-      ..changed = [
-        BridgeFileChange(
-          path: 'long.ts',
-          shown: 'long.ts',
-          status: BridgeChangeStatus.added,
-          added: 200,
-          removed: 0,
-        ),
-      ]
-      ..patches = {
-        'long.ts': [
-          '@@ -0,0 +1,200 @@',
-          for (var line = 1; line <= 200; line++) '+line $line',
-        ].join('\n'),
-      };
-    state = SessionState(backend);
-    await state.git.refresh();
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: AgentShell(state: state, info: info, parseDiff: parsePatch),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('git-next')));
-    await tester.pumpAndSettle();
-    expect(find.text('Create pull request…'), findsOneWidget);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
-
-    final first = find.text('line 1', findRichText: true);
-    await tester.drag(first, const Offset(0, -10000));
-    await tester.pumpAndSettle();
-    expect(
-      tester.getBottomLeft(find.text('line 200', findRichText: true)).dy,
-      lessThanOrEqualTo(tester.getTopLeft(find.byType(StatusBar)).dy),
-      reason: 'the last line scrolls into the panel above the status bar',
-    );
-    await tester.pump(const Duration(seconds: 7));
-    state.git.stop();
-  });
-
-  group('a question that closes a running dialog', () {
-    Future<void> showBranch(WidgetTester tester) async {
-      await tester.binding.setSurfaceSize(const Size(1600, 900));
-      backend = FakeBackend()
-        ..git = gitStatusOf(branch: 'feature/retry-after')
-        ..worktreeList = [
-          worktreeOf('/code/api', branch: 'main', main: true, current: true),
-          worktreeOf('/code/api-hotfix', branch: 'hotfix/login'),
-        ];
-      backend.reviews['/code/api-hotfix'] = removalOf(
-        backend.worktreeList.last,
-      );
-      state = SessionState(backend);
-      await state.git.refresh();
-      await state.pulls.refresh();
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: liquidTheme(Brightness.light),
-          home: AgentShell(state: state, info: info),
-        ),
-      );
-      await tester.pumpAndSettle();
-    }
-
-    Iterable<String> notices() => state.notices.value.map((n) => n.text);
-
-    testWidgets('reports a pull request creation that failed meanwhile', (
-      tester,
-    ) async {
-      await showBranch(tester);
-      await tester.tap(find.byKey(const Key('git-menu')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Create pull request…').last);
-      await tester.pumpAndSettle();
-      final gate = backend.createGate = Completer();
-      await tester.tap(find.widgetWithText(InkWell, 'Create pull request'));
-      await tester.pump();
-
-      await emit(tester, confirm('q1'));
-      expect(find.text('Create pull request'), findsNothing);
-      gate.complete(
-        pullRequestOutcomeOf(
-          kind: BridgePullRequestOutcomeKind.notCreated,
-          detail: 'Validation Failed (HTTP 422)',
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(notices(), [
-        'GitHub refused the pull request; none was created. “Validation Failed (HTTP 422)”',
-      ]);
-      state.git.stop();
-    });
-
-    testWidgets('reports a worktree removal that failed meanwhile', (
-      tester,
-    ) async {
-      await showBranch(tester);
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.comma);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Worktrees'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(InkWell, 'Remove…'));
-      await tester.pumpAndSettle();
-      final gate = backend.removeGate = Completer();
-      await tester.tap(find.widgetWithText(InkWell, 'Remove worktree'));
-      await tester.pump();
-
-      await emit(tester, confirm('q1'));
-      expect(find.text('Remove hotfix/login worktree?'), findsNothing);
-      gate.complete(
-        const BridgeWorktreeOutcome(
-          kind: BridgeWorktreeOutcomeKind.failed,
-          running: [],
-          detail: 'fatal: validation failed',
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(notices(), [
-        'Could not remove the worktree at /code/api-hotfix: “fatal: validation failed” It stays listed until Git removes it.',
-      ]);
-      state.git.stop();
-    });
-
-    testWidgets('warns of a worktree removal that changed meanwhile', (
-      tester,
-    ) async {
-      await showBranch(tester);
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.comma);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Worktrees'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(InkWell, 'Remove…'));
-      await tester.pumpAndSettle();
-      final gate = backend.removeGate = Completer();
-      await tester.tap(find.widgetWithText(InkWell, 'Remove worktree'));
-      await tester.pump();
-
-      await emit(tester, confirm('q1'));
-      expect(find.text('Remove hotfix/login worktree?'), findsNothing);
-      gate.complete(
-        const BridgeWorktreeOutcome(
-          kind: BridgeWorktreeOutcomeKind.changed,
-          running: [],
-          detail: '',
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(notices(), [
-        '/code/api-hotfix changed since this dialog opened. Nothing was removed.',
-      ]);
-      expect(state.notices.value.single.level, BridgeLevel.warning);
-      await tester.pump(const Duration(seconds: 7));
-      state.git.stop();
-    });
-  });
-
-  testWidgets('answers a question in place of the composer', (tester) async {
-    await show(tester);
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.userInputRequested,
-        request: BridgeRequest(
-          id: 'q1',
-          question: BridgeQuestion(
-            kind: BridgeQuestionKind.select,
-            title: 'Pick a window',
-            detail: '',
-            options: ['Sliding', 'Fixed'],
-          ),
-        ),
-      ),
-    );
-    expect(find.byKey(const Key('composer')), findsNothing);
-    await tester.pump(const Duration(milliseconds: 500));
-    await tester.tap(find.text('Fixed'));
-    await tester.pump();
-    expect(backend.calls.last, 'answer q1 Fixed');
-  });
-
-  testWidgets('a question open at the first frame comes before the profile', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 900));
-    backend = FakeBackend();
-    state = SessionState(backend);
-    backend.controller.add(confirm('q1'));
-    await tester.pump();
-    expect(
-      state.asking,
-      isTrue,
-      reason: 'the question is open before the shell',
-    );
-
-    final store = MemoryStore();
-    final shortcuts = await ShortcutController.load(store, FakeHost());
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: AgentShell(state: state, info: info, shortcuts: shortcuts),
-      ),
-    );
-    await tester.pumpAndSettle();
-    const asks = 'How do you want to use the keyboard?';
-    expect(find.text(asks), findsNothing, reason: 'the question goes first');
-    expect(store.saved, isNull, reason: 'nobody chose a profile');
-
-    backend.controller.add(
-      event(
-        BridgeEventKind.userInputResolved,
-        request: BridgeRequest(id: 'q1'),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.text(asks), findsOneWidget);
-
-    await tester.tap(find.text('Use Liquid key'));
-    await tester.pumpAndSettle();
-    expect(find.text(asks), findsNothing, reason: 'asked once');
-    expect(store.saved, ShortcutSettings.liquidKey());
-  });
-
-  testWidgets('keeps a long question and its answers in the input area', (
-    tester,
-  ) async {
-    await show(tester);
-    final long = [for (var part = 0; part < 40; part++) 'line $part'].join(' ');
-    BridgeEvent ask(String id, BridgeQuestionKind kind, String detail) => event(
-      BridgeEventKind.userInputRequested,
-      request: BridgeRequest(
-        id: id,
-        question: BridgeQuestion(
-          kind: kind,
-          title: 'Question: $long',
-          detail: detail,
-          options: const ['Sliding', 'Fixed'],
-        ),
-      ),
-    );
-    final area = find.byType(ActionArea);
-    void inArea(Finder finder) => expect(
-      tester.getRect(area).intersect(tester.getRect(finder)),
-      tester.getRect(finder),
-      reason: '$finder',
-    );
-
-    await emit(tester, ask('q1', BridgeQuestionKind.confirm, 'Detail: $long'));
-    inArea(find.text('Yes'));
-    inArea(find.text('No'));
-    // A question takes answers once it could be read.
-    await tester.pump(const Duration(milliseconds: 500));
-    await tester.tap(find.text('No'));
-    expect(backend.calls.last, 'confirm q1 false');
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.userInputResolved,
-        request: BridgeRequest(id: 'q1'),
-      ),
-    );
-
-    await emit(tester, ask('q2', BridgeQuestionKind.select, ''));
-    inArea(find.text('Fixed'));
-    await tester.pump(const Duration(milliseconds: 500));
-    await tester.tap(find.text('Fixed'));
-    expect(backend.calls.last, 'answer q2 Fixed');
-  });
-
-  testWidgets('names extension statuses but not Watershed\'s own', (
-    tester,
-  ) async {
-    await show(tester);
-    for (final (key, text) in [
-      ('watershed.revert', 'Waiting for a revert in this checkout to finish'),
-      ('todo', '2 left'),
-      // An extension's key that only looks like Watershed's still shows.
-      ('watershed.other', 'busy'),
-    ]) {
-      await emit(
-        tester,
-        event(
-          BridgeEventKind.statusChanged,
-          display: BridgeDisplay(key: key, lines: const []),
-          text: text,
-        ),
-      );
-    }
-    expect(
-      find.text(
-        'Waiting for a revert in this checkout to finish · todo 2 left · '
-        'watershed.other busy',
-      ),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('fits many extension statuses', (tester) async {
-    await show(tester);
-    for (var key = 0; key < 8; key++) {
-      await emit(
-        tester,
-        event(
-          BridgeEventKind.statusChanged,
-          display: BridgeDisplay(key: 'extension-$key', lines: const []),
-          text: 'indexing workspace files ($key)',
-        ),
-      );
-    }
-  });
-
-  testWidgets('filters a long selection and picks from the keyboard', (
-    tester,
-  ) async {
-    await show(tester);
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.userInputRequested,
-        request: BridgeRequest(
-          id: 'q1',
-          question: BridgeQuestion(
-            kind: BridgeQuestionKind.select,
-            title: 'Pick a deployment target',
-            detail: '',
-            options: [
-              'staging-eu',
-              'staging-us',
-              'production-eu',
-              'production-us',
-              for (var number = 1; number <= 10; number++) 'preview-$number',
-            ],
-          ),
-        ),
-      ),
-    );
-    expect(find.text('14 / 14'), findsOneWidget);
-    await tester.enterText(find.byKey(const Key('filter')), 'PROD');
-    await tester.pump();
-    expect(find.text('2 / 14'), findsOneWidget);
-    expect(find.text('staging-eu'), findsNothing);
-    await tester.pump(const Duration(milliseconds: 500));
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    expect(backend.calls.last, 'answer q1 production-us');
-  });
-
-  testWidgets('filtering after scrolling shows the option Enter picks', (
-    tester,
-  ) async {
-    await show(tester);
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.userInputRequested,
-        request: BridgeRequest(
-          id: 'q1',
-          question: BridgeQuestion(
-            kind: BridgeQuestionKind.select,
-            title: 'Pick an option',
-            detail: '',
-            options: [
-              for (var number = 0; number < 100; number++)
-                'Option ${number.toString().padLeft(2, '0')}',
-            ],
-          ),
-        ),
-      ),
-    );
-    for (var step = 0; step < 50; step++) {
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    }
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const Key('filter')), 'Option');
-    await tester.pumpAndSettle();
-    expect(
-      find.text('Option 00').hitTestable(),
-      findsOneWidget,
-      reason: 'the highlighted first match is in view',
-    );
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    expect(backend.calls.last, 'answer q1 Option 00');
-  });
-
-  testWidgets('edits a multi-line answer and sends it with ⌘Enter', (
-    tester,
-  ) async {
-    await show(tester);
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.userInputRequested,
-        request: BridgeRequest(
-          id: 'q1',
-          question: BridgeQuestion(
-            kind: BridgeQuestionKind.editor,
-            title: 'Edit the commit message',
-            detail: 'fix: limit /login',
-            options: const [],
-          ),
-        ),
-      ),
-    );
-    await holdCommand(tester);
-    expect(find.text('⏎ new line'), findsOneWidget);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    final editor = find.byKey(const Key('answer'));
-    await tester.enterText(editor, 'fix: limit /login\n\nAdd a limiter.');
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    expect(backend.calls.last, 'answer q1 fix: limit /login\n\nAdd a limiter.');
-  });
-
-  testWidgets('shows the lines a file change added and removed', (
-    tester,
-  ) async {
-    await show(tester);
-    await emit(tester, event(BridgeEventKind.turnStarted));
-    for (final (id, tool, added, removed) in [
-      (5, 'edit', 9, 2),
-      (6, 'write', 38, 0),
-    ]) {
-      await emit(
-        tester,
-        event(
-          BridgeEventKind.itemStarted,
-          item: item(id, kind: BridgeItemKind.fileChange, tool: tool),
-        ),
-      );
-      await emit(
-        tester,
-        event(
-          BridgeEventKind.itemCompleted,
-          item: item(
-            id,
-            kind: BridgeItemKind.fileChange,
-            tool: tool,
-            durationMs: 9,
-            added: added,
-            removed: removed,
-          ),
-        ),
-      );
-    }
-    expect(find.text('+9 −2', findRichText: true), findsOneWidget);
-    expect(find.text('+38', findRichText: true), findsOneWidget);
-    expect(find.text('9 ms'), findsNothing, reason: 'the lines say more');
-  });
-
-  testWidgets('shows thinking without promising to open it', (tester) async {
-    await show(tester);
-    await emit(tester, event(BridgeEventKind.turnStarted));
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.itemStarted,
-        item: item(4, kind: BridgeItemKind.reasoning),
-      ),
-    );
-    final thinking = find.ancestor(
-      of: find.text('Thinking'),
-      matching: find.byType(ItemTile),
-    );
-    expect(
-      find.descendant(of: thinking, matching: find.byType(Icon)),
-      findsNothing,
-      reason: 'a chevron would suggest it opens',
-    );
-  });
-
-  testWidgets('marks a tool done when only its outcome changes', (
-    tester,
-  ) async {
-    await show(tester);
-    await emit(tester, event(BridgeEventKind.turnStarted));
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.itemStarted,
-        item: item(5, kind: BridgeItemKind.commandExecution, tool: 'bash'),
-      ),
-    );
-    expect(find.byIcon(LucideIcons.loader), findsOneWidget);
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.itemCompleted,
-        item: item(
-          5,
-          kind: BridgeItemKind.commandExecution,
-          tool: 'bash',
-          durationMs: 40,
-        ),
-      ),
-    );
-    expect(find.byIcon(LucideIcons.check), findsOneWidget);
-    expect(find.text('40 ms'), findsOneWidget);
-
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.itemStarted,
-        item: item(6, kind: BridgeItemKind.commandExecution, tool: 'bash'),
-      ),
-    );
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.itemCompleted,
-        item: item(
-          6,
-          kind: BridgeItemKind.commandExecution,
-          tool: 'bash',
-          durationMs: 84213,
-        ),
-      ),
-    );
-    expect(find.text('1m 24s'), findsOneWidget);
-  });
-
-  testWidgets('fits a tool with a 64-character name on its row', (
-    tester,
-  ) async {
-    await show(tester);
-    await emit(tester, event(BridgeEventKind.turnStarted));
-    final tool = 'mcp_${'x' * 60}';
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.itemStarted,
-        item: item(7, kind: BridgeItemKind.dynamicToolCall, tool: tool),
-      ),
-    );
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.itemCompleted,
-        item: item(
-          7,
-          kind: BridgeItemKind.dynamicToolCall,
-          tool: tool,
-          durationMs: 40,
-        ),
-      ),
-    );
-    expect(tester.takeException(), isNull);
-    expect(find.text('40 ms'), findsOneWidget, reason: 'the outcome stays');
-  });
-
-  testWidgets('shows contextual shortcuts only while Cmd alone is held', (
-    tester,
-  ) async {
-    await show(tester);
-    await emit(tester, event(BridgeEventKind.turnStarted));
-    await emit(
-      tester,
-      event(
-        BridgeEventKind.userInputRequested,
-        request: BridgeRequest(
-          id: 'q1',
-          question: BridgeQuestion(
-            kind: BridgeQuestionKind.editor,
-            title: 'Commit message',
-            detail: '',
-            options: const [],
-          ),
-        ),
-      ),
-    );
-    expect(find.text('⌘⏎'), findsNothing, reason: 'hidden by default');
-    expect(
-      find.text('⌘1'),
-      findsNothing,
-      reason: 'app-wide ones live in menus',
-    );
-
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pump(const Duration(milliseconds: 300));
-    await tester.sendKeyEvent(LogicalKeyboardKey.digit1);
-    await tester.pump(const Duration(milliseconds: 700));
-    expect(find.text('⌘⏎'), findsNothing, reason: 'a shortcut was used');
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pump(const Duration(milliseconds: 700));
-    expect(find.text('⌘⏎'), findsOneWidget);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pump();
-    expect(find.text('⌘⏎'), findsNothing);
-  });
-
-  testWidgets('the status bar counts tokens as the session card does', (
-    tester,
-  ) async {
-    await show(tester);
-    state.totals.value = const SessionTotals(input: 212000, output: 18300);
-    await tester.pumpAndSettle();
-    expect(find.text('212 k in · 18.3 k out'), findsOneWidget);
-  });
-
-  testWidgets('the status bar names the Diff panel\'s keys while Cmd is held', (
-    tester,
-  ) async {
-    await show(tester);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
-    expect(
-      tester.getSemantics(find.text('Diff').first),
-      isSemantics(isSelected: true),
-      reason: 'the open tab is told, not only drawn',
-    );
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pump(const Duration(milliseconds: 700));
-    expect(
-      find.text(
-        'T turn · ↑↓ file · ←→ folder · ⌥↑↓ hunk · U unified/split · W whitespace',
-      ),
-      findsOneWidget,
-    );
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pump();
-  });
-
-  testWidgets('underlines the Chat tab in the accent', (tester) async {
-    await show(tester);
-    await tester.pumpAndSettle();
-    Color underline(String tab) =>
-        (tester
-                    .widget<Container>(
-                      find
-                          .ancestor(
-                            of: find.text(tab),
-                            matching: find.byType(Container),
-                          )
-                          .first,
-                    )
-                    .decoration!
-                as BoxDecoration)
-            .border!
-            .bottom
-            .color;
-    expect(underline('Chat'), WsPalette.light.accent);
-  });
-
-  testWidgets('puts app-wide shortcuts into the macOS menu bar', (
-    tester,
-  ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-    final labels = <String>[];
-    void collect(Object? items) {
-      for (final item in (items as List?) ?? const []) {
-        final map = item as Map;
-        if (map['label'] case final String label) labels.add(label);
-        collect(map['children']);
-      }
-    }
-
+  /// Records what the app copies to the clipboard; the getter returns the last copy.
+  String? Function() recordClipboard(WidgetTester tester) {
+    String? copied;
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-      SystemChannels.menu,
+      SystemChannels.platform,
       (call) async {
-        if (call.method == 'Menu.setMenus') {
-          collect((call.arguments as Map)['0']);
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map)['text'] as String?;
         }
         return null;
       },
     );
-    await show(tester);
-    await tester.pump();
-    debugDefaultTargetPlatformOverride = null;
-    expect(
-      labels,
-      containsAll(['Chat', 'Diff', 'Session card', 'Focus Input']),
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
     );
+    return () => copied;
+  }
+
+  testWidgets('Copy message copies the message text', (tester) async {
+    final copied = recordClipboard(tester);
+    await show(tester, transcript: [userMessage(1, 'Fix login')]);
+    await hover(tester, find.text('Fix login'));
+    await tester.tap(find.text('Copy message'));
+    await tester.pumpAndSettle();
+    expect(copied(), 'Fix login');
   });
 
-  testWidgets('stops the agent before the app exits', (tester) async {
+  testWidgets('Copy message copies a reply too', (tester) async {
+    final copied = recordClipboard(tester);
+    await show(tester, transcript: [reply(1, 'Done')]);
+    await hover(tester, find.text('Done'));
+    await tester.tap(find.text('Copy message'));
+    await tester.pumpAndSettle();
+    expect(copied(), 'Done');
+  });
+
+  testWidgets('a command approval shows what it runs and Approve answers it', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      transcript: [userMessage(1, 'Run the build')],
+      requests: [
+        approvalOf(
+          'a1',
+          prompt: 'rm -rf build',
+          options: const [
+            BridgeApprovalOption(decision: 'decline', label: 'Decline'),
+            BridgeApprovalOption(decision: 'accept', label: 'Approve'),
+          ],
+        ),
+      ],
+    );
+    expect(find.text('Command approval'), findsOneWidget);
+    expect(find.text('rm -rf build'), findsOneWidget);
+    expect(find.text('Waiting for approval'), findsOneWidget);
+
+    await tester.tap(find.text('Approve'));
+    await tester.pumpAndSettle();
+    expect(actions(), ['respond a1 accept']);
+  });
+
+  testWidgets('More lists the approval options that no button shows', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      transcript: [userMessage(1, 'Run the build')],
+      requests: [approvalOf('a1')],
+    );
+    await tester.tap(find.text('More'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Always allow this session'));
+    await tester.pumpAndSettle();
+    expect(actions(), ['respond a1 acceptForSession']);
+  });
+
+  testWidgets('questions step through their answers and submit them together', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      requests: [
+        questionsOf('q1', [
+          questionOf('scope', 'Which scope?', options: ['Small', 'Large']),
+          questionOf(
+            'style',
+            'Which styles?',
+            options: ['Plain', 'Bold'],
+            multiSelect: true,
+          ),
+        ]),
+      ],
+    );
+    await read(tester);
+
+    await tester.tap(find.text('Small'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+    expect(find.text('2/2'), findsOneWidget);
+    await tester.tap(find.text('Plain'));
+    await tester.tap(find.text('Bold'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Submit answers'));
+    await tester.pumpAndSettle();
+    expect(actions(), ['answer q1 scope=Small style=Plain+Bold']);
+  });
+
+  testWidgets('Dismiss question without answering sends the dismissal', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      requests: [
+        questionsOf('q1', [questionOf('name', 'Your name')]),
+      ],
+    );
+    await tester.tap(find.byTooltip('Dismiss question without answering'));
+    await tester.pumpAndSettle();
+    expect(actions(), isEmpty, reason: 'too early to answer');
+
+    await read(tester);
+    await tester.tap(find.byTooltip('Dismiss question without answering'));
+    await tester.pumpAndSettle();
+    expect(actions(), ['dismiss q1']);
+  });
+
+  testWidgets('a notice shows in the status bar', (tester) async {
     await show(tester);
-    AppExitResponse? response;
-    unawaited(
-      tester.binding.handleRequestAppExit().then((answer) => response = answer),
-    );
+    state.notify(NoticeLevel.error, 'Could not read the sessions: boom');
+    await tester.pumpAndSettle();
+    expect(find.text('Could not read the sessions: boom'), findsOneWidget);
+  });
+
+  testWidgets('⌘L focuses the composer from the Chat', (tester) async {
+    await show(tester);
+    expect(focused(tester, const Key('composer')), isFalse);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump();
-    expect(
-      response,
-      AppExitResponse.exit,
-      reason: 'an idle agent lets Liquid quit',
+    await tester.pumpAndSettle();
+    expect(focused(tester, const Key('composer')), isTrue);
+  });
+
+  testWidgets('a turn\'s revert link asks before it reverts the files', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      transcript: [userMessage(1, 'Fix login')],
+      turns: [turnOf(1, prompt: 'Fix login', files: 1, added: 1)],
     );
-    expect(backend.calls, contains('shutdown'));
+    await tester.tap(find.text('Revert files to before this turn…'));
+    await tester.pumpAndSettle();
+    expect(find.text('Edit from here?'), findsOneWidget);
+    await tester.tap(find.text('Revert files too'));
+    await tester.pumpAndSettle();
+    expect(actions(), ['revert 1 files=true']);
+  });
+
+  testWidgets('an approval names its kind and explains a warned option', (
+    tester,
+  ) async {
+    for (final (kind, title) in [
+      ('file_change', 'File change approval'),
+      ('file-read', 'File read approval'),
+      ('permission', 'App permission approval'),
+      ('mcp-elicitation', 'App access approval'),
+      ('other', 'Approval'),
+    ]) {
+      await show(
+        tester,
+        transcript: [userMessage(1, 'Run the build')],
+        requests: [approvalOf('a1', kind: kind)],
+      );
+      expect(find.text(title), findsOneWidget, reason: kind);
+    }
+    await show(
+      tester,
+      transcript: [userMessage(1, 'Run the build')],
+      requests: [
+        approvalOf(
+          'a1',
+          options: const [
+            BridgeApprovalOption(
+              decision: 'accept',
+              label: 'Approve',
+              warning: 'Runs outside the project',
+            ),
+          ],
+        ),
+      ],
+    );
+    expect(find.byTooltip('Runs outside the project'), findsOneWidget);
+  });
+
+  testWidgets('reasoning, tool calls and errors each show as their row', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      transcript: [
+        chatItem(
+          item(1, BridgeItemKind.reasoning, ended: true),
+          1,
+          'Weighing the options',
+        ),
+        chatItem(
+          item(
+            2,
+            BridgeItemKind.commandExecution,
+            tool: 'Bash',
+            target: 'flutter test',
+            ended: true,
+            durationMs: 1234,
+          ),
+          1,
+          '',
+        ),
+        chatItem(
+          item(
+            3,
+            BridgeItemKind.fileChange,
+            tool: 'Edit',
+            target: 'lib/login.dart',
+            ended: true,
+            failed: true,
+          ),
+          1,
+          '',
+        ),
+        chatItem(
+          item(
+            4,
+            BridgeItemKind.dynamicToolCall,
+            tool: 'Read',
+            target: 'README.md',
+          ),
+          1,
+          '',
+        ),
+        chatItem(
+          item(5, BridgeItemKind.error, ended: true),
+          1,
+          '{"error":{"message":"Rate limited"}}',
+        ),
+        chatItem(
+          item(6, BridgeItemKind.error, ended: true),
+          1,
+          'Plain failure',
+        ),
+      ],
+    );
+    expect(find.text('Thinking'), findsOneWidget, reason: 'not its text');
+    expect(find.textContaining('flutter test'), findsOneWidget);
+    expect(find.text('1.2 s'), findsOneWidget);
+    expect(find.byIcon(LucideIcons.check), findsOneWidget);
+    expect(find.byIcon(LucideIcons.x), findsOneWidget);
+    expect(find.byIcon(LucideIcons.loader), findsOneWidget, reason: 'running');
+    expect(find.text('Rate limited'), findsOneWidget, reason: 'a JSON message');
+    expect(find.text('Plain failure'), findsOneWidget);
+  });
+
+  testWidgets('a turn asked for scrolls the Chat to its first item', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      transcript: [
+        for (var turn = 1; turn <= 40; turn++)
+          userMessage(turn, 'Prompt $turn'),
+      ],
+    );
+    state.scrollChatTo.value = 2;
+    await tester.pumpAndSettle();
+    expect(find.text('Prompt 2'), findsOneWidget);
+  });
+
+  testWidgets('notices show in the status bar and list until cleared', (
+    tester,
+  ) async {
+    await show(tester);
+    state.notify(NoticeLevel.info, 'Tests passed');
+    state.notify(NoticeLevel.warning, 'lint: 2 warnings');
+    state.notify(NoticeLevel.error, 'Could not branch: compacting');
+    await tester.pumpAndSettle();
+    expect(find.text('Could not branch: compacting'), findsOneWidget);
+    expect(find.text('· 2 more'), findsOneWidget);
+    expect(find.byIcon(LucideIcons.triangleAlert), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('status')));
+    await tester.pumpAndSettle();
+    expect(find.text('Notifications'), findsOneWidget);
+    await tester.tap(find.text('lint: 2 warnings'));
+    await tester.pumpAndSettle();
+    expect(
+      find.byType(SelectableText),
+      findsOneWidget,
+      reason: 'an opened entry shows its whole text',
+    );
+    await tester.tap(find.text('Clear all'));
+    await tester.pumpAndSettle();
+    expect(find.text('Notifications'), findsNothing);
+    expect(find.text('● idle'), findsOneWidget);
+  });
+
+  testWidgets(
+    'the notification list closes on a click, a click elsewhere, esc or a question',
+    (tester) async {
+      await show(tester);
+      state.notify(NoticeLevel.warning, 'lint: 2 warnings');
+      final status = find.byKey(const Key('status'));
+      Future<void> open() async {
+        await tester.tap(status);
+        await tester.pumpAndSettle();
+        expect(find.text('Notifications'), findsOneWidget);
+      }
+
+      await open();
+      await tester.tap(status);
+      await tester.pumpAndSettle();
+      expect(find.text('Notifications'), findsNothing, reason: 'a click');
+
+      await open();
+      await tester.tapAt(const Offset(800, 200));
+      await tester.pumpAndSettle();
+      expect(find.text('Notifications'), findsNothing, reason: 'outside');
+
+      await open();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.text('Notifications'), findsNothing, reason: 'esc');
+
+      Focus.of(tester.element(status)).requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(find.text('Notifications'), findsOneWidget, reason: 'by keys');
+
+      await emit(
+        tester,
+        (seq) => event(
+          BridgeEventKind.requestOpened,
+          seq,
+          request: approvalOf('a1'),
+        ),
+      );
+      expect(
+        find.text('Notifications'),
+        findsNothing,
+        reason: 'it would cover the request',
+      );
+    },
+  );
+
+  testWidgets(
+    'Edit moves a queued message into the composer; Cancel or Update settles it',
+    (tester) async {
+      await show(
+        tester,
+        transcript: [userMessage(1, 'Run the build')],
+        turns: [
+          running(1),
+          turnOf(2, status: BridgeTurnStatus.queued, prompt: 'Add a test'),
+        ],
+      );
+      await tester.tap(find.text('Edit'));
+      await tester.pumpAndSettle();
+      expect(composerText(tester), 'Add a test');
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(find.text('Editing in the composer'), findsNothing);
+
+      await tester.tap(find.text('Edit'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('composer')),
+        'Add two tests',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Update queued message'));
+      await tester.pumpAndSettle();
+      expect(actions().last, 'edit 2 Add two tests');
+    },
+  );
+
+  testWidgets('a held Enter types no line and sends nothing', (tester) async {
+    await show(tester, turns: [running(1)]);
+    await tester.enterText(
+      find.byKey(const Key('composer')),
+      'Use the faster API',
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(composerText(tester), 'Use the faster API');
+    expect(actions(), isEmpty);
+  });
+
+  testWidgets(
+    'Previous returns to an answered question, which keeps its answer',
+    (tester) async {
+      await show(
+        tester,
+        requests: [
+          questionsOf('q1', [
+            const BridgeQuestion(
+              id: 'scope',
+              header: 'scope',
+              question: 'Which scope?',
+              options: ['Small', 'Large'],
+              descriptions: ['Only the login flow', ''],
+              multiSelect: false,
+              custom: true,
+            ),
+            questionOf('style', 'Which styles?', options: ['Plain', 'Bold']),
+          ]),
+        ],
+      );
+      await read(tester);
+      await tester.tap(find.text('Small'));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pumpAndSettle();
+      expect(find.text('Which styles?'), findsOneWidget);
+
+      await tester.tap(find.text('Previous'));
+      await tester.pumpAndSettle();
+      expect(find.text('Which scope?'), findsOneWidget);
+      expect(find.text('Only the login flow'), findsOneWidget);
+    },
+  );
+
+  testWidgets('⌥⌘B hides the session card and shows it again', (tester) async {
+    await show(tester);
+    expect(find.byType(SessionCard), findsOneWidget, reason: 'shown at first');
+    await chord(tester, LogicalKeyboardKey.keyB, option: true);
+    expect(find.byType(SessionCard), findsNothing);
+    await chord(tester, LogicalKeyboardKey.keyB, option: true);
+    expect(find.byType(SessionCard), findsOneWidget);
+  });
+
+  testWidgets('in a narrow window the card is a popover that Escape closes', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      size: const Size(900, 900),
+      transcript: [userMessage(1, 'Fix login')],
+    );
+    expect(find.byType(SessionCard), findsNothing, reason: 'waits closed');
+    await chord(tester, LogicalKeyboardKey.keyB, option: true);
+    expect(find.byType(SessionCard), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byType(SessionCard), findsNothing);
+  });
+
+  testWidgets('⌘N starts a new session in the Chat', (tester) async {
+    await show(tester, transcript: [userMessage(1, 'Fix login')]);
+    await chord(tester, LogicalKeyboardKey.keyN);
+    expect(find.text('Fix login'), findsNothing);
+  });
+
+  testWidgets(
+    'Edit from here restores the prompt before what was typed meanwhile',
+    (tester) async {
+      await show(
+        tester,
+        transcript: [userMessage(1, 'Fix login')],
+        turns: [turnOf(1, prompt: 'Fix login', files: 1, added: 1)],
+      );
+      project.session.revertedPrompt = 'Fix login';
+      await hover(tester, find.text('Fix login'));
+      await tester.enterText(
+        find.byKey(const Key('composer')),
+        'Also add a test',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Edit from here'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Revert and keep changes'));
+      await tester.pumpAndSettle();
+      expect(composerText(tester), 'Fix login\n\nAlso add a test');
+
+      await tester.enterText(find.byKey(const Key('composer')), 'Fix login');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Edit from here'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Revert and keep changes'));
+      await tester.pumpAndSettle();
+      expect(composerText(tester), 'Fix login', reason: 'not doubled');
+    },
+  );
+
+  testWidgets('quitting stops T3 before Liquid exits', (tester) async {
+    final host = FakeAgentHost();
+    await show(tester, host: host);
+    await tester.binding.handleRequestAppExit();
+    expect(host.stopped, isTrue);
+  });
+
+  testWidgets('without a session, a failed save is reported to the Workspace', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    final workspace = WorkspaceState(FakeWorkspace());
+    await workspace.start();
+    addTearDown(workspace.dispose);
+    final diff = DiffSettingsController(const DiffSettings(), _FullDisk());
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: AgentShell(workspace: workspace, diffSettings: diff),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await diff.change(const DiffSettings(layout: DiffLayout.split));
+    expect(
+      workspace.problem.value,
+      'Could not save the Diff settings: disk full',
+    );
   });
 }

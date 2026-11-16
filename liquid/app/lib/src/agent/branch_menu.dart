@@ -4,8 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../controls.dart';
-import '../format.dart';
-import '../rust/api/events.dart';
 import '../rust/api/git.dart';
 import '../session/session_state.dart';
 import '../shortcuts/keymap.dart';
@@ -13,13 +11,14 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import '../workspace/row_menu.dart';
-import 'commit_dialog.dart';
+import 'checkout_pull_request.dart';
 import 'session_card_rows.dart';
 
-/// The checkout's branch with its commits ahead and behind its upstream, as the first row of the
-/// session card. Its name and its chevron are two targets that both open the branch menu, split
-/// by a hairline that shows while the row is hovered, as in T3 Code. A right-click on the name
-/// offers to copy it.
+const _stopFirst = 'Stop the current turn to switch worktrees.';
+
+/// The checkout's branch, as the first row of the session card. Its name and its chevron are two
+/// targets that both open the ref picker, split by a hairline that shows while the row is hovered,
+/// as in T3 Code. A right-click on the name offers to copy it.
 class BranchRow extends StatefulWidget {
   const BranchRow({super.key, required this.state});
 
@@ -33,18 +32,12 @@ class _BranchRowState extends State<BranchRow> {
   bool _hovered = false;
 
   @override
-  Widget build(BuildContext context) {
-    final git = widget.state.git;
-    return ListenableBuilder(
+  Widget build(BuildContext context) => ValueListenableBuilder<GitState>(
+    valueListenable: widget.state.git,
+    builder: (context, git, _) => ListenableBuilder(
       listenable: Listenable.merge([git.status, git.problem]),
       builder: (context, _) {
         final ws = context.ws;
-        final small = TextStyle(
-          color: ws.textFaint,
-          fontSize: WsMetrics.fsSmall,
-          fontWeight: WsMetrics.fwRegular,
-          fontFeatures: const [FontFeature.tabularFigures()],
-        );
         if (git.problem.value case final problem?) {
           return Tooltip(
             message: problem,
@@ -57,23 +50,16 @@ class _BranchRowState extends State<BranchRow> {
           );
         }
         final status = git.status.value;
-        if (status == null) return const SizedBox.shrink();
-        final name = status.branch ?? status.commit ?? 'no commit';
+        if (status == null || !status.repository) {
+          return const SizedBox.shrink();
+        }
+        final name = status.branch ?? 'Select ref';
         void open() => unawaited(showBranchMenu(context, widget.state));
         return Semantics(
           key: const Key('branch-row'),
           button: true,
           onTap: open,
-          label: [
-            'Branch $name',
-            if (status.ahead > 0) '${status.ahead} ahead',
-            if (status.behind > 0) '${status.behind} behind',
-            if (!status.merging &&
-                status.remote != null &&
-                status.branch != null &&
-                status.upstream == null)
-              'no upstream',
-          ].join(', '),
+          label: 'Branch $name',
           excludeSemantics: true,
           child: HoverRegion(
             onHover: (hovered, _) {
@@ -86,7 +72,12 @@ class _BranchRowState extends State<BranchRow> {
                 Flexible(
                   child: GestureDetector(
                     onSecondaryTapUp: (details) => unawaited(
-                      _copyName(context, name, details.globalPosition),
+                      _copyName(
+                        context,
+                        widget.state,
+                        name,
+                        details.globalPosition,
+                      ),
                     ),
                     child: Tooltip(
                       message: name,
@@ -105,19 +96,6 @@ class _BranchRowState extends State<BranchRow> {
                     ),
                   ),
                 ),
-                if (status.merging)
-                  Text('merging', style: small.copyWith(color: ws.warning)),
-                if (status.ahead > 0) Text('↑${status.ahead}', style: small),
-                if (status.behind > 0)
-                  Text(
-                    '↓${status.behind}',
-                    style: small.copyWith(color: ws.warning),
-                  ),
-                if (!status.merging &&
-                    status.remote != null &&
-                    status.branch != null &&
-                    status.upstream == null)
-                  Text('no upstream', style: small),
                 Container(
                   key: const Key('branch-split'),
                   width: 1,
@@ -142,159 +120,185 @@ class _BranchRowState extends State<BranchRow> {
           ),
         );
       },
-    );
-  }
+    ),
+  );
 }
 
-/// Offers to copy the branch name where the pointer right-clicked, as T3 Code's branch menu does.
-Future<void> _copyName(BuildContext context, String name, Offset at) async {
+/// Offers to copy `name` where the pointer right-clicked, as T3 Code's branch menu does.
+Future<void> _copyName(
+  BuildContext context,
+  SessionState state,
+  String name,
+  Offset at,
+) async {
   final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
   await showMenu<void>(
     context: context,
     position: RelativeRect.fromRect(at & Size.zero, Offset.zero & overlay.size),
     items: [
       PopupMenuItem<void>(
-        onTap: () => unawaited(Clipboard.setData(ClipboardData(text: name))),
+        onTap: () => unawaited(_copy(state, name)),
         child: const Text('Copy branch name'),
       ),
     ],
   );
 }
 
-/// What the branch menu was closed with.
-sealed class _Chosen {}
-
-class _Switch extends _Chosen {
-  _Switch(this.branch);
-  final BridgeBranch branch;
+/// Copies `name` and says so, as T3 Code's toast does.
+Future<void> _copy(SessionState state, String name) async {
+  try {
+    await Clipboard.setData(ClipboardData(text: name));
+    state.notify(NoticeLevel.info, 'Branch name copied: $name');
+  } on Object catch (error) {
+    state.notify(NoticeLevel.error, 'Failed to copy branch name. $error');
+  }
 }
 
-class _Create extends _Chosen {
+/// What the ref picker was closed with.
+sealed class _Pick {}
+
+/// Switch to a ref.
+final class _Switch extends _Pick {
+  _Switch(this.ref);
+
+  final BridgeRef ref;
+}
+
+/// Create a ref with this name here and check it out.
+final class _Create extends _Pick {
   _Create(this.name);
+
   final String name;
 }
 
-/// Opens the branch menu, then switches to or creates the branch chosen, asking first where
-/// uncommitted changes go, as GitHub Desktop does.
+/// Check out a pull request, given as the reference the picker's search named.
+final class _Checkout extends _Pick {
+  _Checkout(this.reference);
+
+  final String reference;
+}
+
+/// Opens T3 Code's ref picker, then does what was picked.
 Future<void> showBranchMenu(BuildContext context, SessionState state) async {
-  final git = state.git;
-  // Fresh, so a change made since the last read is asked about.
-  await git.refresh();
-  final BridgeBranches branches;
-  try {
-    branches = await git.branches();
-  } on Object catch (error) {
-    state.notify(BridgeLevel.error, 'Could not list the branches: $error');
-    return;
-  }
-  if (!context.mounted) return;
-  final chosen = await showDialog<_Chosen>(
+  final status = state.git.value.status.value;
+  if (status == null) return;
+  final picked = await showDialog<_Pick>(
     context: context,
     barrierColor: Colors.transparent,
-    builder: (context) =>
-        _BranchMenu(branches: branches, status: git.status.value),
+    builder: (_) => _BranchPicker(state: state, status: status),
   );
-  if (!context.mounted) return;
-  switch (chosen) {
-    case _Create(:final name):
-      await git.create(name);
-    case _Switch(:final branch):
-      await _switch(context, state, branch, branches);
-    case null:
-  }
-}
-
-Future<void> _switch(
-  BuildContext context,
-  SessionState state,
-  BridgeBranch branch,
-  BridgeBranches branches,
-) async {
-  final git = state.git;
-  // Read again, since a change saved while the menu was open must be asked about.
-  await git.refreshSettled();
-  if (!context.mounted) return;
-  if (git.problem.value case final problem?) {
-    state.notify(BridgeLevel.error, 'Could not read the checkout: $problem');
+  if (!context.mounted || picked == null) return;
+  if (state.status.value != RunStatus.idle) {
+    state.notify(NoticeLevel.warning, _stopFirst);
     return;
   }
-  final left = git.status.value?.branch;
-  final changed = git.status.value?.changed ?? 0;
-  final stashed = git.stash.value;
-  final from = branches.branches.where((branch) => branch.current).firstOrNull;
-  Future<BridgeGitOutcome?> switchTo(bool leave) async {
-    if (leave &&
-        (left != from?.shown ||
-            left != git.status.value?.branch ||
-            stashed?.id != git.stash.value?.id)) {
-      state.notify(
-        BridgeLevel.warning,
-        'The checkout branch or stash changed. Choose the branch again.',
+  switch (picked) {
+    case _Switch(:final ref):
+      await _switchTo(context, state, ref);
+    case _Create(:final name):
+      await _create(context, state, name);
+    case _Checkout(:final reference):
+      await showCheckoutPullRequestDialog(
+        context,
+        state,
+        status,
+        reference: reference,
       );
-      return null;
-    }
-    return git.switchTo(
-      branch,
-      leaveChanges: leave,
-      fromBranch: from?.name,
-      replacingStash: stashed?.id,
-    );
   }
+}
 
-  var leave = false;
-  // On no branch the changes can only come along.
-  if (changed > 0 && left != null) {
-    final choice = await showDialog<bool>(
-      context: context,
-      builder: (context) =>
-          _SwitchDialog(left: left, target: branch.shown, stashed: stashed),
-    );
-    if (choice == null || !context.mounted) return;
-    leave = choice;
-  }
-  var outcome = await switchTo(leave);
-  while (outcome?.kind == BridgeGitOutcomeKind.wouldOverwrite) {
-    if (!context.mounted) return;
-    final again = await showDialog<_RefusedChoice>(
-      context: context,
-      builder: (context) => _RefusedDialog(
-        target: branch.shown,
-        files: outcome!.files,
-        left: left,
-        stashed: stashed,
-      ),
-    );
-    if (!context.mounted) return;
-    if (again == _RefusedChoice.commit) {
-      await showCommitDialog(context, state);
+/// Switches to `ref`. A ref checked out in another worktree opens that worktree in the session.
+Future<void> _switchTo(
+  BuildContext context,
+  SessionState state,
+  BridgeRef ref,
+) async {
+  try {
+    if (ref.worktree case final worktree?) {
+      await state.setBranch(ref.name, worktree: worktree);
       return;
     }
-    if (again != _RefusedChoice.leave) return;
-    outcome = await switchTo(true);
+    // A remote ref's local branch has the name after its remote.
+    final branch = ref.remote == null
+        ? ref.name
+        : ref.name.substring(ref.name.indexOf('/') + 1);
+    if (!await _carryChanges(context, state, branch) || !context.mounted) {
+      return;
+    }
+    await state.git.value.backend.switchTo(branch);
+  } on Object catch (error) {
+    state.notify(NoticeLevel.error, 'Failed to switch ref. $error');
   }
 }
 
-/// The searchable list of local and remote branches, with "Create branch" for a new name.
-class _BranchMenu extends StatefulWidget {
-  const _BranchMenu({required this.branches, required this.status});
-
-  final BridgeBranches branches;
-  final BridgeGitStatus? status;
-
-  int get changed => status?.changed ?? 0;
-  String? get current => status?.branch;
-
-  @override
-  State<_BranchMenu> createState() => _BranchMenuState();
+Future<void> _create(
+  BuildContext context,
+  SessionState state,
+  String name,
+) async {
+  try {
+    if (!await _carryChanges(context, state, name) || !context.mounted) {
+      return;
+    }
+    await state.git.value.backend.createBranch(name);
+  } on Object catch (error) {
+    state.notify(NoticeLevel.error, 'Failed to create and switch ref. $error');
+  }
 }
 
-class _BranchMenuState extends State<_BranchMenu> {
+/// Asks before a switch with uncommitted changes, which then carry over or block it; true when
+/// the switch may go on.
+Future<bool> _carryChanges(
+  BuildContext context,
+  SessionState state,
+  String branch,
+) async {
+  if (state.git.value.status.value?.changes.isEmpty ?? true) return true;
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => ActionDialog(
+      title: 'Switch to $branch?',
+      actions: [
+        PrimaryButton(
+          label: 'Switch branch',
+          onPressed: () => Navigator.of(context).pop(true),
+        ),
+      ],
+      children: [
+        Text(
+          "You have uncommitted changes. They'll carry over to the other branch, or block the switch if they conflict.",
+          style: DangerDialog.text(context),
+        ),
+      ],
+    ),
+  );
+  return confirmed ?? false;
+}
+
+/// T3 Code's ref picker: a search over the checkout's refs, with the ways to check out a pull
+/// request or to create a ref the search names.
+class _BranchPicker extends StatefulWidget {
+  const _BranchPicker({required this.state, required this.status});
+
+  final SessionState state;
+  final BridgeGitStatus status;
+
+  @override
+  State<_BranchPicker> createState() => _BranchPickerState();
+}
+
+class _BranchPickerState extends State<_BranchPicker> {
   final _query = TextEditingController();
+  BridgeRefs? _refs;
+
+  /// Counts the searches, so an answer to an earlier one never lands.
+  int _attempt = 0;
 
   @override
   void initState() {
     super.initState();
-    _query.addListener(() => setState(() {}));
+    _query.addListener(() => unawaited(_read()));
+    unawaited(_read());
   }
 
   @override
@@ -303,42 +307,54 @@ class _BranchMenuState extends State<_BranchMenu> {
     super.dispose();
   }
 
+  Future<void> _read() async {
+    final attempt = ++_attempt;
+    try {
+      final refs = await widget.state.git.value.backend.refs(
+        _query.text.trim(),
+      );
+      if (mounted && attempt == _attempt) setState(() => _refs = refs);
+    } on Object catch (error) {
+      if (!mounted || attempt != _attempt) return;
+      widget.state.notify(NoticeLevel.error, 'Could not list the refs: $error');
+      Navigator.of(context).pop();
+    }
+  }
+
+  /// The name the search would create: its spaces made dashes, unless a ref already has it.
+  String? _newName() {
+    final name = _query.text.trim().replaceAll(RegExp(r'[ \t\n\r\f\v]+'), '-');
+    final refs = _refs;
+    if (name.isEmpty ||
+        refs == null ||
+        refs.refs.any((ref) => ref.name == name)) {
+      return null;
+    }
+    return name;
+  }
+
+  /// Enter picks the first item, as T3 Code's picker highlights it.
+  void _submit() {
+    if (widget.state.status.value != RunStatus.idle) return;
+    final checkout = pullRequestReference(_query.text);
+    final first = _refs?.refs.firstOrNull;
+    final create = _newName();
+    if (checkout != null) {
+      Navigator.of(context).pop(_Checkout(checkout));
+    } else if (first != null) {
+      Navigator.of(context).pop(first.current ? null : _Switch(first));
+    } else if (create != null) {
+      Navigator.of(context).pop(_Create(create));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    final query = _query.text.trim();
-    final refused = widget.branches.running.isNotEmpty;
-    final matches = [
-      for (final branch in widget.branches.branches)
-        if (branch.shown.toLowerCase().contains(query.toLowerCase())) branch,
-    ];
-    final exists = widget.branches.branches.any(
-      (branch) => !branch.remote && branch.name == query,
-    );
-    final creatable = query.isNotEmpty && !exists;
-    final problem = creatable ? branchNameProblem(query) : null;
-    final now = DateTime.now();
-    void choose(BridgeBranch branch) =>
-        Navigator.of(context).pop(branch.current ? null : _Switch(branch));
-    void create() => Navigator.of(context).pop(_Create(query));
-    void submit() {
-      if (refused) return;
-      if (matches.where((branch) => !branch.current).firstOrNull
-          case final first?) {
-        choose(first);
-      } else if (creatable && problem == null) {
-        create();
-      }
-    }
-
-    final local = [
-      for (final branch in matches)
-        if (!branch.remote) branch,
-    ];
-    final remote = [
-      for (final branch in matches)
-        if (branch.remote) branch,
-    ];
+    final refs = _refs;
+    final checkout = pullRequestReference(_query.text);
+    final create = _newName();
+    final terms = terminologyFor(widget.status);
     return Stack(
       children: [
         Positioned(
@@ -352,41 +368,78 @@ class _BranchMenuState extends State<_BranchMenu> {
             borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
             child: CallbackShortcuts(
               bindings: {
-                const Keys(LogicalKeyboardKey.enter).activator: submit,
+                const Keys(LogicalKeyboardKey.enter).activator: _submit,
               },
               child: Padding(
                 padding: const EdgeInsets.all(WsMetrics.space2),
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxHeight: 420),
-                  child: ListView(
-                    shrinkWrap: true,
-                    children: [
-                      _search(),
-                      const SizedBox(height: WsMetrics.space1),
-                      if (refused) _refusal(),
-                      ..._group(
-                        'Local branches',
-                        local,
-                        refused: refused,
-                        now: now,
-                        choose: choose,
-                      ),
-                      ..._group(
-                        'Remote branches',
-                        remote,
-                        refused: refused,
-                        now: now,
-                        choose: choose,
-                      ),
-                      ..._footer(
-                        query: query,
-                        matches: matches,
-                        creatable: creatable,
-                        problem: problem,
-                        refused: refused,
-                        create: create,
-                      ),
-                    ],
+                  child: ValueListenableBuilder<RunStatus>(
+                    valueListenable: widget.state.status,
+                    builder: (context, status, _) {
+                      final running = status != RunStatus.idle;
+                      return ListView(
+                        shrinkWrap: true,
+                        children: [
+                          TextField(
+                            key: const Key('branch-search'),
+                            controller: _query,
+                            autofocus: true,
+                            style: TextStyle(
+                              fontSize: WsMetrics.fsCompact,
+                              color: ws.text,
+                            ),
+                            decoration: const InputDecoration(
+                              isDense: true,
+                              hintText: 'Search refs...',
+                            ),
+                          ),
+                          const SizedBox(height: WsMetrics.space1),
+                          if (running) const WarningNotice(_stopFirst),
+                          if (checkout case final reference?)
+                            _MenuRow(
+                              leading: Icon(
+                                LucideIcons.gitPullRequest,
+                                size: 14,
+                                color: ws.textMuted,
+                              ),
+                              name: Text('Checkout ${terms.singular}'),
+                              detail: reference,
+                              onTap: running
+                                  ? null
+                                  : () =>
+                                        Navigator.of(context)
+                                            .pop(_Checkout(reference)),
+                            ),
+                          if (refs != null)
+                            for (final ref in refs.refs) _ref(ref, running),
+                          if (create case final name?)
+                            _MenuRow(
+                              leading: Icon(
+                                LucideIcons.gitBranch,
+                                size: 14,
+                                color: ws.textMuted,
+                              ),
+                              name: Text('Create new ref "$name"'),
+                              onTap: running
+                                  ? null
+                                  : () =>
+                                        Navigator.of(context)
+                                            .pop(_Create(name)),
+                            ),
+                          if (refs == null)
+                            const _Foot('Loading refs...')
+                          else if (refs.refs.isEmpty &&
+                              checkout == null &&
+                              create == null)
+                            const _Foot('No refs found.')
+                          else if (refs.next != null)
+                            _Foot(
+                              'Showing ${refs.refs.length} of ${refs.total} refs',
+                            ),
+                        ],
+                      );
+                    },
                   ),
                 ),
               ),
@@ -397,118 +450,36 @@ class _BranchMenuState extends State<_BranchMenu> {
     );
   }
 
-  /// The field that searches the branches; a name that matches none can be created.
-  Widget _search() => TextField(
-    key: const Key('branch-search'),
-    controller: _query,
-    autofocus: true,
-    style: TextStyle(fontSize: WsMetrics.fsCompact, color: context.ws.text),
-    decoration: const InputDecoration(
-      isDense: true,
-      hintText: 'Search or create a branch',
-    ),
-  );
-
-  /// Why the branches cannot be switched now, and which running work to stop first.
-  Widget _refusal() {
-    final running = widget.branches.running;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: WsMetrics.space1),
-      child: WarningNotice(
-        '${whoRuns(running)}. ${stopFirst(running)}, then switch branches.',
+  /// A ref with its badge; right-click copies its name.
+  Widget _ref(BridgeRef ref, bool running) {
+    final ws = context.ws;
+    return GestureDetector(
+      onSecondaryTapUp: (details) => unawaited(
+        _copyName(context, widget.state, ref.name, details.globalPosition),
+      ),
+      child: _MenuRow(
+        leading: ref.current
+            ? Icon(LucideIcons.check, size: 14, color: ws.accent)
+            : const SizedBox.shrink(),
+        name: Text(ref.shown),
+        detail: switch ((ref.current, ref.worktree, ref.remote, ref.default_)) {
+          (true, _, _, _) => 'current',
+          (_, _?, _, _) => 'worktree',
+          (_, _, _?, _) => 'remote',
+          (_, _, _, true) => 'default',
+          _ => null,
+        },
+        onTap: running
+            ? null
+            : () =>
+                  Navigator.of(context).pop(ref.current ? null : _Switch(ref)),
       ),
     );
   }
-
-  /// One group of branch rows under its label; nothing when the group is empty.
-  List<Widget> _group(
-    String title,
-    List<BridgeBranch> branches, {
-    required bool refused,
-    required DateTime now,
-    required ValueChanged<BridgeBranch> choose,
-  }) => [
-    if (branches.isNotEmpty) _MenuLabel(title),
-    for (final branch in branches)
-      _branchRow(branch, now, refused ? null : () => choose(branch)),
-  ];
-
-  /// A branch with its mark, and its ahead and behind counts or last commit time.
-  Widget _branchRow(BridgeBranch branch, DateTime now, VoidCallback? onTap) =>
-      _MenuRow(
-        leading: branch.current
-            ? Icon(LucideIcons.check, size: 14, color: context.ws.accent)
-            : const SizedBox.shrink(),
-        name: Text(branch.shown),
-        detail: [
-          if (branch.stashed) 'stashed changes',
-          if (branch.current) ...[
-            if ((widget.status?.ahead ?? 0) > 0) '↑${widget.status!.ahead}',
-            if ((widget.status?.behind ?? 0) > 0) '↓${widget.status!.behind}',
-            'now',
-          ] else
-            formatAgo(branch.committedMs, now),
-        ].join(' · '),
-        onTap: onTap,
-      );
-
-  /// The new-branch row when the search names one, with its note; otherwise the note about changes.
-  List<Widget> _footer({
-    required String query,
-    required List<BridgeBranch> matches,
-    required bool creatable,
-    required String? problem,
-    required bool refused,
-    required VoidCallback create,
-  }) {
-    final changes = widget.changed == 1
-        ? '1 uncommitted change'
-        : '${widget.changed} uncommitted changes';
-    if (!creatable) {
-      return [
-        if (widget.changed > 0 && !refused) ...[
-          const Divider(height: WsMetrics.space3),
-          _Foot('You have $changes; switching asks where they go.'),
-        ],
-      ];
-    }
-    return [
-      if (matches.isEmpty) const _MenuLabel('No branch matches'),
-      _MenuRow(
-        leading: Icon(
-          LucideIcons.gitBranch,
-          size: 14,
-          color: context.ws.textMuted,
-        ),
-        name: Text.rich(
-          TextSpan(
-            children: [
-              TextSpan(
-                text: 'Create branch ',
-                style: DefaultTextStyle.of(context).style,
-              ),
-              TextSpan(text: query),
-            ],
-          ),
-        ),
-        detail: problem == null && matches.isEmpty ? '⏎' : null,
-        onTap: refused || problem != null ? null : create,
-      ),
-      _Foot(
-        problem == null
-            ? [
-                'Starts from the current commit',
-                if (widget.current case final current?) ' on $current',
-                if (widget.changed > 0) '; your $changes come along.' else '.',
-              ].join()
-            : '⚠ $problem',
-        color: problem == null ? null : context.ws.danger,
-      ),
-    ];
-  }
 }
 
-/// A row of the branch menu: a leading mark, the name and an optional detail, tappable unless disabled.
+/// A row of the ref picker: a leading mark, the name and an optional detail, tappable unless
+/// disabled.
 class _MenuRow extends StatelessWidget {
   const _MenuRow({
     required this.leading,
@@ -567,9 +538,8 @@ class _MenuRow extends StatelessWidget {
   }
 }
 
-/// The heading over one group of rows in the branch menu.
-class _MenuLabel extends StatelessWidget {
-  const _MenuLabel(this.text);
+class _Foot extends StatelessWidget {
+  const _Foot(this.text);
 
   final String text;
 
@@ -577,7 +547,7 @@ class _MenuLabel extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(
       WsMetrics.space3,
-      WsMetrics.space2,
+      WsMetrics.space1,
       WsMetrics.space3,
       WsMetrics.space1,
     ),
@@ -589,256 +559,4 @@ class _MenuLabel extends StatelessWidget {
       ),
     ),
   );
-}
-
-class _Foot extends StatelessWidget {
-  const _Foot(this.text, {this.color});
-
-  final String text;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(
-      WsMetrics.space3,
-      WsMetrics.space1,
-      WsMetrics.space3,
-      WsMetrics.space1,
-    ),
-    child: Text(
-      text,
-      style: TextStyle(
-        color: color ?? context.ws.textFaint,
-        fontSize: WsMetrics.fsSmall,
-      ),
-    ),
-  );
-}
-
-/// Asks where uncommitted changes go when switching, with GitHub Desktop's words; closes with
-/// `true` to leave them in the stash of the branch left, `false` to bring them along.
-class _SwitchDialog extends StatefulWidget {
-  const _SwitchDialog({
-    required this.left,
-    required this.target,
-    required this.stashed,
-  });
-
-  final String left;
-  final String target;
-
-  /// The stashed changes of the branch left, which leaving replaces.
-  final BridgeStash? stashed;
-
-  @override
-  State<_SwitchDialog> createState() => _SwitchDialogState();
-}
-
-class _SwitchDialogState extends State<_SwitchDialog> {
-  bool _leave = true;
-
-  @override
-  Widget build(BuildContext context) {
-    void confirmed() => Navigator.of(context).pop(_leave);
-    Widget choice(bool leave, String title, String detail) => _Choice(
-      selected: _leave == leave,
-      title: title,
-      detail: detail,
-      onTap: () => setState(() => _leave = leave),
-    );
-    return ActionDialog(
-      title: 'Switch branch',
-      bindings: {
-        const Keys(LogicalKeyboardKey.enter).activator: confirmed,
-        const Keys(LogicalKeyboardKey.arrowUp).activator: () =>
-            setState(() => _leave = true),
-        const Keys(LogicalKeyboardKey.arrowDown).activator: () =>
-            setState(() => _leave = false),
-      },
-      actions: [
-        PrimaryButton(
-          label: _leave && widget.stashed != null
-              ? 'Replace stash and switch'
-              : 'Switch branch',
-          shortcut: '⏎',
-          onPressed: confirmed,
-        ),
-      ],
-      children: [
-        Text(
-          'You have changes on this branch. What would you like to do with them?',
-          style: DangerDialog.text(context),
-        ),
-        choice(
-          true,
-          'Leave my changes on ${widget.left}',
-          'Your in-progress work will be stashed on this branch for you to return to later',
-        ),
-        if (widget.stashed case final stashed? when _leave)
-          WarningNotice(
-            '⚠ ${widget.left} already has stashed changes from '
-            '${formatClockMs(stashed.createdMs)} (${stashed.files.length == 1 ? '1 file' : '${stashed.files.length} files'}). '
-            'Leaving these changes replaces them.',
-          ),
-        choice(
-          false,
-          'Bring my changes to ${widget.target}',
-          'Your in-progress work will follow you to the new branch',
-        ),
-      ],
-    );
-  }
-}
-
-class _Choice extends StatelessWidget {
-  const _Choice({
-    required this.selected,
-    required this.title,
-    required this.detail,
-    required this.onTap,
-  });
-
-  final bool selected;
-  final String title;
-  final String detail;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    return Semantics(
-      inMutuallyExclusiveGroup: true,
-      checked: selected,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: WsMetrics.space4,
-            vertical: WsMetrics.space3,
-          ),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-            border: Border.all(
-              color: selected ? ws.accent : ws.borderStrong,
-              width: selected ? 2 : 1,
-            ),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            spacing: WsMetrics.space4,
-            children: [
-              Container(
-                width: 14,
-                height: 14,
-                margin: const EdgeInsets.only(top: 3),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: selected ? ws.accent : ws.borderStrong,
-                    width: selected ? 4 : 1.5,
-                  ),
-                ),
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        color: ws.text,
-                        fontWeight: WsMetrics.fwMedium,
-                        fontSize: WsMetrics.fsCompact,
-                      ),
-                    ),
-                    Text(detail, style: DangerDialog.text(context)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-enum _RefusedChoice { leave, commit }
-
-/// Offers to leave the changes or commit them after Git refused to bring them along.
-class _RefusedDialog extends StatelessWidget {
-  const _RefusedDialog({
-    required this.target,
-    required this.files,
-    required this.left,
-    required this.stashed,
-  });
-
-  final String target;
-  final List<String> files;
-  final String? left;
-  final BridgeStash? stashed;
-
-  @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    final left = this.left;
-    void leave() => Navigator.of(context).pop(_RefusedChoice.leave);
-    return ActionDialog(
-      title: 'Could not switch to $target',
-      // Nothing changed, so it closes rather than cancels.
-      dismiss: 'Close',
-      bindings: {
-        if (left != null) const Keys(LogicalKeyboardKey.enter).activator: leave,
-      },
-      actions: [
-        if (left != null)
-          PrimaryButton(
-            label: stashed != null
-                ? 'Replace the stash on $left and switch'
-                : 'Leave them on $left and switch',
-            shortcut: '⏎',
-            onPressed: leave,
-          ),
-        SecondaryButton(
-          label: 'Commit changes…',
-          onPressed: () => Navigator.of(context).pop(_RefusedChoice.commit),
-        ),
-      ],
-      children: [
-        Text(
-          'Git did not switch, because it would overwrite your uncommitted changes in these '
-          'files. Nothing was changed.',
-          style: DangerDialog.text(context),
-        ),
-        Container(
-          constraints: const BoxConstraints(maxHeight: 200),
-          padding: const EdgeInsets.all(WsMetrics.space2),
-          decoration: BoxDecoration(
-            color: ws.subtle,
-            borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-          ),
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              for (final file in files)
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: WsMetrics.space2,
-                    vertical: WsMetrics.space1,
-                  ),
-                  child: Text(file, style: monoStyle(context)),
-                ),
-            ],
-          ),
-        ),
-        if (left != null)
-          Text(
-            'Leave them on $left to switch, or commit them first.',
-            style: DangerDialog.text(context),
-          ),
-      ],
-    );
-  }
 }

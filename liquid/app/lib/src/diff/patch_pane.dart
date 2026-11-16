@@ -74,7 +74,9 @@ class PatchPane extends StatelessWidget {
     builder: (context, constraints) {
       final switches = [
         _Toggle(
-          label: 'Hide whitespace',
+          label: settings.hideWhitespace
+              ? 'Show whitespace changes'
+              : 'Hide whitespace changes',
           on: settings.hideWhitespace,
           onTap: onWhitespace,
         ),

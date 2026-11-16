@@ -76,7 +76,7 @@ Liquid        = standalone native workspace / app-building product</code></pre>
           <li>a full separate rich GUI in the MVP.</li>
         </ul></div>
       </div>
-      <p><strong>Session record (ADR-0257):</strong> “Export record” writes what Meta-Harness already records about one stored session as a folder in Downloads: pi's session file unchanged, and <code>record.json</code> (<code>"schema": "watershed-session-record-v1"</code>) with each turn's times, how it ended, its checkpoint commits and the files it changed, plus a <code>README.txt</code> that says what it leaves out. It is observe-only, adds no gate or recording, and claims no completeness (ADR-0222). Its turns are only those that ran through Meta-Harness, and its file changes are those between checkpoints, in files Git does not ignore.</p>
+      <p><strong>Session record (ADR-0257):</strong> “Export record” writes what Meta-Harness holds about one session as a folder in Downloads: T3's record of the thread (<code>thread.json</code>), <code>record.json</code> (<code>"schema": "watershed-session-record-v2"</code>) with each turn's times, how it ended and the files its end checkpoint changed, and a <code>README.txt</code> that says what it leaves out. It is observe-only, adds no gate or recording, and claims no completeness (ADR-0222).</p>
     </div></section>
 
     <section id="flow-agent" class="section"><h2>3. Relationship to Flow Agent</h2><div class="body">
@@ -112,32 +112,22 @@ Liquid
       <p><strong>Liquid is a standalone local-first workspace product, not merely Meta-Harness's UI.</strong> Workspace sync is independent from this live control plane. When an owning Meta-Harness is unreachable, Liquid may render cached state only as offline/stale and must not queue commands as if success were guaranteed. Meta-Harness and its agents access Liquid only through the workspace CLI/API/mutation pipeline, never Liquid storage internals.</p>
       <p>A provisioned local Meta-Harness may start a same-host Flow Agent backed by a local model endpoint without Internet access. This does not let a remote client control an unreachable host. Cross-device Portable continuation uses Flow Agent's future public export/import surface and creates a child Run at the destination; Meta-Harness never copies Flow Agent's private store or transfers a live process claim. Exact archive/ownership behavior remains <a href="../decisions/open-decisions.html#d-058">D-058</a>, archive authenticity remains <a href="../decisions/open-decisions.html#d-062">D-062</a>, and local inference process trust remains <a href="../decisions/open-decisions.html#d-061">D-061</a>.</p>
       <h3 id="git-integration">Git integration</h3>
-      <p>Accepted (ADR-0011, ADR-0190, ADR-0191, ADR-0220, ADR-0234); shipped except creating worktrees, which waits for Chats. Meta-Harness runs the host's <code>git</code> and <code>gh</code> on agent projects and Liquid presents it; it is no VCS. Its security boundary and exact mechanics are canonical in <a href="../../SECURITY.md#mvp-vcs-boundary">SECURITY.md</a>. Target (ADR-0282): T3 Code's Git behavior as shipped replaces every rule below, and this code is deleted; the worktree UI still to build is in the <a href="../design/mockups/liquid-git-prs-worktrees.html">pull request and worktree mockups</a>.</p>
+      <p>Accepted; implemented on macOS (ADR-0282, ADR-0294, ADR-0295). T3 Code runs Git for every harness with its behavior as shipped, and Liquid's session card and dialogs copy T3's desktop app; Watershed keeps no Git rules of its own. Its trust boundary is in <a href="../../SECURITY.md#mvp-vcs-boundary">SECURITY.md</a>.</p>
       <ul>
-        <li><strong>Checkpoints:</strong> as in T3 Code, each turn gets one at its start and one at its end, stored without asking as commits under Watershed's own <a href="../../GLOSSARY.md#liquid-primitives">checkpoint refs</a>, with tracked and new files but none Git ignores; the Diff panel reads them. A folder without Git gets none and says so; deleting a session deletes its checkpoints, and one action removes all of them.</li>
-        <li><strong>Revert:</strong> like T3 Code's “Edit from here”, reverting to a turn first lists the affected files, runs only while the project still matches that confirmed list (ADR-0256), restores only the working tree, never the index or the branch, leaves repositories inside the project alone, continues the session on a new pi branch with the turn's prompt back in the input area, so the undone turns stay in the session tree, and is refused while an agent runs in the same checkout.</li>
-        <li><strong>Guards:</strong> a turn cannot start without its repository and checkout guard. These operating-system file locks under the Git directory, or outside Git in the user's lock folder, order turns, reverts, Initialize Git, session deletion and worktree changes across Liquid windows.</li>
-        <li><strong>Branches and commits:</strong> every other Git write needs an explicit user action, except T3 Code's background fetch every 15 seconds. A checkout with a running agent allows no branch switch, stash, commit or pull, and parallel sessions use their own worktrees. Switching with changes offers GitHub Desktop's choice to leave them in the branch's one stash or bring them along; a stash is restored only into a checkout without changes at the tree it was left on and is identified by a unique token in its message. The user writes the commit message, which Liquid never generates; commits take whole files and need a branch, pull is fast-forward only, and Push needs one resolved fetch and push repository.</li>
-        <li><strong>Pull requests:</strong> the Chat's own model writes the title and description through a one-shot pi, so the diff reaches only that Chat's provider.</li>
-        <li><strong>Worktrees:</strong> they live under a per-host root; a new Chat defaults to a new worktree from the remote default branch, only an idle Chat moves to another, and removal never forces or loses changes, commits or stashes. Accepted target with Chats: the root lies outside Liquid's and Meta-Harness's data folders; a worktree is also removed with its last Chat under the same removal rules; creating one takes the exclusive common Git guard and is refused while any turn in the repository runs.</li>
+        <li><strong>Checkpoints and revert:</strong> T3 stores each turn's files under <code>refs/t3/</code> in the project's repository. “Edit from here” rewinds the session to before a prompt and returns it to the input area; “Revert files too” restores the files only for a session in its own worktree, otherwise T3 rewinds the conversation only.</li>
+        <li><strong>Git actions:</strong> T3's quick action and menu (Commit, Push, Create PR, Publish repository), its commit dialog, the confirmation on the default branch and its ref picker with Checkout pull request. One writer model writes commit messages left blank, pull request text and session titles (ADR-0294).</li>
+        <li><strong>Worktrees:</strong> a new session starts in a new worktree from the default branch, T3's default, which T3 creates under its data folder and names; deleting a worktree's only session asks whether to delete the worktree too.</li>
       </ul>
       <h3 id="statistics">Session card and statistics</h3>
-      <p>Accepted (ADR-0279); shipped for pi sessions. Liquid shows exact session statistics only, counted from the session's stored entries on every branch, as the status bar counts; it never estimates or interprets. The session card, rebuilt from T3 Code's thread details card, shows them as rows under the Git controls; its Statistics row or ⌘U opens the statistics panel, laid out like T3 Code's Usage page per turn instead of per day, with Cost, Tokens and Time views, a tool breakdown and a turn breakdown; the panel is at most 660 px wide; selecting a turn on the current branch scrolls the Chat to it, and Escape or ✕ closes the panel.</p>
+      <p>Accepted (ADR-0279, ADR-0287, ADR-0293). The session card copies T3 Code 0.1.9's thread details card and its “Choose what to show” menu: the host and worktree; branch and pull request with its checks and actions (Ready, Merge, Fix, Resolve); the next Git step; Changes against the branch's base or uncommitted; the servers the agent runs, opened in the default browser since Liquid has no browser panel; the session's automations; Lineage and Side chats; then Liquid's statistics, usage limits and the context window, the last two hidden by default as in T3. Project scripts wait until Liquid has a terminal, and “Open in editor” is left out. Its Statistics row or ⌘U opens the statistics panel, laid out like T3 Code's Usage page per turn, with a tool breakdown and a turn breakdown. Liquid shows only what T3 reports and never estimates:</p>
       <ul>
-        <li><strong>Session card:</strong> 280 px at the Chat's top right while the Chat keeps T3 Code's minimum width, otherwise a popover from the header's toggle (⌥⌘B) that opens only when pressed and closes on Escape or when focus leaves it. Its rows, in T3 Code's order: branch, pull request, the next Git step with the others behind its arrow, Changes of the latest turn, then the statistics and the context window. Right-clicking the card chooses its rows; hidden rows keep their shortcuts, and only changed choices are stored.</li>
-        <li><strong>Diff panel:</strong> beside the Chat, opened by the Changes row or ⌘D and closed by ✕ or ⌘D; 540 px wide at first, resizable from 360 px, its width kept in <code>diff.json</code>.</li>
-        <li><strong>Answer menu:</strong> an agent answer's ··· menu offers Copy and Branch from here; branching waits until the agent is idle.</li>
-        <li><strong>Shortcuts:</strong> a new default key that one of the user's own bindings already uses stays unbound until the user resets it in Settings → Shortcuts.</li>
+        <li><strong>Turns:</strong> a turn is a T3 run, numbered by its ordinal, which also numbers its end checkpoint and diff; a reverted run leaves the count.</li>
+        <li><strong>Tokens:</strong> each provider turn's input, cache reads and writes, output and reasoning, by model. T3 reports no cost per turn, so the Cost row says none is reported.</li>
+        <li><strong>Time:</strong> a turn's working time from its start to its end, and each tool call's time; T3 times no single model request, so model time shows a dash.</li>
+        <li><strong>Tool calls:</strong> by tool and outcome: succeeded, failed, cancelled and running.</li>
+        <li><strong>Context window:</strong> the latest provider turn's context use, window and compaction threshold, when the provider reports them.</li>
+        <li><strong>Interpretations:</strong> “Ask the agent about this session…” puts a question into the input area and sends nothing.</li>
       </ul>
-      <ul>
-        <li><strong>Turns:</strong> a turn starts at each start checkpoint, or in a session without checkpoints at each prompt; entries before the first turn count only in the totals.</li>
-        <li><strong>Tokens and cost:</strong> as pi recorded each entry, including summaries, split by model; the cost also splits by kind of tokens (input, output, cache read, cache write). A response with tokens but no recorded cost counts in tokens only, and the cost row says how many such responses there are.</li>
-        <li><strong>Working time:</strong> from a turn's first stored entry to its end checkpoint, or to its last entry while it runs or without checkpoints; entries after the end checkpoint, such as a model change, count only in the totals. Model time adds up the extension's request timing entries; tool time adds up, per response, its longest tool, since pi runs a response's tools at once; the rest is Other. A turn without timing entries shows a dash for model and tool time.</li>
-        <li><strong>Tool calls:</strong> by tool and outcome: succeeded, failed, cancelled (no result once its turn ended or a later one started) and running (no result yet while the turn runs). Each tool's time adds up the timing entries of its calls that got a result, paired as the chat pairs them; a tool with none shows a dash.</li>
-        <li><strong>Context window:</strong> pi's own context use and the model's window (<code>get_session_stats</code>), with the point where pi compacts: the window minus <code>compaction.reserveTokens</code> from pi's settings; none when automatic compaction is off, the settings cannot be read, or the project's <code>.pi/settings.json</code> sets compaction, since pi reads that file only for a project it trusts and Liquid cannot see that choice.</li>
-        <li><strong>Interpretations:</strong> “Ask the agent about this session…” puts a question into the input area and sends nothing; the agent may write its own evaluation script.</li>
-      </ul>
-      <p>Where these statistics come from once T3 Code runs the harnesses follows ADR-0282.</p>
     </div></section>
 
     <section id="deployment" class="section"><h2>5. Deployment modes</h2><div class="body">
@@ -195,8 +185,13 @@ meta metrics ...</code></pre></div>
 
     <section id="architecture" class="section"><h2>7. Architecture</h2><div class="body">
       <h3 id="t3-stack">Agent host on T3 Code</h3>
-      <p>Accepted target (ADR-0280 to ADR-0282, ADR-0286). The pipeline and crates further down predate building on T3 Code and follow it once reworked.</p>
-      <p><span class="pd-key pd-ws">Watershed</span><span class="pd-key pd-t3">T3 Code, unchanged</span><span class="pd-key pd-h">Harness or outside agent</span><span class="pd-key pd-sy">Host connection</span></p>
+      <p>Accepted (ADR-0280 to ADR-0282, ADR-0286); implemented on macOS with Meta-Harness embedded in Liquid. The pipeline and crates further down predate building on T3 Code and follow it once reworked.</p>
+      <ul>
+        <li><strong>Start:</strong> Meta-Harness runs the pinned <code>t3</code> itself with <code>serve --host 127.0.0.1</code>, its own <code>T3CODE_HOME</code>, <code>T3CODE_TELEMETRY_ENABLED=false</code> and <code>T3CODE_OTEL_SDK_DISABLED=true</code>, reads the port from <code>userdata/server-runtime.json</code> and takes an owner token from <code>t3 auth session issue</code>. Before starting, it stops the pinned <code>t3 serve</code> the data folder records as running, such as one a dead Meta-Harness left; one data folder belongs to one Meta-Harness.</li>
+        <li><strong>Protocol:</strong> Effect RPC JSON messages on <code>/ws?orchestrationProtocol=2</code> over <code>tokio-tungstenite</code>, acknowledging every streamed message (ADR-0292). A followed thread keeps T3's projection, updated by each event as T3's own client applies it. T3 closes a socket when its session expires, so the client reconnects with a new 24 h owner token, sends its open streams again, and a thread restarts from the snapshot T3 then sends, so Liquid reloads its Chat.</li>
+        <li><strong>Version pin and contract tests (ADR-0281):</strong> <code>meta-harness/t3.lock</code> holds the T3 version and each archive's SHA-256 from the release's <code>SHA256SUMS</code>. The contract tests start that T3 with an empty data folder and a scripted local ACP agent as the provider, with no model or account, and check what Meta-Harness relies on; live providers stay a manual check.</li>
+      </ul>
+<p><span class="pd-key pd-ws">Watershed</span><span class="pd-key pd-t3">T3 Code, unchanged</span><span class="pd-key pd-h">Harness or outside agent</span><span class="pd-key pd-sy">Host connection</span></p>
       <div class="pd-row">
         <div>
           <div class="pd-b pd-ws">Liquid on any device</div>
@@ -209,12 +204,12 @@ meta metrics ...</code></pre></div>
         </div>
         <div>
           <div class="pd-cap">Start and packaging (ADR-0286)</div>
-          <div class="pd-b pd-ws">One installer: <code>meta</code> CLI and a login service<small>launchd or a systemd user unit, no administrator rights</small></div>
+          <div class="pd-b pd-ws">One installer: <code>meta</code> CLI and a login service<small>launchd, a systemd user unit or a Windows per-user autostart, no administrator rights</small></div>
           <div class="pd-a">at sign-in and after a crash</div>
           <div class="pd-b pd-ws">Meta-Harness<small>own state in SQLite with an append-only approval log</small></div>
           <div class="pd-a">starts and supervises</div>
           <div class="pd-b pd-t3">T3 Code</div>
-          <div class="pd-box"><strong>Windows 11:</strong> Liquid runs natively; whether Meta-Harness, T3 Code and the harnesses run natively or in WSL is open in <a href="../decisions/open-decisions.html#d-107">D-107</a>.</div>
+          <div class="pd-box"><strong>Windows 11:</strong> Liquid, Meta-Harness, T3 Code and the harnesses run natively, without WSL (ADR-0291).</div>
         </div>
       </div>
       <div class="flow" aria-label="Meta-Harness control-plane pipeline">
@@ -245,7 +240,7 @@ liquid integration
         <li><strong>Control plane:</strong> session registry, task state, attention state and schedules for this instance/host.</li>
         <li><strong>Config resolver:</strong> maps Watershed building blocks to agent-specific CLI config and launch commands.</li>
         <li><strong>Meta-Harness agent executor:</strong> host-local supervisor for whole CLI agents. It validates that every launched or controlled CLI process belongs to this instance's host; cross-host execution is outside the architecture.</li>
-        <li><strong>Adapters:</strong> normalize native events into <a href="../../PROTOCOL.md">PROTOCOL.md</a> families. Accepted target (ADR-0239): the pi adapter carries Watershed's pi extension in its binary, writes it into Meta-Harness's own data folder and passes it with <code>-e</code>; never into <code>~/.pi/agent/extensions/</code>, which every pi run would load, nor into the project's <code>.pi/extensions/</code>, which the agent writes.</li>
+        <li><strong>Adapters:</strong> T3 Code runs each harness through its built-in providers or as a local ACP command (ADR-0282).</li>
         <li><strong>Artifact index:</strong> logs, summaries, checkpoints, handoff packs and host-provided diffs.</li>
         <li><strong>Policy gate:</strong> configuration-change proposals (ADR-0227) and control commands follow the <a href="#policy-gate">policy gate</a>.</li>
       </ul>
@@ -293,7 +288,7 @@ liquid integration
             <li>Meta-Harness on the receiving host has its T3 issue a pairing code, as that T3's owner.</li>
             <li>The code travels end-to-end encrypted to Meta-Harness on the linking host.</li>
             <li>That Meta-Harness runs <code>t3 environment link</code> with the code, its tunnel's address and the access level its policy sets.</li>
-            <li>The linking T3 signs in to the other T3's <code>/mcp</code> as an OAuth client and keeps the token in its secret store; the receiving T3 lists it under Sharing &amp; access, where it can be revoked.</li>
+            <li>The linking T3 signs in to the other T3's <code>/mcp</code> as an OAuth client and keeps the token in its secret store; the receiving T3 lists it under Settings → Connections, where it can be revoked.</li>
           </ol>
           <p class="muted">Linked work cannot use the receiving host's own links, so every pair of hosts gets its own link, six for three hosts; Meta-Harness adds and removes them.</p>
         </div>
@@ -303,7 +298,7 @@ liquid integration
           <div class="pd-a">to its own T3</div>
           <div class="pd-b pd-t3">T3 on the Mac refuses read-only or ended callers and attaches the caller's mode</div>
           <div class="pd-a">through Meta-Harness's tunnel</div>
-          <div class="pd-b pd-sy">Meta-Harness Mac → direct or relay → Meta-Harness Windows (WSL)<small>forwards bytes, checks nothing</small></div>
+          <div class="pd-b pd-sy">Meta-Harness Mac → direct or relay → Meta-Harness Windows<small>forwards bytes, checks nothing</small></div>
           <div class="pd-a">loopback</div>
           <div class="pd-b pd-t3">T3 on the Windows PC grants the lower of the link's level and the caller's mode and stamps <code>linkOrigin</code></div>
           <div class="pd-a">starts</div>
@@ -316,12 +311,18 @@ liquid integration
         <li><strong>Authority:</strong> the caller's mode limits the remote work, so a subagent never exceeds its parent (ADR-0223); a plan-mode agent cannot start full-access work.</li>
         <li><strong>Below full access</strong> linked work changes only threads of its own origin and no projects, settings or schedules, and setup scripts are skipped; it can still read every thread on that host. At full access it runs as the receiving host's user, unfenced, still stamped with its origin.</li>
         <li><strong>The person</strong> sees each child under its parent in Liquid and can stop it.</li>
-        <li><strong>Spike:</strong> T3 never takes a loopback address as another host's, so the tunnel's end needs an address T3 accepts; pairing without a person and switching the beta on are checked too. If one fails, Meta-Harness offers its own tools for other hosts.</li>
+        <li><strong>Spike result (T3 0.1.9):</strong> all three checks pass, so the fallback is not needed. Two T3 servers linked through a byte-forwarding tunnel on <code>http://127.0.0.1:&lt;port&gt;</code>, and a Claude Code thread on one ran <code>delegate_task</code> on the other.
+          <ul>
+            <li><strong>Address:</strong> <code>t3 environment link</code> accepts plain http only on loopback or Tailscale names and https elsewhere; it refuses loopback only when a person picks a known machine in T3's UI. The tunnel must keep the HTTP <code>Host</code> header unchanged, because the receiving T3 binds the link's OAuth token to it, and each peer keeps a stable local port, because T3 refuses the same peer at a second address while a link lives.</li>
+            <li><strong>Pairing:</strong> <code>t3 auth pairing create --json</code> mints a single-use code valid for 5 minutes; linking needs no approval on either side. The link's session lasts 30 days, then Meta-Harness pairs again.</li>
+            <li><strong>Switch:</strong> <code>linkedEnvironmentsEnabled</code> is a plain key in T3's <code>settings.json</code>, off by default and needed on both hosts; T3 watches the file, and only an administrator's T3 policy file can lock it.</li>
+          </ul>
+        </li>
       </ul>
     </div></section>
 
     <section id="durability" class="section"><h2>11. Durability</h2><div class="body">
-      <p class="muted">Today's limit (ADR-0274): Liquid restores a Chat with separate reads of its transcript, usage and turns, so a turn that something outside Liquid, such as a pi extension, ends during a restore may be missing until the next restore. Target (ADR-0290): one snapshot returns all three with the stream position at read time; Liquid ignores live events up to that position, as T3 Code's <code>subscribeThread</code> does.</p>
+      <p>Restoring the Chat (ADR-0290): one snapshot of T3's projection carries the transcript, turns and pending requests with its stream position; Liquid ignores live events up to that position and applies later ones, so each counts once. When Liquid falls behind or turns are reverted, it restores from a new snapshot.</p>
       <p>Accepted target (ADR-0229). Durable work has four levels, and Meta-Harness with T3 Code on every host covers all four: agents depend on the files, tools and credentials of a machine, so every host needs its own supervisor, and Liquid sync plus Git checkpoints give the hosts a shared state.</p>
       <p><span class="pd-key pd-ws">Watershed</span><span class="pd-key pd-t3">T3 Code, unchanged</span><span class="pd-key pd-h">Harness or outside agent</span><span class="pd-key pd-sy">Host connection</span></p>
       <div style="overflow-x:auto">
@@ -383,7 +384,7 @@ liquid integration
       </div>
       <h3 id="persistent-agents">Persistent agents</h3>
       <p>Accepted target (ADR-0283), once host moves and host links work: an agent profile has a name, a memory folder, its central configuration and its own T3 routines and webhooks. Each wake-up is a turn in the profile's thread; a full context hands off to a new thread, as Grok Bot keeps the bot, not a thread, as its lasting unit.</p>
-      <p><strong>Another harness</strong> (ADR-0231): a session moves to another harness, such as from pi to Codex, only as a handoff, as in T3 Code. The target starts a new session that receives the conversation so far as text, at most 16,000 tokens by default, marked as context, not a new request; attachments and the provider's tool and reasoning state do not move. A target that already saw part of the conversation receives only what followed; the files come from the Git checkpoint ref. Within pi, switching model or provider stays pi's own switch inside the session.</p>
+      <p><strong>Another harness</strong> (ADR-0231): a session moves to another harness, such as from Claude Code to Codex, only as a handoff, as in T3 Code. The target starts a new session that receives the conversation so far as text, at most 16,000 tokens by default, marked as context, not a new request; attachments and the provider's tool and reasoning state do not move. A target that already saw part of the conversation receives only what followed; the files come from T3's Git checkpoint ref.</p>
     </div></section>
 
     <section id="byoa" class="section"><h2>12. BYOA / external control</h2><div class="body">
@@ -403,7 +404,7 @@ liquid integration
     </div></section>
 
     <section id="open" class="section"><h2>14. Open decisions</h2><div class="body">
-      <p>See <a href="../decisions/open-decisions.html">open-decisions.html</a>: building on T3 Code (ADR-0280 to ADR-0290; Windows <a href="../decisions/open-decisions.html#d-107">D-107</a>) and AgentPulse formulas (<a href="../decisions/open-decisions.html#d-010">D-010</a>). Host-scoped execution and multi-instance projection ownership are decided, not open.</p>
+      <p>See <a href="../decisions/open-decisions.html">open-decisions.html</a>: building on T3 Code (ADR-0280 to ADR-0291) and AgentPulse formulas (<a href="../decisions/open-decisions.html#d-010">D-010</a>). Host-scoped execution and multi-instance projection ownership are decided, not open.</p>
     </div></section>
   </main>
 </div>

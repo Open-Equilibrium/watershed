@@ -7,7 +7,7 @@ Native targets and current availability follow [PLATFORMS.md](../PLATFORMS.md).
 ## Layout
 
 - `app/` — the Flutter app. Its exact Flutter release is pinned in `app/pubspec.yaml`, which CI reads.
-- `liquid-bridge/` — the Rust side of the flutter_rust_bridge bindings (ADR-0186). It embeds the Meta-Harness core (ADR-0184) and opens the Workspace with its key from the keychain (ADR-0216, ADR-0237); neither core depends on the bridge; `app/hook/build.dart` compiles it into the app (ADR-0213).
+- `liquid-bridge/` — the Rust side of the flutter_rust_bridge bindings (ADR-0186). It embeds the Meta-Harness core (ADR-0184), which runs a pinned T3 Code server (ADR-0281), and opens the Workspace with its key from the keychain (ADR-0216, ADR-0237); neither core depends on the bridge; `app/hook/build.dart` compiles it into the app (ADR-0213).
 - `liquid-core/` — the Workspace core: object model, mutation pipeline and History over Automerge (ADR-0235, ADR-0238), committing every write to a store.
 - `liquid-storage/` — the local replica: that store in SQLite with SQLCipher (ADR-0237). Build hosts: [TESTING.md](../TESTING.md#development-toolchain).
 
@@ -15,12 +15,11 @@ After changing `liquid-bridge/src/api`, run `flutter_rust_bridge_codegen generat
 
 ## Run
 
-The app opens the Workspace, whose replica lives in `~/Library/Application Support/Liquid/Workspace/` with its key in the keychain. With the project named in the environment it also starts pi and opens the start page, where recent sessions continue and the first message starts a new one; without a session, it opens the Workspace's first Page and says why on stderr. An agent session needs pi 1.3.0 with a configured model, which the user installs; Liquid bundles neither pi nor Node, also not for office users (ADR-0219). `flutter run -d macos` in `app/` needs Xcode and rustup ([build hosts](../TESTING.md#development-toolchain)). The project signs development builds ad hoc; release builds are to be signed with Developer ID, hardened and notarized, and to run without the App Sandbox (ADR-0200).
+The app opens the Workspace, whose replica lives in `~/Library/Application Support/Liquid/Workspace/` with its key in the keychain. With the project named in the environment it also starts Meta-Harness's T3 Code server and opens the start page, where the project's sessions continue and the first message starts a new one; without a session, it opens the Workspace's first Page and says why on stderr. Agents need the pinned T3 Code release (`meta-harness/t3.lock`; `node scripts/install-t3.mjs <folder>` installs it) and a provider it runs, such as Claude Code or Codex, with its login; the installer and service follow with ADR-0286. `flutter run -d macos` in `app/` needs Xcode and rustup ([build hosts](../TESTING.md#development-toolchain)). The project signs development builds ad hoc; release builds are to be signed with Developer ID, hardened and notarized, and to run without the App Sandbox (ADR-0200).
 
 - `LIQUID_PROJECT` — the agent's project directory (required for an agent session).
-- `LIQUID_PI_EXTENSION` — the absolute path of `meta-harness/pi-extension/watershed.ts` (required: without it a turn has no checkpoints, so Liquid does not start a session unless this extension is loaded).
-- `LIQUID_PI` — the pi executable, a name looked up on `PATH` or an absolute path; defaults to `pi`.
-- `LIQUID_PI_SESSION` — the absolute path of a stored pi session file to reopen, with its chat and branches.
+- `LIQUID_T3` — the absolute path of the pinned `t3` executable (required for an agent session).
+- `LIQUID_T3_HOME` — T3's data folder, owned by this Liquid's Meta-Harness; defaults to `~/Library/Application Support/Liquid/T3`.
 - `LIQUID_KEY_LOG=1` — writes key events to stderr twice, as macOS hands them to the window (`native key`) and as Flutter receives them (`flutter key`), to diagnose shortcuts; only with the Liquid key, or with ⌘ or ⌃ but not ⌥ (which types characters such as @ on many layouts), so plain typing is not recorded.
 
 ## Liquid key

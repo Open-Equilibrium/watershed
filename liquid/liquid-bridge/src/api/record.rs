@@ -6,22 +6,22 @@ use std::path::{Path, PathBuf};
 /// The text of `README.txt`: what the record covers and leaves out.
 pub(crate) const README: &str = "Session record
 
-session.jsonl   pi's session file, copied byte for byte.
+thread.json     T3 Code's record of the thread as Meta-Harness held it when exported: the
+                thread, its runs, messages, tool calls, provider turns with their tokens,
+                requests and checkpoints.
 record.json     The host, the harness, the project folder and the branch when exported. Per turn:
-                its times in Unix milliseconds, how it ended, its start and end checkpoint commits
-                and the files it changed, with added and removed lines.
+                its times in Unix milliseconds, how it ended and the files its end checkpoint
+                changed, with added and removed lines.
 
-Covers: only turns that ran through Meta-Harness, and the changes between each turn's start and
-end checkpoints, in files of the project that Git does not ignore.
-
-Leaves out: files Git ignores; files outside the project folder; effects beyond files, such as
-commands, network requests or other programs; anything done outside Meta-Harness.
-
-The transcript is pi's own file. Nothing here is signed or proven complete.
+Covers: only turns that ran through Meta-Harness, and the changes T3 captured between each
+turn's checkpoints, in files of the checkout that Git does not ignore.
+Leaves out: reverted turns; files Git ignores; files outside the checkout; effects beyond files,
+such as commands, network requests or other programs; anything done outside Meta-Harness.
+Nothing here is signed or proven complete.
 ";
 
-/// The name of the copied session file inside a record.
-pub(crate) const SESSION_FILE: &str = "session.jsonl";
+/// The name of T3's thread record inside a record.
+pub(crate) const THREAD_FILE: &str = "thread.json";
 
 /// Longest title kept in a folder name, in bytes. With ` – record <day>` (22 bytes), a numbered
 /// suffix and the temporary folder's `.` and `.partial`, every name stays within 255 bytes.

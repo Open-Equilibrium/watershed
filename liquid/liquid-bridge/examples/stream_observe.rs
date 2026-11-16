@@ -1,52 +1,99 @@
-//! Observation workload for Liquid's token streaming (PERFORMANCE.md, Liquid): a scripted agent
-//! streams one response of 20,000 text deltas through the Meta-Harness core and the bridge to a
-//! consumer that takes and confirms each event at once, as Liquid confirms what it applies. It
-//! prints one JSON line per sample and a summary and
-//! never compares with a threshold. Run from the repository root:
+//! Observation workload for Liquid's token streaming (PERFORMANCE.md, Liquid): a scripted ACP
+//! agent streams one response of 20,000 text chunks through the pinned T3 Code server, the
+//! Meta-Harness core and the bridge to a consumer that takes and confirms each event at once,
+//! as Liquid confirms what it applies. It prints one JSON line per sample and a summary and never
+//! compares with a threshold. Run from the repository root with the pinned `t3`:
 //!
 //! ```sh
 //! cargo build --release -p liquid_bridge --example stream_observe
-//! /usr/bin/time -l target/release/examples/stream_observe
+//! META_HARNESS_T3=<pinned t3> /usr/bin/time -l target/release/examples/stream_observe
 //! ```
 
-use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use liquid_bridge::api::events::BridgeEventKind;
 use liquid_bridge::api::session::AgentSession;
-use meta_harness_core::AgentCommand;
+use meta_harness_core::{
+    AcpAgent, Host, HostConfig, ModelChoice, Permissions, StartThread, Workspace,
+};
 
-const DELTAS: usize = 20_000;
-const DELTA: &str = "sixteen bytes ok";
+const CHUNKS: usize = 20_000;
+const CHUNK_BYTES: usize = 16;
 const SAMPLES: usize = 20;
-/// pi's answer to command `id` that Watershed's extension is loaded.
-fn gate(id: u32) -> String {
-    format!(
-        r#"{{"id":"{id}","type":"response","command":"get_commands","success":true,"data":{{"commands":[{{"name":"watershed-branch","source":"extension","sourceInfo":{{"path":"/watershed.ts"}}}}]}}}}"#
-    )
-}
 
 fn main() {
-    let dir = std::env::temp_dir().join(format!("liquid-stream-observe-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("temporary directory");
-    let stream = dir.join("stream.jsonl");
-    std::fs::write(&stream, agent_output()).expect("stream file");
-    let command = agent_command(&dir, &stream);
+    let dir = std::env::temp_dir().join(format!("liquid-stream-{}", std::process::id()));
+    let repo = dir.join("repo");
+    std::fs::create_dir_all(&repo).expect("temporary directory");
+    let git = |args: &[&str]| {
+        let ok = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&repo)
+            .status()
+            .is_ok_and(|status| status.success());
+        assert!(ok, "git {args:?}");
+    };
+    git(&["init", "-q"]);
+    git(&[
+        "-c",
+        "user.name=o",
+        "-c",
+        "user.email=o@o",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "start",
+    ]);
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../meta-harness/meta-harness-core/tests/fixtures/scripted_acp_agent.py");
+    let runtime = tokio::runtime::Runtime::new().expect("runtime starts");
+    let host = runtime
+        .block_on(Host::start(HostConfig {
+            binary: PathBuf::from(std::env::var_os("META_HARNESS_T3").expect("META_HARNESS_T3")),
+            home: dir.join("t3"),
+            acp_agents: vec![AcpAgent {
+                id: "scripted".to_owned(),
+                command: PathBuf::from("/usr/bin/python3"),
+                args: vec![script.to_string_lossy().into_owned()],
+                models: vec!["scripted".to_owned()],
+            }],
+        }))
+        .expect("T3 starts");
+    let project = runtime.block_on(host.project(&repo)).expect("project");
     let mut elapsed = Vec::new();
     for sample in 0..SAMPLES {
-        let session = AgentSession::launch(command.clone()).expect("agent starts");
-        let (sender, receiver) = mpsc::channel();
-        session
-            .forward(move |event| sender.send(event).is_ok())
-            .expect("subscriber");
         let started = Instant::now();
-        session.send("stream".to_owned(), false).expect("send");
-        let (mut events, mut deltas, mut largest, mut text) = (0, 0, 0, 0);
-        loop {
+        let thread = runtime
+            .block_on(project.start(StartThread {
+                text: format!("stream {CHUNKS}"),
+                model: ModelChoice {
+                    instance: "scripted".to_owned(),
+                    model: "scripted".to_owned(),
+                    options: Vec::new(),
+                },
+                workspace: Workspace::Checkout,
+                permissions: Permissions::FullAccess,
+            }))
+            .expect("thread starts");
+        let session = AgentSession::follow(thread, repo.to_string_lossy().into_owned());
+        let (sender, receiver) = mpsc::channel();
+        let snapshot = session.forward(move |event| sender.send(event).is_ok());
+        let mut text: usize = snapshot
+            .transcript
+            .iter()
+            .filter(|item| {
+                item.item.kind == liquid_bridge::api::events::BridgeItemKind::AssistantMessage
+            })
+            .map(|item| item.text.len())
+            .sum();
+        let (mut events, mut deltas, mut largest) = (0, 0, 0);
+        let mut done = snapshot.turns.iter().any(|turn| turn.ended_ms.is_some());
+        while !done {
             let event = receiver
-                .recv_timeout(Duration::from_secs(60))
+                .recv_timeout(Duration::from_secs(120))
                 .expect("event arrives");
             events += 1;
             session.confirm_applied(events);
@@ -57,89 +104,25 @@ fn main() {
                     largest = largest.max(length);
                     text += length;
                 }
-                BridgeEventKind::TurnCompleted => break,
+                BridgeEventKind::TurnCompleted => done = true,
                 _ => {}
             }
         }
         let millis = started.elapsed().as_secs_f64() * 1000.0;
-        // Run as flutter_rust_bridge runs it: on a runtime of its own.
-        let stopper = tokio::runtime::Runtime::new().expect("runtime starts");
-        stopper.block_on(session.shutdown());
-        assert_eq!(text, DELTAS * DELTA.len(), "the whole stream arrived");
+        assert_eq!(text, CHUNKS * CHUNK_BYTES, "the whole stream arrived");
         println!(
             r#"{{"sample":{sample},"elapsed_ms":{millis:.3},"events":{events},"delta_events":{deltas},"largest_delta_bytes":{largest}}}"#
         );
         elapsed.push(millis);
     }
+    runtime.block_on(host.shutdown());
     let _ = std::fs::remove_dir_all(&dir);
     elapsed.sort_by(f64::total_cmp);
     println!(
-        r#"{{"summary":"stream","deltas_in":{DELTAS},"delta_bytes":{},"samples":{SAMPLES},"p50_ms":{:.3},"p95_ms":{:.3},"max_ms":{:.3}}}"#,
-        DELTA.len(),
+        r#"{{"summary":"stream","chunks_in":{CHUNKS},"chunk_bytes":{CHUNK_BYTES},"samples":{SAMPLES},"p50_ms":{:.3},"p95_ms":{:.3},"max_ms":{:.3}}}"#,
         rank(&elapsed, 0.50),
         rank(&elapsed, 0.95),
         elapsed[elapsed.len() - 1],
-    );
-}
-
-fn agent_command(dir: &Path, stream: &Path) -> AgentCommand {
-    // The agent confirms that Watershed's extension is loaded when the session starts and
-    // before the message, as the session requires.
-    let script = format!(
-        "IFS= read -r line\nprintf '%s\\n' '{}'\nIFS= read -r line\nprintf '%s\\n' '{}'\nIFS= read -r line\ncat \"$1\"\nIFS= read -r line || exit 0",
-        gate(1),
-        gate(2),
-    );
-    AgentCommand {
-        program: "/bin/sh".into(),
-        args: vec![
-            "-c".into(),
-            script.into(),
-            "stream-observe".into(),
-            stream.as_os_str().to_owned(),
-        ],
-        extension: "/watershed.ts".into(),
-        session: None,
-        cwd: dir.to_path_buf(),
-    }
-}
-
-#[test]
-fn stream_script_handles_quoted_temporary_paths() {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-
-    let dir = std::env::temp_dir().join(format!("liquid-stream 'quoted' {}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("temporary directory");
-    let stream = dir.join("stream.jsonl");
-    let text = agent_output();
-    std::fs::write(&stream, &text).expect("stream file");
-    let command = agent_command(&dir, &stream);
-    let mut child = Command::new(command.program)
-        .args(command.args)
-        .current_dir(command.cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("script starts");
-    child
-        .stdin
-        .take()
-        .expect("piped input")
-        .write_all(b"gate\ngate\nprompt\n")
-        .expect("script input");
-    let output = child.wait_with_output().expect("script ends");
-    std::fs::remove_dir_all(&dir).expect("remove temporary directory");
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        output.stdout == format!("{}\n{}\n{text}", gate(1), gate(2)).as_bytes(),
-        "the script did not return the gates and whole stream: {}",
-        String::from_utf8_lossy(&output.stderr)
     );
 }
 
@@ -147,36 +130,4 @@ fn stream_script_handles_quoted_temporary_paths() {
 fn rank(sorted: &[f64], quantile: f64) -> f64 {
     let index = ((quantile * sorted.len() as f64).ceil() as usize).clamp(1, sorted.len());
     sorted[index - 1]
-}
-
-/// pi's RPC output for one prompt that streams `DELTAS` text deltas.
-fn agent_output() -> String {
-    let mut out = String::new();
-    for line in [
-        r#"{"id":"3","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}"#,
-        r#"{"type":"agent_start"}"#,
-        r#"{"type":"turn_start"}"#,
-        r#"{"type":"message_start","message":{"role":"assistant","content":[]}}"#,
-        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}"#,
-    ] {
-        out.push_str(line);
-        out.push('\n');
-    }
-    for _ in 0..DELTAS {
-        let _ = writeln!(
-            out,
-            r#"{{"type":"message_update","assistantMessageEvent":{{"type":"text_delta","contentIndex":0,"delta":"{DELTA}"}}}}"#
-        );
-    }
-    for line in [
-        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":""}}"#,
-        r#"{"type":"message_end","message":{"role":"assistant","content":[]}}"#,
-        r#"{"type":"turn_end","message":{"role":"assistant","content":[]},"toolResults":[]}"#,
-        r#"{"type":"agent_end","messages":[],"willRetry":false}"#,
-        r#"{"type":"agent_settled","aborted":false}"#,
-    ] {
-        out.push_str(line);
-        out.push('\n');
-    }
-    out
 }

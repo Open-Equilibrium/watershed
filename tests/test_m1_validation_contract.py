@@ -7,6 +7,8 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
+from git_fixture import git_environment
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PROTECTED_SCAN_DIRECTORIES = {
@@ -69,6 +71,7 @@ def tracked_validation_paths(repo: Path) -> list[Path]:
         cwd=repo,
         check=True,
         capture_output=True,
+        env=git_environment(),
     )
     root = repo.resolve()
     relative_paths: list[Path] = []
@@ -129,7 +132,9 @@ class M1ValidationContractTest(unittest.TestCase):
             prefix="watershed-m1-validation-"
         ) as temp_dir:
             repo = Path(temp_dir)
-            subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "init", "--quiet"], cwd=repo, check=True, env=git_environment()
+            )
             safe = repo / "safe.txt"
             safe.write_text("tracked", encoding="utf-8")
             untracked = repo / "untracked.txt"
@@ -158,6 +163,7 @@ class M1ValidationContractTest(unittest.TestCase):
                 ],
                 cwd=repo,
                 check=True,
+                env=git_environment(),
             )
 
             excluded = {
@@ -214,10 +220,14 @@ class M1ValidationContractTest(unittest.TestCase):
             tempfile.TemporaryDirectory() as external_directory,
         ):
             repo = Path(repo_directory)
-            subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "init", "--quiet"], cwd=repo, check=True, env=git_environment()
+            )
             tracked = repo / "tracked.txt"
             tracked.write_text("staged placeholder", encoding="utf-8")
-            subprocess.run(["git", "add", "--", tracked.name], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "add", "--", tracked.name], cwd=repo, check=True, env=git_environment()
+            )
             tracked.unlink()
             external = Path(external_directory) / "credential.txt"
             external.write_text("external credential", encoding="utf-8")
@@ -240,7 +250,9 @@ class M1ValidationContractTest(unittest.TestCase):
         ]:
             with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary_directory:
                 repo = Path(temporary_directory)
-                subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True)
+                subprocess.run(
+                    ["git", "init", "--quiet"], cwd=repo, check=True, env=git_environment()
+                )
                 target = repo / target_relative
                 target.parent.mkdir(exist_ok=True)
                 target.write_text(label, encoding="utf-8")
@@ -251,7 +263,9 @@ class M1ValidationContractTest(unittest.TestCase):
                 staged = [str(tracked.relative_to(repo))]
                 if label.startswith("setup-"):
                     staged.append(str(target_relative))
-                subprocess.run(["git", "add", "--", *staged], cwd=repo, check=True)
+                subprocess.run(
+                    ["git", "add", "--", *staged], cwd=repo, check=True, env=git_environment()
+                )
                 tracked.unlink()
                 safe_parent.rmdir()
                 try:
@@ -279,6 +293,7 @@ class M1ValidationContractTest(unittest.TestCase):
         result = subprocess.run(
             ["git", "check-ignore", "--no-index", "--quiet", path],
             cwd=ROOT,
+            env=git_environment(),
         )
         if result.returncode not in (0, 1):
             raise AssertionError(

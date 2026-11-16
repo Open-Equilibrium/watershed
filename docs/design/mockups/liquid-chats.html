@@ -152,14 +152,14 @@ const pageChat=`<div class="panel2"><div class="chead" style="padding-left:16px"
 ${msg('',avatar('me','B'),'Add a day trip if the weather holds.',{mine:1,t:'09:12'})}
 ${msg('Planner',AG,'Added “Day trip to Sintra” under Ideas, with the 9:11 train from Rossio.',{t:'09:15',extra:`<div class="turn"><span class="chip">1 change · Undo</span></div>`})}</div><div style="flex:1"></div><div class="comp2" style="margin:0 16px 14px">Message… </div></div>`;
 frame('w-page',{h:560,side:{sel:'trip',chat:'page'},main:`<div style="display:flex;height:100%"><div style="flex:1;display:flex;flex-direction:column;min-width:0">${pageHead}<div class="pg"><div class="col" style="width:560px"><div class="ttl"><span class="tic">🧳</span>Trip to Lisbon</div><div class="prose"><p><b>Plan</b></p><p>Five days in Lisbon, one in Porto. We fly on 12 November.</p><p><b>Ideas</b></p><p style="background:var(--ws-accent-subtle);border-radius:4px;padding:0 4px">Day trip to Sintra, 9:11 from Rossio.</p></div></div></div></div>${pageChat}</div>`});
-const workMain=`<div class="chead">${AG}<b>Coder</b><span class="chip">${I.dir}acme-api</span><span class="cap">pi · sonnet</span><span class="end" style="margin-left:auto"><span class="ib">${I.more}</span></span></div>
+const workMain=`<div class="chead">${AG}<b>Coder</b><span class="chip">${I.dir}acme-api</span><span class="cap">Claude Code · sonnet</span><span class="end" style="margin-left:auto"><span class="ib">${I.more}</span></span></div>
 <div class="msgs">${msg('',avatar('me','B'),'Add a rate limit to /login and make the tests pass.',{mine:1,t:'11:02'})}
 ${msg('Coder',AG,'Added a limiter of 5 attempts per minute to the login route and two tests.',{t:'11:06',extra:`<div class="turn"><span class="chip">3 files changed</span><span class="chip">Diff</span><span class="chip">Revert</span></div>`})}
 <div class="msg">${AG}<div class="appr"><b style="font-weight:500">Run the login tests now?</b><div style="display:flex;gap:6px"><span class="btn pri">Yes <kbd>⏎</kbd></span><span class="btn">No</span><span class="sp"></span><span class="btn">Dismiss <kbd>esc</kbd></span></div></div></div></div>
 <div style="flex:1"></div><div class="comp2">Steer or queue a message…</div>`;
 frame('w-work',{h:620,side:{sel:'docs',chat:'coder'},main:`<div style="display:flex;flex-direction:column;height:100%">${workMain}</div>`});
 const prof=`<div class="prof"><div style="display:flex;gap:10px;align-items:center">${AG}<b style="font-size:15px">Coder</b><span class="cap" style="margin-left:auto">agent</span></div>
-<div class="r"><span>Harness</span><b>pi 1.3</b></div><div class="r"><span>Model</span><b>sonnet</b></div>
+<div class="r"><span>Harness</span><b>Claude Code</b></div><div class="r"><span>Model</span><b>sonnet</b></div>
 <div class="r"><span>Work folder</span><b>${I.dir} acme-api</b></div><div class="r"><span>Rights</span><b>Can edit · Acme API</b></div>
 <div class="cap">Instructions: Small commits, tests first, never push.</div><div style="display:flex;gap:6px"><span class="btn">Edit profile</span><span class="btn">New Chat</span></div></div>`;
 frame('w-prof',{h:620,side:{sel:'docs',chat:'coder'},main:`<div style="display:flex;flex-direction:column;height:100%">${workMain}</div>`,over:prof});

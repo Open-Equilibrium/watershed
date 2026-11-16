@@ -73,6 +73,7 @@ class LiquidApp extends StatelessWidget {
             ? AgentShell(
                 state: state,
                 info: launch.info,
+                host: launch.host,
                 workspace: workspace,
                 workspaceProblem: workspaceProblem,
                 shortcuts: shortcuts,

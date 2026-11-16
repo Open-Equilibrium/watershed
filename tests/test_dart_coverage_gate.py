@@ -27,6 +27,14 @@ class DartCoverageGateTest(unittest.TestCase):
                 result = self.run_gate(record("lib/app.dart", 100, hit))
                 self.assertEqual(result.returncode == 0, passes, result.stderr)
 
+    def test_crlf_reports_gate_like_lf_reports(self) -> None:
+        for hit, passes in ((90, True), (87, False)):
+            with self.subTest(hit=hit):
+                lf = self.run_gate(record("lib/app.dart", 100, hit))
+                crlf = self.run_gate(record("lib/app.dart", 100, hit).replace("\n", "\r\n"))
+                self.assertEqual(crlf.returncode, lf.returncode, crlf.stderr)
+                self.assertEqual(crlf.returncode == 0, passes, crlf.stderr)
+
     def test_generated_and_ffi_glue_are_not_measured(self) -> None:
         result = self.run_gate(
             record("lib/app.dart", 100, 90),

@@ -1,167 +1,281 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../controls.dart';
+import '../rust/api/events.dart';
 import '../rust/api/git.dart';
 import '../session/session_state.dart';
-import '../shortcuts/keymap.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
-import 'commit_draft.dart';
 
-/// The approved whole-file commit dialog; its message and selection remain a draft.
-Future<void> showCommitDialog(BuildContext context, SessionState state) async {
-  final generation = state.generation;
-  await state.git.openCommitPlan((plan) async {
-    if (!context.mounted || generation != state.generation) return;
-    await showDialog<void>(
-      context: context,
-      builder: (_) => _CommitDialog(state: state, plan: plan),
-    );
-  });
+/// T3 Code's "Commit changes" dialog: the checkout's uncommitted files, with those to leave out,
+/// and an optional message. Committing closes it and runs the commit.
+Future<void> showCommitDialog(BuildContext context, SessionState state) {
+  final git = state.git.value;
+  return showDialog<void>(
+    context: context,
+    builder: (_) => _CommitDialog(git: git),
+  );
 }
 
 class _CommitDialog extends StatefulWidget {
-  const _CommitDialog({required this.state, required this.plan});
-  final SessionState state;
-  final BridgeCommitPlan plan;
+  const _CommitDialog({required this.git});
+
+  final GitState git;
+
   @override
   State<_CommitDialog> createState() => _CommitDialogState();
 }
 
 class _CommitDialogState extends State<_CommitDialog> {
-  late final _draft = CommitDraft(widget.state, widget.plan)
-    ..addListener(_rebuild);
-
-  void _rebuild() {
-    if (mounted) setState(() {});
-  }
+  final _message = TextEditingController();
+  final _excluded = <String>{};
+  bool _editing = false;
 
   @override
   void dispose() {
-    _draft.dispose();
+    _message.dispose();
     super.dispose();
   }
 
-  Future<void> _commit([String? branch]) async {
-    if (!_draft.ready ||
-        (branch == null && widget.state.git.status.value?.branch == null)) {
-      return;
-    }
-    final result = await _draft.commit(branch: branch);
-    if (!mounted || ModalRoute.of(context)?.isCurrent != true) return;
-    if (result?.kind == BridgeGitOutcomeKind.done ||
-        result?.kind == BridgeGitOutcomeKind.hookChanged) {
-      Navigator.of(context).pop();
-    }
-  }
-
-  Future<void> _newBranch() async {
-    final name = await showDialog<String>(
-      context: context,
-      builder: (_) => _CommitBranch(
-        branch: widget.state.git.status.value?.branch,
-        count: _draft.selected.length,
+  /// Commits the files not left out; the whole set passes no file list.
+  void _commit({bool onNewBranch = false}) {
+    final files = widget.git.status.value?.changes ?? const [];
+    final chosen = [
+      for (final file in files)
+        if (!_excluded.contains(file.path)) file.path,
+    ];
+    final text = _message.text.trim();
+    Navigator.of(context).pop();
+    unawaited(
+      widget.git.run(
+        BridgeGitAction.commit,
+        message: text.isEmpty ? null : text,
+        files: chosen.length == files.length ? null : chosen,
+        featureBranch: onNewBranch,
       ),
     );
-    if (mounted && name != null) await _commit(name);
   }
 
   @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    final status = widget.state.git.status.value;
-    final ready = _draft.ready;
-    final enter = !_draft.messageFocus.hasFocus;
-    return ActionDialog(
-      title: 'Commit changes',
-      bindings: {
-        if (ready && status?.branch != null && enter)
-          const Keys(LogicalKeyboardKey.enter).activator: () => _commit(),
-      },
-      actions: [
-        PrimaryButton(
-          label: 'Commit',
-          shortcut: enter ? '⏎' : null,
-          onPressed: ready && status?.branch != null ? () => _commit() : null,
-        ),
-        if (!_draft.agentRunning)
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.git.status,
+    builder: (context, _) {
+      final ws = context.ws;
+      final status = widget.git.status.value;
+      final files = status?.changes ?? const <BridgeFileChange>[];
+      final chosen = [
+        for (final file in files)
+          if (!_excluded.contains(file.path)) file,
+      ];
+      final all = chosen.length == files.length;
+      final none = chosen.isEmpty;
+      final muted = TextStyle(
+        color: ws.textMuted,
+        fontSize: WsMetrics.fsCompact,
+      );
+      return ActionDialog(
+        title: 'Commit changes',
+        actions: [
+          PrimaryButton(
+            label: 'Commit',
+            onPressed: none ? null : () => _commit(),
+          ),
           SecondaryButton(
-            label: 'Commit on new branch…',
-            onPressed: ready ? _newBranch : null,
+            label: 'Commit on new branch',
+            onPressed: none ? null : () => _commit(onNewBranch: true),
           ),
-      ],
-      children: commitDraftFields(
-        context,
-        _draft,
-        trailing:
-            status?.branch != null && status?.branch == status?.defaultBranch
-            ? Text(
-                'Default branch',
-                style: TextStyle(
-                  color: ws.warning,
-                  fontSize: WsMetrics.fsSmall,
+        ],
+        children: [
+          Text(
+            'Review and confirm your commit. Leave the message blank to auto-generate one.',
+            style: DangerDialog.text(context),
+          ),
+          Container(
+            padding: const EdgeInsets.all(WsMetrics.space4),
+            decoration: BoxDecoration(
+              color: ws.subtle,
+              borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              spacing: WsMetrics.space3,
+              children: [
+                Row(
+                  spacing: WsMetrics.space4,
+                  children: [
+                    Text('Branch', style: muted),
+                    Expanded(
+                      child: Text(
+                        status?.branch ?? '(detached HEAD)',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: ws.text,
+                          fontSize: WsMetrics.fsCompact,
+                          fontWeight: WsMetrics.fwMedium,
+                        ),
+                      ),
+                    ),
+                    if (status?.defaultBranch ?? false)
+                      Text(
+                        'Default branch',
+                        style: TextStyle(
+                          color: ws.warning,
+                          fontSize: WsMetrics.fsSmall,
+                        ),
+                      ),
+                  ],
                 ),
-              )
-            : null,
-      ),
-    );
-  }
-}
+                Row(
+                  spacing: WsMetrics.space2,
+                  children: [
+                    if (_editing && files.isNotEmpty)
+                      Checkbox(
+                        tristate: true,
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        value: none ? false : (all ? true : null),
+                        onChanged: (_) => setState(() {
+                          if (all) {
+                            _excluded.addAll(files.map((file) => file.path));
+                          } else {
+                            _excluded.clear();
+                          }
+                        }),
+                      ),
+                    Text('Files', style: muted),
+                    if (!all && !_editing)
+                      Text(
+                        '(${chosen.length} of ${files.length})',
+                        style: muted,
+                      ),
+                    const Spacer(),
+                    if (files.isNotEmpty)
+                      GhostButton(
+                        label: _editing ? 'Done' : 'Edit',
+                        onPressed: () => setState(() => _editing = !_editing),
+                      ),
+                  ],
+                ),
+                if (files.isEmpty)
+                  Text('none', style: TextStyle(fontSize: WsMetrics.fsCompact))
+                else
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Container(
+                        height: 176,
+                        decoration: BoxDecoration(
+                          color: ws.surface,
+                          borderRadius: BorderRadius.circular(
+                            WsMetrics.radiusMd,
+                          ),
+                        ),
+                        child: ListView(
+                          padding: const EdgeInsets.all(WsMetrics.space2),
+                          children: [
+                            for (final file in files) _row(context, file),
+                          ],
+                        ),
+                      ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Text.rich(
+                          TextSpan(
+                            children: [
+                              TextSpan(
+                                text:
+                                    '+${chosen.fold(0, (sum, file) => sum + file.added)}',
+                                style: TextStyle(color: ws.diffAddStrong),
+                              ),
+                              TextSpan(text: ' / ', style: muted),
+                              TextSpan(
+                                text:
+                                    '-${chosen.fold(0, (sum, file) => sum + file.removed)}',
+                                style: TextStyle(color: ws.diffDelStrong),
+                              ),
+                            ],
+                          ),
+                          style: monoStyle(context),
+                        ),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+          Text(
+            'Commit message (optional)',
+            style: TextStyle(
+              fontSize: WsMetrics.fsCompact,
+              fontWeight: WsMetrics.fwMedium,
+              color: ws.text,
+            ),
+          ),
+          TextField(
+            controller: _message,
+            minLines: 1,
+            maxLines: 4,
+            decoration: const InputDecoration(
+              isDense: true,
+              hintText: 'Leave empty to auto-generate',
+            ),
+          ),
+        ],
+      );
+    },
+  );
 
-class _CommitBranch extends StatefulWidget {
-  const _CommitBranch({required this.branch, required this.count});
-  final String? branch;
-  final int count;
-  @override
-  State<_CommitBranch> createState() => _CommitBranchState();
-}
-
-class _CommitBranchState extends State<_CommitBranch> {
-  final _name = TextEditingController();
-  @override
-  void dispose() {
-    _name.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final name = _name.text.trim();
-    final problem = branchNameProblem(name);
-    final submit = name.isEmpty || problem != null
-        ? null
-        : () => Navigator.of(context).pop(name);
-    return ActionDialog(
-      title: 'Commit on a new branch',
-      dismiss: 'Back',
-      bindings: {const Keys(LogicalKeyboardKey.enter).activator: ?submit},
-      actions: [
-        PrimaryButton(
-          label: 'Create branch and commit',
-          shortcut: '⏎',
-          onPressed: submit,
-        ),
-      ],
+  /// One file: its path, and its added and removed lines or Excluded.
+  Widget _row(BuildContext context, BridgeFileChange file) {
+    final ws = context.ws;
+    final excluded = _excluded.contains(file.path);
+    final muted = TextStyle(color: ws.textMuted, fontSize: WsMetrics.fsCompact);
+    return Row(
+      spacing: WsMetrics.space2,
       children: [
-        Text(
-          'Creates the branch from the current commit on ${widget.branch ?? 'detached HEAD'}, switches to it and commits the ${widget.count} ${widget.count == 1 ? 'file' : 'files'} there. ${widget.branch ?? 'The current commit'} stays as it is.',
-          style: DangerDialog.text(context),
-        ),
-        TextField(
-          key: const Key('commit-branch-name'),
-          controller: _name,
-          autofocus: true,
-          style: monoStyle(context),
-          onSubmitted: (_) => submit?.call(),
-          onChanged: (_) => setState(() {}),
-          decoration: InputDecoration(
-            labelText: 'Branch name',
-            errorText: problem,
+        if (_editing)
+          Checkbox(
+            visualDensity: VisualDensity.compact,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            value: !excluded,
+            onChanged: (_) => setState(() {
+              if (excluded) {
+                _excluded.remove(file.path);
+              } else {
+                _excluded.add(file.path);
+              }
+            }),
+          ),
+        Expanded(
+          child: Text(
+            file.shown,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: monoStyle(context, color: excluded ? ws.textMuted : null),
           ),
         ),
+        if (excluded)
+          Text('Excluded', style: muted)
+        else
+          Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: '+${file.added}',
+                  style: TextStyle(color: ws.diffAddStrong),
+                ),
+                TextSpan(text: ' / ', style: muted),
+                TextSpan(
+                  text: '-${file.removed}',
+                  style: TextStyle(color: ws.diffDelStrong),
+                ),
+              ],
+            ),
+            style: monoStyle(context),
+          ),
       ],
     );
   }

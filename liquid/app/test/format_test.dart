@@ -80,4 +80,32 @@ void main() {
       ['95%', '33%', '0%'],
     );
   });
+
+  test('formats clock times and how long ago a time was', () {
+    final now = DateTime(2026, 11, 15, 12);
+    String ago(Duration before) =>
+        formatAgo(now.subtract(before).millisecondsSinceEpoch, now);
+    expect(formatClock(DateTime(2026, 11, 15, 9, 5)), '09:05');
+    expect(formatClockMs(now.millisecondsSinceEpoch), '12:00');
+    expect(
+      [
+        ago(const Duration(seconds: 30)),
+        ago(const Duration(minutes: 5)),
+        ago(const Duration(hours: 5)),
+        ago(const Duration(days: 3)),
+        ago(const Duration(days: 20)),
+        ago(const Duration(days: 90)),
+        ago(const Duration(days: 800)),
+      ],
+      [
+        'now',
+        '5 min ago',
+        '5 h ago',
+        '3 days ago',
+        '2 weeks ago',
+        '3 months ago',
+        '2 years ago',
+      ],
+    );
+  });
 }

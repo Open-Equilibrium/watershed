@@ -1,4 +1,4 @@
-//! Agent-neutral agent events, using T3 Code's provider runtime vocabulary (ADR-0195).
+//! Agent-neutral agent events, in T3 Code's vocabulary (ADR-0281).
 
 /// One turn: a user prompt until the agent settles, including its retries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -23,6 +23,8 @@ pub enum ItemKind {
     FileChange,
     /// Any other tool call.
     DynamicToolCall,
+    /// An error T3 or the provider reported in the Chat.
+    Error,
 }
 
 /// Kind-specific information about a started item.
@@ -39,7 +41,7 @@ pub enum ItemDetail {
     },
 }
 
-/// Tokens and cost of one model request, as the provider reported them.
+/// Tokens of one model request, as the provider reported them; T3 reports no cost (ADR-0293).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Usage {
     /// Input tokens.
@@ -52,127 +54,67 @@ pub struct Usage {
     pub cache_write: u64,
     /// Reasoning tokens, already counted in `output`.
     pub reasoning: u64,
-    /// Cost in millionths of a US dollar.
-    pub cost_micro_usd: u64,
-}
-
-/// What each kind of a request's tokens cost, in millionths of a US dollar. The kinds add up to
-/// the request's cost within rounding.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct CostByKind {
-    /// Input tokens.
-    pub input: u64,
-    /// Output tokens.
-    pub output: u64,
-    /// Input tokens read from the provider's cache.
-    pub cache_read: u64,
-    /// Input tokens written to the provider's cache.
-    pub cache_write: u64,
-}
-
-/// The lines a file change added and removed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ChangedLines {
-    /// Added lines.
-    pub added: u32,
-    /// Removed lines.
-    pub removed: u32,
-}
-
-/// What a session entry holds.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EntryKind {
-    /// A user message.
-    User,
-    /// A model response.
-    Assistant,
-    /// A tool result.
-    ToolResult,
-    /// A system message that changed prompt sections or tools.
-    System,
-    /// An extension's custom entry.
-    Custom,
-    /// Any other entry.
-    Other,
-}
-
-/// One entry of a session's branch tree.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TreeNode {
-    /// The agent's entry id.
-    pub id: String,
-    /// The parent entry, or `None` for a root.
-    pub parent: Option<String>,
-    /// What the entry holds.
-    pub kind: EntryKind,
-}
-
-/// A session's entries as a tree, in append order.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SessionTree {
-    /// The entries; every parent precedes its children.
-    pub nodes: Vec<TreeNode>,
-    /// The entry the next message continues from.
-    pub leaf: Option<String>,
 }
 
 /// One open request from the agent that waits for the user.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RequestId(pub String);
 
-/// A question an agent extension asks the user.
+/// A request the agent waits on.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum UserInput {
-    /// Choose one of several options.
-    Select {
-        /// The question.
-        title: String,
-        /// The options in display order.
-        options: Vec<String>,
-    },
-    /// Confirm or decline.
-    Confirm {
-        /// The question.
-        title: String,
-        /// Further explanation.
-        message: String,
-    },
-    /// Enter one line of text.
-    Input {
-        /// The question.
-        title: String,
-        /// Placeholder text.
-        placeholder: String,
-    },
-    /// Edit multi-line text.
-    Editor {
-        /// The question.
-        title: String,
-        /// The initial text.
-        prefill: String,
-    },
+pub struct PendingRequest {
+    /// The request.
+    pub id: RequestId,
+    /// The turn that asks.
+    pub turn: TurnId,
+    /// What it asks.
+    pub request: Request,
 }
 
-/// The user's reply to a [`UserInput`].
+/// What a request asks.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Answer {
-    /// The chosen option or entered text.
-    Value(String),
-    /// The reply to a confirmation.
-    Confirmed(bool),
-    /// The user dismissed the question.
-    Cancelled,
+pub enum Request {
+    /// Approve an action.
+    Approval {
+        /// T3's request kind, such as `command`, `file_change` or `file_read`.
+        kind: String,
+        /// The command, path or other detail.
+        prompt: String,
+        /// Why the agent asks, if it said.
+        reason: Option<String>,
+        /// The choices, in T3's order.
+        options: Vec<ApprovalOption>,
+    },
+    /// Answer one or more questions.
+    Questions(Vec<Question>),
 }
 
-/// How urgent a notification is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NotificationLevel {
-    /// Information.
-    Info,
-    /// A warning.
-    Warning,
-    /// An error.
-    Error,
+/// One choice of an approval.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovalOption {
+    /// T3's decision: `accept`, `acceptForSession`, `acceptAlways`, `decline` or `cancel`.
+    pub decision: String,
+    /// The label.
+    pub label: String,
+    /// A warning shown with it.
+    pub warning: Option<String>,
+}
+
+/// One question the agent asks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Question {
+    /// The id its answer is sent under.
+    pub id: String,
+    /// A short header.
+    pub header: String,
+    /// The question, in Markdown.
+    pub question: String,
+    /// The options, as label and description.
+    pub options: Vec<(String, String)>,
+    /// Whether several options may be chosen.
+    pub multi_select: bool,
+    /// Whether a typed answer is allowed.
+    pub custom: bool,
 }
 
 /// How an item ended.
@@ -206,6 +148,20 @@ pub enum AgentEvent {
         /// The turn's checkpoint id, which names its end checkpoint; absent when it requested none.
         checkpoint: Option<String>,
     },
+    /// The agent asks the person to approve an action or answer questions.
+    RequestOpened {
+        /// The request.
+        request: PendingRequest,
+    },
+    /// The person, or T3, resolved a request.
+    RequestResolved {
+        /// The request.
+        request: RequestId,
+    },
+    /// Turns were reverted and left the thread; the Chat reloads from a snapshot.
+    RolledBack,
+    /// A turn's changed files became known, or changed.
+    TurnsChanged,
     /// An item started.
     ItemStarted {
         /// The owning turn.
@@ -216,13 +172,6 @@ pub enum AgentEvent {
         kind: ItemKind,
         /// Kind-specific information.
         detail: ItemDetail,
-    },
-    /// A running item reported its latest partial output.
-    ItemUpdated {
-        /// The item.
-        item: ItemId,
-        /// The latest partial output text.
-        output: String,
     },
     /// Text was appended to a streaming item.
     ContentDelta {
@@ -245,77 +194,12 @@ pub enum AgentEvent {
         status: ItemStatus,
         /// How long a tool ran, when the agent measured it.
         duration_ms: Option<u64>,
-        /// The lines a file change added and removed.
-        lines: Option<ChangedLines>,
     },
     /// The model finished its response to a request.
     ModelRequestCompleted {
         /// The owning turn.
         turn: TurnId,
-        /// Tokens and cost.
+        /// Its tokens.
         usage: Usage,
-        /// Why the response ended, such as `stop`, `toolUse`, `error` or `aborted`.
-        stop_reason: String,
-        /// The provider's error, if the request failed.
-        error: Option<String>,
     },
-    /// An agent extension asks the user a question.
-    UserInputRequested {
-        /// The request.
-        request: RequestId,
-        /// The question.
-        input: UserInput,
-    },
-    /// The user answered a question.
-    UserInputResolved {
-        /// The request.
-        request: RequestId,
-    },
-    /// An agent extension shows a notification.
-    Notification {
-        /// How urgent it is.
-        level: NotificationLevel,
-        /// The text.
-        message: String,
-    },
-    /// An agent extension, or the session while a turn waits for a revert, set or cleared a
-    /// status entry.
-    StatusChanged {
-        /// The extension's status key.
-        key: String,
-        /// The text, or `None` when cleared.
-        text: Option<String>,
-    },
-    /// An agent extension set or cleared a widget of text lines.
-    WidgetChanged {
-        /// The extension's widget key.
-        key: String,
-        /// The lines, or `None` when cleared.
-        lines: Option<Vec<String>>,
-    },
-    /// An agent extension replaced the text in the input area.
-    InputTextSet {
-        /// The text.
-        text: String,
-    },
-    /// The messages waiting for a running agent changed.
-    QueueChanged(Queue),
-}
-
-/// Messages waiting for a running agent, in order.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Queue {
-    /// Steering messages, delivered before the agent's next model request.
-    pub steering: Vec<String>,
-    /// Follow-up messages, delivered once the agent is done.
-    pub follow_up: Vec<String>,
-}
-
-/// How a message reaches an agent that is already running; an idle agent starts with it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Delivery {
-    /// Before the agent's next model request.
-    Steer,
-    /// Once the agent is done.
-    FollowUp,
 }

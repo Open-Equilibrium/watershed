@@ -28,26 +28,21 @@ void main() {
     expect(again.value.shows(CardItem.branch), isTrue);
   });
 
-  test('stores only the rows that differ from the default', () async {
+  test('stores only the rows that differ from their default', () async {
     final settings = await SessionCardSettingsController.load(
       SettingsFile(file),
     );
     await settings.change(
       settings.value
+          .withItem(CardItem.changes, false)
           .withItem(CardItem.branch, false)
           .withItem(CardItem.branch, true)
+          .withItem(CardItem.usage, true)
           .withItem(CardItem.context, false),
     );
-    expect(
-      SessionCardSettings.fromJson({
-        'hidden': ['context'],
-      }).toJson(),
-      {
-        'hidden': ['context'],
-      },
-    );
     expect(settings.value.toJson(), {
-      'hidden': ['context'],
+      'hidden': ['changes'],
+      'shown': ['usage'],
     });
   });
 
@@ -58,20 +53,41 @@ void main() {
     await settings.change(settings.value.withItem(CardItem.gitActions, false));
     await settings.change(const SessionCardSettings());
     expect(settings.value.isDefault, isTrue);
-    expect(settings.value.toJson(), {'hidden': <String>[]});
+    expect(settings.value.toJson(), {
+      'hidden': <String>[],
+      'shown': <String>[],
+    });
   });
 
-  test('ignores what it does not know, and keeps the ids unchanged', () {
+  test('Usage limits and Context window are off until they are shown', () {
+    const defaults = SessionCardSettings();
+    expect(defaults.shows(CardItem.usage), isFalse);
+    expect(defaults.shows(CardItem.context), isFalse);
+    expect(defaults.shows(CardItem.servers), isTrue);
+    expect(defaults.shows(CardItem.statistics), isTrue);
+  });
+
+  test('keeps the stored ids, their order and the rows a file names', () {
     final settings = SessionCardSettings.fromJson({
-      'hidden': ['changes', 'sideways', 7],
+      // `usage` is off by default, so a hidden entry for it changes nothing; `context` shown
+      // turns the default-off row on.
+      'hidden': ['changes', 'sideways', 7, 'usage'],
+      'shown': ['context', 'changes'],
     });
     expect(settings.shows(CardItem.changes), isFalse);
-    expect(settings.hidden, {CardItem.changes});
+    expect(settings.shows(CardItem.usage), isFalse);
+    expect(settings.shows(CardItem.context), isTrue);
     expect(CardItem.values.map((item) => item.id), [
+      'workspace',
       'branch',
       'gitActions',
       'changes',
+      'servers',
+      'automations',
+      'lineage',
+      'sideChats',
       'figures',
+      'usage',
       'context',
     ]);
   });

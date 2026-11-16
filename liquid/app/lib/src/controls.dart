@@ -104,10 +104,14 @@ class _Button extends StatelessWidget {
     this.icon,
     this.shortcut,
     this.focusNode,
+    this.semanticsLabel,
   });
 
   final String label;
   final String? shortcut;
+
+  /// What the button is announced as, in place of its visible label.
+  final String? semanticsLabel;
 
   /// None shows the button disabled.
   final VoidCallback? onPressed;
@@ -126,6 +130,7 @@ class _Button extends StatelessWidget {
     final button = Semantics(
       button: true,
       enabled: onPressed != null,
+      label: semanticsLabel,
       child: Material(
         color: background,
         shape: RoundedRectangleBorder(
@@ -151,11 +156,14 @@ class _Button extends StatelessWidget {
                 ],
                 // Cut short only where a layout leaves the button too little room.
                 Flexible(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: _buttonLabel.copyWith(color: foreground),
+                  child: ExcludeSemantics(
+                    excluding: semanticsLabel != null,
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: _buttonLabel.copyWith(color: foreground),
+                    ),
                   ),
                 ),
               ],
@@ -440,6 +448,7 @@ class SecondaryButton extends StatelessWidget {
     this.shortcut,
     this.color,
     this.focusNode,
+    this.semanticsLabel,
   });
 
   final String label;
@@ -448,6 +457,7 @@ class SecondaryButton extends StatelessWidget {
   final Color? color;
   final VoidCallback? onPressed;
   final FocusNode? focusNode;
+  final String? semanticsLabel;
 
   @override
   Widget build(BuildContext context) => _Button(
@@ -456,6 +466,7 @@ class SecondaryButton extends StatelessWidget {
     shortcut: shortcut,
     onPressed: onPressed,
     focusNode: focusNode,
+    semanticsLabel: semanticsLabel,
     foreground: color ?? context.ws.text,
     background: context.ws.canvas,
     outline: context.ws.borderStrong,

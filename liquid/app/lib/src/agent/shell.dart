@@ -11,7 +11,7 @@ import '../diff/diff_panel.dart';
 import '../diff/diff_settings.dart';
 import '../diff/diff_view.dart';
 import '../diff/turn_scope.dart';
-import '../rust/api/events.dart';
+import '../rust/api/session.dart';
 import '../session/session_state.dart';
 import '../settings_file.dart';
 import '../settings_page.dart';
@@ -26,24 +26,23 @@ import '../workspace/page_view.dart';
 import '../workspace/workspace_state.dart';
 import 'action_area.dart';
 import 'chat_view.dart';
-import 'input_lane.dart';
-import 'pull_request_status.dart';
 import 'session_card_area.dart';
 import 'session_card_layout.dart';
 import 'session_card_settings.dart';
 import 'sidebar.dart';
+import 'start_page.dart';
 import 'statistics_panel.dart';
 import 'status_bar.dart';
-import 'worktrees_pane.dart';
 
-/// The window: the sidebar with the Explorer and the agent session, and beside it the open
-/// Page or the agent surface with its tabs, the Diff panel beside the chat, the widget strip, the input area
-/// and the status bar. Every part keeps its position in every tab (guidelines, principle 8).
+/// The window: the sidebar with the Explorer and the project's sessions, and beside it the open Page
+/// or the agent surface with its tabs, the Diff panel beside the chat, the input area and the status
+/// bar. Every part keeps its position in every tab (guidelines, principle 8).
 class AgentShell extends StatefulWidget {
   const AgentShell({
     super.key,
     this.state,
     this.info,
+    this.host,
     this.workspace,
     this.workspaceProblem,
     this.shortcuts,
@@ -56,6 +55,9 @@ class AgentShell extends StatefulWidget {
   /// The agent session, if one started.
   final SessionState? state;
   final SessionInfo? info;
+
+  /// The agent host, which stops when the app quits.
+  final AgentHost? host;
 
   /// The Workspace, or why it did not open.
   final WorkspaceState? workspace;
@@ -111,15 +113,14 @@ class _AgentShellState extends State<AgentShell> {
   /// settings save again.
   final _saveFailure = ValueNotifier<SaveFailure?>(null);
 
-  /// Stops the agent before the app exits, so no pi process outlives Liquid.
+  /// Stops the session and then T3 before the app exits, so no agent server outlives Liquid.
   late final _lifecycle = AppLifecycleListener(
-    // The pull request summary is read again when the window regains focus.
-    onResume: () => unawaited(widget.state?.pulls.refresh()),
     onExitRequested: () async {
       await widget.state?.dispose();
       // Every edit asked for reaches the replica before Liquid exits.
       await widget.workspace?.drain();
       await widget.workspace?.dispose();
+      await widget.host?.shutdown();
       return AppExitResponse.exit;
     },
   );
@@ -133,14 +134,13 @@ class _AgentShellState extends State<AgentShell> {
     _hideWhitespace();
     if (widget.state case final state?) {
       state.draft.addListener(_applyDraft);
-      state.question.addListener(_questionChanged);
+      state.request.addListener(_requestChanged);
       unawaited(state.loadStart());
-      state.git.watch();
     }
     widget.workspace?.open.addListener(_pageOpened);
     for (final settings in _saved.nonNulls) {
       settings.report = (problem) => widget.state != null
-          ? widget.state!.notify(BridgeLevel.error, problem)
+          ? widget.state!.notify(NoticeLevel.error, problem)
           : widget.workspace?.problem.value = problem;
       settings.saveOutcome = (failure) => _saveOutcome(settings, failure);
     }
@@ -149,19 +149,9 @@ class _AgentShellState extends State<AgentShell> {
     }
   }
 
-  @override
-  void didUpdateWidget(AgentShell oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // Only the shown session's checkout is fetched.
-    if (oldWidget.state != widget.state) {
-      oldWidget.state?.git.stop();
-      widget.state?.git.watch();
-    }
-  }
-
   Future<void> _askProfile() async {
-    // A question open now goes first; `_questionChanged` asks once it is answered.
-    if (widget.state?.asking ?? false) return;
+    // A request open now goes first; `_requestChanged` asks once it is answered.
+    if (widget.state?.request.value != null) return;
     final profile = await askProfile(context);
     // A question closed it before a choice; it asks again once it is answered.
     if (profile == null) return;
@@ -183,10 +173,10 @@ class _AgentShellState extends State<AgentShell> {
     if (!_settings.value) _focus.requestFocus();
   }
 
-  /// A question closes Settings and any menu or dialog, which would cover it or take the keys
+  /// A request closes Settings and any menu or dialog, which would cover it or take the keys
   /// meant for it; once none is left, a first start asks for the profile again.
-  void _questionChanged() {
-    if (widget.state!.asking) {
+  void _requestChanged() {
+    if (widget.state!.request.value != null) {
       _settings.value = false;
       Navigator.of(context).popUntil((route) => route.isFirst);
     } else if (_shortcuts.firstStart && ModalRoute.of(context)!.isCurrent) {
@@ -233,11 +223,10 @@ class _AgentShellState extends State<AgentShell> {
 
   @override
   void dispose() {
-    widget.state?.git.stop();
     widget.workspace?.open.removeListener(_pageOpened);
     _lifecycle.dispose();
     widget.state?.draft.removeListener(_applyDraft);
-    widget.state?.question.removeListener(_questionChanged);
+    widget.state?.request.removeListener(_requestChanged);
     _composer.dispose();
     _composerFocus.dispose();
     _diffOpen.dispose();
@@ -423,6 +412,7 @@ class _AgentShellState extends State<AgentShell> {
 
   Widget _build(BuildContext context, ShortcutSettings keys) {
     final ws = context.ws;
+    final project = widget.state?.project;
     if (_composerReplaced) {
       _composerReplaced = false;
       _composer = adoptController(_composer);
@@ -463,16 +453,14 @@ class _AgentShellState extends State<AgentShell> {
                           return SettingsPage(
                             shortcuts: _shortcuts,
                             appearance: widget.appearance,
+                            cardSettings: _cardSettings,
                             onClose: _toggleSettings,
                             saveFailure: _saveFailure,
                             onDismissSaveFailure: () =>
                                 _saveFailure.value = null,
-                            worktrees: widget.state == null
+                            writer: project == null
                                 ? null
-                                : WorktreesPane(
-                                    state: widget.state!,
-                                    device: widget.info!.device,
-                                  ),
+                                : WriterModelPane(project: project),
                           );
                         }
                         final open = widget.workspace?.open.value;
@@ -540,30 +528,20 @@ class _AgentShellState extends State<AgentShell> {
                     // The input area stays with the Chat, beside the Diff panel.
                     final input = KeyedSubtree(
                       key: _inputKey,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          WidgetStrip(state: state),
-                          PushedOffer(state: state, device: info.device),
-                          ActionArea(
-                            state: state,
-                            project: info.project,
-                            composer: _composer,
-                            composerFocus: _composerFocus,
-                            onSent: _sent,
-                          ),
-                        ],
+                      child: ActionArea(
+                        state: state,
+                        composer: _composer,
+                        composerFocus: _composerFocus,
+                        onSent: _sent,
                       ),
                     );
                     return SessionCardArea(
                       state: state,
-                      device: info.device,
                       settings: _cardSettings,
                       visibility: _card,
                       diffSettings: _diffSettings,
                       viewportWidth: MediaQuery.sizeOf(context).width,
-                      onChanges: () => _openDiff(const LatestTurn()),
+                      onChanges: _openDiff,
                       onDismiss: _closeCardPopover,
                       diff: diffOpen
                           ? DiffPanel(
@@ -677,11 +655,17 @@ class _Header extends StatelessWidget {
                 ),
                 Flexible(child: chip(project)),
                 Flexible(
-                  child: ValueListenableBuilder(
-                    valueListenable: state.model,
-                    builder: (context, model, _) => model == null
-                        ? const SizedBox.shrink()
-                        : chip(model.substring(model.indexOf('/') + 1)),
+                  child: ListenableBuilder(
+                    listenable: Listenable.merge([
+                      state.model,
+                      state.providers,
+                    ]),
+                    builder: (context, _) => switch (state.model.value) {
+                      final model? => chip(
+                        modelName(state.providers.value, model),
+                      ),
+                      null => const SizedBox.shrink(),
+                    },
                   ),
                 ),
               ],
@@ -719,7 +703,7 @@ class _DetailsButton extends StatelessWidget {
           child: CommandHint(
             command: Command.sessionDetails,
             child: Tooltip(
-              message: 'Session card',
+              message: 'Toggle thread details',
               child: Semantics(
                 button: true,
                 selected: shown,
@@ -811,42 +795,6 @@ class CommandHint extends StatelessWidget {
         child,
         Positioned(top: -11, right: -14, child: KeyBadge(label)),
       ],
-    );
-  }
-}
-
-/// Extension widgets, directly above the input area.
-class WidgetStrip extends StatelessWidget {
-  const WidgetStrip({super.key, required this.state});
-
-  final SessionState state;
-
-  @override
-  Widget build(BuildContext context) {
-    return ValueListenableBuilder(
-      valueListenable: state.widgets,
-      builder: (context, widgets, _) => SizedBox(
-        height: widgetStripHeight,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              [
-                for (final entry in widgets.entries)
-                  '${entry.key}  ${entry.value.join('  ')}',
-              ].join('    '),
-              key: const Key('widgets'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: monoStyle(
-                context,
-                color: context.ws.textMuted,
-              ).copyWith(fontSize: WsMetrics.fsSmall),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

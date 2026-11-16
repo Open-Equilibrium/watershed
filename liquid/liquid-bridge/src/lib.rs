@@ -8,7 +8,6 @@ mod convert;
 #[allow(clippy::unwrap_used)]
 mod frb_generated;
 mod keys;
-mod ready;
 mod stream;
 
 #[cfg(test)]

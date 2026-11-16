@@ -7,6 +7,7 @@ import tomllib
 import unittest
 from pathlib import Path
 
+from git_fixture import git_environment
 from test_ci_toolchain_contract import ROOT, job_steps, jobs, step_lines, step_run, workflow_text
 
 PRODUCTS = ("flow_agent", "meta_harness", "liquid")
@@ -48,7 +49,12 @@ class CiProductScopeTest(unittest.TestCase):
 
     def git(self, *args: str) -> str:
         return subprocess.run(
-            ["git", *args], cwd=self.repo, check=True, capture_output=True, text=True
+            ["git", *args],
+            cwd=self.repo,
+            check=True,
+            capture_output=True,
+            text=True,
+            env=git_environment(),
         ).stdout.strip()
 
     def commit(self, files: dict[str, str]) -> str:
@@ -69,7 +75,7 @@ class CiProductScopeTest(unittest.TestCase):
             ["node", str(ROOT / "scripts" / "ci-product-scope.mjs")],
             cwd=self.repo,
             env={
-                **os.environ,
+                **git_environment(),
                 "GITHUB_EVENT_NAME": event_name,
                 "GITHUB_EVENT_PATH": str(event_path),
                 "GITHUB_OUTPUT": str(output_path),
@@ -164,7 +170,7 @@ class CiProductScopeTest(unittest.TestCase):
         for name, expected in (
             ("liquid/app/lib/main.dart", scope(True, "liquid")),
             ("liquid/liquid-bridge/rust-toolchain.toml", scope(True, "liquid")),
-            ("meta-harness/pi-extension/watershed.ts", scope(True, "meta_harness", "liquid")),
+            ("meta-harness/meta-harness-core/src/lib.rs", scope(True, "meta_harness", "liquid")),
             ("flow-agent/flow-agent-core/src/lib.rs", scope(True, "flow_agent")),
             ("core/core-policy/src/lib.rs", scope(True, "flow_agent")),
             ("proto/proto/src/lib.rs", scope(True, "flow_agent")),
@@ -252,7 +258,7 @@ class CiProductScopeTest(unittest.TestCase):
 
     def test_a_previous_tip_absent_from_the_clone_compares_the_branch_against_main(self) -> None:
         # A rebase and force-push leaves the previous tip on no fetched ref.
-        main = self.commit({"meta-harness/pi-extension/watershed.ts": "Fixture\n"})
+        main = self.commit({"meta-harness/meta-harness-core/src/lib.rs": "Fixture\n"})
         self.git("update-ref", "refs/remotes/origin/main", main)
         self.commit({"flow-agent/flow-agent-core/src/lib.rs": "Fixture\n"})
         self.commit({"liquid/app/lib/main.dart": "Fixture\n"})

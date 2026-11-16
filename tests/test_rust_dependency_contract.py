@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from git_fixture import git_environment
 from test_m1_validation_contract import tracked_validation_paths
 
 
@@ -122,7 +123,7 @@ class RustDependencyContractTest(unittest.TestCase):
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repo = Path(temporary_directory)
-            subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True)
+            subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True, env=git_environment())
             tracked = repo / "Cargo.toml"
             tracked.write_text("[workspace]\n", encoding="utf-8")
             protected = repo / "credentials" / "Cargo.toml"
@@ -138,7 +139,10 @@ class RustDependencyContractTest(unittest.TestCase):
                 manifest.parent.mkdir(parents=True, exist_ok=True)
                 manifest.write_text(content, encoding="utf-8")
             subprocess.run(
-                ["git", "add", "--", tracked.name, *manifests], cwd=repo, check=True
+                ["git", "add", "--", tracked.name, *manifests],
+                cwd=repo,
+                check=True,
+                env=git_environment(),
             )
 
             excluded = {

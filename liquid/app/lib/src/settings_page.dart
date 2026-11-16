@@ -1,8 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'agent/session_card_settings.dart';
+import 'agent/start_page.dart';
 import 'appearance.dart';
 import 'controls.dart';
+import 'rust/api/session.dart';
+import 'session/backend.dart';
 import 'settings_file.dart';
 import 'shortcuts/keymap.dart';
 import 'shortcuts/shortcut_store.dart';
@@ -12,11 +18,11 @@ import 'theme/theme.dart';
 import 'theme/tokens.g.dart';
 
 /// A section of Settings.
-enum _Section { appearance, shortcuts, worktrees }
+enum _Section { appearance, shortcuts, writer }
 
-/// Settings: Appearance with theme and text size, Shortcuts with the
-/// profile, every action's keys and recording new ones, and Worktrees with a session. It
-/// replaces the main area; esc closes it, or first dismisses a failed save's notice.
+/// Settings: Appearance with theme, text size and thread details, Shortcuts with the profile, every
+/// action's keys and recording new ones, and the Writer model with a project. It replaces the main
+/// area; esc closes it, or first dismisses a failed save's notice.
 class SettingsPage extends StatefulWidget {
   const SettingsPage({
     super.key,
@@ -25,7 +31,8 @@ class SettingsPage extends StatefulWidget {
     required this.saveFailure,
     required this.onDismissSaveFailure,
     this.appearance,
-    this.worktrees,
+    this.cardSettings,
+    this.writer,
   });
 
   final ShortcutController shortcuts;
@@ -38,8 +45,11 @@ class SettingsPage extends StatefulWidget {
   /// Theme and text size; without them Settings show only Shortcuts.
   final AppearanceController? appearance;
 
-  /// The Worktrees section; none without a session.
-  final Widget? worktrees;
+  /// The session card's rows, which Appearance sets as Thread details.
+  final SessionCardSettingsController? cardSettings;
+
+  /// The Writer model section; none without the project's backend.
+  final Widget? writer;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -110,8 +120,8 @@ class _SettingsPageState extends State<SettingsPage> {
                       if (widget.appearance != null)
                         ('Appearance', _Section.appearance),
                       ('Shortcuts', _Section.shortcuts),
-                      if (widget.worktrees != null)
-                        ('Worktrees', _Section.worktrees),
+                      if (widget.writer != null)
+                        ('Writer model', _Section.writer),
                     ])
                       Semantics(
                         selected: _section == section,
@@ -168,11 +178,14 @@ class _SettingsPageState extends State<SettingsPage> {
                     child: switch ((
                       _section,
                       widget.appearance,
-                      widget.worktrees,
+                      widget.writer,
                     )) {
                       (_Section.appearance, final appearance?, _) =>
-                        AppearancePane(appearance: appearance),
-                      (_Section.worktrees, _, final worktrees?) => worktrees,
+                        AppearancePane(
+                          appearance: appearance,
+                          cardSettings: widget.cardSettings,
+                        ),
+                      (_Section.writer, _, final writer?) => writer,
                       _ => ShortcutsPane(shortcuts: widget.shortcuts),
                     },
                   ),
@@ -233,6 +246,104 @@ class _SaveNotice extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// The writer model (ADR-0294): the one model that writes commit messages left blank, pull request
+/// titles and descriptions, and session titles, read and set through the project's backend.
+class WriterModelPane extends StatefulWidget {
+  const WriterModelPane({super.key, required this.project});
+
+  final ProjectBackend project;
+
+  @override
+  State<WriterModelPane> createState() => _WriterModelPaneState();
+}
+
+class _WriterModelPaneState extends State<WriterModelPane> {
+  List<BridgeProvider>? _providers;
+  BridgeModelChoice? _choice;
+  String? _problem;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_read());
+  }
+
+  Future<void> _read() async {
+    try {
+      final providers = await widget.project.providers();
+      final choice = await widget.project.writerModel();
+      if (!mounted) return;
+      setState(() {
+        _providers = providers;
+        _choice = choice;
+      });
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() => _problem = 'Could not read the writer model: $error');
+      }
+    }
+  }
+
+  Future<void> _set(BridgeModelChoice next) async {
+    setState(() {
+      _choice = next;
+      _problem = null;
+    });
+    try {
+      await widget.project.setWriterModel(next);
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() => _problem = 'Could not save the writer model: $error');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return Padding(
+      padding: const EdgeInsets.all(WsMetrics.space6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: WsMetrics.space4,
+        children: [
+          Text(
+            'Writer model',
+            style: TextStyle(
+              fontSize: WsMetrics.fsUi,
+              fontWeight: WsMetrics.fwSemibold,
+              color: ws.text,
+            ),
+          ),
+          Text(
+            'Writes commit messages left blank, pull request titles and descriptions, and session titles.',
+            style: TextStyle(
+              fontSize: WsMetrics.fsCompact,
+              color: ws.textMuted,
+            ),
+          ),
+          if (_providers case final providers?)
+            ModelMenu(
+              providers: providers,
+              choice: _choice,
+              onChanged: (next) => unawaited(_set(next)),
+            )
+          else
+            Text(
+              'Reading the models…',
+              style: TextStyle(
+                fontSize: WsMetrics.fsSmall,
+                color: ws.textFaint,
+              ),
+            ),
+          if (_problem case final problem?)
+            WarningNotice(problem, danger: true),
+        ],
       ),
     );
   }

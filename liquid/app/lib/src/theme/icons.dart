@@ -55,4 +55,27 @@ abstract final class LucideIcons {
   static const barChart3 = IconData(0xe2a3, fontFamily: _family);
   static const checkCircle = IconData(0xe07c, fontFamily: _family);
   static const circleX = IconData(0xe084, fontFamily: _family);
+  static const cloudDownload = IconData(0xe089, fontFamily: _family);
+  static const cloudUpload = IconData(0xe091, fontFamily: _family);
+  static const gitBranchPlus = IconData(0xe1f4, fontFamily: _family);
+  static const gitMerge = IconData(0xe0e4, fontFamily: _family);
+  static const gitPullRequestArrow = IconData(0xe555, fontFamily: _family);
+  static const gitPullRequestClosed = IconData(0xe35a, fontFamily: _family);
+  static const gitPullRequestDraft = IconData(0xe35b, fontFamily: _family);
+  static const circleDashed = IconData(0xe4b0, fontFamily: _family);
+  static const circleDot = IconData(0xe345, fontFamily: _family);
+  static const circleSlash = IconData(0xe402, fontFamily: _family);
+  static const arrowUpRight = IconData(0xe04d, fontFamily: _family);
+  static const folderGit = IconData(0xe409, fontFamily: _family);
+  static const server = IconData(0xe153, fontFamily: _family);
+  static const globe = IconData(0xe0e8, fontFamily: _family);
+  static const square = IconData(0xe167, fontFamily: _family);
+  static const calendarClock = IconData(0xe304, fontFamily: _family);
+  static const play = IconData(0xe13c, fontFamily: _family);
+  static const cornerLeftUp = IconData(0xe0a4, fontFamily: _family);
+  static const bot = IconData(0xe1bb, fontFamily: _family);
+  static const messagesSquare = IconData(0xe40d, fontFamily: _family);
+  static const gitFork = IconData(0xe28d, fontFamily: _family);
+  static const unplug = IconData(0xe45d, fontFamily: _family);
+  static const chevronUp = IconData(0xe070, fontFamily: _family);
 }

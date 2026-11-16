@@ -4,438 +4,471 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../frb_generated.dart';
+import 'details.dart';
 import 'events.dart';
 import 'git.dart';
-import 'history.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-import 'worktrees.dart';
+import 'thread.dart';
 
-// These functions are ignored because they are not marked as `pub`: `answer`, `branch_turns`, `checkpoint_ids`, `checkpoint`, `checkpoints_of`, `export_into`, `left_unreverted`, `open`, `session_dir`, `shown`, `stored_session`, `turn_of`, `unread`, `whitespace`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Open`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `drop`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
-// These functions are ignored (category: IgnoreBecauseExplicitAttribute): `forward`, `launch`
+// These functions are ignored because they are not marked as `pub`: `export_record_to`, `host`, `new`, `permissions_of`, `range_diff`, `run`, `stream`, `summary`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These functions are ignored (category: IgnoreBecauseExplicitAttribute): `automations_with`, `follow`, `forward`, `from_host`, `lineage_with`, `servers_with`
+
+// Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentHost>>
+abstract class AgentHost implements RustOpaqueInterface {
+  /// The name T3 shows for this host, such as the computer's name.
+  Future<String> environmentName();
+
+  /// The project for the folder `root`.
+  Future<AgentProject> project({required String root});
+
+  /// The providers T3 offers, with their models.
+  Future<List<BridgeProvider>> providers();
+
+  /// Sets the one model that writes commit messages, pull request text and session titles.
+  Future<void> setWriterModel({required BridgeModelChoice choice});
+
+  /// Stops T3; later calls fail.
+  Future<void> shutdown();
+
+  /// Starts the pinned `t3` at `binary` with its data in `home`.
+  static Future<AgentHost> start({
+    required String binary,
+    required String home,
+  }) => RustLib.instance.api.crateApiSessionAgentHostStart(
+    binary: binary,
+    home: home,
+  );
+
+  /// The writer model (ADR-0294), if one is set.
+  Future<BridgeModelChoice?> writerModel();
+}
+
+// Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentProject>>
+abstract class AgentProject implements RustOpaqueInterface {
+  /// Archives or restores the session `id`.
+  Future<void> archive({required String id, required bool archived});
+
+  /// Deletes the session `id`, and with `worktree` its worktree, keeping the branch.
+  Future<void> delete({required String id, required bool worktree});
+
+  /// Git for the project folder.
+  Future<GitCheckout> git();
+
+  /// Whether `id` is the only session in its worktree, so deleting it may delete that too.
+  Future<bool> onlySessionInWorktree({required String id});
+
+  /// Follows the existing session `id`.
+  Future<AgentSession> open({required String id});
+
+  /// Starts a session with its first prompt, as T3's workspace selector chose: in a new
+  /// worktree from `base`, in the existing `worktree`, or else in the project folder.
+  Future<AgentSession> start({
+    required String text,
+    required BridgeModelChoice model,
+    String? base,
+    String? worktree,
+    required BridgePermissions permissions,
+  });
+
+  /// The project's sessions, newest first.
+  Future<List<BridgeThreadSummary>> threads();
+}
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>>
 abstract class AgentSession implements RustOpaqueInterface {
-  /// Aborts the running turn; open questions are dismissed, so the agent can stop.
-  Future<void> abort();
-
-  /// Answers a confirmation question.
-  Future<void> answerConfirm({
+  /// Answers questions.
+  Future<void> answer({
     required String request,
-    required bool confirmed,
+    required List<BridgeQuestionAnswer> answers,
   });
 
-  /// Answers a selection, input or editor question with text.
-  Future<void> answerText({required String request, required String text});
+  /// Streams each change of the scheduled tasks after the latest
+  /// [`AgentSession::automations_subscribe`].
+  Stream<List<BridgeAutomation>> automationsEvents();
 
-  /// Continues the session from `entry`; the next prompt starts a new branch there.
-  Future<void> branch({required String entry});
+  /// The scheduled tasks bound to this session now; their changes then stream from
+  /// [`AgentSession::automations_events`].
+  Future<List<BridgeAutomation>> automationsSubscribe();
 
-  /// The sessions with checkpoints in the project's repository, sorted by their ids.
-  Future<List<BridgeCheckpointSession>> checkpointSessions();
+  /// Removes a queued turn.
+  Future<void> cancelQueued({required PlatformInt64 turn});
 
-  /// Removes the messages waiting for the running agent and returns them.
-  Future<BridgeQueue> clearQueue();
-
-  /// Commits the selected whole files using the user's Git and hooks, optionally creating
-  /// and switching to a branch first.
-  Future<BridgeGitOutcome> commitFiles({
-    required String snapshot,
-    required List<String> paths,
-    required String message,
-    String? branch,
-  });
-
-  /// Every uncommitted file with attribution from the current session branch's checkpoints.
-  Future<BridgeCommitPlan> commitPlan();
-
-  /// Confirms that Liquid applied the stream's first `applied` events, which lets the stream
-  /// send that many more. Liquid calls it after applying each batch it received (ADR-0272).
+  /// Confirms that Liquid applied the stream's first `applied` events (ADR-0272).
   Future<void> confirmApplied({required PlatformInt64 applied});
 
-  /// The context window the next request fills and when pi compacts it; `None` when the agent
-  /// reports no window.
+  /// The context window the latest request filled.
   Future<BridgeContext?> context();
 
-  /// Creates the branch `name` at the current commit and switches to it.
-  Future<BridgeGitOutcome> createBranch({required String name});
+  /// T3's "Disconnect agent session": detaches the session's provider sessions.
+  Future<void> disconnect();
 
-  /// Creates the reviewed pull request on GitHub through the host's gh.
-  Future<BridgePullRequestOutcome> createPullRequest({
-    required BridgePullRequestDraft draft,
-  });
-
-  /// The selected model as `provider/id`.
-  Future<String?> currentModel();
-
-  /// Deletes the session stored in `path`, a session of this project in pi's session
-  /// directory other than the open one, with its checkpoints first; refused while an agent
-  /// runs in any worktree of the repository. Neither comes back. A session pi never stored
-  /// leaves nothing to delete.
-  Future<void> deleteSession({required String path});
-
-  /// Deletes the stashed changes `id`.
-  Future<BridgeGitOutcome> discardStash({required String id});
-
-  /// Dismisses a question.
+  /// Dismisses questions without answering.
   Future<void> dismiss({required String request});
 
-  /// Streams the session's events; a session has one subscriber.
+  /// Replaces a queued turn's prompt.
+  Future<void> editQueued({required PlatformInt64 turn, required String text});
+
+  /// Streams the events after the latest [`AgentSession::subscribe`].
   Stream<BridgeEvent> events();
 
-  /// Writes the record of the session stored in `path` as a new folder in Downloads and returns
-  /// its path. `title` is the name Liquid shows, `host` the machine's name and `day` the local
-  /// date as `YYYY-MM-DD`. A failure writes nothing and says why.
-  Future<String> exportRecord({
-    required String path,
-    required String title,
-    required String host,
-    required String day,
+  /// Writes the session's record into a new folder in Downloads (ADR-0257); returns it.
+  Future<String> exportRecord({required String host, required String day});
+
+  /// T3's "Fork from this response": a new session from the end of turn `turn`; its id.
+  Future<String> fork({required PlatformInt64 turn});
+
+  /// Git for the session's checkout.
+  Future<GitCheckout> git();
+
+  /// The session's id.
+  Future<String> id();
+
+  /// Streams the lineage after each change that may have changed it, once the changes settle,
+  /// after the latest [`AgentSession::lineage_subscribe`]. A failed read streams as an error.
+  Stream<BridgeLineage> lineageEvents();
+
+  /// The lineage now: the threads related to this session, as T3's relationships panel shows
+  /// them. Its changes then stream from [`AgentSession::lineage_events`].
+  Future<BridgeLineage> lineageSubscribe();
+
+  /// T3's "Merge back": merges this fork's latest finished run into the session it forked from.
+  Future<void> mergeBack();
+
+  /// The session's model.
+  Future<BridgeModelChoice?> model();
+
+  /// Answers an approval with one of its decisions.
+  Future<void> respond({required String request, required String decision});
+
+  /// T3's "Edit from here": rewinds to before turn `turn`, with `restore_files` its files
+  /// too. Returns the turn's prompt for the input area.
+  Future<String> revert({
+    required PlatformInt64 turn,
+    required bool restoreFiles,
   });
 
-  /// Fetches the upstream remote, origin or the sole remote through checked destinations, and
-  /// returns the remote it fetched, as Liquid shows it; none when there is no remote.
-  Future<String?> fetch();
+  /// Runs the scheduled task `id` now.
+  Future<void> runAutomationNow({required String id});
 
-  /// The checkout's branches.
-  Future<BridgeBranches> gitBranches();
+  /// Sends `text`: an idle session starts a turn; a running one takes it as a steer with
+  /// `steer`, else queues it.
+  Future<void> send({required String text, required bool steer});
 
-  /// The stashed changes of the branch checked out, if any.
-  Future<BridgeStash?> gitStash();
+  /// "Send now" on a queued turn.
+  Future<void> sendQueuedNow({required PlatformInt64 turn});
 
-  /// The checkout's branch, upstream and uncommitted files; none outside Git.
-  Future<BridgeGitStatus?> gitStatus();
+  /// Streams each change of the servers after the latest [`AgentSession::servers_subscribe`].
+  Stream<List<BridgeLocalServer>> serversEvents();
 
-  /// Reads the session's branch tree and what its stored responses used.
-  Future<BridgeHistory> history();
+  /// The local servers this session's terminals and agent started now; the servers' changes
+  /// then stream from [`AgentSession::servers_events`].
+  Future<List<BridgeLocalServer>> serversSubscribe();
 
-  /// Whether the project is in a Git repository, so its turns can have checkpoints.
-  Future<bool> inRepository();
-
-  /// Explicitly initializes Git; checkpoints begin with the next turn.
-  Future<BridgeGitOutcome> initializeGit();
-
-  /// The models the agent can use.
-  Future<List<BridgeModel>> models();
-
-  /// Starts a new session in the same agent; `false` when an extension cancelled it.
-  Future<bool> newSession();
-
-  /// Pulls fast-forward only under the checkout lock, refusing any running agent.
-  Future<BridgeGitOutcome> pull();
-
-  /// The branch's latest pull request on GitHub, open ones first; none without one.
-  Future<BridgePullRequestOutcome> pullRequest();
-
-  /// The branches of `target` on `host` whose names contain `query`, as GitHub finds them.
-  Future<BridgePullRequestOutcome> pullRequestBaseSearch({
-    required String host,
-    required String target,
-    required String query,
-  });
-
-  /// The branches of `target` on `host` GitHub lists, to choose a base from.
-  Future<BridgePullRequestOutcome> pullRequestBases({
-    required String host,
-    required String target,
-  });
-
-  /// The create dialog's plan for `target` and `base` as the user chose them, else as
-  /// preselected; `base` is the recorded branch this one was created from, if any.
-  Future<BridgePullRequestOutcome> pullRequestPlan({
-    String? target,
-    String? base,
-  });
-
-  /// The branch's target, base and any open pull request before it is pushed, for "Commit,
-  /// push & create PR", which checks them before any write.
-  Future<BridgePullRequestOutcome> pullRequestPrepared({
-    String? target,
-    String? base,
-  });
-
-  /// Pushes the branch through the user's Git and hooks, without a checkout lock.
-  Future<BridgeGitOutcome> push({BridgePushConfirmation? confirmed});
-
-  /// Up to `limit` stored sessions of this project, newest first, without the current one.
-  Future<List<BridgeStoredSession>> recentSessions({required int limit});
-
-  /// Removes every checkpoint in the project's repository; refused while an agent runs in any
-  /// of its worktrees. Outside Git there is nothing to remove.
-  Future<void> removeAllCheckpoints();
-
-  /// Removes the `reviewed` worktree once a recheck finds it unchanged and removable.
-  Future<BridgeWorktreeOutcome> removeWorktree({
-    required BridgeWorktreeRemoval reviewed,
-  });
-
-  /// Moves the stashed changes `id` back into the checkout.
-  Future<BridgeGitOutcome> restoreStash({required String id});
-
-  /// What reverting the files to before turn `turn` of the current branch would change;
-  /// files changed after the branch's last turn ended are marked.
-  Future<BridgeRevertPlan> revertPlan({required String turn});
-
-  /// Reverts the files to before turn `turn` of the current branch and continues the session
-  /// from before its prompt, which returns to the input area; the undone turns keep their
-  /// branch. Refused while an agent runs in the checkout, and once the files no longer match
-  /// the plan `confirmation` came with (ADR-0256). Each error says whether the files changed.
-  Future<void> revertToTurn({
-    required String turn,
-    required BridgeRevertConfirmation confirmation,
-  });
-
-  /// Sends a message: an idle agent starts a run with it, a running one takes it before its
-  /// next model request or, with `follow_up`, once it is done. Each run's start and end are
-  /// checkpointed, so the Diff panel shows what it changed.
-  Future<void> send({required String message, required bool followUp});
-
-  /// The file pi stores the open session in, unless it keeps the session in memory.
-  Future<String?> sessionFile();
-
-  /// Selects the model the next requests use.
-  Future<void> setModel({required String provider, required String id});
-
-  /// Asks the agent to exit and kills it after a grace period; returns whether it exited
-  /// successfully.
-  Future<bool> shutdown();
-
-  /// Starts pi; subscribe with [`AgentSession::events`].
-  static Future<AgentSession> start({required SessionConfig config}) =>
-      RustLib.instance.api.crateApiSessionAgentSessionStart(config: config);
-
-  /// The files and line counts of stash `id`, with the chosen whitespace setting.
-  Future<List<BridgeFileChange>> stashChanges({
+  /// Pauses or resumes the scheduled task `id`.
+  Future<void> setAutomationEnabled({
     required String id,
-    required bool hideWhitespace,
+    required bool enabled,
   });
 
-  /// The unified diff of the file `path` of the stash `id`, its lines written out as a
-  /// turn's are.
-  Future<String> stashPatch({
-    required String id,
-    required String path,
-    required bool hideWhitespace,
-  });
+  /// Points the session at `branch`, in `worktree` when the branch picker chose one.
+  Future<void> setBranch({required String branch, String? worktree});
 
-  /// What the session's stored entries count to, on every branch (ADR-0279).
+  /// Changes the model for the next turn.
+  Future<void> setModel({required BridgeModelChoice model});
+
+  /// Changes what the agent may do without asking.
+  Future<void> setPermissions({required BridgePermissions permissions});
+
+  /// The session now, to restore the Chat after falling behind (ADR-0290).
+  Future<BridgeSnapshot> snapshot();
+
+  /// The session's exact statistics (ADR-0279).
   Future<BridgeStatistics> statistics();
 
-  /// Stops waiting for the pull request text being written.
-  Future<void> stopPullRequestText();
+  /// Stops the running turn.
+  Future<void> stop();
 
-  /// The turns with checkpoints of the session stored in `path`, the open one too; none
-  /// outside Git or before pi stored the session.
-  Future<PlatformInt64> storedTurns({required String path});
-
-  /// Switches to the branch `name`, a remote one when `remote`; with `leave_changes`,
-  /// uncommitted changes stay on `from_branch`, replacing only `replacing_stash` (none
-  /// confirms its absence); else they come along.
-  Future<BridgeGitOutcome> switchBranch({
-    required String name,
-    required bool remote,
-    required bool leaveChanges,
-    String? fromBranch,
-    String? replacingStash,
+  /// Stops the local server `pid` on `port`.
+  Future<void> stopServer({
+    required PlatformInt64 pid,
+    required PlatformInt64 port,
   });
 
-  /// Continues the session stored in `path`; `false` when an extension cancelled it.
-  Future<bool> switchSession({required String path});
+  /// T3's "Stop subagent": stops the subagent `id`.
+  Future<void> stopSubagent({required String id});
 
-  /// The open session's title, as the start page names stored sessions; none before pi
-  /// stored a name or a prompt.
-  Future<String?> title();
+  /// The session now; [`AgentSession::events`] then streams the events after it, with no gap.
+  /// Liquid shows the snapshot and applies each event whose sequence is past it (ADR-0290).
+  Future<BridgeSnapshot> subscribe();
 
-  /// The chat of the current branch: the items of up to `limit` stored entries before
-  /// `before`, or of the newest ones.
-  Future<BridgeTranscript> transcript({String? before, required int limit});
+  /// Its title.
+  Future<String> title();
 
-  /// The files that changed from the start of turn `from` to the end of turn `to`, both on
-  /// the current branch; with `hide_whitespace`, changes that are only whitespace are left
-  /// out.
-  Future<BridgeTurnChanges> turnChanges({
-    required String from,
-    required String to,
+  /// The files that changed from the start of turn `from` to the end of turn `to`.
+  Future<List<BridgeFileChange>> turnChanges({
+    required PlatformInt64 from,
+    required PlatformInt64 to,
     required bool hideWhitespace,
   });
 
-  /// The unified diff of one file from the start of turn `from` to the end of turn `to`;
-  /// characters that could hide or reorder its lines are written out, as in the file's shown
-  /// name, but for the carriage returns of Windows line ends, which the Diff panel marks.
+  /// One file's unified diff from the start of turn `from` to the end of turn `to`.
   Future<String> turnPatch({
-    required String from,
-    required String to,
+    required PlatformInt64 from,
+    required PlatformInt64 to,
     required String path,
     required bool hideWhitespace,
   });
 
-  /// The turns of the current branch, oldest first, with what each changed.
+  /// The turns, oldest first.
   Future<List<BridgeTurn>> turns();
 
-  /// Compared tree identities and uncommitted tracked and untracked files.
-  Future<(String, List<BridgeFileChange>)> uncommittedChanges({
-    required bool hideWhitespace,
-  });
+  /// The provider's usage limits, or `None` when it reports none.
+  Future<BridgeUsageLimits?> usageLimits();
 
-  /// One uncommitted file compared with the last commit, its lines written out as a turn's.
-  Future<String> uncommittedPatch({
-    required String path,
-    required bool hideWhitespace,
-  });
-
-  /// What removing the worktree at `path` would lose, or what keeps it.
-  Future<BridgeWorktreeRemoval> worktreeRemoval({required String path});
-
-  /// Git's registered worktrees of the session's repository, the main checkout first.
-  Future<List<BridgeWorktree>> worktrees();
-
-  /// As [`AgentSession::write_pull_request_text`], before a commit and push: about the commits
-  /// the base branch `base` lacks, as far as Git has it, and the files at `paths` as the
-  /// commit plan's `snapshot` holds them; none when there are neither.
-  Future<BridgePullRequestText?> writePullRequestDraftText({
-    required String model,
-    String? base,
-    required String snapshot,
-    required List<String> paths,
-  });
-
-  /// The title and description the Chat's `model` (`provider/id`) writes about the commits
-  /// from `merge_base` to `head_commit`, through pi as the session started it; a later request
-  /// or [`AgentSession::stop_pull_request_text`] stops waiting for this one.
-  Future<BridgePullRequestText> writePullRequestText({
-    required String model,
-    required String mergeBase,
-    required String headCommit,
-  });
+  /// Its own worktree, if it has one.
+  Future<String?> worktree();
 }
 
-/// A session with checkpoints in the project's repository.
-class BridgeCheckpointSession {
-  /// Its title, as the start page names stored sessions; "Unknown session" when no session
-  /// of this project is stored with its id.
-  final String title;
-
-  /// Its turns with checkpoints.
-  final PlatformInt64 turns;
-
-  const BridgeCheckpointSession({required this.title, required this.turns});
-
-  @override
-  int get hashCode => title.hashCode ^ turns.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeCheckpointSession &&
-          runtimeType == other.runtimeType &&
-          title == other.title &&
-          turns == other.turns;
-}
-
-/// A model the agent can use.
+/// A model and its choices.
 class BridgeModel {
-  /// The provider, such as `anthropic`.
-  final String provider;
-
-  /// The provider's model id.
+  /// The id.
   final String id;
 
-  /// The name to show.
+  /// The display name.
   final String name;
 
-  /// Tokens the model can take in one request, when the agent knows them.
-  final PlatformInt64? contextWindow;
+  /// Its select options, such as reasoning effort.
+  final List<BridgeModelOption> options;
 
   const BridgeModel({
-    required this.provider,
     required this.id,
     required this.name,
-    this.contextWindow,
+    required this.options,
   });
 
   @override
-  int get hashCode =>
-      provider.hashCode ^ id.hashCode ^ name.hashCode ^ contextWindow.hashCode;
+  int get hashCode => id.hashCode ^ name.hashCode ^ options.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is BridgeModel &&
           runtimeType == other.runtimeType &&
-          provider == other.provider &&
           id == other.id &&
           name == other.name &&
-          contextWindow == other.contextWindow;
+          options == other.options;
 }
 
-/// A session pi stored, as the start page lists it.
-class BridgeStoredSession {
-  /// The session file.
-  final String path;
+/// A chosen provider, model and option values.
+class BridgeModelChoice {
+  /// The provider instance.
+  final String instance;
 
-  /// Its name, or else the first line of its first prompt, or else "Untitled session".
-  final String title;
+  /// The model.
+  final String model;
 
-  /// When pi last wrote it, in Unix milliseconds.
-  final PlatformInt64 modifiedMs;
+  /// Option ids, matching `values`.
+  final List<String> optionIds;
 
-  const BridgeStoredSession({
-    required this.path,
-    required this.title,
-    required this.modifiedMs,
-  });
+  /// Chosen values.
+  final List<String> values;
 
-  @override
-  int get hashCode => path.hashCode ^ title.hashCode ^ modifiedMs.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeStoredSession &&
-          runtimeType == other.runtimeType &&
-          path == other.path &&
-          title == other.title &&
-          modifiedMs == other.modifiedMs;
-}
-
-/// How to start pi; the core adds its arguments.
-class SessionConfig {
-  /// The executable.
-  final String program;
-
-  /// Watershed's pi extension, by absolute path.
-  final String extensionPath;
-
-  /// A stored session file to reopen, by absolute path.
-  final String? session;
-
-  /// Its working directory.
-  final String cwd;
-
-  const SessionConfig({
-    required this.program,
-    required this.extensionPath,
-    this.session,
-    required this.cwd,
+  const BridgeModelChoice({
+    required this.instance,
+    required this.model,
+    required this.optionIds,
+    required this.values,
   });
 
   @override
   int get hashCode =>
-      program.hashCode ^
-      extensionPath.hashCode ^
-      session.hashCode ^
-      cwd.hashCode;
+      instance.hashCode ^ model.hashCode ^ optionIds.hashCode ^ values.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is SessionConfig &&
+      other is BridgeModelChoice &&
           runtimeType == other.runtimeType &&
-          program == other.program &&
-          extensionPath == other.extensionPath &&
-          session == other.session &&
-          cwd == other.cwd;
+          instance == other.instance &&
+          model == other.model &&
+          optionIds == other.optionIds &&
+          values == other.values;
+}
+
+/// One select option of a model.
+class BridgeModelOption {
+  /// The id.
+  final String id;
+
+  /// The label.
+  final String label;
+
+  /// The choices' ids.
+  final List<String> choices;
+
+  /// The choices' labels, matching `choices`.
+  final List<String> labels;
+
+  /// The default choice.
+  final String? default_;
+
+  const BridgeModelOption({
+    required this.id,
+    required this.label,
+    required this.choices,
+    required this.labels,
+    this.default_,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      label.hashCode ^
+      choices.hashCode ^
+      labels.hashCode ^
+      default_.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeModelOption &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          label == other.label &&
+          choices == other.choices &&
+          labels == other.labels &&
+          default_ == other.default_;
+}
+
+/// What an agent may do without asking (T3's Permissions).
+enum BridgePermissions {
+  /// Ask before commands and file changes.
+  supervised,
+
+  /// Auto-approve edits, ask before other actions.
+  autoAcceptEdits,
+
+  /// Supported providers approve routine actions; others still ask.
+  auto,
+
+  /// Allow commands and edits without prompts.
+  fullAccess,
+}
+
+/// A provider and its models, as the model picker lists them.
+class BridgeProvider {
+  /// The instance id sessions choose it by.
+  final String instance;
+
+  /// Its display name.
+  final String name;
+
+  /// Whether it can run now.
+  final bool available;
+
+  /// Its models.
+  final List<BridgeModel> models;
+
+  const BridgeProvider({
+    required this.instance,
+    required this.name,
+    required this.available,
+    required this.models,
+  });
+
+  @override
+  int get hashCode =>
+      instance.hashCode ^ name.hashCode ^ available.hashCode ^ models.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeProvider &&
+          runtimeType == other.runtimeType &&
+          instance == other.instance &&
+          name == other.name &&
+          available == other.available &&
+          models == other.models;
+}
+
+/// One answer to one question.
+class BridgeQuestionAnswer {
+  /// The question's id.
+  final String question;
+
+  /// The chosen labels, or the typed text.
+  final List<String> values;
+
+  const BridgeQuestionAnswer({required this.question, required this.values});
+
+  @override
+  int get hashCode => question.hashCode ^ values.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeQuestionAnswer &&
+          runtimeType == other.runtimeType &&
+          question == other.question &&
+          values == other.values;
+}
+
+/// A session as the sidebar lists it.
+class BridgeThreadSummary {
+  /// The session's id.
+  final String id;
+
+  /// Its title.
+  final String title;
+
+  /// When it last changed, in Unix milliseconds.
+  final PlatformInt64? updatedMs;
+
+  /// Its branch.
+  final String? branch;
+
+  /// Its worktree.
+  final String? worktree;
+
+  /// Whether a turn runs.
+  final bool running;
+
+  /// Whether it is archived.
+  final bool archived;
+
+  const BridgeThreadSummary({
+    required this.id,
+    required this.title,
+    this.updatedMs,
+    this.branch,
+    this.worktree,
+    required this.running,
+    required this.archived,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      title.hashCode ^
+      updatedMs.hashCode ^
+      branch.hashCode ^
+      worktree.hashCode ^
+      running.hashCode ^
+      archived.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeThreadSummary &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          title == other.title &&
+          updatedMs == other.updatedMs &&
+          branch == other.branch &&
+          worktree == other.worktree &&
+          running == other.running &&
+          archived == other.archived;
 }

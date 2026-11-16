@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../controls.dart';
 import '../format.dart';
-import '../rust/api/events.dart';
 import '../session/session_state.dart';
 import '../shortcuts/keymap.dart';
 import '../shortcuts/shortcut_reveal.dart';
@@ -11,12 +10,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'sidebar.dart';
 
-/// The status entry the session sets while a turn waits for another Git action that holds its
-/// checkout alone.
-const revertWaitKey = 'watershed.revert';
-
-/// Run status, tokens, cost and extension status entries. A notification takes the status
-/// slot; a click lists the latest ones.
+/// Run status and tokens. A notification takes the status slot; a click lists the latest ones.
 class StatusBar extends StatefulWidget {
   const StatusBar({super.key, required this.state, required this.keys});
 
@@ -46,19 +40,19 @@ class _StatusBarState extends State<StatusBar> {
   @override
   void initState() {
     super.initState();
-    widget.state.question.addListener(_asked);
+    widget.state.request.addListener(_asked);
   }
 
   @override
   void dispose() {
-    widget.state.question.removeListener(_asked);
+    widget.state.request.removeListener(_asked);
     _listFocus.dispose();
     super.dispose();
   }
 
-  /// The list would cover a question in the input area.
+  /// The list would cover a request the agent waits on.
   void _asked() {
-    if (widget.state.asking) _list.hide();
+    if (widget.state.request.value != null) _list.hide();
   }
 
   @override
@@ -80,16 +74,13 @@ class _StatusBarState extends State<StatusBar> {
         listenable: Listenable.merge([
           state.status,
           state.totals,
-          state.statuses,
-          state.failure,
           state.notice,
           state.notices,
         ]),
         builder: (context, _) {
           final (label, color) = statusLabel(context, state.status.value);
           final totals = state.totals.value;
-          final failure = state.failure.value;
-          final notice = failure == null ? state.notice.value : null;
+          final notice = state.notice.value;
           final more = state.notices.value.length - 1;
           return Row(
             children: [
@@ -127,7 +118,7 @@ class _StatusBarState extends State<StatusBar> {
                             ],
                             Flexible(
                               child: Text(
-                                notice?.text ?? '● ${failure ?? label}',
+                                notice?.text ?? '● $label',
                                 key: const Key('status'),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -157,25 +148,6 @@ class _StatusBarState extends State<StatusBar> {
                 '${formatTokens(totals.input)} in · ${formatTokens(totals.output)} out',
                 style: text,
               ),
-              const SizedBox(width: WsMetrics.space6),
-              Text('≈ ${formatCost(totals.costMicroUsd)}', style: text),
-              if (state.statuses.value.isNotEmpty) ...[
-                const SizedBox(width: WsMetrics.space6),
-                Flexible(
-                  child: Text(
-                    [
-                      // Watershed's own entry needs no key to tell it apart.
-                      for (final entry in state.statuses.value.entries)
-                        entry.key == revertWaitKey
-                            ? entry.value
-                            : '${entry.key} ${entry.value}',
-                    ].join(' · '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: text,
-                  ),
-                ),
-              ],
               const Spacer(),
               // The view's keys show only while the reveal key is held.
               if (ShortcutReveal.shown(context))
@@ -189,15 +161,15 @@ class _StatusBarState extends State<StatusBar> {
 }
 
 /// The symbol that tells a notification's level apart without color.
-IconData _mark(BridgeLevel level) => switch (level) {
-  BridgeLevel.info => LucideIcons.info,
-  BridgeLevel.warning || BridgeLevel.error => LucideIcons.triangleAlert,
+IconData _mark(NoticeLevel level) => switch (level) {
+  NoticeLevel.info => LucideIcons.info,
+  NoticeLevel.warning || NoticeLevel.error => LucideIcons.triangleAlert,
 };
 
-Color _tone(BuildContext context, BridgeLevel level) => switch (level) {
-  BridgeLevel.info => context.ws.textMuted,
-  BridgeLevel.warning => context.ws.warning,
-  BridgeLevel.error => context.ws.danger,
+Color _tone(BuildContext context, NoticeLevel level) => switch (level) {
+  NoticeLevel.info => context.ws.textMuted,
+  NoticeLevel.warning => context.ws.warning,
+  NoticeLevel.error => context.ws.danger,
 };
 
 /// The latest notifications above the status bar.

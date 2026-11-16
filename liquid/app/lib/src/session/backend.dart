@@ -1,280 +1,259 @@
+import 'dart:async';
+
+import '../rust/api/details.dart';
 import '../rust/api/events.dart';
 import '../rust/api/git.dart';
-import '../rust/api/worktrees.dart';
-import '../rust/api/history.dart';
 import '../rust/api/session.dart';
+import '../rust/api/thread.dart';
 
-/// Stored entries the chat reads at a time.
-const chatPage = 200;
+/// What Liquid needs from a project on Meta-Harness's agent host; tests substitute a fake.
+abstract interface class ProjectBackend {
+  /// The project's sessions, newest first.
+  Future<List<BridgeThreadSummary>> threads();
 
-/// How many recent sessions the start page offers.
-const recentLimit = 8;
+  /// Starts a session: in a new worktree from `base`, in the existing `worktree`, or else in
+  /// the project folder, as T3's workspace selector chose.
+  Future<SessionBackend> start(
+    String text,
+    BridgeModelChoice model, {
+    String? base,
+    String? worktree,
+    required BridgePermissions permissions,
+  });
+  Future<SessionBackend> open(String id);
 
-/// What [SessionState] needs from a running agent session; tests substitute a fake.
+  /// Whether `id` is the only session in its worktree, as T3 asks before deleting it.
+  Future<bool> onlySessionInWorktree(String id);
+  Future<void> delete(String id, {required bool worktree});
+  Future<void> archive(String id, {required bool archived});
+
+  /// Git for the project folder.
+  GitBackend git();
+  Future<List<BridgeProvider>> providers();
+  Future<BridgeModelChoice?> writerModel();
+  Future<void> setWriterModel(BridgeModelChoice model);
+
+  /// The name T3 shows for this host, such as the computer's name.
+  Future<String> environmentName();
+}
+
+/// What Liquid needs from one session.
 abstract interface class SessionBackend {
+  String get id;
+
+  /// The session now; [events] then streams the events after it (ADR-0290).
+  Future<BridgeSnapshot> subscribe();
   Stream<BridgeEvent> events();
 
-  /// Confirms that the first [applied] events of [events] were applied, so the bridge may send
-  /// that many more (ADR-0272).
+  /// Confirms that the first [applied] events were applied, so the bridge may send more
+  /// (ADR-0272).
   Future<void> confirmApplied(int applied);
-  Future<void> send(String message, {required bool followUp});
-  Future<BridgeQueue> clearQueue();
-  Future<void> abort();
-  Future<void> answerText(String request, String text);
-  Future<void> answerConfirm(String request, bool confirmed);
-  Future<void> dismiss(String request);
-  Future<bool> shutdown();
-
-  /// Whether the project is in a Git repository, so its turns can have checkpoints.
-  Future<bool> isInRepository();
-
-  /// The turns of the current branch, oldest first, with what each changed.
+  Future<BridgeSnapshot> snapshot();
+  Future<void> send(String text, {required bool steer});
+  Future<void> stop();
   Future<List<BridgeTurn>> turns();
 
   /// The files that changed from the start of turn `from` to the end of turn `to`.
-  Future<BridgeTurnChanges> turnChanges(
-    String from,
-    String to, {
+  Future<List<BridgeFileChange>> turnChanges(
+    int from,
+    int to, {
     required bool hideWhitespace,
   });
-
-  /// One file's unified diff from the start of turn `from` to the end of turn `to`.
   Future<String> turnPatch(
-    String from,
-    String to,
+    int from,
+    int to,
     String path, {
     required bool hideWhitespace,
   });
-  Future<BridgeHistory> history();
 
-  /// What the session's stored entries count to, on every branch (ADR-0279).
+  /// T3's "Edit from here"; returns the turn's prompt.
+  Future<String> revert(int turn, {required bool restoreFiles});
+
+  /// T3's "Fork from this response"; returns the new session's id.
+  Future<String> fork(int turn);
+  Future<void> respond(String request, String decision);
+  Future<void> answer(String request, List<BridgeQuestionAnswer> answers);
+  Future<void> dismiss(String request);
   Future<BridgeStatistics> statistics();
-
-  /// The context window the next request fills and when pi compacts it; null when the agent
-  /// reports no window.
   Future<BridgeContext?> context();
-  Future<BridgeTranscript> transcript(String? before);
-  Future<void> branch(String entry);
+  Future<BridgeModelChoice?> model();
+  Future<void> setModel(BridgeModelChoice model);
+  Future<void> setPermissions(BridgePermissions permissions);
+  Future<void> sendQueuedNow(int turn);
+  Future<void> editQueued(int turn, String text);
+  Future<void> cancelQueued(int turn);
+  Future<String> title();
+  Future<String?> worktree();
 
-  /// What reverting the files to before turn `turn` would change.
-  Future<BridgeRevertPlan> revertPlan(String turn);
+  /// Git for the session's checkout.
+  GitBackend git();
+  Future<void> setBranch(String branch, {String? worktree});
 
-  /// Reverts the files to before turn `turn` and continues the session from before its
-  /// prompt, which returns to the input area; refused once the files left the plan
-  /// `confirmation` came with.
-  Future<void> revertToTurn(String turn, BridgeRevertConfirmation confirmation);
+  /// Writes the session's record into Downloads; returns the folder.
+  Future<String> exportRecord({required String host, required String day});
 
-  /// The sessions with checkpoints in the project's repository.
-  Future<List<BridgeCheckpointSession>> checkpointSessions();
+  /// The servers the session's agent or terminals run, now and as they change.
+  Future<List<BridgeLocalServer>> servers();
+  Stream<List<BridgeLocalServer>> serverChanges();
+  Future<void> stopServer(int pid, int port);
 
-  /// Removes every checkpoint in the project's repository.
-  Future<void> removeAllCheckpoints();
+  /// The session's scheduled tasks, now and as they change.
+  Future<List<BridgeAutomation>> automations();
+  Stream<List<BridgeAutomation>> automationChanges();
+  Future<void> setAutomationEnabled(String id, {required bool enabled});
+  Future<void> runAutomationNow(String id);
 
-  /// The file pi stores the open session in, unless it keeps it in memory.
-  Future<String?> sessionFile();
+  /// The session's related threads (T3's Lineage and Side chats), now and as they change.
+  Future<BridgeLineage> lineage();
+  Stream<BridgeLineage> lineageChanges();
+  Future<void> mergeBack();
+  Future<void> disconnect();
+  Future<void> stopSubagent(String id);
 
-  /// The turns with checkpoints of the session stored at `path`.
-  Future<int> storedTurns(String path);
+  /// The provider's usage limits, if it reports any.
+  Future<BridgeUsageLimits?> usageLimits();
 
-  /// Deletes the stored session at `path`, not the open one, with its checkpoints.
-  Future<void> deleteSession(String path);
-
-  /// Writes the record of the session stored at `path` into Downloads; returns the folder.
-  Future<String> exportRecord({
-    required String path,
-    required String title,
-    required String host,
-    required String day,
-  });
-
-  /// The project's recent stored sessions, newest first, without the current one.
-  Future<List<BridgeStoredSession>> recentSessions();
-
-  /// The open session's title, as the recent sessions are named; null until pi stored one.
-  Future<String?> title();
-
-  /// Starts a new session or continues a stored one; `false` when an extension cancelled it.
-  Future<bool> newSession();
-  Future<bool> switchSession(String path);
-
-  /// The checkout's branch, upstream and uncommitted files; null outside Git.
-  Future<BridgeGitStatus?> gitStatus();
-
-  /// The checkout's branches and the agents running there.
-  Future<BridgeBranches> gitBranches();
-
-  /// Switches to `branch`; with `leaveChanges`, uncommitted changes stay in the stash of the
-  /// branch left.
-  Future<BridgeGitOutcome> switchBranch(
-    BridgeBranch branch, {
-    required bool leaveChanges,
-    required String? fromBranch,
-    required String? replacingStash,
-  });
-
-  /// Creates the branch `name` at the current commit and switches to it; the outcome names the
-  /// branch it was created from.
-  Future<BridgeGitOutcome> createBranch(String name);
-
-  /// Captures the current whole files and their checkpoint attribution.
-  Future<BridgeCommitPlan> commitPlan();
-
-  /// Commits selected files only if they still match the captured tree.
-  Future<BridgeGitOutcome> commitFiles(
-    String snapshot,
-    List<String> paths,
-    String message,
-    String? branch,
-  );
-
-  /// Initializes Git only while no turn runs in this project folder.
-  Future<BridgeGitOutcome> initializeGit();
-
-  /// Reads compared tree identities and whole-file changes against HEAD.
-  Future<(String, List<BridgeFileChange>)> uncommittedChanges({
-    required bool hideWhitespace,
-  });
-
-  /// Reads one uncommitted file against HEAD.
-  Future<String> uncommittedPatch(String path, {required bool hideWhitespace});
-
-  /// The stashed changes of the branch checked out, if any.
-  Future<BridgeStash?> gitStash();
-
-  /// The files and line counts of stash `id`, with the chosen whitespace setting.
-  Future<List<BridgeFileChange>> stashChanges(
-    String id, {
-    required bool hideWhitespace,
-  });
-
-  /// One file's unified diff in the stash `id`.
-  Future<String> stashPatch(
-    String id,
-    String path, {
-    required bool hideWhitespace,
-  });
-  Future<BridgeGitOutcome> restoreStash(String id);
-  Future<BridgeGitOutcome> discardStash(String id);
-
-  /// Fetches the upstream's remote, or else origin or the only remote; the remote fetched, if
-  /// there was one.
-  Future<String?> fetch();
-
-  Future<BridgeGitOutcome> push(BridgePushConfirmation? confirmed);
-  Future<BridgeGitOutcome> pull();
-
-  /// The pushed branch's pull request plan on GitHub, through the host's gh; `base` is the
-  /// recorded branch it was created from, if any.
-  Future<BridgePullRequestOutcome> pullRequestPlan({
-    String? target,
-    String? base,
-  });
-
-  /// Creates the reviewed pull request after rechecking its plan.
-  Future<BridgePullRequestOutcome> createPullRequest(
-    BridgePullRequestDraft draft,
-  );
-
-  /// The branch's latest pull request on GitHub, open ones first.
-  Future<BridgePullRequestOutcome> pullRequest();
-
-  /// The branches of `target` on GitHub, to choose a base from.
-  Future<BridgePullRequestOutcome> pullRequestBases(String host, String target);
-
-  /// The branches of `target` on GitHub whose names contain `query`.
-  Future<BridgePullRequestOutcome> pullRequestBaseSearch(
-    String host,
-    String target,
-    String query,
-  );
-
-  /// The title and description the Chat's `model` (`provider/id`) writes about the commits
-  /// from `mergeBase` to `headCommit`; a later request or [stopPullRequestText] stops it.
-  Future<BridgePullRequestText> writePullRequestText({
-    required String model,
-    required String mergeBase,
-    required String headCommit,
-  });
-
-  /// As [writePullRequestText], before a commit and push: about the commits the base branch
-  /// `base` lacks, as far as Git has it, and the files at `paths` as the commit plan's
-  /// `snapshot` holds them; none when there are neither.
-  Future<BridgePullRequestText?> writePullRequestDraftText({
-    required String model,
-    String? base,
-    required String snapshot,
-    required List<String> paths,
-  });
-
-  /// The branch's target, base and any open pull request before it is pushed, for "Commit,
-  /// push & create PR".
-  Future<BridgePullRequestOutcome> pullRequestPrepared({
-    String? target,
-    String? base,
-  });
-
-  /// Stops the pull request text being written.
-  Future<void> stopPullRequestText();
-
-  /// Git's registered worktrees of the repository, the main checkout first.
-  Future<List<BridgeWorktree>> worktrees();
-
-  /// What removing the worktree at `path` would lose, or what keeps it.
-  Future<BridgeWorktreeRemoval> worktreeRemoval(String path);
-
-  /// Removes the `reviewed` worktree once a recheck finds it unchanged and removable.
-  Future<BridgeWorktreeOutcome> removeWorktree(BridgeWorktreeRemoval reviewed);
-
-  Future<List<BridgeModel>> models();
-
-  /// The selected model as `provider/id`.
-  Future<String?> currentModel();
-  Future<void> setModel(BridgeModel model);
+  /// Releases the session once Liquid left it, which ends its follows on T3.
+  void close();
 }
 
-/// A session in the embedded Meta-Harness core, reached through the Rust bridge.
+/// Git for one checkout, as T3 runs it.
+abstract interface class GitBackend {
+  Future<BridgeGitStatus> status();
+  Stream<BridgeGitStatus> watch();
+  Future<BridgeRefs> refs(String query, {int cursor = 0, int limit = 50});
+  Future<void> switchTo(String name);
+  Future<void> createBranch(String name);
+  Future<void> init();
+
+  /// Pulls; returns T3's title and description.
+  Future<(String, String)> pull();
+  Stream<BridgeGitProgress> run(
+    BridgeGitAction action, {
+    String? message,
+    List<String>? files,
+    bool featureBranch = false,
+  });
+  Future<List<BridgeFileChange>> uncommittedChanges({
+    required bool hideWhitespace,
+  });
+  Future<String> uncommittedPatch(String path, {required bool hideWhitespace});
+  Future<BridgeResolvedPullRequest> resolvePullRequest(String reference);
+  Future<BridgeCheckedOut> checkOutPullRequest(
+    String reference, {
+    required bool worktree,
+  });
+  Future<void> publish(
+    String provider,
+    String repository, {
+    required bool public,
+  });
+
+  /// The branch compared with its base, as T3's "Changes vs" row.
+  Future<List<BridgeFileChange>> branchChanges({required bool hideWhitespace});
+  Future<String> branchPatch(String path, {required bool hideWhitespace});
+  Future<BridgePullRequestDetail> pullRequest(int number);
+  Future<void> runPullRequestAction(
+    int number,
+    String action, {
+    String? mergeMethod,
+  });
+
+  /// Checks out the pull request at `url` in a worktree, as T3's Fix and Resolve do.
+  Future<BridgeCheckedOut> pullRequestWorktree(String url);
+
+  /// Releases the checkout once Liquid no longer shows it, which ends its status watch.
+  void close();
+}
+
+/// The project on Meta-Harness's T3 server, reached through the Rust bridge.
+class RustProjectBackend implements ProjectBackend {
+  RustProjectBackend(this._host, this._project);
+
+  final AgentHost _host;
+  final AgentProject _project;
+
+  @override
+  Future<List<BridgeThreadSummary>> threads() => _project.threads();
+  @override
+  Future<SessionBackend> start(
+    String text,
+    BridgeModelChoice model, {
+    String? base,
+    String? worktree,
+    required BridgePermissions permissions,
+  }) async => RustSessionBackend.of(
+    await _project.start(
+      text: text,
+      model: model,
+      base: base,
+      worktree: worktree,
+      permissions: permissions,
+    ),
+  );
+  @override
+  Future<SessionBackend> open(String id) async =>
+      RustSessionBackend.of(await _project.open(id: id));
+  @override
+  Future<bool> onlySessionInWorktree(String id) =>
+      _project.onlySessionInWorktree(id: id);
+  @override
+  Future<void> delete(String id, {required bool worktree}) =>
+      _project.delete(id: id, worktree: worktree);
+  @override
+  Future<void> archive(String id, {required bool archived}) =>
+      _project.archive(id: id, archived: archived);
+  @override
+  GitBackend git() => RustGitBackend(_project.git());
+  @override
+  Future<List<BridgeProvider>> providers() => _host.providers();
+  @override
+  Future<BridgeModelChoice?> writerModel() => _host.writerModel();
+  @override
+  Future<void> setWriterModel(BridgeModelChoice model) =>
+      _host.setWriterModel(choice: model);
+  @override
+  Future<String> environmentName() => _host.environmentName();
+}
+
+/// One session on the agent host, reached through the Rust bridge.
 class RustSessionBackend implements SessionBackend {
-  RustSessionBackend(this._session);
+  RustSessionBackend._(this._session, this.id);
+
+  static Future<RustSessionBackend> of(AgentSession session) async =>
+      RustSessionBackend._(session, await session.id());
 
   final AgentSession _session;
+  @override
+  final String id;
 
+  @override
+  Future<BridgeSnapshot> subscribe() => _session.subscribe();
   @override
   Stream<BridgeEvent> events() => _session.events();
   @override
   Future<void> confirmApplied(int applied) =>
       _session.confirmApplied(applied: applied);
   @override
-  Future<void> send(String message, {required bool followUp}) =>
-      _session.send(message: message, followUp: followUp);
+  Future<BridgeSnapshot> snapshot() => _session.snapshot();
   @override
-  Future<BridgeQueue> clearQueue() => _session.clearQueue();
+  Future<void> send(String text, {required bool steer}) =>
+      _session.send(text: text, steer: steer);
   @override
-  Future<void> abort() => _session.abort();
-  @override
-  Future<void> answerText(String request, String text) =>
-      _session.answerText(request: request, text: text);
-  @override
-  Future<void> answerConfirm(String request, bool confirmed) =>
-      _session.answerConfirm(request: request, confirmed: confirmed);
-  @override
-  Future<void> dismiss(String request) => _session.dismiss(request: request);
-  @override
-  Future<bool> shutdown() => _session.shutdown();
-  @override
-  Future<bool> isInRepository() => _session.inRepository();
+  Future<void> stop() => _session.stop();
   @override
   Future<List<BridgeTurn>> turns() => _session.turns();
   @override
-  Future<BridgeTurnChanges> turnChanges(
-    String from,
-    String to, {
+  Future<List<BridgeFileChange>> turnChanges(
+    int from,
+    int to, {
     required bool hideWhitespace,
   }) =>
       _session.turnChanges(from: from, to: to, hideWhitespace: hideWhitespace);
   @override
   Future<String> turnPatch(
-    String from,
-    String to,
+    int from,
+    int to,
     String path, {
     required bool hideWhitespace,
   }) => _session.turnPatch(
@@ -284,195 +263,185 @@ class RustSessionBackend implements SessionBackend {
     hideWhitespace: hideWhitespace,
   );
   @override
-  Future<BridgeHistory> history() => _session.history();
+  Future<String> revert(int turn, {required bool restoreFiles}) =>
+      _session.revert(turn: turn, restoreFiles: restoreFiles);
+  @override
+  Future<String> fork(int turn) => _session.fork(turn: turn);
+  @override
+  Future<void> respond(String request, String decision) =>
+      _session.respond(request: request, decision: decision);
+  @override
+  Future<void> answer(String request, List<BridgeQuestionAnswer> answers) =>
+      _session.answer(request: request, answers: answers);
+  @override
+  Future<void> dismiss(String request) => _session.dismiss(request: request);
   @override
   Future<BridgeStatistics> statistics() => _session.statistics();
   @override
   Future<BridgeContext?> context() => _session.context();
   @override
-  Future<BridgeTranscript> transcript(String? before) =>
-      _session.transcript(before: before, limit: chatPage);
+  Future<BridgeModelChoice?> model() => _session.model();
   @override
-  Future<void> branch(String entry) => _session.branch(entry: entry);
+  Future<void> setModel(BridgeModelChoice model) =>
+      _session.setModel(model: model);
   @override
-  Future<BridgeRevertPlan> revertPlan(String turn) =>
-      _session.revertPlan(turn: turn);
+  Future<void> setPermissions(BridgePermissions permissions) =>
+      _session.setPermissions(permissions: permissions);
   @override
-  Future<void> revertToTurn(
-    String turn,
-    BridgeRevertConfirmation confirmation,
-  ) => _session.revertToTurn(turn: turn, confirmation: confirmation);
+  Future<void> sendQueuedNow(int turn) => _session.sendQueuedNow(turn: turn);
   @override
-  Future<List<BridgeCheckpointSession>> checkpointSessions() =>
-      _session.checkpointSessions();
+  Future<void> editQueued(int turn, String text) =>
+      _session.editQueued(turn: turn, text: text);
   @override
-  Future<void> removeAllCheckpoints() => _session.removeAllCheckpoints();
+  Future<void> cancelQueued(int turn) => _session.cancelQueued(turn: turn);
   @override
-  Future<String?> sessionFile() => _session.sessionFile();
+  Future<String> title() => _session.title();
   @override
-  Future<int> storedTurns(String path) async =>
-      (await _session.storedTurns(path: path)).toInt();
+  Future<String?> worktree() => _session.worktree();
   @override
-  Future<void> deleteSession(String path) => _session.deleteSession(path: path);
+  GitBackend git() => RustGitBackend(_session.git());
   @override
-  Future<String> exportRecord({
-    required String path,
-    required String title,
-    required String host,
-    required String day,
-  }) => _session.exportRecord(path: path, title: title, host: host, day: day);
+  Future<void> setBranch(String branch, {String? worktree}) =>
+      _session.setBranch(branch: branch, worktree: worktree);
   @override
-  Future<List<BridgeStoredSession>> recentSessions() =>
-      _session.recentSessions(limit: recentLimit);
+  Future<String> exportRecord({required String host, required String day}) =>
+      _session.exportRecord(host: host, day: day);
   @override
-  Future<String?> title() => _session.title();
+  Future<List<BridgeLocalServer>> servers() => _session.serversSubscribe();
   @override
-  Future<bool> newSession() => _session.newSession();
+  Stream<List<BridgeLocalServer>> serverChanges() => _session.serversEvents();
   @override
-  Future<bool> switchSession(String path) => _session.switchSession(path: path);
+  Future<void> stopServer(int pid, int port) =>
+      _session.stopServer(pid: pid, port: port);
   @override
-  Future<BridgeGitStatus?> gitStatus() => _session.gitStatus();
+  Future<List<BridgeAutomation>> automations() =>
+      _session.automationsSubscribe();
   @override
-  Future<BridgeBranches> gitBranches() => _session.gitBranches();
+  Stream<List<BridgeAutomation>> automationChanges() =>
+      _session.automationsEvents();
   @override
-  Future<BridgeGitOutcome> switchBranch(
-    BridgeBranch branch, {
-    required bool leaveChanges,
-    required String? fromBranch,
-    required String? replacingStash,
-  }) => _session.switchBranch(
-    name: branch.name,
-    remote: branch.remote,
-    leaveChanges: leaveChanges,
-    fromBranch: fromBranch,
-    replacingStash: replacingStash,
+  Future<void> setAutomationEnabled(String id, {required bool enabled}) =>
+      _session.setAutomationEnabled(id: id, enabled: enabled);
+  @override
+  Future<void> runAutomationNow(String id) => _session.runAutomationNow(id: id);
+  @override
+  Future<BridgeLineage> lineage() => _session.lineageSubscribe();
+  @override
+  Stream<BridgeLineage> lineageChanges() => _session.lineageEvents();
+  @override
+  Future<void> mergeBack() => _session.mergeBack();
+  @override
+  Future<void> disconnect() => _session.disconnect();
+  @override
+  Future<void> stopSubagent(String id) => _session.stopSubagent(id: id);
+  @override
+  Future<BridgeUsageLimits?> usageLimits() => _session.usageLimits();
+  @override
+  void close() => _session.dispose();
+}
+
+/// Git through the Rust bridge; the checkout arrives from the bridge's worker threads.
+class RustGitBackend implements GitBackend {
+  RustGitBackend(this._git);
+
+  final Future<GitCheckout> _git;
+
+  @override
+  Future<BridgeGitStatus> status() async => (await _git).status();
+  @override
+  Stream<BridgeGitStatus> watch() =>
+      Stream.fromFuture(_git).asyncExpand((git) => git.watch());
+  @override
+  Future<BridgeRefs> refs(
+    String query, {
+    int cursor = 0,
+    int limit = 50,
+  }) async => (await _git).refs(query: query, cursor: cursor, limit: limit);
+  @override
+  Future<void> switchTo(String name) async => (await _git).switch_(name: name);
+  @override
+  Future<void> createBranch(String name) async =>
+      (await _git).createBranch(name: name);
+  @override
+  Future<void> init() async => (await _git).init();
+  @override
+  Future<(String, String)> pull() async {
+    final result = await (await _git).pull();
+    return (result.first, result.last);
+  }
+
+  @override
+  Stream<BridgeGitProgress> run(
+    BridgeGitAction action, {
+    String? message,
+    List<String>? files,
+    bool featureBranch = false,
+  }) => Stream.fromFuture(_git).asyncExpand(
+    (git) => git.run(
+      action: action,
+      message: message,
+      files: files,
+      featureBranch: featureBranch,
+    ),
   );
   @override
-  Future<BridgeGitOutcome> createBranch(String name) =>
-      _session.createBranch(name: name);
-  @override
-  Future<BridgeCommitPlan> commitPlan() => _session.commitPlan();
-  @override
-  Future<BridgeGitOutcome> commitFiles(
-    String snapshot,
-    List<String> paths,
-    String message,
-    String? branch,
-  ) => _session.commitFiles(
-    snapshot: snapshot,
-    paths: paths,
-    message: message,
-    branch: branch,
-  );
-  @override
-  Future<BridgeGitOutcome> initializeGit() => _session.initializeGit();
-  @override
-  Future<(String, List<BridgeFileChange>)> uncommittedChanges({
+  Future<List<BridgeFileChange>> uncommittedChanges({
     required bool hideWhitespace,
-  }) => _session.uncommittedChanges(hideWhitespace: hideWhitespace);
+  }) async => (await _git).uncommittedChanges(hideWhitespace: hideWhitespace);
   @override
   Future<String> uncommittedPatch(
     String path, {
     required bool hideWhitespace,
-  }) => _session.uncommittedPatch(path: path, hideWhitespace: hideWhitespace);
+  }) async =>
+      (await _git).uncommittedPatch(path: path, hideWhitespace: hideWhitespace);
   @override
-  Future<BridgeStash?> gitStash() => _session.gitStash();
+  Future<BridgeResolvedPullRequest> resolvePullRequest(
+    String reference,
+  ) async => (await _git).resolvePullRequest(reference: reference);
   @override
-  Future<List<BridgeFileChange>> stashChanges(
-    String id, {
+  Future<BridgeCheckedOut> checkOutPullRequest(
+    String reference, {
+    required bool worktree,
+  }) async => (await _git).checkOutPullRequest(
+    reference: reference,
+    worktree: worktree,
+  );
+  @override
+  Future<void> publish(
+    String provider,
+    String repository, {
+    required bool public,
+  }) async => (await _git).publish(
+    provider: provider,
+    repository: repository,
+    public: public,
+  );
+  @override
+  Future<List<BridgeFileChange>> branchChanges({
     required bool hideWhitespace,
-  }) => _session.stashChanges(id: id, hideWhitespace: hideWhitespace);
+  }) async => (await _git).branchFiles(hideWhitespace: hideWhitespace);
   @override
-  Future<String> stashPatch(
-    String id,
+  Future<String> branchPatch(
     String path, {
     required bool hideWhitespace,
-  }) => _session.stashPatch(id: id, path: path, hideWhitespace: hideWhitespace);
+  }) async =>
+      (await _git).branchPatch(path: path, hideWhitespace: hideWhitespace);
   @override
-  Future<BridgeGitOutcome> restoreStash(String id) =>
-      _session.restoreStash(id: id);
+  Future<BridgePullRequestDetail> pullRequest(int number) async =>
+      (await _git).pullRequest(number: number);
   @override
-  Future<BridgeGitOutcome> discardStash(String id) =>
-      _session.discardStash(id: id);
-  @override
-  Future<String?> fetch() => _session.fetch();
-  @override
-  Future<BridgeGitOutcome> push(BridgePushConfirmation? confirmed) =>
-      _session.push(confirmed: confirmed);
-  @override
-  Future<BridgeGitOutcome> pull() => _session.pull();
-  @override
-  Future<BridgePullRequestOutcome> pullRequestPlan({
-    String? target,
-    String? base,
-  }) => _session.pullRequestPlan(target: target, base: base);
-  @override
-  Future<BridgePullRequestOutcome> createPullRequest(
-    BridgePullRequestDraft draft,
-  ) => _session.createPullRequest(draft: draft);
-  @override
-  Future<BridgePullRequestOutcome> pullRequest() => _session.pullRequest();
-  @override
-  Future<BridgePullRequestOutcome> pullRequestBases(
-    String host,
-    String target,
-  ) => _session.pullRequestBases(host: host, target: target);
-  @override
-  Future<BridgePullRequestOutcome> pullRequestBaseSearch(
-    String host,
-    String target,
-    String query,
-  ) => _session.pullRequestBaseSearch(host: host, target: target, query: query);
-
-  @override
-  Future<BridgePullRequestText> writePullRequestText({
-    required String model,
-    required String mergeBase,
-    required String headCommit,
-  }) => _session.writePullRequestText(
-    model: model,
-    mergeBase: mergeBase,
-    headCommit: headCommit,
+  Future<void> runPullRequestAction(
+    int number,
+    String action, {
+    String? mergeMethod,
+  }) async => (await _git).runPullRequestAction(
+    number: number,
+    action: action,
+    mergeMethod: mergeMethod,
   );
-
   @override
-  Future<BridgePullRequestText?> writePullRequestDraftText({
-    required String model,
-    String? base,
-    required String snapshot,
-    required List<String> paths,
-  }) => _session.writePullRequestDraftText(
-    model: model,
-    base: base,
-    snapshot: snapshot,
-    paths: paths,
-  );
-
+  Future<BridgeCheckedOut> pullRequestWorktree(String url) async =>
+      (await _git).pullRequestWorktree(url: url);
   @override
-  Future<BridgePullRequestOutcome> pullRequestPrepared({
-    String? target,
-    String? base,
-  }) => _session.pullRequestPrepared(target: target, base: base);
-
-  @override
-  Future<void> stopPullRequestText() => _session.stopPullRequestText();
-
-  @override
-  Future<List<BridgeWorktree>> worktrees() => _session.worktrees();
-
-  @override
-  Future<BridgeWorktreeRemoval> worktreeRemoval(String path) =>
-      _session.worktreeRemoval(path: path);
-
-  @override
-  Future<BridgeWorktreeOutcome> removeWorktree(
-    BridgeWorktreeRemoval reviewed,
-  ) => _session.removeWorktree(reviewed: reviewed);
-  @override
-  Future<List<BridgeModel>> models() => _session.models();
-  @override
-  Future<String?> currentModel() => _session.currentModel();
-  @override
-  Future<void> setModel(BridgeModel model) =>
-      _session.setModel(provider: model.provider, id: model.id);
+  void close() => unawaited(_git.then((git) => git.dispose()));
 }

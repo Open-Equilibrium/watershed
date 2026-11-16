@@ -41,6 +41,7 @@ class FileTile extends StatelessWidget {
       BridgeChangeStatus.added => letter('A', ws.success),
       BridgeChangeStatus.deleted => letter('D', ws.danger),
       BridgeChangeStatus.modified => letter('M', ws.warning),
+      BridgeChangeStatus.renamed => letter('R', ws.accent),
       null => Icon(
         folded ? LucideIcons.chevronRight : LucideIcons.chevronDown,
         size: 14,

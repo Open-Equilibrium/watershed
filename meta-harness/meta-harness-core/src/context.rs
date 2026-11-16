@@ -1,14 +1,14 @@
-//! The context window the next request fills and the token count at which pi compacts it
+//! The context window the next request fills and the token count at which T3 compacts it
 //! (ADR-0279).
 
-/// The context window the next request fills, and when pi compacts it.
+/// The context window the next request fills, and when T3 compacts it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Context {
-    /// Tokens the window holds now, when pi knows them; `None` right after a compaction.
+    /// Tokens the window holds now, as T3 reports them; `None` when the report has no count.
     pub tokens: Option<u64>,
     /// Tokens the model's context window holds.
     pub window: u64,
-    /// Tokens at which pi starts compacting; `None` when auto compaction is off, pi's settings
-    /// cannot be read, or the project's settings set compaction.
+    /// Tokens at which T3 starts compacting (its `autoCompactThreshold`); `None` when T3 reports
+    /// no threshold.
     pub compacts_at: Option<u64>,
 }

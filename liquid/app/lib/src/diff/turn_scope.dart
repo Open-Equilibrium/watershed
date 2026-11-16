@@ -1,6 +1,6 @@
-import '../rust/api/history.dart';
+import '../rust/api/thread.dart';
 
-/// Which turns the Diff panel compares.
+/// What the Diff panel compares.
 sealed class DiffScope {
   const DiffScope();
 }
@@ -10,20 +10,20 @@ class LatestTurn extends DiffScope {
   const LatestTurn();
 }
 
-/// One turn, by its checkpoint id.
+/// One turn, by its number.
 class OneTurn extends DiffScope {
-  const OneTurn(this.id);
+  const OneTurn(this.number);
 
-  final String id;
-
-  @override
-  bool operator ==(Object other) => other is OneTurn && other.id == id;
+  final int number;
 
   @override
-  int get hashCode => id.hashCode;
+  bool operator ==(Object other) => other is OneTurn && other.number == number;
+
+  @override
+  int get hashCode => number.hashCode;
 }
 
-/// Every turn of the branch: the end of the latest against the start of the first.
+/// Every turn: the end of the latest against the start of the first.
 class AllTurns extends DiffScope {
   const AllTurns();
 }
@@ -33,40 +33,38 @@ class UncommittedChanges extends DiffScope {
   const UncommittedChanges();
 }
 
-/// The stashed changes of the branch checked out.
-class StashedChanges extends DiffScope {
-  const StashedChanges();
+/// The checkout's branch compared with its base, as T3's Changes scope.
+class BranchChanges extends DiffScope {
+  const BranchChanges();
 }
 
-/// The checkpoints a scope compares: the start of `from` and the end of `to`.
+/// The turns a scope compares: from the start of `from` to the end of `to`.
 typedef Compared = ({BridgeTurn from, BridgeTurn to});
 
-/// The turns that ended, whether or not their checkpoints could be taken.
+/// The turns that ended with a ready checkpoint.
 List<BridgeTurn> finished(List<BridgeTurn> turns) => [
   for (final turn in turns)
-    if (turn.endEntry != null) turn,
+    if (turn.checkpoint) turn,
 ];
 
-/// What `scope` compares among `turns`, oldest first; none before a turn ended. A turn whose
-/// checkpoint failed stays, so the Diff panel says why. A turn that is no longer on the branch
-/// falls back to the latest.
+/// What `scope` compares among `turns`, oldest first; none before a turn ended. A turn that is
+/// no longer in the session falls back to the latest.
 Compared? compared(List<BridgeTurn> turns, DiffScope scope) {
   final ended = finished(turns);
   if (ended.isEmpty) return null;
   final latest = (from: ended.last, to: ended.last);
   return switch (scope) {
     LatestTurn() => latest,
-    OneTurn(:final id) =>
+    OneTurn(:final number) =>
       [
             for (final turn in ended)
-              if (turn.id == id) (from: turn, to: turn),
+              if (turn.number == number) (from: turn, to: turn),
           ].firstOrNull ??
           latest,
-    AllTurns() => (from: turns.first, to: ended.last),
-    StashedChanges() || UncommittedChanges() => null,
+    AllTurns() => (from: ended.first, to: ended.last),
+    UncommittedChanges() || BranchChanges() => null,
   };
 }
 
-/// The turn's name, numbered by its first prompt on the branch.
-String turnName(BridgeTurn turn) =>
-    turn.number > 0 ? 'Turn ${turn.number}' : 'A turn without a prompt';
+/// The turn's name.
+String turnName(BridgeTurn turn) => 'Turn ${turn.number}';

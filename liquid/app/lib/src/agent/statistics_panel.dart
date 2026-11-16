@@ -9,8 +9,9 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'segment_bar.dart';
-import 'statistics_table.dart';
+import 'session_card_statistics.dart';
 import 'statistics_chart.dart';
+import 'statistics_table.dart';
 
 /// The text the Ask button puts in the input; the user completes it and sends it.
 const askStart = 'About this session: ';
@@ -19,9 +20,9 @@ enum _View { cost, tokens, time }
 
 enum _Breakdown { model, tool, turn }
 
-/// The statistics panel of a session (ADR-0279): what its stored entries count to, by cost,
-/// tokens or time, with a chart per turn and the breakdowns. It opens over the session card, and
-/// Escape or ✕ closes it.
+/// The statistics panel of a session (ADR-0279): what T3 reports for it, by tokens or time, with a
+/// chart per turn and the breakdowns. T3 reports no cost, so the Cost view says so (ADR-0293). It
+/// opens over the session card, and Escape or ✕ closes it.
 class StatisticsPanel extends StatefulWidget {
   const StatisticsPanel({
     super.key,
@@ -103,10 +104,11 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
               widget.state.statistics,
               widget.state.statisticsProblem,
               widget.state.status,
+              widget.state.turns,
             ]),
             builder: (context, _) {
               final stored = widget.state.statistics.value;
-              final running = widget.state.turnRuns;
+              final running = turnRuns(widget.state);
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -131,7 +133,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     );
   }
 
-  /// The panel until the statistics are read: that they are being read, or why they are not.
+  /// The panel until the statistics are read, or why they were not.
   Widget _unread(WsPalette ws, ({String title, String text})? problem) =>
       Padding(
         padding: const EdgeInsets.all(20),
@@ -197,7 +199,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
 
   Widget _body(WsPalette ws, SessionStatistics statistics) {
     final children = switch (_view) {
-      _View.cost => _costView(ws, statistics),
+      _View.cost => _costView(ws),
       _View.tokens => _tokensView(ws, statistics),
       _View.time => _timeView(ws, statistics),
     };
@@ -207,6 +209,21 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
       children: [...children, _breakdownSection(ws, statistics), _askRow(ws)],
     );
   }
+
+  /// T3 Code reports no cost, so no figure is shown (ADR-0293).
+  List<Widget> _costView(WsPalette ws) => [
+    Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      spacing: 4,
+      children: [
+        _heading(ws, 'T3 Code reports no cost'),
+        Text(
+          'Tokens and times are counted from the session and are on their views.',
+          style: TextStyle(fontSize: WsMetrics.fsSmall, color: ws.textMuted),
+        ),
+      ],
+    ),
+  ];
 
   /// The headline and its per-model or per-part rows on the left, the chart on the right.
   Widget _top(
@@ -263,63 +280,6 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     ],
   );
 
-  List<Widget> _costView(WsPalette ws, SessionStatistics statistics) {
-    final models = statistics.models;
-    final kinds = statistics.costByKind;
-    return [
-      _top(
-        ws,
-        title: 'Cost per turn',
-        hero: '≈ ${formatCost(statistics.cost)}',
-        caption: _responsesAndTurns(statistics),
-        who: [
-          for (final model in models)
-            _who(
-              ws,
-              colour: _series(ws, model.series),
-              name: model.name,
-              value: '≈ ${formatCost(model.cost)}',
-              caption:
-                  '${formatShare(model.cost, statistics.cost)} of cost · '
-                  '${formatTokens(model.tokens)} tokens · '
-                  '${plural(model.responses, 'response')}',
-            ),
-        ],
-        chart: _chart(
-          ws,
-          statistics,
-          columnParts: (turn) =>
-              turn.bySeries((model) => model.usage.costMicroUsd),
-          colours: [..._seriesColours(ws), ws.textFaint],
-          axis: (value) => value == 0 ? r'$0.00' : formatCost(value),
-          rows: (turn) => [
-            for (final model in turn.stats.models)
-              if (model.usage.costMicroUsd > 0)
-                ChartTipRow(
-                  _series(ws, statistics.seriesOf(model.model)),
-                  modelName(model.model),
-                  '≈ ${formatCost(model.usage.costMicroUsd)}',
-                ),
-          ],
-          notes: (turn) => [
-            turn.prompt,
-            '${plural(turn.responses, 'response')} · ${formatTokens(turn.tokens)} tokens',
-          ],
-        ),
-      ),
-      _totals(ws, statistics),
-      _byType(
-        ws,
-        'Cost by type',
-        input: kinds.input,
-        cacheRead: kinds.cacheRead,
-        cacheWrite: kinds.cacheWrite,
-        output: kinds.output,
-        format: formatCost,
-      ),
-    ];
-  }
-
   /// A total's share bar and legend, split into input, cache read, cache write and output.
   Widget _byType(
     WsPalette ws,
@@ -328,7 +288,6 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     required int cacheRead,
     required int cacheWrite,
     required int output,
-    required String Function(int) format,
   }) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     spacing: 8,
@@ -344,10 +303,10 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
         ],
       ),
       StatisticsLegend([
-        ('Input', ws.data1, format(input)),
-        ('Cache read', ws.data2, format(cacheRead)),
-        ('Cache write', ws.textFaint, format(cacheWrite)),
-        ('Output', ws.data3, format(output)),
+        ('Input', ws.data1, formatTokens(input)),
+        ('Cache read', ws.data2, formatTokens(cacheRead)),
+        ('Cache write', ws.textFaint, formatTokens(cacheWrite)),
+        ('Output', ws.data3, formatTokens(output)),
       ]),
     ],
   );
@@ -369,7 +328,6 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
               value: formatTokens(model.tokens),
               caption:
                   '${formatShare(model.tokens, statistics.tokens)} of tokens · '
-                  '≈ ${formatCost(model.cost)} · '
                   '${plural(model.responses, 'response')}',
             ),
         ],
@@ -409,20 +367,14 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
         cacheRead: usage.cacheRead,
         cacheWrite: usage.cacheWrite,
         output: usage.output,
-        format: formatTokens,
       ),
     ];
   }
 
   List<Widget> _timeView(WsPalette ws, SessionStatistics statistics) {
     final working = statistics.workingMs;
-    final (model, tool, other) = (
-      statistics.modelMs,
-      statistics.toolMs,
-      statistics.otherMs,
-    );
-    String share(int? part) =>
-        part == null || working == 0 ? '—' : formatShare(part, working);
+    final tool = statistics.toolMs;
+    String share(int part) => working == 0 ? '—' : formatShare(part, working);
     return [
       _top(
         ws,
@@ -437,13 +389,9 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
           _who(
             ws,
             colour: ws.data1,
-            name: 'Waiting for the model',
-            value: model == null ? '—' : formatDuration(model),
-            caption: model == null
-                ? 'Not recorded for turns without timing entries'
-                : '${share(model)} · ${plural(statistics.responses, 'response')}'
-                      ' · ${formatDuration(model ~/ (statistics.responses == 0 ? 1 : statistics.responses))}'
-                      ' each on average',
+            name: 'Model',
+            value: '—',
+            caption: 'T3 times no single model request',
           ),
           _who(
             ws,
@@ -454,40 +402,21 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
                 ? 'Not recorded for turns without timing entries'
                 : '${share(tool)} · ${plural(statistics.toolCalls, 'call')}',
           ),
-          _who(
-            ws,
-            colour: ws.textFaint,
-            name: 'Other',
-            value: other == null ? '—' : formatDuration(other),
-            caption: other == null
-                ? 'Not recorded for turns without timing entries'
-                : '${share(other)} · in the turn, neither model nor tool',
-          ),
         ],
         chart: _chart(
           ws,
           statistics,
-          columnParts: (turn) => [
-            turn.modelMs ?? 0,
-            turn.toolMs ?? 0,
-            turn.otherMs ?? 0,
-          ],
-          colours: [ws.data1, ws.data2, ws.textFaint],
+          columnParts: (turn) => [turn.workingMs ?? 0],
+          colours: [ws.data1],
           axis: formatDuration,
           title: (turn) =>
               'Turn ${turn.index} · ${formatDuration(turn.workingMs ?? 0)}',
           rows: (turn) => [
-            ChartTipRow(ws.data1, 'Model', formatDuration(turn.modelMs ?? 0)),
             ChartTipRow(ws.data2, 'Tools', formatDuration(turn.toolMs ?? 0)),
-            ChartTipRow(
-              ws.textFaint,
-              'Other',
-              formatDuration(turn.otherMs ?? 0),
-            ),
           ],
           notes: (turn) => [
             turn.prompt,
-            if (turn.modelMs == null) 'Timing not recorded for this turn',
+            if (turn.toolMs == null) 'Timing not recorded for this turn',
           ],
         ),
       ),
@@ -496,7 +425,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
 
   String _responsesAndTurns(SessionStatistics statistics) =>
       '${plural(statistics.responses, 'response')} · '
-      '${plural(statistics.turns.length, 'turn')} · as pi recorded it';
+      '${plural(statistics.turns.length, 'turn')} · as T3 Code reports it';
 
   /// The chart of the turns: one column per turn, its parts stacked as `columnParts` gives them.
   TurnChart _chart(
@@ -602,7 +531,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
 
   Widget _modelTable(WsPalette ws, SessionStatistics statistics) =>
       StatisticsTable(
-        headers: const ['#', 'Model', 'Responses', 'Tokens', 'Cost'],
+        headers: const ['#', 'Model', 'Responses', 'Tokens'],
         rows: [
           for (final (index, model) in statistics.models.indexed)
             [
@@ -610,7 +539,6 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
               _name(ws, model.name),
               _number(ws, '${model.responses}'),
               _number(ws, formatTokens(model.tokens)),
-              _number(ws, '≈ ${formatCost(model.cost)}'),
             ],
         ],
       );
@@ -672,7 +600,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
 
   /// Shows a turn in the Chat: the Chat scrolls to its prompt and the panel closes.
   void _selectTurn(TurnStatistics turn) {
-    widget.state.scrollChatTo.value = turn.stats.entry;
+    widget.state.scrollChatTo.value = turn.stats.number;
     widget.onClose();
   }
 
@@ -682,7 +610,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
       (most, turn) => (turn.workingMs ?? 0) > most ? turn.workingMs! : most,
     );
     return StatisticsTable(
-      headers: const ['#', 'Turn', 'Time', 'Tokens', 'Cost'],
+      headers: const ['#', 'Turn', 'Time', 'Tokens'],
       onSelect: (index) => _selectTurn(statistics.turns[index]),
       rows: [
         for (final turn in statistics.turns)
@@ -696,13 +624,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
                   : _miniBar(
                       ws,
                       fraction: turn.workingMs! / longest,
-                      segments: turn.modelMs == null
-                          ? [BarSegment(turn.workingMs!, ws.textFaint)]
-                          : [
-                              BarSegment(turn.modelMs!, ws.data1),
-                              BarSegment(turn.toolMs!, ws.data2),
-                              BarSegment(turn.otherMs!, ws.textFaint),
-                            ],
+                      segments: [BarSegment(turn.workingMs!, ws.data1)],
                     ),
               trailing: turn.failed > 0
                   ? Text(
@@ -719,7 +641,6 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
               turn.workingMs == null ? '—' : formatDuration(turn.workingMs!),
             ),
             _number(ws, formatTokens(turn.tokens)),
-            _number(ws, '≈ ${formatCost(turn.cost)}'),
           ],
       ],
     );

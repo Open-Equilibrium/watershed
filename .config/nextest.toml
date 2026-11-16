@@ -3,3 +3,12 @@
 [[profile.default.overrides]]
 filter = 'test(crash_matrix)'
 threads-required = 'num-test-threads'
+
+# Each of these tests starts its own pinned T3 Code server, about 1 GB each; two at a time keep a
+# small CI runner from pushing a server's start past its 30 s deadline.
+[test-groups]
+t3-server = { max-threads = 2 }
+
+[[profile.default.overrides]]
+filter = 'binary(t3_contract) | (package(liquid_bridge) & test(/^tests::agent::/))'
+test-group = 't3-server'

@@ -24,7 +24,7 @@ let linesFound = null;
 let linesHit = null;
 let found = 0;
 let hit = 0;
-for (const line of readFileSync(lcov, "utf8").split("\n")) {
+for (const line of readFileSync(lcov, "utf8").split(/\r?\n/)) {
   if (line.startsWith("SF:")) {
     if (path !== null) fail(`unterminated Dart coverage record for ${path} in ${lcov}`);
     path = line.slice(3);
