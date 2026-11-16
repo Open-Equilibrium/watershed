@@ -134,6 +134,9 @@ class FakeSession implements SessionBackend {
 
   void emit(BridgeEvent event) => _events.add(event);
 
+  /// Fails the event stream, as the bridge's stream can.
+  void fail(Object error) => _events.addError(error);
+
   /// Whether Liquid released the session.
   bool closed = false;
 
@@ -151,7 +154,10 @@ class FakeSession implements SessionBackend {
     late final StreamSubscription<BridgeEvent> source;
     late final StreamController<BridgeEvent> controller;
     controller = StreamController(
-      onListen: () => source = _events.stream.listen(controller.add),
+      onListen: () => source = _events.stream.listen(
+        controller.add,
+        onError: controller.addError,
+      ),
       onCancel: () async => unawaited(source.cancel()),
     );
     return controller.stream;

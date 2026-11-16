@@ -568,7 +568,18 @@ class SessionState {
           final subscribed = await next.subscribe();
           if (generation != _generation) return;
           _restore(subscribed.snapshot);
-          _subscription = next.events(subscribed.id).listen(_receive);
+          final events = next.events(subscribed.id);
+          _subscription = events.listen(
+            _receive,
+            onError: (Object error) {
+              if (generation == _generation) {
+                notify(
+                  NoticeLevel.error,
+                  'Could not follow the session: $error',
+                );
+              }
+            },
+          );
           final title = await next.title();
           if (generation != _generation) return;
           sessionTitle.value = title;

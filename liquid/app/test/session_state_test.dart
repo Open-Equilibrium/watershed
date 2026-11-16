@@ -951,6 +951,22 @@ void main() {
   });
 
   group('notices', () {
+    test(
+      'a failed Chat stream is an error notice, not an unhandled error',
+      () async {
+        await open();
+
+        session.fail('the stream broke');
+        await pumpEventQueue();
+
+        expect(state.notice.value?.level, NoticeLevel.error);
+        expect(
+          state.notice.value?.text,
+          'Could not follow the session: the stream broke',
+        );
+      },
+    );
+
     test('a failed send or open is a notice that names the action', () async {
       await open();
       session.sendError = 'the agent is busy';
