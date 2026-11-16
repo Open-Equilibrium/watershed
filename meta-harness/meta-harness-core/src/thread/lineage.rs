@@ -629,10 +629,12 @@ pub struct LineageChanges {
     task: JoinHandle<()>,
 }
 
-/// Marks the changes `ended` and wakes their reader, which then learns no change comes.
+/// Marks the changes `ended` and wakes every waiting reader, which then learns no change comes.
+/// `notify_one` keeps a permit for a reader that is about to wait.
 fn end(wake: &Notify, ended: &std::sync::atomic::AtomicBool) {
     ended.store(true, std::sync::atomic::Ordering::SeqCst);
     wake.notify_one();
+    wake.notify_waiters();
 }
 
 impl LineageChanges {
