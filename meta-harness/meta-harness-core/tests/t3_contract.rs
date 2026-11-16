@@ -50,21 +50,10 @@ fn fixture() -> (tempdir::Dir, PathBuf, PathBuf) {
 }
 
 async fn host(home: &Path) -> Host {
-    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/scripted_acp_agent.py");
     Host::start(HostConfig {
         binary: t3(),
         home: home.to_owned(),
-        acp_agents: vec![AcpAgent {
-            id: AGENT.to_owned(),
-            command: PathBuf::from("/usr/bin/python3"),
-            // The script ignores its arguments; the home folder names this test's agents in the
-            // process list.
-            args: vec![
-                script.to_string_lossy().into_owned(),
-                home.to_string_lossy().into_owned(),
-            ],
-            models: vec![AGENT.to_owned()],
-        }],
+        acp_agents: agents(home),
     })
     .await
     .expect("T3 starts")
@@ -86,6 +75,8 @@ fn agents(home: &Path) -> Vec<AcpAgent> {
     vec![AcpAgent {
         id: AGENT.to_owned(),
         command: PathBuf::from("/usr/bin/python3"),
+        // The script ignores its arguments; the home folder names this test's agents in the
+        // process list.
         args: vec![
             script.to_string_lossy().into_owned(),
             home.to_string_lossy().into_owned(),
