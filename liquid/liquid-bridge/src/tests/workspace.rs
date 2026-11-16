@@ -288,6 +288,37 @@ fn a_path_entry_holding_another_key_is_kept() {
     assert_eq!(keys.read(&path).unwrap(), Some(other));
 }
 
+/// A keychain whose read of the folder's path entry fails, as a locked keychain's would.
+struct PathUnreadable<'a>(&'a Memory, String);
+
+impl Keys for PathUnreadable<'_> {
+    fn read(&self, name: &str) -> Result<Option<[u8; 32]>, String> {
+        if name == self.1 {
+            return Err("the keychain is locked".into());
+        }
+        self.0.read(name)
+    }
+
+    fn write(&self, name: &str, key: &[u8; 32]) -> Result<(), String> {
+        self.0.write(name, key)
+    }
+
+    fn delete(&self, name: &str) -> Result<(), String> {
+        self.0.delete(name)
+    }
+}
+
+#[test]
+fn a_failed_path_entry_lookup_does_not_block_the_key_named_by_the_folder() {
+    let folder = Folder::new("path-unreadable");
+    let keys = Memory::default();
+    lisbon(&LiquidWorkspace::open_with(&folder.0, &keys).unwrap());
+    let path = path_name(&folder.0).unwrap();
+
+    LiquidWorkspace::open_with(&folder.0, &PathUnreadable(&keys, path))
+        .expect("the key the folder names opens the replica");
+}
+
 #[test]
 fn a_malformed_key_name_file_is_refused() {
     let folder = Folder::new("malformed");
