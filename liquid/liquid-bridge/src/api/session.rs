@@ -514,9 +514,14 @@ impl AgentSession {
         self.credit.confirm(u64::try_from(applied).unwrap_or(0));
     }
 
-    /// The session now, to restore the Chat after falling behind (ADR-0290).
+    /// The session now, to restore the Chat after falling behind (ADR-0290). Deltas do not merge
+    /// across its sequence, so the restored Chat never replays text it holds.
     pub fn snapshot(&self) -> Result<BridgeSnapshot, String> {
-        run(self.thread.snapshot()).map(convert::snapshot)
+        self.credit.begin_snapshot();
+        let snapshot = run(self.thread.snapshot()).map(convert::snapshot);
+        self.credit
+            .end_snapshot(snapshot.as_ref().ok().map(|snapshot| snapshot.sequence));
+        snapshot
     }
 
     /// Sends `text`: an idle session starts a turn; a running one takes it as a steer with
