@@ -29,6 +29,12 @@ pub const CONNECTION_FILE: &str = "connection.json";
 /// Frames a connection's writer holds before a stream waits for the client to read.
 const OUTGOING: usize = 256;
 
+/// Threads a connection keeps followed after their last call; a stream keeps its own thread.
+const FOLLOWED: usize = 32;
+
+/// How long a new connection may take to complete its handshake.
+const HANDSHAKE: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// Meta-Harness's data folder: `META_HARNESS_HOME`, else `.meta-harness` in the home folder, as
 /// T3 Code keeps `~/.t3`.
 pub fn default_home() -> Option<PathBuf> {
@@ -122,8 +128,12 @@ impl Service {
             stopping: stopped,
         });
         let accept = tokio::spawn(async move {
-            while let Ok((socket, _)) = listener.accept().await {
-                tokio::spawn(serve(shared.clone(), socket));
+            loop {
+                match listener.accept().await {
+                    Ok((socket, _)) => drop(tokio::spawn(serve(shared.clone(), socket))),
+                    // Such as too many open files: the service keeps listening.
+                    Err(_) => tokio::time::sleep(std::time::Duration::from_millis(100)).await,
+                }
             }
         });
         Ok(Self {
@@ -233,7 +243,12 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream) {
             .collect();
         Ok(response)
     };
-    let Ok(socket) = tokio_tungstenite::accept_hdr_async(socket, check).await else {
+    let Ok(Ok(socket)) = tokio::time::timeout(
+        HANDSHAKE,
+        tokio_tungstenite::accept_hdr_async(socket, check),
+    )
+    .await
+    else {
         return;
     };
     let (mut sink, mut frames) = socket.split();
@@ -314,7 +329,8 @@ struct Session {
     shared: Arc<Shared>,
     client: String,
     projects: Mutex<HashMap<String, Project>>,
-    threads: Mutex<HashMap<String, Thread>>,
+    /// Followed threads, the most recently used last.
+    threads: Mutex<Vec<(String, Thread)>>,
 }
 
 impl Session {
@@ -334,15 +350,27 @@ impl Session {
 
     /// The thread `id`, followed on first use, also after the client reconnected.
     async fn thread(&self, root: &str, id: &str) -> Result<Thread, String> {
-        if let Some(thread) = self.threads.lock().await.get(id) {
-            return Ok(thread.clone());
+        {
+            let mut threads = self.threads.lock().await;
+            if let Some(at) = threads.iter().position(|(known, _)| known == id) {
+                let entry = threads.remove(at);
+                let thread = entry.1.clone();
+                threads.push(entry);
+                return Ok(thread);
+            }
         }
         let thread = self.project(root).await?.open(id).await?;
-        self.threads
-            .lock()
-            .await
-            .insert(id.to_owned(), thread.clone());
+        self.keep(thread.clone()).await;
         Ok(thread)
+    }
+
+    /// Keeps `thread` followed, letting go of the least recently used beyond [`FOLLOWED`].
+    async fn keep(&self, thread: Thread) {
+        let mut threads = self.threads.lock().await;
+        threads.retain(|(known, _)| known != thread.id());
+        threads.push((thread.id().to_owned(), thread));
+        let excess = threads.len().saturating_sub(FOLLOWED);
+        threads.drain(..excess);
     }
 
     async fn git(&self, checkout: &Checkout) -> Result<crate::Git, String> {
@@ -387,7 +415,7 @@ impl Session {
             ProjectCall::Start(start) => {
                 let thread = project.start(start).await?;
                 let id = thread.id().to_owned();
-                self.threads.lock().await.insert(id.clone(), thread);
+                self.keep(thread).await;
                 to(id)
             }
             ProjectCall::Open(id) => to(self.thread(root, &id).await.map(|_| ())?),
@@ -395,7 +423,10 @@ impl Session {
                 to(project.only_thread_in_worktree(&thread).await?)
             }
             ProjectCall::Delete { thread, worktree } => {
-                self.threads.lock().await.remove(&thread.id);
+                self.threads
+                    .lock()
+                    .await
+                    .retain(|(known, _)| *known != thread.id);
                 to(project.delete(&thread, worktree).await?)
             }
             ProjectCall::Archive { thread, archived } => {
@@ -443,7 +474,9 @@ impl Session {
         };
         match stream {
             Stream::Subscribe { root, id: thread } => {
-                let (snapshot, mut events) = self.thread(&root, &thread).await?.subscribe();
+                // The stream holds the thread, so it stays followed however many others open.
+                let followed = self.thread(&root, &thread).await?;
+                let (snapshot, mut events) = followed.subscribe();
                 send(Reply::Ok {
                     id,
                     ok: to(snapshot)?,
