@@ -26,19 +26,23 @@ use crate::subscriptions::Subscriptions;
 #[flutter_rust_bridge::frb(opaque)]
 pub struct LiquidWorkspace {
     inner: Mutex<Inner>,
-    /// The replica folder's lock, held while the Workspace is open.
-    _lock: File,
+    /// The replica folder's lock, held while the Workspace is open. Fields drop in order, so
+    /// it is released only after the database has closed.
+    _lock: ReplicaLock,
 }
+
+/// A taken replica lock, released when dropped.
+struct ReplicaLock(File);
 
 struct Inner {
     workspace: Workspace<Sqlite>,
     subscriptions: Subscriptions,
 }
 
-impl Drop for LiquidWorkspace {
+impl Drop for ReplicaLock {
     fn drop(&mut self) {
         // A concurrently spawned child may still hold an inherited descriptor until exec.
-        let _ = self._lock.unlock();
+        let _ = self.0.unlock();
     }
 }
 
@@ -126,7 +130,7 @@ impl LiquidWorkspace {
                 workspace,
                 subscriptions: Subscriptions::default(),
             }),
-            _lock: lock,
+            _lock: ReplicaLock(lock),
         })
     }
 

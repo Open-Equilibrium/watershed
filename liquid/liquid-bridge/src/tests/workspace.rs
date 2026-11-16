@@ -812,3 +812,29 @@ fn opening_never_writes_through_a_linked_lock_file() {
     assert!(opened.is_err(), "a linked lock file is refused");
     assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), "keep me");
 }
+
+#[test]
+fn a_closing_workspace_keeps_its_replica_lock_until_its_database_has_closed() {
+    // A subscriber's hand-off is dropped with the open Workspace's state, the database
+    // among it; whether another session could take the replica then shows in its drop.
+    struct Probe(PathBuf, Arc<Mutex<Option<bool>>>);
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            let lock = std::fs::File::open(self.0.join("replica.lock")).unwrap();
+            let free = lock.try_lock().is_ok();
+            *self.1.lock().unwrap() = Some(free);
+        }
+    }
+    let folder = Folder::new("closing");
+    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let free: Arc<Mutex<Option<bool>>> = Arc::default();
+    let probe = Probe(folder.0.clone(), free.clone());
+    workspace
+        .watch(1, resource(BridgeResourceKind::Areas), move |_| {
+            let _ = &probe;
+            true
+        })
+        .unwrap();
+    drop(workspace);
+    assert_eq!(*free.lock().unwrap(), Some(false), "the lock is still held");
+}
