@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +10,7 @@ import '../theme/tokens.g.dart';
 import 'explorer.dart';
 import 'page_views.dart';
 import 'page_editor.dart';
+import 'stored_name.dart';
 import 'table_block.dart';
 import 'text_block.dart';
 import 'workspace_state.dart';
@@ -30,11 +29,25 @@ class WorkspacePage extends StatefulWidget {
 }
 
 class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
-  /// The title's controller, which a title Liquid assigned swaps for a fresh one (see [_adopt]).
-  var _title = TextEditingController();
-
-  /// Whether Liquid assigned the title since the field last took its controller.
-  bool _replaced = false;
+  /// The title, each change of which is one rename; a refused one puts the stored title back,
+  /// read again first, as the tree may not show an earlier rename yet.
+  late final _title = StoredName(
+    _page?.title ?? '',
+    rename: (title) => widget.state.rename(widget.open.page, title),
+    restore: () async {
+      if (!mounted) return null;
+      try {
+        await widget.state.readPages(widget.open.area);
+      } on Object {
+        // The tree keeps its last read, and the problem shows.
+      }
+      return mounted ? _page?.title ?? '' : null;
+    },
+    quitting: () => widget.state.quitting,
+    replaced: () {
+      if (mounted) setState(() {});
+    },
+  );
   late final _titleFocus = FocusNode(
     debugLabel: 'Page title',
     onKeyEvent: (_, event) => _titleKey(event),
@@ -78,14 +91,11 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
   @override
   void initState() {
     super.initState();
-    _title.text = _page?.title ?? '';
-    _named = _title.text;
     _tree.addListener(_titleChanged);
-    _title.addListener(_typedTitle);
     _first.addListener(_typedFirst);
     _views.ready.addListener(_readied);
     widget.state.finishing.add(_typedFirst);
-    widget.state.finishing.add(_typedTitle);
+    widget.state.finishing.add(_title.typed);
     // After the frame, so it wins over the window's own first focus.
     if (widget.open.fresh) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -103,10 +113,9 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     }
     editor.left(this);
     widget.state.finishing.remove(_typedFirst);
-    // A composition still open in the title is written as it stands, as in the first line.
-    _writeTitle();
-    widget.state.finishing.remove(_typedTitle);
+    widget.state.finishing.remove(_title.typed);
     _tree.removeListener(_titleChanged);
+    // A composition still open in the title is written as it stands, as in the first line.
     _title.dispose();
     _titleFocus.dispose();
     _views.dispose();
@@ -119,67 +128,8 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
   void _titleChanged() {
     if (_titleFocus.hasFocus) return;
     final title = _page?.title ?? '';
-    if (_title.text != title) _show(title);
+    if (_title.controller.text != title) _title.show(title);
   }
-
-  /// Shows `title` as the stored one, which is no rename.
-  void _show(String title) {
-    _named = title;
-    if (!writeText(_title, TextEditingValue(text: title))) return;
-    if (mounted) setState(() => _replaced = true);
-  }
-
-  /// Flutter keeps a field's undo history with its controller, so ⌘Z after a title Liquid
-  /// assigned would bring back the title it replaced. The field takes a fresh controller when it
-  /// builds, which keeps what is typed before that frame.
-  void _adopt() {
-    _replaced = false;
-    _title = adoptController(_title, listener: _typedTitle);
-  }
-
-  /// Each change of the title, once any composition ends, is one rename (architecture rule 7).
-  void _typedTitle() {
-    // On quitting, a composition still open is written as it stands.
-    if (!_title.value.composing.isCollapsed && !widget.state.quitting) return;
-    _writeTitle();
-  }
-
-  /// Renames the Page to what the title holds, unless that is already sent or stored.
-  void _writeTitle() {
-    final title = _title.text;
-    if (title == _named) return;
-    _named = title;
-    _rename(title);
-  }
-
-  /// Each change of the title is one rename; a refused one puts the stored title back, read
-  /// again first, as the tree may not show an earlier rename yet.
-  void _rename(String title) {
-    final rename = ++_renames;
-    unawaited(
-      widget.state
-          .rename(widget.open.page, title)
-          .then<void>(
-            (_) {},
-            onError: (Object _) async {
-              // Only the latest rename's refusal puts the stored title back.
-              if (!mounted || rename != _renames) return;
-              try {
-                await widget.state.readPages(widget.open.area);
-              } on Object {
-                // The tree keeps its last read, and the problem shows.
-              }
-              if (!mounted || rename != _renames) return;
-              _show(_page?.title ?? '');
-            },
-          ),
-    );
-  }
-
-  int _renames = 0;
-
-  /// The title last sent or stored, which a change of the field is compared with.
-  String _named = '';
 
   void _readied() {
     if (mounted) setState(() {});
@@ -188,7 +138,9 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
   /// ⏎ or ↓ in the title goes to the first Text Block, as in Notion.
   KeyEventResult _titleKey(KeyEvent event) {
     // A composition takes its own ⏎ and arrows, and the field the keys with modifiers.
-    if (event is KeyUpEvent || !_title.value.composing.isCollapsed || !_plain) {
+    if (event is KeyUpEvent ||
+        !_title.controller.value.composing.isCollapsed ||
+        !_plain) {
       return KeyEventResult.ignored;
     }
     if (event.logicalKey != LogicalKeyboardKey.enter &&
@@ -257,7 +209,6 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    if (_replaced) _adopt();
     final firstLine = KeyedSubtree(
       key: _firstLineKey,
       child: TextField(
@@ -314,7 +265,7 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                     child: _column(
                       TextField(
                         key: const Key('page-title'),
-                        controller: _title,
+                        controller: _title.take(),
                         focusNode: _titleFocus,
                         // The title wraps but stays one line, as in Notion.
                         maxLines: null,
