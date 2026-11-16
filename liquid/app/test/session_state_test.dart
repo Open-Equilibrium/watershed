@@ -680,8 +680,16 @@ void main() {
       expect(state.contextWindow.value?.window, 1000000);
     });
 
-    test('a permission change the session refuses leaves the permissions it still has', () async {
+    test('a permission or model change the session refuses leaves what it still has', () async {
+      session.chosen = choiceOf('claude-haiku');
       await open();
+      session.modelError = 'the model is gone';
+      await state.setModel(choiceOf('claude-opus-5-5'));
+      expect(state.model.value, choiceOf('claude-haiku'));
+      expect(
+        state.notice.value?.text,
+        'Could not apply the model selection: the model is gone',
+      );
       session.permissionsError = 'the agent is busy';
 
       await state.setPermissions(BridgePermissions.supervised);

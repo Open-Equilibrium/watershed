@@ -291,13 +291,18 @@ class SessionState {
     }
   }
 
-  /// Sets the model: the open session's next turn, else the next new session's. The open session
-  /// reads its context window again, which depends on the model.
+  /// Sets the model: the open session's next turn, else the next new session's. An open session
+  /// takes it first, so a refused change is not shown, and reads its context window again, which
+  /// depends on the model.
   Future<void> setModel(BridgeModelChoice next) async {
-    model.value = next;
     if (_session case final session?) {
-      await _act(() => session.setModel(next), 'apply the model selection');
+      await _act(() async {
+        await session.setModel(next);
+        model.value = next;
+      }, 'apply the model selection');
       await readStatistics();
+    } else {
+      model.value = next;
     }
   }
 

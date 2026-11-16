@@ -126,8 +126,9 @@ class FakeSession implements SessionBackend {
   /// What [send] fails with.
   Object? sendError;
 
-  /// What [setPermissions] fails with.
+  /// What [setPermissions] and [setModel] fail with.
   Object? permissionsError;
+  Object? modelError;
 
   /// The applied counts Liquid confirmed, in order.
   final confirmed = <int>[];
@@ -230,6 +231,7 @@ class FakeSession implements SessionBackend {
   @override
   Future<void> setModel(BridgeModelChoice model) async {
     calls.add('model ${model.model}');
+    if (modelError case final error?) throw error;
     chosen = model;
   }
 
