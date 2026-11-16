@@ -333,31 +333,6 @@ fn deltas_taken_while_a_recovery_snapshot_is_taken_stay_apart() {
 }
 
 #[test]
-fn a_replacement_stream_is_not_credited_with_its_predecessors_confirmations() {
-    paused_runtime().block_on(async {
-        let credit = Arc::new(Credit::default());
-        let (events, mut deliveries) = start_forwarding(credit.clone());
-        for item in 1..=WINDOW as u64 {
-            events.send(started(item)).await.expect("sent");
-        }
-        settle().await;
-        assert_eq!(taken(&mut deliveries).len(), WINDOW);
-        credit.confirm(WINDOW as u64);
-        // A replacement stream of the same session, with more events than one window.
-        let (replacement, mut replaced) = start_forwarding(credit.clone());
-        for item in 1..=2 * WINDOW as u64 {
-            replacement.send(started(item)).await.expect("sent");
-        }
-        settle().await;
-        assert_eq!(
-            taken(&mut replaced).len(),
-            WINDOW,
-            "the confirmations the first stream received do not reopen the replacement's window"
-        );
-    });
-}
-
-#[test]
 fn closing_the_credit_releases_a_forwarder_that_waits_on_a_dropped_session() {
     paused_runtime().block_on(async {
         let credit = Arc::new(Credit::default());

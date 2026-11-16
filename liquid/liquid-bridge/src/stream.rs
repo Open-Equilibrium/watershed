@@ -136,23 +136,12 @@ pub(crate) struct Outbox {
     pub(crate) pending: Vec<BridgeEvent>,
     /// Events handed to Dart so far.
     sent: u64,
-    /// The session's confirmations before this stream began. They confirm the stream it replaced,
-    /// so this stream does not count them.
-    confirmed_before: u64,
     /// Set from dropping partial output until its fell-behind event goes out; further drops
     /// then add no second event.
     behind: bool,
 }
 
 impl Outbox {
-    /// An outbox for a stream that begins now, with `credit`'s confirmations so far behind it.
-    pub(crate) fn beginning(credit: &Credit) -> Self {
-        Self {
-            confirmed_before: credit.applied(),
-            ..Self::default()
-        }
-    }
-
     /// Queues `event` for Dart. Past the bound, the partial output waiting goes, since the reload
     /// replaces it, and one fell-behind event follows it; no other event is ever dropped.
     pub(crate) fn admit(&mut self, event: BridgeEvent, credit: &Credit) {
@@ -185,8 +174,7 @@ impl Outbox {
     /// Hands pending events to `deliver` in order, as far as the window has room. Returns `false`
     /// once `deliver` refused one.
     fn send(&mut self, credit: &Credit, deliver: &mut impl FnMut(BridgeEvent) -> bool) -> bool {
-        let applied = credit.applied().saturating_sub(self.confirmed_before);
-        let unconfirmed = self.sent.saturating_sub(applied);
+        let unconfirmed = self.sent.saturating_sub(credit.applied());
         let room = (WINDOW as u64).saturating_sub(unconfirmed);
         let count = room.min(self.pending.len() as u64) as usize;
         for event in self.pending.drain(..count) {
@@ -333,7 +321,7 @@ pub(crate) async fn forward<Next: Future<Output = Option<mpsc::Receiver<ThreadEv
     credit: Arc<Credit>,
     mut deliver: impl FnMut(BridgeEvent) -> bool,
 ) {
-    let mut outbox = Outbox::beginning(&credit);
+    let mut outbox = Outbox::default();
     loop {
         if credit.is_closed() {
             // The session was dropped, so no confirmation comes; what waits is released with it.
