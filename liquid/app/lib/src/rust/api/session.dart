@@ -14,7 +14,7 @@ import 'thread.dart';
 
 // These functions are ignored because they are not marked as `pub`: `export_record_to`, `host`, `new`, `permissions_of`, `range_diff`, `run`, `stream`, `summary`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
-// These functions are ignored (category: IgnoreBecauseExplicitAttribute): `follow`, `forward`, `from_host`
+// These functions are ignored (category: IgnoreBecauseExplicitAttribute): `automations_with`, `follow`, `forward`, `from_host`, `lineage_with`, `servers_with`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentHost>>
 abstract class AgentHost implements RustOpaqueInterface {
