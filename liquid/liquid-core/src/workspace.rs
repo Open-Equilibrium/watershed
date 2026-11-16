@@ -484,8 +484,6 @@ impl<S: Store> Workspace<S> {
         if !model::on_boundary(doc, &content, at) {
             return Err(Error::OutOfRange);
         }
-        let text = doc.text(&content)?;
-        let tail = text[utf8_offset(&text, at)..].to_string();
         let (new_block, new_view) = if at == 0 {
             let starts_section = order.view(view).is_some_and(|shown| shown.boundary);
             let sort = order.key_before(view)?;
@@ -496,6 +494,9 @@ impl<S: Store> Workspace<S> {
             }
             added
         } else {
+            // Only a split inside the text moves a tail, so only it reads the text.
+            let text = doc.text(&content)?;
+            let tail = text[utf8_offset(&text, at)..].to_string();
             let length =
                 isize::try_from(doc.length(&content) - at).map_err(|_| Error::OutOfRange)?;
             doc.splice_text(&content, at, length, "")?;
