@@ -4,13 +4,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 
-import 'table_kit.dart';
+import 'page_kit.dart';
 
 /// On desktop, Flutter selects a single-line field's text when it takes focus; a key typed
 /// onto a cell reaches the field before it does, and what the person types next goes in
 /// where the field's selection is, as macOS text input puts it.
 void main() {
-  final kit = TableKit();
+  final kit = PageKit();
   final macOS = TargetPlatformVariant.only(TargetPlatform.macOS);
 
   Finder cell(String row, String field) =>

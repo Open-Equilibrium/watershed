@@ -13,10 +13,10 @@ import 'package:liquid/src/workspace/text_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'focus_kit.dart';
-import 'table_kit.dart';
+import 'page_kit.dart';
 
 void main() {
-  final kit = TableKit();
+  final kit = PageKit();
 
   Finder block(int index) => find.descendant(
     of: find.byType(TextBlock).at(index),

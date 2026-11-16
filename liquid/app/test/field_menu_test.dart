@@ -5,10 +5,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
-import 'table_kit.dart';
+import 'page_kit.dart';
 
 void main() {
-  final kit = TableKit();
+  final kit = PageKit();
 
   final menu = find.byKey(const Key('field menu'));
   Finder inMenu(Finder finder) => find.descendant(of: menu, matching: finder);

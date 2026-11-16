@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/shell.dart';
+import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/app.dart';
 import 'package:liquid/src/launch.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
+import 'package:liquid/src/session/session_state.dart';
+import 'package:liquid/src/shortcuts/shortcut_store.dart';
 import 'package:liquid/src/theme/theme.dart';
 import 'package:liquid/src/workspace/table_block.dart';
+import 'package:liquid/src/workspace/text_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'fake_workspace.dart';
@@ -124,25 +129,56 @@ BridgeRow namedRow(int number) => BridgeRow(
   ],
 );
 
-/// A Page with Tables opened over a fake Workspace, for the Table tests.
-class TableKit {
+/// A Page opened over a fake Workspace, for the Workspace tests.
+class PageKit {
   late FakeWorkspace fake;
   late WorkspaceState workspace;
   late String page;
 
   /// Opens a Page of `parts` in Liquid, or in a bare frame unless `app`.
+  ///
+  /// A `fresh` Page stays the new blank Page of a first start, which takes the keys in its
+  /// title; a `session` shows that agent session instead, beside the sidebar's Pages.
   Future<void> show(
     WidgetTester tester,
     List<Part> parts, {
     bool app = false,
+    bool fresh = false,
+    SessionState? session,
+    SessionInfo? info,
+    ShortcutController? shortcuts,
     void Function()? before,
   }) async {
     await tester.binding.setSurfaceSize(const Size(1400, 900));
     fake = FakeWorkspace();
     before?.call();
     workspace = WorkspaceState(fake);
-    await workspace.start();
-    page = workspace.open.value!.page;
+    await workspace.start(show: session == null);
+    if (session == null) {
+      page = workspace.open.value!.page;
+      await _add(parts);
+      if (!fresh) {
+        workspace.open.value = OpenPage(workspace.open.value!.area, page);
+      }
+    }
+    await tester.pumpWidget(
+      app
+          ? LiquidApp(launch: const Launch.problem(null), workspace: workspace)
+          : MaterialApp(
+              theme: liquidTheme(Brightness.light),
+              home: AgentShell(
+                state: session,
+                info: info,
+                workspace: workspace,
+                shortcuts: shortcuts,
+              ),
+            ),
+    );
+    await tester.pumpAndSettle();
+    addTearDown(workspace.dispose);
+  }
+
+  Future<void> _add(List<Part> parts) async {
     String? after;
     for (final part in parts) {
       switch (part) {
@@ -189,17 +225,6 @@ class TableKit {
           after = 'unknown-view';
       }
     }
-    workspace.open.value = OpenPage(workspace.open.value!.area, page);
-    await tester.pumpWidget(
-      app
-          ? LiquidApp(launch: const Launch.problem(null), workspace: workspace)
-          : MaterialApp(
-              theme: liquidTheme(Brightness.light),
-              home: AgentShell(workspace: workspace),
-            ),
-    );
-    await tester.pumpAndSettle();
-    addTearDown(workspace.dispose);
   }
 
   Finder inTable(Finder finder) =>
@@ -207,4 +232,18 @@ class TableKit {
 
   Iterable<BridgeMutation> applied(BridgeMutationKind kind) =>
       fake.applied.where((applied) => applied.kind == kind);
+}
+
+/// The text field of the Text Block at `index`.
+Finder block(int index) => find.descendant(
+  of: find.byType(TextBlock).at(index),
+  matching: find.byType(TextField),
+);
+
+TextField field(WidgetTester tester, int index) =>
+    tester.widget<TextField>(block(index));
+
+Future<void> key(WidgetTester tester, LogicalKeyboardKey key) async {
+  await tester.sendKeyEvent(key);
+  await tester.pumpAndSettle();
 }
