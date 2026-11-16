@@ -119,6 +119,51 @@
   <section id="m3">
     <h2>M3 - Liquid</h2>
     <div class="grid">
+      <details id="d-108" class="decision wide">
+        <summary><h3>D-108 - A New Line Above A Line That Shares Its Place</h3></summary>
+        <p><strong>Status:</strong> Open; from the review of the shared placement routine in <code>liquid/liquid-core/src/sort_key.rs</code>. It matters once sync (M3c) lets two devices place a line at one spot; today one device never makes such a pair.</p>
+        <p><strong>Problem:</strong> Each line on a Page carries a sort key, and placing a line writes only that line (ADR-0238). Two devices that add lines A and B at one spot give both the same key; their identities then decide that A shows above B. Pressing ⏎ at the start of B should put an empty line right between A and B. No key fits between two equal keys, so today the empty line goes above A. If B starts a Section, the Section then starts at the empty line, and A, which belonged to the Section above, moves into B's Section.</p>
+        <p><strong>Question:</strong> Where should the empty line go when B shares its key with the line above?</p>
+        <div class="dia">
+          <div class="opt rec"><h4>A: Give B a new key <span class="tag">Recommended</span></h4>
+            <div class="b ws">B moves right below A's group</div>
+            <div class="a">the empty line takes a key between them</div>
+            <ul><li>Pro: the empty line lands exactly where the person pressed ⏎, and Sections stay as they were.</li><li>Con: placing also writes B's key, so a move of B on another device at the same time keeps only one of the two keys, as any two moves of one line do.</li></ul>
+          </div>
+          <div class="opt"><h4>B: Keep it above both</h4>
+            <div class="b ws">Empty line, A, B, as today</div>
+            <ul><li>Pro: no further work; placing writes only the new line.</li><li>Con: the empty line shows above A, and a Section starting at B swallows A.</li></ul>
+          </div>
+          <div class="opt"><h4>C: Refuse</h4>
+            <div class="b ws">⏎ does nothing and the Page says why</div>
+            <ul><li>Pro: no line ever lands in the wrong place.</li><li>Con: a key the person presses daily fails without a reason they can see or fix.</li></ul>
+          </div>
+        </div>
+        <p><strong>Recommendation:</strong> A, built with the sync slice, when such pairs first arise.</p>
+        <p><strong>Acceptance criterion:</strong> with A and B sharing a key and B starting a Section, ⏎ at B's start puts the empty line between them, the Section starts at the empty line, A stays in the Section above, and all of this holds after the Page reloads.</p>
+      </details>
+      <details id="d-109" class="decision wide">
+        <summary><h3>D-109 - A Limit On A Sort Key's Length</h3></summary>
+        <p><strong>Status:</strong> Open; the last part of a Minor from the M3a KPI review (PLAN.md).</p>
+        <p><strong>Problem:</strong> A sort key grows by about one character for every six new lines placed at the very same spot, and nothing limits its length. A key that sync brings from another device may also be of any length. The core reads keys without recursion, so a long key costs time and memory but no crash; ADR-0251 caps every other size the core stores.</p>
+        <p><strong>Question:</strong> How long may a sort key be, and what happens at the limit?</p>
+        <div class="dia">
+          <div class="opt rec"><h4>A: Cap and refuse <span class="tag">Recommended</span></h4>
+            <div class="b ws">1,000 characters, as names and titles (ADR-0251)</div>
+            <div class="a">a placement needing a longer key is refused with the reason; a longer stored key reads as no key</div>
+            <ul><li>Pro: matches ADR-0251; the limit takes about 6,000 lines placed at one spot, which real use never meets.</li><li>Con: a person who reaches it cannot place a line at that spot until a line there moves.</li></ul>
+          </div>
+          <div class="opt"><h4>B: Cap and respace</h4>
+            <div class="b ws">At the limit, new keys are written for the neighboring lines</div>
+            <ul><li>Pro: placing never fails.</li><li>Con: placing writes other lines, which ADR-0238 avoids, and two devices respacing at once can collide.</li></ul>
+          </div>
+          <div class="opt"><h4>C: No cap</h4>
+            <ul><li>Pro: no work.</li><li>Con: the one stored size ADR-0251 leaves open.</li></ul>
+          </div>
+        </div>
+        <p><strong>Recommendation:</strong> A.</p>
+        <p><strong>Acceptance criterion:</strong> the core never writes a key past the cap, refuses that placement with its reason, and orders a stored key past the cap as it orders a key that is no key.</p>
+      </details>
       <details id="d-027" class="decision">
         <summary><h3>D-027 - Liquid CLI/API Surface</h3></summary>
         <p><strong>Status:</strong> Open before external-agent Liquid edits.</p>

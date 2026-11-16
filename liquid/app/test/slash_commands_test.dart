@@ -710,6 +710,41 @@ void main() {
     expect(shown.top, greaterThanOrEqualTo(0));
   });
 
+  testWidgets('scrolling the Page chooses the menu\'s side again', (
+    tester,
+  ) async {
+    await show(tester, [
+      for (var line = 0; line < 20; line++) 'Line $line',
+      '',
+      for (var line = 21; line < 50; line++) 'Line $line',
+    ]);
+    await type(tester, 20, '/');
+    // Only the Views in view are built, so the line is found by its text.
+    final slash = find.byWidgetPredicate(
+      (widget) => widget is TextField && widget.controller?.text == '/',
+    );
+    expect(
+      tester.getRect(menu).bottom,
+      lessThanOrEqualTo(tester.getRect(slash).top),
+    );
+    // The line scrolls up near the window's top, where the menu no longer fits above it.
+    final page = tester.state<ScrollableState>(
+      find
+          .descendant(
+            of: find.byType(CustomScrollView),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    page.position.jumpTo(page.position.pixels + tester.getRect(slash).top - 40);
+    await tester.pumpAndSettle();
+    final line = tester.getRect(slash);
+    final shown = tester.getRect(menu);
+    expect(line.top, lessThan(100), reason: 'the line is high');
+    expect(shown.top, greaterThanOrEqualTo(line.bottom));
+    expect(shown.bottom, lessThanOrEqualTo(900));
+  });
+
   testWidgets('in a low window, the menu scrolls to the chosen command', (
     tester,
   ) async {

@@ -197,3 +197,86 @@ class _FieldPanelState extends State<FieldPanel> {
     );
   }
 }
+
+/// The field panel while `panel` shows it, under + (see [AddField]), which it follows
+/// out of view and back as fields are added; clicking it or + keeps it open.
+class FieldPanelPortal extends StatelessWidget {
+  const FieldPanelPortal({
+    super.key,
+    required this.panel,
+    required this.plus,
+    required this.onAdd,
+    required this.child,
+  });
+
+  final OverlayPortalController panel;
+  final LayerLink plus;
+
+  /// Adds a field of a name and kind.
+  final Future<void> Function(String name, BridgeFieldKind kind) onAdd;
+
+  /// The Table, which holds +.
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => OverlayPortal(
+    controller: panel,
+    overlayChildBuilder: (context) => Align(
+      alignment: Alignment.topLeft,
+      child: CompositedTransformFollower(
+        link: plus,
+        showWhenUnlinked: false,
+        targetAnchor: Alignment.bottomRight,
+        followerAnchor: Alignment.topRight,
+        offset: const Offset(0, WsMetrics.space1),
+        child: TapRegion(
+          groupId: panel,
+          onTapOutside: (_) => panel.hide(),
+          // A click in the panel beside its field keeps the field's keys.
+          child: TextFieldTapRegion(
+            child: FieldPanel(onAdd: onAdd, onClose: panel.hide),
+          ),
+        ),
+      ),
+    ),
+    child: child,
+  );
+}
+
+/// + after the last field, which opens the field panel.
+class AddField extends StatelessWidget {
+  const AddField({
+    super.key,
+    required this.plus,
+    required this.panel,
+    required this.onTap,
+  });
+
+  final LayerLink plus;
+  final OverlayPortalController panel;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => CompositedTransformTarget(
+    link: plus,
+    child: TapRegion(
+      groupId: panel,
+      child: Semantics(
+        button: true,
+        label: 'Add field',
+        child: GestureDetector(
+          key: const Key('add field'),
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Center(
+            child: Icon(
+              LucideIcons.plus,
+              size: 14,
+              color: context.ws.textMuted,
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}

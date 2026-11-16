@@ -10,6 +10,7 @@ import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'anchored_menu.dart';
 import 'cell_pickers.dart';
 import 'field_menu.dart';
 import 'field_panel.dart';
@@ -198,7 +199,7 @@ class _TableBlockState extends State<TableBlock> {
   }
 
   void _moved() {
-    if (_scrollingItself) return _replacePick();
+    if (_scrollingItself) return;
     if (_panel.isShowing) _panel.hide();
     _fieldMenus.close();
     _rowHandles.closeMenu();
@@ -256,18 +257,9 @@ class _TableBlockState extends State<TableBlock> {
 
   /// The person scrolling the rows closes a select cell's picker, as its cell moves away.
   void _scrolled() {
-    if (_scrollingItself) return _replacePick();
+    if (_scrollingItself) return;
     _cells.closePick();
     _rowHandles.closeMenu();
-  }
-
-  /// Chooses the picker's side and room again once the Table is laid out, after the
-  /// Table moved its cell.
-  void _replacePick() {
-    if (!_cells.picking) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) setState(() {});
-    });
   }
 
   void _changed() {
@@ -278,10 +270,6 @@ class _TableBlockState extends State<TableBlock> {
       ..read(rowIndex);
     _rowHandles.read();
     setState(() {});
-    _replacePick();
-    if (_cells.picking != _pick.isShowing) {
-      _cells.picking ? _pick.show() : _pick.hide();
-    }
   }
 
   /// A hovered row's handle, left of the Table, and the row's menu (approved Table View
@@ -311,11 +299,6 @@ class _TableBlockState extends State<TableBlock> {
   Future<void> _writeRows(BridgeMutation change) =>
       widget.views.write(change, const []).then((_) {}, onError: (Object _) {});
 
-  /// A select cell's picker, under the cell or above it, which a click outside closes.
-  final _pick = OverlayPortalController();
-  final _pickAnchor = LayerLink();
-  final _pickCell = GlobalKey();
-
   Future<String> _addOption(BridgeField field, String name, int color) async {
     final added = await widget.views.write(
       mutation(
@@ -331,79 +314,11 @@ class _TableBlockState extends State<TableBlock> {
     return added.option!;
   }
 
-  Widget _picker(BuildContext context) {
-    final field = _cells.picked;
-    if (field == null) return const SizedBox.shrink();
-    final cell = _pickCell.currentContext?.findRenderObject() as RenderBox?;
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox?;
-    // The picker shows once its cell is laid out, which tells so.
-    if (cell == null || !cell.hasSize || overlay == null) {
-      return const SizedBox.shrink();
-    }
-    // It hangs under the cell, or above it when all options do not fit under it and
-    // there is more room above; they scroll in the room it has.
-    final top = cell.localToGlobal(Offset.zero, ancestor: overlay).dy;
-    final below =
-        overlay.size.height - top - cell.size.height - 2 * WsMetrics.space1;
-    final above = top - 2 * WsMetrics.space1;
-    final date = field.kind == BridgeFieldKind.date;
-    final height = date
-        ? DatePicker.height
-        : SelectPicker.heightFor(field.options.length);
-    final up = height > below && above > below;
-    return Align(
-      alignment: Alignment.topLeft,
-      child: CompositedTransformFollower(
-        link: _pickAnchor,
-        showWhenUnlinked: false,
-        targetAnchor: up ? Alignment.topLeft : Alignment.bottomLeft,
-        followerAnchor: up ? Alignment.bottomLeft : Alignment.topLeft,
-        offset: Offset(0, up ? -WsMetrics.space1 : WsMetrics.space1),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: math.max(0, up ? above : below),
-          ),
-          child: TapRegion(
-            groupId: _pick,
-            onTapOutside: (_) => _cells.leavePick(),
-            // A click in the picker beside its field keeps the field's keys.
-            child: TextFieldTapRegion(
-              child: date
-                  ? DatePicker(
-                      text: _cells.pickText,
-                      locale: _cells.days,
-                      onDay: _cells.pickDay,
-                      onEnter: _cells.enterDay,
-                      onClear: () => _cells.pickDay(null),
-                      onClose: _cells.closePick,
-                      onTab: _cells.tabFromPick,
-                      onKeys: (keys) => _cells.pickKeys = keys,
-                    )
-                  : SelectPicker(
-                      field: field,
-                      text: _cells.pickText,
-                      onPick: _cells.pick,
-                      onCreate: _cells.create,
-                      onClose: _cells.closePick,
-                      onTab: _cells.tabFromPick,
-                      onKeys: (keys) => _cells.pickKeys = keys,
-                    ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Brings the picked cell into the Page's view, as an editor's caret does, and shows
-  /// its picker.
-  void _placed() {
-    if (!mounted || !_cells.picking) return;
+  /// Brings the picked cell into the Page's view, as an editor's caret does.
+  void _placed(RenderObject cell) {
     _scrollingItself = true;
-    _pickCell.currentContext?.findRenderObject()?.showOnScreen();
+    cell.showOnScreen();
     _scrollingItself = false;
-    setState(() {});
   }
 
   /// + New adds a row last, which the core places as it applies the write (ADR-0247),
@@ -717,156 +632,125 @@ class _TableBlockState extends State<TableBlock> {
         }
       });
     }
-    // The field panel opens under +, and clicking it or + keeps it open.
     return OverlayPortal(
       controller: _rowHandles.handle,
       overlayChildBuilder: _rowHandles.handleView,
       child: OverlayPortal(
         controller: _rowHandles.menu,
         overlayChildBuilder: _rowHandles.menuView,
-        child: OverlayPortal(
-          controller: _panel,
-          overlayChildBuilder: (context) => Align(
-            alignment: Alignment.topLeft,
-            child: CompositedTransformFollower(
-              link: _plus,
-              showWhenUnlinked: false,
-              targetAnchor: Alignment.bottomRight,
-              followerAnchor: Alignment.topRight,
-              offset: const Offset(0, WsMetrics.space1),
-              child: TapRegion(
-                groupId: _panel,
-                onTapOutside: (_) => _panel.hide(),
-                // A click in the panel beside its field keeps the field's keys.
-                child: TextFieldTapRegion(
-                  child: FieldPanel(onAdd: _addField, onClose: _panel.hide),
-                ),
-              ),
-            ),
-          ),
-          child: OverlayPortal(
-            controller: _fieldMenus.overlay,
-            overlayChildBuilder: _fieldMenus.view,
-            child: OverlayPortal(
-              controller: _pick,
-              overlayChildBuilder: _picker,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: WsMetrics.space3),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    SizedBox(
-                      height: 32,
-                      child: Row(
-                        children: [
-                          Icon(
-                            LucideIcons.table,
-                            size: 16,
-                            color: ws.textFaint,
+        child: FieldPanelPortal(
+          panel: _panel,
+          plus: _plus,
+          onAdd: _addField,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: WsMetrics.space3),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                  height: 32,
+                  child: Row(
+                    children: [
+                      Icon(LucideIcons.table, size: 16, color: ws.textFaint),
+                      const SizedBox(width: WsMetrics.space3),
+                      Expanded(
+                        child: TextField(
+                          controller: _name,
+                          focusNode: _nameFocus,
+                          // The caret stays where Liquid puts it; desktop Flutter would select all on focus.
+                          selectAllOnFocus: false,
+                          style: TextStyle(
+                            fontSize: WsMetrics.fsProse,
+                            fontWeight: WsMetrics.fwSemibold,
+                            color: ws.text,
                           ),
-                          const SizedBox(width: WsMetrics.space3),
-                          Expanded(
-                            child: TextField(
-                              controller: _name,
-                              focusNode: _nameFocus,
-                              // The caret stays where Liquid puts it; desktop Flutter would select all on focus.
-                              selectAllOnFocus: false,
-                              style: TextStyle(
-                                fontSize: WsMetrics.fsProse,
-                                fontWeight: WsMetrics.fwSemibold,
-                                color: ws.text,
-                              ),
-                              decoration: InputDecoration.collapsed(
-                                hintText: 'Untitled',
-                                hintStyle: TextStyle(color: ws.textFaint),
-                              ),
-                            ),
+                          decoration: InputDecoration.collapsed(
+                            hintText: 'Untitled',
+                            hintStyle: TextStyle(color: ws.textFaint),
                           ),
-                        ],
+                        ),
                       ),
-                    ),
-                    if (database != null)
-                      Focus(
-                        focusNode: _cells.cellsFocus,
-                        // The keys of a selected cell, without a node of its own for readers.
-                        includeSemantics: false,
-                        child: ClipRRect(
+                    ],
+                  ),
+                ),
+                if (database != null)
+                  Focus(
+                    focusNode: _cells.cellsFocus,
+                    // The keys of a selected cell, without a node of its own for readers.
+                    includeSemantics: false,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+                      child: Container(
+                        foregroundDecoration: BoxDecoration(
+                          border: Border.all(color: ws.border),
                           borderRadius: BorderRadius.circular(
                             WsMetrics.radiusLg,
                           ),
-                          child: Container(
-                            foregroundDecoration: BoxDecoration(
-                              border: Border.all(color: ws.border),
-                              borderRadius: BorderRadius.circular(
-                                WsMetrics.radiusLg,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // A Table may lose all its fields, as when another device removes
+                            // them; its rows still count.
+                            if (database.fields.isEmpty)
+                              Container(
+                                height: _headerHeight,
+                                color: ws.subtle,
+                                alignment: Alignment.centerRight,
+                                child: SizedBox(
+                                  width: _addWidth,
+                                  child: AddField(
+                                    plus: _plus,
+                                    panel: _panel,
+                                    onTap: _togglePanel,
+                                  ),
+                                ),
+                              )
+                            else
+                              LayoutBuilder(
+                                builder: (context, constraints) => _grid(
+                                  database.fields,
+                                  constraints.maxWidth,
+                                  NumberFormat.decimalPattern(numbers),
+                                  shownDays(days),
+                                ),
                               ),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                // A Table may lose all its fields, as when another device removes
-                                // them; its rows still count.
-                                if (database.fields.isEmpty)
-                                  Container(
-                                    height: _headerHeight,
-                                    color: ws.subtle,
-                                    alignment: Alignment.centerRight,
-                                    child: SizedBox(
-                                      width: _addWidth,
-                                      child: _AddField(
-                                        link: _plus,
-                                        panel: _panel,
-                                        onTap: _togglePanel,
-                                      ),
-                                    ),
-                                  )
-                                else
-                                  LayoutBuilder(
-                                    builder: (context, constraints) => _grid(
-                                      database.fields,
-                                      constraints.maxWidth,
-                                      NumberFormat.decimalPattern(numbers),
-                                      shownDays(days),
-                                    ),
+                            _NewRow(onTap: () => unawaited(_addRow())),
+                            if (count > 0)
+                              Container(
+                                height: _footerHeight,
+                                color: ws.subtle,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                ),
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  '${NumberFormat.decimalPattern(numbers).format(count)} '
+                                  '${count == 1 ? 'row' : 'rows'}',
+                                  style: TextStyle(
+                                    fontSize: WsMetrics.fsCompact,
+                                    color: ws.textFaint,
                                   ),
-                                _NewRow(onTap: () => unawaited(_addRow())),
-                                if (count > 0)
-                                  Container(
-                                    height: _footerHeight,
-                                    color: ws.subtle,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                    ),
-                                    alignment: Alignment.centerLeft,
-                                    child: Text(
-                                      '${NumberFormat.decimalPattern(numbers).format(count)} '
-                                      '${count == 1 ? 'row' : 'rows'}',
-                                      style: TextStyle(
-                                        fontSize: WsMetrics.fsCompact,
-                                        color: ws.textFaint,
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
-                    // A value refused in place says why, under the Table (approved mockups).
-                    if (_cells.error case final error?)
-                      Padding(
-                        padding: const EdgeInsets.only(top: WsMetrics.space2),
-                        child: Text(
-                          error,
-                          style: TextStyle(
-                            fontSize: WsMetrics.fsSmall,
-                            color: ws.danger,
-                          ),
-                        ),
+                    ),
+                  ),
+                // A value refused in place says why, under the Table (approved mockups).
+                if (_cells.error case final error?)
+                  Padding(
+                    padding: const EdgeInsets.only(top: WsMetrics.space2),
+                    child: Text(
+                      error,
+                      style: TextStyle(
+                        fontSize: WsMetrics.fsSmall,
+                        color: ws.danger,
                       ),
-                  ],
-                ),
-              ),
+                    ),
+                  ),
+              ],
             ),
           ),
         ),
@@ -958,33 +842,17 @@ class _TableBlockState extends State<TableBlock> {
             onTap: () => onTap(index),
             child: box,
           );
-          // A field's menu hangs under its header, and a click on it is no click
-          // outside.
+          // A field's menu hangs under its header.
           if (menu?.call(index) ?? false) {
-            return TapRegion(
-              groupId: _fieldMenus.overlay,
-              child: CompositedTransformTarget(
-                link: _fieldMenus.anchor,
-                child: tapped,
-              ),
+            return AnchoredMenu(
+              onTapOutside: (_) => _fieldMenus.close(),
+              menu: _fieldMenus.view,
+              child: tapped,
             );
           }
-          // The picker hangs under its cell, and a click in it is no click outside.
+          // The picker hangs from its cell.
           if (picking?.call(index) ?? false) {
-            return TapRegion(
-              groupId: _pick,
-              // Nor does it take the keys from the picker's filter.
-              child: TextFieldTapRegion(
-                child: _PickedCell(
-                  onPlaced: _placed,
-                  child: CompositedTransformTarget(
-                    key: _pickCell,
-                    link: _pickAnchor,
-                    child: tapped,
-                  ),
-                ),
-              ),
-            );
+            return PickedCell(cells: _cells, onPlaced: _placed, child: tapped);
           }
           // A click in the edited cell beside its text is no click outside the editor.
           return editing?.call(index) ?? false
@@ -1059,8 +927,8 @@ class _TableBlockState extends State<TableBlock> {
                       index < fields.length &&
                       fields[index].id == _fieldMenus.open,
                   cell: (index) => index == fields.length
-                      ? _AddField(
-                          link: _plus,
+                      ? AddField(
+                          plus: _plus,
                           panel: _panel,
                           onTap: _togglePanel,
                         )
@@ -1161,43 +1029,6 @@ class _TableBlockState extends State<TableBlock> {
   }
 }
 
-/// + after the last field, which opens the field panel.
-class _AddField extends StatelessWidget {
-  const _AddField({
-    required this.link,
-    required this.panel,
-    required this.onTap,
-  });
-
-  final LayerLink link;
-  final OverlayPortalController panel;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => CompositedTransformTarget(
-    link: link,
-    child: TapRegion(
-      groupId: panel,
-      child: Semantics(
-        button: true,
-        label: 'Add field',
-        child: GestureDetector(
-          key: const Key('add field'),
-          behavior: HitTestBehavior.opaque,
-          onTap: onTap,
-          child: Center(
-            child: Icon(
-              LucideIcons.plus,
-              size: 14,
-              color: context.ws.textMuted,
-            ),
-          ),
-        ),
-      ),
-    ),
-  );
-}
-
 /// + New under the last row, which adds a row there.
 class _NewRow extends StatelessWidget {
   const _NewRow({required this.onTap});
@@ -1232,28 +1063,4 @@ class _NewRow extends StatelessWidget {
       ),
     );
   }
-}
-
-/// The cell a select picker hangs from, which tells once it is first laid out.
-class _PickedCell extends StatefulWidget {
-  const _PickedCell({required this.onPlaced, required this.child});
-
-  final VoidCallback onPlaced;
-  final Widget child;
-
-  @override
-  State<_PickedCell> createState() => _PickedCellState();
-}
-
-class _PickedCellState extends State<_PickedCell> {
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) widget.onPlaced();
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) => widget.child;
 }

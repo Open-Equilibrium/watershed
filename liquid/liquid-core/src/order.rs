@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use automerge::AutoCommit;
 
 use crate::model::{self, BLOCK, BLOCKS, BOUNDARY, KIND, SORT, VIEWS};
-use crate::{BlockId, BlockKind, Error, View, ViewId};
+use crate::{BlockId, BlockKind, Error, Place, View, ViewId};
 
 /// One live View with its sort key.
 struct Placed {
@@ -48,15 +48,22 @@ impl Order {
 
     /// The sort key for a View placed after `after`, or first.
     pub(crate) fn key_after(&self, after: Option<&ViewId>) -> Result<String, Error> {
-        let index = match after {
-            None => 0,
-            Some(after) => self.position(after).ok_or(Error::NotFound)? + 1,
-        };
-        let key = |i: usize| self.placed.get(i).map(|placed| placed.sort.as_str());
-        Ok(crate::sort_key::between(
-            index.checked_sub(1).and_then(key),
-            key(index),
-        ))
+        crate::sort_key::at(
+            &self.placed,
+            after.map_or(Place::First, Place::After),
+            |placed| &placed.view.id,
+            |placed| Some(&placed.sort),
+        )
+    }
+
+    /// The sort key for a View placed right before `before`.
+    pub(crate) fn key_before(&self, before: &ViewId) -> Result<String, Error> {
+        crate::sort_key::before(
+            &self.placed,
+            before,
+            |placed| &placed.view.id,
+            |placed| Some(&placed.sort),
+        )
     }
 
     pub(crate) fn insert(&mut self, sort: String, view: View) {

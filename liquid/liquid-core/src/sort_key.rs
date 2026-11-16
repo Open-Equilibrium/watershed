@@ -5,11 +5,67 @@
 //! character encodes its length, then an optional fraction. Appending or prepending
 //! increments or decrements the integer, so keys grow only logarithmically.
 
+use crate::{Error, Place};
+
 const DIGITS: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 const SMALLEST: &[u8] = b"A00000000000000000000000000";
 
 fn value(digit: u8) -> usize {
     DIGITS.iter().position(|&d| d == digit).unwrap_or(0)
+}
+
+/// The key for an item placed at `place` among `sorted`, ordered by key, then identity
+/// (ADR-0247); `id` and `key` read an item's identity and key. After an item whose key
+/// others share, as two devices placing at one spot leave them, it goes after them all,
+/// since only identities order them.
+pub(crate) fn at<T, I: PartialEq + ?Sized>(
+    sorted: &[T],
+    place: Place<&I>,
+    id: impl Fn(&T) -> &I,
+    key: impl Fn(&T) -> Option<&str>,
+) -> Result<String, Error> {
+    let index = match place {
+        Place::First => 0,
+        Place::After(after) => {
+            let at = sorted
+                .iter()
+                .position(|item| id(item) == after)
+                .ok_or(Error::NotFound)?;
+            let tied = key(&sorted[at]);
+            at + 1
+                + sorted[at + 1..]
+                    .iter()
+                    .take_while(|item| key(item) == tied)
+                    .count()
+        }
+        Place::Last => sorted.len(),
+    };
+    let key_at = |i: usize| sorted.get(i).and_then(&key);
+    Ok(between(
+        index.checked_sub(1).and_then(key_at),
+        key_at(index),
+    ))
+}
+
+/// The key for an item placed right before `before` among `sorted`, as [at] reads them.
+/// Before an item whose key others share, it goes before them all.
+pub(crate) fn before<T, I: PartialEq + ?Sized>(
+    sorted: &[T],
+    before: &I,
+    id: impl Fn(&T) -> &I,
+    key: impl Fn(&T) -> Option<&str>,
+) -> Result<String, Error> {
+    let at = sorted
+        .iter()
+        .position(|item| id(item) == before)
+        .ok_or(Error::NotFound)?;
+    let tied = key(&sorted[at]);
+    let below = sorted[..at]
+        .iter()
+        .rev()
+        .map(&key)
+        .find(|other| *other != tied);
+    Ok(between(below.flatten(), tied))
 }
 
 /// A key after `before` and before `after`; `None` is the start or the end. Equal or
@@ -169,7 +225,20 @@ fn midpoint(mut before: &[u8], mut after: Option<&[u8]>) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::between;
+    use super::{at, between};
+    use crate::{Error, Place};
+
+    #[test]
+    fn a_place_after_tied_keys_goes_after_them_and_before_the_next() {
+        // Two devices placed x and y at one spot; ties order by identity.
+        let sorted = [("x", "a0"), ("y", "a0"), ("z", "a1")];
+        let place = |place| at(&sorted, place, |item| item.0, |item| Some(item.1));
+        let after = place(Place::After("x")).unwrap();
+        assert!("a0" < after.as_str() && after.as_str() < "a1", "{after}");
+        assert!(place(Place::First).unwrap().as_str() < "a0");
+        assert!(place(Place::Last).unwrap().as_str() > "a1");
+        assert!(matches!(place(Place::After("w")), Err(Error::NotFound)));
+    }
 
     #[test]
     fn keys_fit_between_any_two_neighbors() {

@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../rust/api/database.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'anchored_menu.dart';
 import 'cell_pickers.dart';
 import 'table_cells.dart';
 
@@ -609,5 +610,72 @@ class CellSelection extends ChangeNotifier {
     editFocus.dispose();
     cellsFocus.dispose();
     super.dispose();
+  }
+}
+
+/// The picked select or date cell, which its picker hangs from (see [AnchoredMenu]); a
+/// click outside both leaves the picker. Once first laid out it hands itself to
+/// [onPlaced], which brings it into view.
+class PickedCell extends StatefulWidget {
+  const PickedCell({
+    super.key,
+    required this.cells,
+    required this.onPlaced,
+    required this.child,
+  });
+
+  final CellSelection cells;
+  final void Function(RenderObject cell) onPlaced;
+  final Widget child;
+
+  @override
+  State<PickedCell> createState() => _PickedCellState();
+}
+
+class _PickedCellState extends State<PickedCell> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (context.findRenderObject() case final cell? when mounted) {
+        widget.onPlaced(cell);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cells = widget.cells;
+    final field = cells.picked;
+    if (field == null) return widget.child;
+    final date = field.kind == BridgeFieldKind.date;
+    return AnchoredMenu(
+      height: date
+          ? DatePicker.height
+          : SelectPicker.heightFor(field.options.length),
+      onTapOutside: (_) => cells.leavePick(),
+      menu: (context) => date
+          ? DatePicker(
+              text: cells.pickText,
+              locale: cells.days,
+              onDay: cells.pickDay,
+              onEnter: cells.enterDay,
+              onClear: () => cells.pickDay(null),
+              onClose: cells.closePick,
+              onTab: cells.tabFromPick,
+              onKeys: (keys) => cells.pickKeys = keys,
+            )
+          : SelectPicker(
+              field: field,
+              text: cells.pickText,
+              onPick: cells.pick,
+              onCreate: cells.create,
+              onClose: cells.closePick,
+              onTab: cells.tabFromPick,
+              onKeys: (keys) => cells.pickKeys = keys,
+            ),
+      // Nor does a click in the cell take the keys from the picker's filter.
+      child: TextFieldTapRegion(child: widget.child),
+    );
   }
 }
