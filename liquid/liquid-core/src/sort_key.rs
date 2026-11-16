@@ -15,6 +15,12 @@ const SMALLEST: &[u8] = b"A00000000000000000000000000";
 /// longer stored key, as another device may send, counts as no key.
 pub(crate) const MAX_KEY: usize = 1_000;
 
+/// `key` if it is one the core writes, within [`MAX_KEY`]; any other, as another device or
+/// an older version may store, counts as no key and sorts first.
+pub(crate) fn usable(key: Option<&str>) -> Option<&str> {
+    key.filter(|key| key.len() <= MAX_KEY && integer(key.as_bytes()).is_some())
+}
+
 fn value(digit: u8) -> usize {
     DIGITS.iter().position(|&d| d == digit).unwrap_or(0)
 }
@@ -45,6 +51,13 @@ pub(crate) fn at<T, I: PartialEq + ?Sized>(
         }
         Place::Last => sorted.len(),
     };
+    // Nothing sorts before an item without a usable key.
+    if sorted
+        .get(index)
+        .is_some_and(|item| usable(key(item)).is_none())
+    {
+        return Err(Error::TooLong);
+    }
     let key_at = |i: usize| sorted.get(i).and_then(&key);
     between(index.checked_sub(1).and_then(key_at), key_at(index))
 }
@@ -62,6 +75,9 @@ pub(crate) fn before<T, I: PartialEq + ?Sized>(
         .position(|item| id(item) == before)
         .ok_or(Error::NotFound)?;
     let tied = key(&sorted[at]);
+    if usable(tied).is_none() {
+        return Err(Error::TooLong);
+    }
     let below = sorted[..at]
         .iter()
         .rev()
@@ -75,11 +91,9 @@ pub(crate) fn before<T, I: PartialEq + ?Sized>(
 /// key after `before`; ties order by identity. A neighbor that is no valid key counts as
 /// the start or the end, as one past [`MAX_KEY`] does; a new key past it is refused.
 fn between(before: Option<&str>, after: Option<&str>) -> Result<String, Error> {
-    let valid = |key: &&[u8]| key.len() <= MAX_KEY && integer(key).is_some();
-    let before = before.map(str::as_bytes).filter(valid);
-    let after = after
+    let before = usable(before).map(str::as_bytes);
+    let after = usable(after)
         .map(str::as_bytes)
-        .filter(valid)
         .filter(|after| before.is_none_or(|before| before < *after));
     let key = key_between(before, after);
     if key.len() > MAX_KEY {
@@ -230,7 +244,7 @@ fn midpoint(mut before: &[u8], mut after: Option<&[u8]>) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_KEY, at, between, midpoint};
+    use super::{MAX_KEY, at, before, between, midpoint};
     use crate::{Error, Place};
 
     #[test]
@@ -308,6 +322,30 @@ mod tests {
         assert_eq!(place(&longest).unwrap().len(), MAX_KEY);
         let full = format!("{longest}z");
         assert!(matches!(place(&full), Err(Error::TooLong)));
+    }
+
+    #[test]
+    fn nothing_goes_before_a_neighbor_without_a_usable_key() {
+        let over = format!("a0{}", "z".repeat(MAX_KEY));
+        for unusable in ["", "!", over.as_str()] {
+            let sorted = [("x", unusable), ("y", "a1")];
+            assert!(matches!(
+                at(&sorted, Place::First, |item| item.0, |item| Some(item.1)),
+                Err(Error::TooLong)
+            ));
+            assert!(matches!(
+                before(&sorted, "x", |item| item.0, |item| Some(item.1)),
+                Err(Error::TooLong)
+            ));
+            let after = at(
+                &sorted,
+                Place::After("x"),
+                |item| item.0,
+                |item| Some(item.1),
+            )
+            .unwrap();
+            assert!(after.as_str() < "a1", "{after}");
+        }
     }
 
     #[test]

@@ -406,8 +406,9 @@ pub enum Error {
     /// A Database holds [`crate::MAX_FIELDS`] fields, or a select field
     /// [`crate::MAX_OPTIONS`] options, already.
     TooMany,
-    /// A placement would need a sort key longer than the core writes (ADR-0251): too many
-    /// objects were placed at one spot; moving one of its neighbors frees it.
+    /// A placement needs a sort key the core cannot write (ADR-0297): one past the cap, after
+    /// too many objects were placed at one spot, or one before a neighbor with no usable key;
+    /// moving that neighbor frees the spot.
     TooLong,
     /// The system's random source failed, so no new identity could be made.
     Random,

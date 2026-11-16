@@ -189,10 +189,9 @@ impl Entry {
             .map(|(_, value)| value.as_str())
     }
 
-    /// Its sort key; one past the cap, as another device may send, is no key (ADR-0297).
+    /// Its sort key, if usable (ADR-0297).
     pub(crate) fn sort(&self) -> Option<&str> {
-        self.get(SORT)
-            .filter(|key| key.len() <= crate::sort_key::MAX_KEY)
+        crate::sort_key::usable(self.get(SORT))
     }
 }
 

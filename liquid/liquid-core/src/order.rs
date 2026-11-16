@@ -172,6 +172,11 @@ mod tests {
                 .collect()
         };
         assert_eq!(shown(&order), ["b2", "b1", "b3"]);
+        let first = order.placed[0].view.id.clone();
+        assert!(
+            matches!(order.key_before(&first), Err(crate::Error::TooLong)),
+            "nothing sorts before a View without a usable key"
+        );
         let mut added = order.placed[1].view.clone();
         added.block = crate::BlockId::stored("b4");
         order.insert("a0V".to_owned(), added);
