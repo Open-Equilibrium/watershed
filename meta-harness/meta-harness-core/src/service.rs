@@ -106,7 +106,7 @@ impl Service {
             .await
             .map_err(|e| format!("Could not listen on the loopback: {e}"))?;
         let url = format!("ws://{}", listener.local_addr().map_err(|e| e.to_string())?);
-        let token = crate::t3::fresh_id("mh");
+        let token = fresh_token();
         let connection_file = config.home.join(CONNECTION_FILE);
         write_private(
             &connection_file,
@@ -144,6 +144,13 @@ impl Service {
         let _ = std::fs::remove_file(&self.connection_file);
         self.host.shutdown().await;
     }
+}
+
+/// A bearer token of 256 random bits, new at each start.
+fn fresh_token() -> String {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).expect("the operating system provides random bytes");
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn create_private_dir(path: &Path) -> Result<(), String> {
