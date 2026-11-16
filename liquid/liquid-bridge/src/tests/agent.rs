@@ -484,6 +484,51 @@ fn a_followed_session_resumes_after_meta_harness_restarts() {
 }
 
 #[test]
+fn an_event_stream_takes_the_subscription_it_names() {
+    let fixture = Fixture::new();
+    let (service, host) = host(&fixture);
+    let session = project_at(&host, &fixture.repo())
+        .start(
+            "append first".to_owned(),
+            scripted(),
+            Some("main".to_owned()),
+            None,
+            BridgePermissions::FullAccess,
+        )
+        .expect("session starts");
+    let first = session.subscribe().expect("the first subscription");
+    session
+        .send("append second".to_owned(), false)
+        .expect("second turn");
+    follow_turns(&session, 2);
+    let second = session.subscribe().expect("the second subscription");
+    assert_ne!(first.id, second.id);
+
+    // The turn ran between the two snapshots, so only the first subscription streams its events:
+    // its first event comes after its snapshot and no later than the second's.
+    let (sender, received) = mpsc::channel();
+    session
+        .events_with(first.id, move |event| sender.send(event).is_ok())
+        .expect("the first subscription streams");
+    let event = received
+        .recv_timeout(Duration::from_secs(60))
+        .expect("the first subscription's events");
+    assert!(
+        first.snapshot.sequence < event.sequence && event.sequence <= second.snapshot.sequence,
+        "{event:?} is not between the snapshots"
+    );
+    assert!(
+        session.events_with(first.id, |_| true).is_err(),
+        "a subscription streams once"
+    );
+    assert!(
+        session.events_with(first.id + 1000, |_| true).is_err(),
+        "an unknown subscription is an error"
+    );
+    stop(service);
+}
+
+#[test]
 fn servers_automations_and_lineage_follows_resume_after_meta_harness_restarts() {
     let fixture = Fixture::new();
     let (service, bridge) = host(&fixture);

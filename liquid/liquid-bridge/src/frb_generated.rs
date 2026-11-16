@@ -1262,6 +1262,7 @@ fn wire__crate__api__session__AgentSession_events_impl(
             let api_that = <RustOpaqueMoi<
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>,
             >>::sse_decode(&mut deserializer);
+            let api_id = <i64>::sse_decode(&mut deserializer);
             let api_sink = <StreamSink<
                 crate::api::events::BridgeEvent,
                 flutter_rust_bridge::for_generated::SseCodec,
@@ -1283,8 +1284,11 @@ fn wire__crate__api__session__AgentSession_events_impl(
                         }
                     }
                     let api_that_guard = api_that_guard.unwrap();
-                    let output_ok =
-                        crate::api::session::AgentSession::events(&*api_that_guard, api_sink)?;
+                    let output_ok = crate::api::session::AgentSession::events(
+                        &*api_that_guard,
+                        api_id,
+                        api_sink,
+                    )?;
                     std::result::Result::Ok(output_ok)
                 })())
             }
@@ -5645,6 +5649,18 @@ impl SseDecode for crate::api::thread::BridgeStatistics {
     }
 }
 
+impl SseDecode for crate::api::session::BridgeSubscription {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <i64>::sse_decode(deserializer);
+        let mut var_snapshot = <crate::api::thread::BridgeSnapshot>::sse_decode(deserializer);
+        return crate::api::session::BridgeSubscription {
+            id: var_id,
+            snapshot: var_snapshot,
+        };
+    }
+}
+
 impl SseDecode for crate::api::workspace::BridgeTextStyle {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -8481,6 +8497,27 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::thread::BridgeStatistics>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::session::BridgeSubscription {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.id.into_into_dart().into_dart(),
+            self.snapshot.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::session::BridgeSubscription
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::session::BridgeSubscription>
+    for crate::api::session::BridgeSubscription
+{
+    fn into_into_dart(self) -> crate::api::session::BridgeSubscription {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeTextStyle {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
@@ -9813,6 +9850,14 @@ impl SseEncode for crate::api::thread::BridgeStatistics {
         <Vec<crate::api::thread::BridgeTurnStatistics>>::sse_encode(self.turns, serializer);
         <Option<i64>>::sse_encode(self.started_ms, serializer);
         <Option<i64>>::sse_encode(self.ended_ms, serializer);
+    }
+}
+
+impl SseEncode for crate::api::session::BridgeSubscription {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i64>::sse_encode(self.id, serializer);
+        <crate::api::thread::BridgeSnapshot>::sse_encode(self.snapshot, serializer);
     }
 }
 

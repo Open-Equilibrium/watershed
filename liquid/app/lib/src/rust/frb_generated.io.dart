@@ -433,6 +433,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeStatistics dco_decode_bridge_statistics(dynamic raw);
 
   @protected
+  BridgeSubscription dco_decode_bridge_subscription(dynamic raw);
+
+  @protected
   BridgeTextStyle dco_decode_bridge_text_style(dynamic raw);
 
   @protected
@@ -1083,6 +1086,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeStatistics sse_decode_bridge_statistics(SseDeserializer deserializer);
+
+  @protected
+  BridgeSubscription sse_decode_bridge_subscription(
+    SseDeserializer deserializer,
+  );
 
   @protected
   BridgeTextStyle sse_decode_bridge_text_style(SseDeserializer deserializer);
@@ -1946,6 +1954,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_statistics(
     BridgeStatistics self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_subscription(
+    BridgeSubscription self,
     SseSerializer serializer,
   );
 

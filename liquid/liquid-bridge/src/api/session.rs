@@ -2,7 +2,9 @@
 //! thread (ADR-0280, ADR-0297). Calls run on flutter_rust_bridge's worker threads, never on the
 //! Dart main isolate, and events stream to Dart as they arrive (ADR-0182).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -324,13 +326,24 @@ async fn resubscribe(
         .flatten()
 }
 
+/// A session as one subscription begins: its snapshot, and the id [`AgentSession::events`] streams
+/// the events after it by.
+pub struct BridgeSubscription {
+    /// The id.
+    pub id: i64,
+    /// The session now.
+    pub snapshot: BridgeSnapshot,
+}
+
 /// One followed session.
 #[flutter_rust_bridge::frb(opaque)]
 pub struct AgentSession {
     thread: Thread,
     root: String,
-    /// The events after the latest [`AgentSession::subscribe`] snapshot, until streamed.
-    receiver: Mutex<Option<tokio::sync::mpsc::Receiver<meta_harness_core::ThreadEvent>>>,
+    /// The events of each subscription, until [`AgentSession::events`] takes them by its id.
+    subscriptions: Mutex<HashMap<i64, tokio::sync::mpsc::Receiver<ThreadEvent>>>,
+    /// The id the latest subscription got.
+    last_subscription: AtomicI64,
     /// How many of the stream's events Liquid applied, which reopens the window (ADR-0272).
     credit: Arc<stream::Credit>,
     /// Dropped with the session, which ends the card's follows (see [`until_ended`]).
@@ -362,7 +375,8 @@ impl AgentSession {
         Self {
             thread,
             root,
-            receiver: Mutex::new(None),
+            subscriptions: Mutex::default(),
+            last_subscription: AtomicI64::default(),
             credit: Arc::default(),
             ended: tokio::sync::watch::channel(()).0,
             servers: Mutex::default(),
@@ -390,15 +404,40 @@ impl AgentSession {
 
     /// The session now; [`AgentSession::events`] then streams the events after it, with no gap.
     /// Liquid shows the snapshot and applies each event whose sequence is past it (ADR-0290).
-    pub fn subscribe(&self) -> Result<BridgeSnapshot, String> {
+    pub fn subscribe(&self) -> Result<BridgeSubscription, String> {
         let (snapshot, events) = run(self.thread.subscribe())?;
-        *self.receiver.lock().unwrap_or_else(PoisonError::into_inner) = Some(pump(events));
-        Ok(convert::snapshot(snapshot))
+        let id = self.last_subscription.fetch_add(1, Ordering::Relaxed) + 1;
+        self.subscriptions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(id, pump(events));
+        Ok(BridgeSubscription {
+            id,
+            snapshot: convert::snapshot(snapshot),
+        })
     }
 
-    /// Streams the events after the latest [`AgentSession::subscribe`].
-    pub fn events(&self, sink: StreamSink<BridgeEvent>) -> Result<(), String> {
-        self.stream(move |event| sink.add(event).is_ok())
+    /// Streams the events after subscription `id`, from [`AgentSession::subscribe`]. A subscription
+    /// streams once; an unknown or streamed one is an error.
+    pub fn events(&self, id: i64, sink: StreamSink<BridgeEvent>) -> Result<(), String> {
+        self.events_with(id, move |event| sink.add(event).is_ok())
+    }
+
+    /// As [`AgentSession::events`], to a Rust consumer.
+    #[flutter_rust_bridge::frb(ignore)]
+    pub fn events_with(
+        &self,
+        id: i64,
+        deliver: impl FnMut(BridgeEvent) -> bool + Send + 'static,
+    ) -> Result<(), String> {
+        let receiver = self
+            .subscriptions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&id)
+            .ok_or_else(|| "This subscription is not open.".to_owned())?;
+        self.spawn_stream(receiver, deliver);
+        Ok(())
     }
 
     /// Subscribes and streams to a Rust consumer; returns the snapshot.
@@ -411,20 +450,6 @@ impl AgentSession {
         let (snapshot, events) = run(self.thread.subscribe())?;
         self.spawn_stream(pump(events), deliver);
         Ok(convert::snapshot(snapshot))
-    }
-
-    fn stream(
-        &self,
-        deliver: impl FnMut(BridgeEvent) -> bool + Send + 'static,
-    ) -> Result<(), String> {
-        let receiver = self
-            .receiver
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-            .ok_or_else(|| "Subscribe before streaming the session's events.".to_owned())?;
-        self.spawn_stream(receiver, deliver);
-        Ok(())
     }
 
     /// Forwards `receiver`'s events to `deliver`, resubscribing when the subscription is lost.

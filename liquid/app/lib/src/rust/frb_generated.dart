@@ -197,6 +197,7 @@ abstract class RustLibApi extends BaseApi {
 
   Stream<BridgeEvent> crateApiSessionAgentSessionEvents({
     required AgentSession that,
+    required PlatformInt64 id,
   });
 
   Future<String> crateApiSessionAgentSessionExportRecord({
@@ -315,7 +316,7 @@ abstract class RustLibApi extends BaseApi {
     required String id,
   });
 
-  Future<BridgeSnapshot> crateApiSessionAgentSessionSubscribe({
+  Future<BridgeSubscription> crateApiSessionAgentSessionSubscribe({
     required AgentSession that,
   });
 
@@ -1390,6 +1391,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @override
   Stream<BridgeEvent> crateApiSessionAgentSessionEvents({
     required AgentSession that,
+    required PlatformInt64 id,
   }) {
     final sink = RustStreamSink<BridgeEvent>();
     unawaited(
@@ -1401,6 +1403,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
               that,
               serializer,
             );
+            sse_encode_i_64(id, serializer);
             sse_encode_StreamSink_bridge_event_Sse(sink, serializer);
             pdeCallFfi(
               generalizedFrbRustBinding,
@@ -1414,7 +1417,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             decodeErrorData: sse_decode_String,
           ),
           constMeta: kCrateApiSessionAgentSessionEventsConstMeta,
-          argValues: [that, sink],
+          argValues: [that, id, sink],
           apiImpl: this,
         ),
       ),
@@ -1425,7 +1428,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiSessionAgentSessionEventsConstMeta =>
       const TaskConstMeta(
         debugName: "AgentSession_events",
-        argNames: ["that", "sink"],
+        argNames: ["that", "id", "sink"],
       );
 
   @override
@@ -2367,7 +2370,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<BridgeSnapshot> crateApiSessionAgentSessionSubscribe({
+  Future<BridgeSubscription> crateApiSessionAgentSessionSubscribe({
     required AgentSession that,
   }) {
     return handler.executeNormal(
@@ -2386,7 +2389,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_bridge_snapshot,
+          decodeSuccessData: sse_decode_bridge_subscription,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateApiSessionAgentSessionSubscribeConstMeta,
@@ -4754,6 +4757,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeSubscription dco_decode_bridge_subscription(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return BridgeSubscription(
+      id: dco_decode_i_64(arr[0]),
+      snapshot: dco_decode_bridge_snapshot(arr[1]),
+    );
+  }
+
+  @protected
   BridgeTextStyle dco_decode_bridge_text_style(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return BridgeTextStyle.values[raw as int];
@@ -6594,6 +6609,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       startedMs: var_startedMs,
       endedMs: var_endedMs,
     );
+  }
+
+  @protected
+  BridgeSubscription sse_decode_bridge_subscription(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_i_64(deserializer);
+    var var_snapshot = sse_decode_bridge_snapshot(deserializer);
+    return BridgeSubscription(id: var_id, snapshot: var_snapshot);
   }
 
   @protected
@@ -8643,6 +8668,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bridge_subscription(
+    BridgeSubscription self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self.id, serializer);
+    sse_encode_bridge_snapshot(self.snapshot, serializer);
+  }
+
+  @protected
   void sse_encode_bridge_text_style(
     BridgeTextStyle self,
     SseSerializer serializer,
@@ -9580,9 +9615,12 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
     text: text,
   );
 
-  /// Streams the events after the latest [`AgentSession::subscribe`].
-  Stream<BridgeEvent> events() =>
-      RustLib.instance.api.crateApiSessionAgentSessionEvents(that: this);
+  /// Streams the events after subscription `id`, from [`AgentSession::subscribe`]. A subscription
+  /// streams once; an unknown or streamed one is an error.
+  Stream<BridgeEvent> events({required PlatformInt64 id}) => RustLib
+      .instance
+      .api
+      .crateApiSessionAgentSessionEvents(that: this, id: id);
 
   /// Writes the session's record into a new folder in Downloads (ADR-0257); returns it.
   Future<String> exportRecord({required String host, required String day}) =>
@@ -9730,7 +9768,7 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
 
   /// The session now; [`AgentSession::events`] then streams the events after it, with no gap.
   /// Liquid shows the snapshot and applies each event whose sequence is past it (ADR-0290).
-  Future<BridgeSnapshot> subscribe() =>
+  Future<BridgeSubscription> subscribe() =>
       RustLib.instance.api.crateApiSessionAgentSessionSubscribe(that: this);
 
   /// Its title.
