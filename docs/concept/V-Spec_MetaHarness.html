@@ -156,10 +156,16 @@ meta metrics ...</code></pre>
 
     <section id="surfaces" class="section"><h2>6. Public surfaces</h2><div class="body">
       <div class="grid">
-        <div class="card"><h3>CLI surface</h3><pre><code>meta serve | status | uninstall
-meta config show | propose FILE [SUMMARY] | revert N
-            | pending | approve N | reject N | log
-meta service install | uninstall</code></pre>
+        <div class="card"><h3>CLI surface</h3><pre><code>meta serve | status
+meta config show | log
+meta config pending
+meta config propose FILE
+meta config approve N
+meta config reject N
+meta config revert N
+meta service install
+meta service uninstall
+meta uninstall</code></pre>
           <p class="muted">Implemented (ADR-0296); <code>meta help</code> describes each command and data commands print JSON. Target, not yet built: <code>meta sessions</code>, <code>attach</code>, <code>run</code>, <code>schedule</code>, <code>metrics</code>.</p></div>
         <div class="card"><h3>API / protocol surface</h3><ul>
           <li>session registry;</li>
@@ -233,7 +239,7 @@ meta service install | uninstall</code></pre>
 
     <section id="config" class="section"><h2>8. Central config</h2><div class="body">
       <p>Unlike T3 Code, Meta-Harness keeps harness configurations centrally (ADR-0225, ADR-0227, ADR-0298). Implemented for Claude Code and Codex: a revision holds three kinds of configuration blocks, each named with letters, digits, <code>-</code> and <code>_</code>, and Meta-Harness writes the current one into a home per harness it owns, which T3 starts each harness with (<code>CLAUDE_CONFIG_DIR</code>, <code>CODEX_HOME</code>, through T3's provider settings).</p>
-      <table>
+      <table style="width:100%;table-layout:fixed;overflow-wrap:anywhere">
         <tr><th>Block</th><th>Claude Code home</th><th>Codex home</th></tr>
         <tr><td>Instructions, joined in name order</td><td><code>CLAUDE.md</code></td><td><code>AGENTS.md</code></td></tr>
         <tr><td>Skills: a folder of text files with a <code>SKILL.md</code></td><td><code>skills/&lt;name&gt;/</code></td><td><code>skills/&lt;name&gt;/</code></td></tr>
