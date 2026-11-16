@@ -39,6 +39,10 @@ class Caret {
 /// An open Page's Views in order, read in windows as the Page scrolls to them, and reread
 /// after each change. It also keeps what the Page's Text Blocks share: their styles, for
 /// numbering, and where the caret goes next.
+/// How many windows of a Page's Views stay read: a long Page holds and rereads only those
+/// last used, not all it was scrolled through (client architecture rules 3 and 5).
+const keptViewWindows = 10;
+
 class PageViews extends ChangeNotifier {
   PageViews(this.state, this.page) {
     _views.addListener(notifyListeners);
@@ -47,12 +51,16 @@ class PageViews extends ChangeNotifier {
   final WorkspaceState state;
   final String page;
 
-  late final _views = WindowedList<BridgeView>((start, limit) async {
-    final answer = await state.read(
-      query(BridgeQueryKind.views, page: page, start: start, limit: limit),
-    );
-    return (answer.count, answer.views);
-  }, _report);
+  late final _views = WindowedList<BridgeView>(
+    (start, limit) async {
+      final answer = await state.read(
+        query(BridgeQueryKind.views, page: page, start: start, limit: limit),
+      );
+      return (answer.count, answer.views);
+    },
+    _report,
+    kept: keptViewWindows,
+  );
 
   /// How many Views the Page shows; null until first read.
   int? get count => _views.count;
@@ -90,6 +98,9 @@ class PageViews extends ChangeNotifier {
       BridgeResource(kind: BridgeResourceKind.views, page: page),
     ).listen((_) => unawaited(_views.reread()), onError: _report);
   }
+
+  /// The View at `index` if its window is kept, without reading it.
+  BridgeView? peek(int index) => _views.peek(index);
 
   /// The View at `index`, or null outside the Page or while its window is read.
   BridgeView? at(int index) => _views.at(index);

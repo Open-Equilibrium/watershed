@@ -53,6 +53,15 @@ class WindowedList<T> extends ChangeNotifier {
     return at < items.length ? items[at] : null;
   }
 
+  /// The item at `index` if its window is kept, without reading it or counting it as used,
+  /// for walks that must not push the shown windows out.
+  T? peek(int index) {
+    if (index < 0) return null;
+    final items = _chunks[index ~/ _chunk];
+    final at = index % _chunk;
+    return items != null && at < items.length ? items[at] : null;
+  }
+
   /// The position of the first read item that passes `test`, or null.
   int? indexWhere(bool Function(T item) test) {
     for (final MapEntry(key: chunk, value: items) in _chunks.entries) {

@@ -835,7 +835,8 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (widget.view.boundary) return 1;
     var number = 1;
     for (var index = widget.index - 1; index >= 0; index--) {
-      final above = widget.views.at(index);
+      // Read as far as readRun reached, without pushing the shown windows out.
+      final above = widget.views.peek(index);
       if (above == null || styles[above.block] != BridgeTextStyle.numbered) {
         break;
       }
