@@ -1,6 +1,6 @@
 //! T3 Code's client protocol, Effect RPC JSON frames over one WebSocket on `/ws`. T3 closes a
 //! socket when its session expires, so the client reconnects with a fresh token and sends its open
-//! streams again (ADR-0292).
+//! subscriptions again; calls and actions are never sent twice (ADR-0292).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
