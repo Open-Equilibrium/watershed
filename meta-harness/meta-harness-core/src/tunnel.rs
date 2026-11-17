@@ -14,7 +14,7 @@ use hyper::body::{Body, Bytes, Incoming};
 use hyper::client::conn::http1 as client;
 use hyper::server::conn::http1 as server;
 use hyper::service::service_fn;
-use hyper::{Request, Response, StatusCode};
+use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, duplex, split};
@@ -24,7 +24,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::api;
 use crate::hosts::Access;
-use crate::util::{IDLE, PING, TIMEOUT};
+use crate::util::{IDLE, TIMEOUT};
 
 /// The bytes a tunnel message carries at most.
 const CHUNK: usize = 16 * 1024;
@@ -32,15 +32,19 @@ const CHUNK: usize = 16 * 1024;
 /// The bytes that the HTTP server of a tunnel may hold between its WebSocket and its parser.
 const BUFFER: usize = 64 * 1024;
 
-/// The paths a link uses, exactly (ADR-0301): the descriptor, the MCP sign-in a link makes, and the
-/// MCP endpoint that linked agents call. T3 registers no other path under `/mcp`.
-const LINK_PATHS: [&str; 5] = [
-    "/.well-known/t3/environment",
-    "/oauth/mcp/register",
-    DECISION_PATH,
-    "/oauth/mcp/token",
-    "/mcp",
-];
+/// Whether a link uses `method` on `path`, exactly (ADR-0301): the descriptor, the MCP sign-in a
+/// link makes, and the MCP endpoint that linked agents call, each with the methods T3 serves it
+/// with. T3 registers no other path under `/mcp`.
+fn passes(method: &Method, path: &str) -> bool {
+    match path {
+        "/.well-known/t3/environment" => *method == Method::GET,
+        "/oauth/mcp/register" | DECISION_PATH | "/oauth/mcp/token" => *method == Method::POST,
+        // The MCP transport answers POST with requests, GET with its stream and DELETE with the end
+        // of a session.
+        "/mcp" => matches!(*method, Method::GET | Method::POST | Method::DELETE),
+        _ => false,
+    }
+}
 
 /// The path of the decision that approves a link's sign-in, whose level the tunnel checks.
 const DECISION_PATH: &str = "/oauth/mcp/decision";
@@ -62,7 +66,7 @@ where
     let (mut sink, mut frames) = socket.split();
     let up = async {
         let mut buffer = vec![0u8; CHUNK];
-        let mut ping = tokio::time::interval(PING);
+        let mut ping = crate::util::pings();
         loop {
             tokio::select! {
                 read = reader.read(&mut buffer) => match read {
@@ -130,7 +134,7 @@ async fn forward(
     level: Access,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Infallible> {
     let path = request.uri().path();
-    if !LINK_PATHS.contains(&path) {
+    if !passes(request.method(), path) {
         return Ok(answer(StatusCode::FORBIDDEN));
     }
     let request = if path == DECISION_PATH {

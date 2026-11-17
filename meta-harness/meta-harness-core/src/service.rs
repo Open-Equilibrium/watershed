@@ -28,7 +28,7 @@ use crate::api::{
 use crate::config::{Homes, Proposed, Store, now_ms, provider_instances};
 use crate::hosts::{self, Links};
 
-use crate::util::{IDLE, PING};
+use crate::util::IDLE;
 use crate::{AcpAgent, Host, HostConfig, Project, Thread, tunnel};
 use admit::{Admission, Caller, Listener, admit, header, revoked};
 
@@ -402,7 +402,7 @@ async fn serve(
         threads: Mutex::default(),
     });
     let mut streams: HashMap<u64, AbortHandle> = HashMap::new();
-    let mut ping = tokio::time::interval(PING);
+    let mut ping = crate::util::pings();
     let mut heard = tokio::time::Instant::now();
     loop {
         // The ping is sent after the select, so no guard it holds lives across that await.

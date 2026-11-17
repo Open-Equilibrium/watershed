@@ -16,6 +16,12 @@ pub(crate) const TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const PING: Duration = Duration::from_secs(30);
 pub(crate) const IDLE: Duration = Duration::from_secs(90);
 
+/// The timer of a connection's pings: the first comes a [`PING`] after the connection starts. A ping
+/// at the start races the teardown of short tunnel connections, which then lost their answers.
+pub(crate) fn pings() -> tokio::time::Interval {
+    tokio::time::interval_at(tokio::time::Instant::now() + PING, PING)
+}
+
 /// `bytes` in lower-case hex.
 pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()

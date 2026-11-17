@@ -1597,6 +1597,10 @@ async fn the_tunnel_passes_only_the_paths_a_link_uses() {
         ("GET", "/api/projects"),
         ("GET", "/api/orchestration/shell"),
         ("GET", "/ws"),
+        // The paths a link uses, by other methods than T3 serves them with.
+        ("POST", "/.well-known/t3/environment"),
+        ("GET", "/oauth/mcp/token"),
+        ("PUT", "/mcp"),
         ("GET", "/"),
     ] {
         let answer = http(&addr, method, path, &[], "");
