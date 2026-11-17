@@ -412,8 +412,9 @@ impl Host {
         .await
     }
 
-    /// Unlinks the host named `name` (`meta host remove`).
-    pub async fn host_remove(&self, name: &str) -> Result<(), String> {
+    /// Unlinks the host named `name` (`meta host remove`) and answers the name this host paired
+    /// under at that host, which its `meta host revoke` names.
+    pub async fn host_remove(&self, name: &str) -> Result<String, String> {
         self.call(Call::Hosts(HostsCall::Remove(name.to_owned())))
             .await
     }

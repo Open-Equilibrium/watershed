@@ -75,8 +75,10 @@ pub async fn host(host: &remote::Host, args: &[&str]) -> Result<(), String> {
             Ok(())
         }
         ["remove", name] => {
-            host.host_remove(name).await?;
-            println!("Removed {name}.");
+            let client = host.host_remove(name).await?;
+            println!(
+                "Removed {name}. Its T3 session stays until \"meta host revoke {client}\" runs on {name}."
+            );
             Ok(())
         }
         ["revoke", name] => {

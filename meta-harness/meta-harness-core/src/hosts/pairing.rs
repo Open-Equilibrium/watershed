@@ -1,7 +1,7 @@
 //! Pairing codes and the clients they pair (ADR-0299): a code is single use and expires, and a
 //! client's token admits only the kind of client that paired with it.
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use super::{Access, ClientKind, digest, new_token, same};
@@ -171,6 +171,17 @@ pub(crate) fn client(
         }
     }
     Ok(found)
+}
+
+/// The kind of the client named `name`, if one is paired under that name.
+pub(crate) fn named_kind(db: &Connection, name: &str) -> Result<Option<ClientKind>, String> {
+    let kind: Option<String> = db
+        .query_row("SELECT kind FROM client WHERE name = ?1", [name], |row| {
+            row.get(0)
+        })
+        .optional()
+        .map_err(failed)?;
+    Ok(kind.and_then(|kind| ClientKind::parse(&kind)))
 }
 
 /// Revokes the client named `name`: its token is refused from its next connection on.

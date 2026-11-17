@@ -12,6 +12,8 @@ use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Empty, Full, Limited};
 use hyper::body::{Body, Bytes, Incoming};
 use hyper::client::conn::http1 as client;
+use hyper::header::{CONTENT_LENGTH, HeaderValue, TRANSFER_ENCODING};
+use hyper::http::request::Parts;
 use hyper::server::conn::http1 as server;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
@@ -38,7 +40,7 @@ const BUFFER: usize = 64 * 1024;
 fn passes(method: &Method, path: &str) -> bool {
     match path {
         "/.well-known/t3/environment" => *method == Method::GET,
-        "/oauth/mcp/register" | DECISION_PATH | "/oauth/mcp/token" => *method == Method::POST,
+        REGISTER_PATH | DECISION_PATH | "/oauth/mcp/token" => *method == Method::POST,
         // The MCP transport answers POST with requests, GET with its stream and DELETE with the end
         // of a session.
         "/mcp" => matches!(*method, Method::GET | Method::POST | Method::DELETE),
@@ -46,11 +48,14 @@ fn passes(method: &Method, path: &str) -> bool {
     }
 }
 
+/// The path that registers a link's client, whose name the tunnel sets to its host's (ADR-0300).
+const REGISTER_PATH: &str = "/oauth/mcp/register";
+
 /// The path of the decision that approves a link's sign-in, whose level the tunnel checks.
 const DECISION_PATH: &str = "/oauth/mcp/decision";
 
-/// The bytes of a decision that the tunnel reads at most, which no decision needs more of.
-const DECISION: usize = 64 * 1024;
+/// The bytes of a link's request body that the tunnel reads at most, which no request needs more of.
+const BODY: usize = 64 * 1024;
 
 /// An error that a body or its reader reports.
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -111,14 +116,15 @@ where
 
 /// Serves HTTP on the WebSocket `socket` of a host's tunnel, for T3 at `t3`, until the client
 /// closes it: the requests for a link's paths reach T3, and the others get 403 (see the module).
-pub(crate) async fn serve<S>(socket: WebSocketStream<S>, t3: String, level: Access)
+/// `owner` is the host's name for the link and `level` the access it was invited at.
+pub(crate) async fn serve<S>(socket: WebSocketStream<S>, t3: String, owner: String, level: Access)
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let (ours, theirs) = duplex(BUFFER);
     let http = server::Builder::new().serve_connection(
         TokioIo::new(theirs),
-        service_fn(move |request| forward(request, t3.clone(), level)),
+        service_fn(move |request| forward(request, t3.clone(), owner.clone(), level)),
     );
     // The relay ends by itself once the HTTP connection has dropped its side and every answer byte
     // is sent, so an answer that ends the connection is not cut short. The connection ends when
@@ -127,23 +133,26 @@ where
 }
 
 /// Answers `request`: a path a link uses goes to T3 at `t3`, and any other is refused. A link's
-/// decision goes on only when it asks for no more than `level`, the level its host was invited at.
+/// registration takes the name of its host, and its decision goes on only when it asks for no
+/// more than `level`.
 async fn forward(
     request: Request<Incoming>,
     t3: String,
+    owner: String,
     level: Access,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Infallible> {
     let path = request.uri().path();
     if !passes(request.method(), path) {
         return Ok(answer(StatusCode::FORBIDDEN));
     }
-    let request = if path == DECISION_PATH {
-        match checked(request, level).await {
-            Ok(request) => request,
-            Err(status) => return Ok(answer(status)),
-        }
-    } else {
-        request.map(|body| body.boxed())
+    let request = match path {
+        REGISTER_PATH => named(request, &owner).await,
+        DECISION_PATH => checked(request, level).await,
+        _ => Ok(request.map(|body| body.boxed())),
+    };
+    let request = match request {
+        Ok(request) => request,
+        Err(status) => return Ok(answer(status)),
     };
     Ok(match send(request, &t3).await {
         Some(response) => response.map(|body| body.boxed()),
@@ -151,9 +160,32 @@ async fn forward(
     })
 }
 
+/// Reads a link's request body whole. A body over [`BODY`] bytes is too large.
+async fn read<B>(body: B) -> Result<Bytes, StatusCode>
+where
+    B: Body<Data = Bytes> + Send + 'static,
+    B::Error: Into<BoxError>,
+{
+    let collected = Limited::new(body, BODY)
+        .collect()
+        .await
+        .map_err(|_| StatusCode::PAYLOAD_TOO_LARGE)?;
+    Ok(collected.to_bytes())
+}
+
+/// `parts` with `bytes` as its body, whose length its headers then state.
+fn resend(mut parts: Parts, bytes: Bytes) -> Request<BoxBody<Bytes, hyper::Error>> {
+    parts.headers.remove(TRANSFER_ENCODING);
+    parts
+        .headers
+        .insert(CONTENT_LENGTH, HeaderValue::from(bytes.len()));
+    let body = Full::new(bytes).map_err(|never| match never {}).boxed();
+    Request::from_parts(parts, body)
+}
+
 /// Reads the body of a decision and passes `request` on with it, when the decision asks for no
-/// more than `level`. A body over [`DECISION`] bytes is too large; one that is no JSON, or asks for
-/// an access that names no level, is refused, since the tunnel cannot tell what it would grant.
+/// more than `level`. A body that is no JSON, or asks for an access that names no level, is
+/// refused, since the tunnel cannot tell what it would grant.
 pub(crate) async fn checked<B>(
     request: Request<B>,
     level: Access,
@@ -163,11 +195,7 @@ where
     B::Error: Into<BoxError>,
 {
     let (parts, body) = request.into_parts();
-    let bytes = Limited::new(body, DECISION)
-        .collect()
-        .await
-        .map_err(|_| StatusCode::PAYLOAD_TOO_LARGE)?
-        .to_bytes();
+    let bytes = read(body).await?;
     let decision: Value = serde_json::from_slice(&bytes).map_err(|_| StatusCode::FORBIDDEN)?;
     match &decision["decision"]["access"] {
         // A decision that names no level, such as a refusal, grants nothing.
@@ -175,8 +203,28 @@ where
         Value::String(asked) if Access::parse(asked).is_some_and(|asked| asked <= level) => {}
         _ => return Err(StatusCode::FORBIDDEN),
     }
-    let body = Full::new(bytes).map_err(|never| match never {}).boxed();
-    Ok(Request::from_parts(parts, body))
+    Ok(resend(parts, bytes))
+}
+
+/// Passes `request` on with its client named `owner`, the pairing name of the host it came from.
+/// T3 names the session that the sign-in makes after the client, so `meta host revoke` finds that
+/// session by its name (ADR-0300). A body that is no JSON object is refused.
+pub(crate) async fn named<B>(
+    request: Request<B>,
+    owner: &str,
+) -> Result<Request<BoxBody<Bytes, hyper::Error>>, StatusCode>
+where
+    B: Body<Data = Bytes> + Send + 'static,
+    B::Error: Into<BoxError>,
+{
+    let (parts, body) = request.into_parts();
+    let bytes = read(body).await?;
+    let mut registration: Value =
+        serde_json::from_slice(&bytes).map_err(|_| StatusCode::FORBIDDEN)?;
+    let fields = registration.as_object_mut().ok_or(StatusCode::FORBIDDEN)?;
+    fields.insert("client_name".to_owned(), Value::String(owner.to_owned()));
+    let bytes = serde_json::to_vec(&registration).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(resend(parts, Bytes::from(bytes)))
 }
 
 /// Sends `request` to T3 at `t3` unchanged, over a connection that lasts as long as the body of

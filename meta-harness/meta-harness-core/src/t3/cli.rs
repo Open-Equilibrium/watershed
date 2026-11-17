@@ -134,6 +134,63 @@ pub(crate) async fn link(
     .map(|_| ())
 }
 
+/// The subject of the sessions that a link's sign-in makes (T3's MCP client sessions).
+const MCP_CLIENT_SUBJECT: &str = "mcp-client";
+
+/// An active T3 session, as `auth session list --json` lists it. Its bearer token is never listed.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Session {
+    /// The id that revoking the session names.
+    pub(crate) session_id: String,
+    /// What the session was issued for: a link's sign-in is `mcp-client`.
+    pub(crate) subject: String,
+    /// The client the session was issued to.
+    pub(crate) client: SessionClient,
+}
+
+/// The client of a session. A link's sign-in carries the name its host paired under as its label.
+#[derive(serde::Deserialize)]
+pub(crate) struct SessionClient {
+    /// The name the client was issued under, if it has one.
+    pub(crate) label: Option<String>,
+}
+
+impl Session {
+    /// Whether this session is a link's sign-in made under the name `client` (ADR-0300).
+    pub(crate) fn is_link_of(&self, client: &str) -> bool {
+        self.subject == MCP_CLIENT_SUBJECT && self.client.label.as_deref() == Some(client)
+    }
+}
+
+/// The active sessions in T3's data folder `home`.
+pub(crate) async fn sessions(binary: &Path, home: &Path) -> Result<Vec<Session>, String> {
+    let text = run(
+        binary,
+        home,
+        "list the sessions",
+        &["auth", "session", "list", "--json"],
+    )
+    .await?;
+    serde_json::from_str(&text).map_err(|e| format!("T3 listed its sessions unexpectedly: {e}"))
+}
+
+/// Revokes the session `session_id` in T3's data folder `home`, whose token T3 then refuses.
+pub(crate) async fn revoke_session(
+    binary: &Path,
+    home: &Path,
+    session_id: &str,
+) -> Result<(), String> {
+    run(
+        binary,
+        home,
+        "revoke a session",
+        &["auth", "session", "revoke", session_id],
+    )
+    .await
+    .map(|_| ())
+}
+
 /// Forgets the linked environment `environment_id` in T3's data folder `home`.
 pub(crate) async fn unlink(binary: &Path, home: &Path, environment_id: &str) -> Result<(), String> {
     run(

@@ -16,7 +16,7 @@ use crate::util::hex;
 pub(crate) use links::Links;
 pub use links::{HostList, LinkedHostInfo};
 pub use pairing::ClientInfo;
-pub(crate) use pairing::{client, invite, pair, printable, revoke};
+pub(crate) use pairing::{client, invite, named_kind, pair, printable, revoke};
 
 /// The port the remote listener takes unless `meta remote on --port` names another (ADR-0299).
 pub const DEFAULT_REMOTE_PORT: u16 = 3774;
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS client (
     created_ms INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS peer (
     name TEXT PRIMARY KEY, address TEXT NOT NULL, token TEXT NOT NULL, access TEXT NOT NULL,
-    tunnel_port INTEGER NOT NULL, linked_ms INTEGER);
+    tunnel_port INTEGER NOT NULL, linked_ms INTEGER, client TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS setting (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 ";
 

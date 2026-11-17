@@ -1237,7 +1237,9 @@ async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_re
     assert_eq!(b.hosts().await.unwrap().clients.len(), clients);
 
     let (tunnel, _) = peer_row(&home_a, &name);
-    a.host_remove(&name).await.unwrap();
+    // The name that B revokes this pairing by, which B still holds (ADR-0301).
+    let client = a.host_remove(&name).await.unwrap();
+    assert!(host_client_names(&b).await.contains(&client), "{client}");
     assert!(t3_environments(&home_a).is_empty(), "T3 forgets the link");
     assert!(a.hosts().await.unwrap().hosts.is_empty());
     assert!(std::net::TcpStream::connect(("127.0.0.1", tunnel)).is_err());
@@ -1516,11 +1518,24 @@ const JSON: &[(&str, &str)] = &[("Content-Type", "application/json")];
 /// Sends one HTTP/1.1 request with `headers` and `body` to `addr` and answers everything sent
 /// back, the connection closing after the answer.
 fn http(addr: &str, method: &str, path: &str, headers: &[(&str, &str)], body: &str) -> String {
-    let mut stream = std::net::TcpStream::connect(addr).unwrap();
+    http_at(addr, addr, method, path, headers, body)
+}
+
+/// As [`http`], sent to `connect` with the Host header `host`: a tunnel passes the header on, and
+/// T3 binds a token to the host it was issued for.
+fn http_at(
+    connect: &str,
+    host: &str,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &str,
+) -> String {
+    let mut stream = std::net::TcpStream::connect(connect).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(30)))
         .unwrap();
-    let mut request = format!("{method} {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n");
+    let mut request = format!("{method} {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n");
     for (name, value) in headers {
         request.push_str(&format!("{name}: {value}\r\n"));
     }
@@ -1724,30 +1739,14 @@ async fn revoking_a_client_closes_the_connections_it_has_open() {
     assert!(ended.is_ok(), "the tunnel's connection ended");
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_linked_agents_mcp_request_reaches_t3_through_the_tunnel() {
+/// Signs an MCP client in through the tunnel at `addr` with a pairing code of its receiving host,
+/// and answers the bearer token that its requests carry: the sign-in a link makes (ADR-0301).
+fn sign_in(addr: &str, pairing: &str) -> String {
     use sha2::{Digest, Sha256};
-    let (dir, _repo, _home) = fixture();
-    let link = linked(dir.path()).await;
-    let (_b, b) = &link.b;
-    let port = peer_row(&dir.path().join("a"), &link.name).0;
-    let addr = format!("127.0.0.1:{port}");
     let resource = format!("http://{addr}/mcp");
     let redirect = "http://127.0.0.1/t3code-peer-link";
-    // The sign-in a link makes, run over the tunnel: register, approve with a pairing code, then
-    // exchange the code for a token that the linked agents' MCP requests carry.
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let host_token = remote::pair(&link.url_b, &code, "tester")
-        .await
-        .unwrap()
-        .token;
-    let host = remote::Host::connect_to(&link.url_b, &host_token, "tester")
-        .await
-        .unwrap();
-    let pairing = host.t3_pairing().await.unwrap();
-
     let registered = post(
-        &addr,
+        addr,
         "/oauth/mcp/register",
         JSON,
         &serde_json::json!({"client_name": "tester", "redirect_uris": [redirect]}).to_string(),
@@ -1756,7 +1755,7 @@ async fn a_linked_agents_mcp_request_reaches_t3_through_the_tunnel() {
     let verifier = "a".repeat(64);
     let challenge = base64url(&Sha256::digest(verifier.as_bytes()));
     let decided = post(
-        &addr,
+        addr,
         "/oauth/mcp/decision",
         JSON,
         &serde_json::json!({
@@ -1781,9 +1780,12 @@ async fn a_linked_agents_mcp_request_reaches_t3_through_the_tunnel() {
         form_value(&client_id),
         form_value(&resource),
     );
-    let token = post(&addr, "/oauth/mcp/token", FORM, &form);
-    let bearer = format!("Bearer {}", token["access_token"].as_str().unwrap());
+    let token = post(addr, "/oauth/mcp/token", FORM, &form);
+    format!("Bearer {}", token["access_token"].as_str().unwrap())
+}
 
+/// The answer to an MCP initialize request that `bearer` makes to `connect` with the Host `host`.
+fn mcp_answer(connect: &str, host: &str, bearer: &str) -> String {
     let initialize = serde_json::json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -1794,17 +1796,112 @@ async fn a_linked_agents_mcp_request_reaches_t3_through_the_tunnel() {
             "clientInfo": {"name": "tester", "version": "0"},
         },
     });
-    let answer = http(
-        &addr,
+    http_at(
+        connect,
+        host,
         "POST",
         "/mcp",
         &[
-            ("Authorization", &bearer),
+            ("Authorization", bearer),
             ("Accept", "application/json, text/event-stream"),
             ("Content-Type", "application/json"),
         ],
         &initialize.to_string(),
-    );
+    )
+}
+
+/// The active T3 sessions in `home`, as `t3 auth session list --json` lists them.
+fn t3_sessions(home: &Path) -> Vec<serde_json::Value> {
+    let output = Command::new(t3())
+        .args(["auth", "session", "list", "--json"])
+        .env("T3CODE_HOME", home.join("t3"))
+        .env("T3CODE_TELEMETRY_ENABLED", "false")
+        .output()
+        .unwrap();
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_linked_agents_mcp_request_reaches_t3_through_the_tunnel() {
+    let (dir, _repo, _home) = fixture();
+    let link = linked(dir.path()).await;
+    let (_b, b) = &link.b;
+    let port = peer_row(&dir.path().join("a"), &link.name).0;
+    let addr = format!("127.0.0.1:{port}");
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let host_token = remote::pair(&link.url_b, &code, "tester")
+        .await
+        .unwrap()
+        .token;
+    let host = remote::Host::connect_to(&link.url_b, &host_token, "tester")
+        .await
+        .unwrap();
+    let bearer = sign_in(&addr, &host.t3_pairing().await.unwrap());
+    let answer = mcp_answer(&addr, &addr, &bearer);
     assert_eq!(status_of(&answer), 200, "{answer}");
     assert!(answer.contains("protocolVersion"), "{answer}");
+}
+
+/// The names of the host clients paired with `on`.
+async fn host_client_names(on: &remote::Host) -> Vec<String> {
+    on.hosts()
+        .await
+        .unwrap()
+        .clients
+        .into_iter()
+        .filter(|client| client.kind == ClientKind::Host)
+        .map(|client| client.name)
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn revoking_a_host_ends_the_t3_sessions_its_link_made() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b, home_c) = (
+        dir.path().join("a"),
+        dir.path().join("b"),
+        dir.path().join("c"),
+    );
+    let (_a, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let (_c, c) = start_service(&home_c).await;
+    let port_b = free_port();
+    b.remote_on(port_b).await.unwrap();
+    for host in [&a, &b, &c] {
+        host.host_agents(true).await.unwrap();
+    }
+    let url_b = format!("ws://127.0.0.1:{port_b}");
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let (name_a, _) = a.host_add(&url_b, &code, None).await.unwrap();
+    // The hosts share one environment name, so A's pairing is named by the only pairing B holds.
+    let a_clients = host_client_names(&b).await;
+    assert_eq!(a_clients.len(), 1, "{a_clients:?}");
+    let a_client = a_clients[0].clone();
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let (name_c, _) = c.host_add(&url_b, &code, None).await.unwrap();
+
+    // A signs an agent in through its own tunnel; C's tunnel is another valid way to reach B's T3.
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let tester = remote::pair(&url_b, &code, "tester").await.unwrap().token;
+    let tester = remote::Host::connect_to(&url_b, &tester, "tester")
+        .await
+        .unwrap();
+    let addr_a = format!("127.0.0.1:{}", peer_row(&home_a, &name_a).0);
+    let addr_c = format!("127.0.0.1:{}", peer_row(&home_c, &name_c).0);
+    let bearer = sign_in(&addr_a, &tester.t3_pairing().await.unwrap());
+    assert_eq!(status_of(&mcp_answer(&addr_c, &addr_a, &bearer)), 200);
+
+    b.revoke_client(&a_client).await.unwrap();
+    assert!(
+        t3_sessions(&home_b)
+            .iter()
+            .all(|session| session["client"]["label"] != a_client.as_str()),
+        "A's T3 sessions end with its pairing"
+    );
+    let refused = mcp_answer(&addr_c, &addr_a, &bearer);
+    assert_eq!(
+        status_of(&refused),
+        401,
+        "T3 refuses the revoked session's token: {refused:?}"
+    );
 }

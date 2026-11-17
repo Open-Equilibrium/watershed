@@ -27,6 +27,8 @@ struct LinkedHost {
     access: Access,
     tunnel_port: u16,
     linked_ms: Option<u64>,
+    /// The name this host paired under at the other host, which `meta host revoke` there names.
+    client: String,
 }
 
 /// A linked host, as `meta host list` shows it.
@@ -53,10 +55,11 @@ pub struct HostList {
     pub clients: Vec<ClientInfo>,
 }
 
-fn linked_host_from(
-    row: (String, String, String, String, i64, Option<i64>),
-) -> Result<LinkedHost, String> {
-    let (name, address, token, access, tunnel_port, linked_ms) = row;
+/// The columns of a linked host's row, in [`LINKED_HOST_COLUMNS`] order.
+type LinkedHostRow = (String, String, String, String, i64, Option<i64>, String);
+
+fn linked_host_from(row: LinkedHostRow) -> Result<LinkedHost, String> {
+    let (name, address, token, access, tunnel_port, linked_ms, client) = row;
     Ok(LinkedHost {
         name,
         address,
@@ -66,12 +69,11 @@ fn linked_host_from(
         tunnel_port: u16::try_from(tunnel_port)
             .map_err(|_| "The configuration store holds a bad tunnel port.")?,
         linked_ms: linked_ms.map(count),
+        client,
     })
 }
 
-fn linked_host_row(
-    row: &rusqlite::Row,
-) -> rusqlite::Result<(String, String, String, String, i64, Option<i64>)> {
+fn linked_host_row(row: &rusqlite::Row) -> rusqlite::Result<LinkedHostRow> {
     Ok((
         row.get(0)?,
         row.get(1)?,
@@ -79,10 +81,11 @@ fn linked_host_row(
         row.get(3)?,
         row.get(4)?,
         row.get(5)?,
+        row.get(6)?,
     ))
 }
 
-const LINKED_HOST_COLUMNS: &str = "name, address, token, access, tunnel_port, linked_ms";
+const LINKED_HOST_COLUMNS: &str = "name, address, token, access, tunnel_port, linked_ms, client";
 
 fn linked(db: &Connection) -> Result<Vec<LinkedHost>, String> {
     let mut statement = db
@@ -112,14 +115,15 @@ fn insert_linked_host(db: &Connection, host: &LinkedHost) -> Result<(), String> 
         return Err(format!("{} is linked already.", host.name));
     }
     db.execute(
-        &format!("INSERT INTO peer ({LINKED_HOST_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6)"),
+        &format!("INSERT INTO peer ({LINKED_HOST_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"),
         params![
             host.name,
             host.address,
             host.token,
             host.access.as_str(),
             host.tunnel_port,
-            host.linked_ms.map(sql)
+            host.linked_ms.map(sql),
+            host.client
         ],
     )
     .map(|_| ())
@@ -245,6 +249,7 @@ impl Links {
             access: host.access,
             tunnel_port: port,
             linked_ms: None,
+            client: host.client.clone(),
         };
         self.tunnel(socket, &moved);
         Ok(())
@@ -277,7 +282,7 @@ impl Links {
         let access = access.unwrap_or(paired.access);
         let name = printable(&paired.name);
         match self
-            .link_paired(store, address, &name, paired.token, access)
+            .link_paired(store, address, &name, paired.token, access, &client)
             .await
         {
             Ok(()) => Ok((name, access)),
@@ -296,6 +301,7 @@ impl Links {
         name: &str,
         token: String,
         access: Access,
+        client: &str,
     ) -> Result<(), String> {
         let socket = TcpListener::bind("127.0.0.1:0")
             .await
@@ -311,6 +317,7 @@ impl Links {
             access,
             tunnel_port,
             linked_ms: None,
+            client: client.to_owned(),
         };
         insert_linked_host(&store.db(), &host)?;
         self.tunnel(socket, &host);
@@ -321,8 +328,10 @@ impl Links {
         set_linked(&store.db(), name, now_ms())
     }
 
-    /// Unlinks the host `name`: its T3 forgets the link, its tunnel stops and it is removed.
-    pub(crate) async fn remove(&self, store: &Store, name: &str) -> Result<(), String> {
+    /// Unlinks the host `name`: its T3 forgets the link, its tunnel stops and it is removed. Answers
+    /// the name this host paired under at the other host, which keeps the pairing and its T3
+    /// sessions for this link until its `meta host revoke` runs with that name.
+    pub(crate) async fn remove(&self, store: &Store, name: &str) -> Result<String, String> {
         let _serial = self.serial.lock().await;
         let host = linked_named(&store.db(), name)?
             .ok_or_else(|| format!("There is no linked host named {name}."))?;
@@ -331,7 +340,19 @@ impl Links {
         if let Some(link) = t3_links.iter().find(|link| link.urls.contains(&url)) {
             t3::unlink(&self.t3, &self.t3_home, &link.environment_id).await?;
         }
-        self.forget(store, name)
+        self.forget(store, name)?;
+        Ok(host.client)
+    }
+
+    /// Ends the T3 sessions that the sign-ins of the client named `client` made here, so that T3
+    /// refuses their tokens from the next request on (ADR-0300, ADR-0301).
+    pub(crate) async fn end_sessions(&self, client: &str) -> Result<(), String> {
+        for session in t3::sessions(&self.t3, &self.t3_home).await? {
+            if session.is_link_of(client) {
+                t3::revoke_session(&self.t3, &self.t3_home, &session.session_id).await?;
+            }
+        }
+        Ok(())
     }
 
     /// The linked hosts and the clients paired with this host, with whether each host's T3

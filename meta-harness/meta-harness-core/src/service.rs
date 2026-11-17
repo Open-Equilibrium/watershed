@@ -360,7 +360,7 @@ async fn serve(
         Some(Admission::Tunnel(owner, access)) => {
             let mut ends = ends.clone();
             tokio::select! {
-                () = tunnel::serve(socket, shared.host.t3_address().to_owned(), access) => {}
+                () = tunnel::serve(socket, shared.host.t3_address().to_owned(), owner.clone(), access) => {}
                 () = revoked(&mut revocations, Some(&owner)) => {}
                 _ = ends.wait_for(|stopped| *stopped) => {}
             }
@@ -589,6 +589,11 @@ impl Session {
         match call {
             HostsCall::T3Pairing => to(shared.links.pairing_code(self.caller.access()).await?),
             HostsCall::Revoke(name) => {
+                // A host's T3 sessions end before its client goes, so a failure leaves the host to
+                // revoke again (ADR-0301).
+                if hosts::named_kind(&shared.store.db(), &name)? == Some(hosts::ClientKind::Host) {
+                    shared.links.end_sessions(&name).await?;
+                }
                 hosts::revoke(&shared.store.db(), &name)?;
                 // The client's open connections end with its token (ADR-0299).
                 let _ = shared.revoked.send(name);
