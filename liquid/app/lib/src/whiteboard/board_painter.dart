@@ -137,9 +137,10 @@ class BoardPainter extends CustomPainter {
               ..strokeJoin = StrokeJoin.round,
           );
       case BridgeElementKind.text:
-        textPainter(element, color)
+        final painter = textPainter(element, color)
           ..layout(maxWidth: math.max(1, element.w))
           ..paint(canvas, Offset(element.x, element.y));
+        painter.dispose();
     }
     canvas.restore();
   }

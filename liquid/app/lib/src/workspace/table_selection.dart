@@ -192,9 +192,18 @@ class CellSelection extends ChangeNotifier {
     }
     final added = await attach(sources);
     if (added.isEmpty || _disposed) return;
-    // The row as read now, if it is still where it was.
-    final now = rowAt(row);
-    final current = now?.id == read.id ? filesOf(now!) : filesOf(read);
+    // The row as read now, wherever it went meanwhile; gone, it takes nothing.
+    BridgeRow? now;
+    for (var at = 0; at < rowCount() && now == null; at++) {
+      if (rowAt(at) case final found? when found.id == read.id) now = found;
+    }
+    if (now == null) {
+      report(
+        'Liquid did not add the files, as their row went; add them again.',
+      );
+      return;
+    }
+    final current = filesOf(now);
     _write(
       read,
       column,

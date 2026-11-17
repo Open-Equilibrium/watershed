@@ -765,7 +765,7 @@ class BoardSurfaceState extends State<BoardSurface> {
     if (element == null) return;
     setState(() => _text = null);
     final text = _typed.text.trimRight();
-    final height = (TextPainter(
+    final measure = TextPainter(
       text: TextSpan(
         text: text,
         style: BoardPainter.textStyle(
@@ -775,7 +775,9 @@ class BoardSurfaceState extends State<BoardSurface> {
         ),
       ),
       textDirection: TextDirection.ltr,
-    )..layout(maxWidth: math.max(1, element.w))).height;
+    )..layout(maxWidth: math.max(1, element.w));
+    final height = measure.height;
+    measure.dispose();
     final frame = Rect.fromLTWH(element.x, element.y, element.w, height);
     if (element.id == null) {
       if (text.isEmpty) return;

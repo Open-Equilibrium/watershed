@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -223,6 +225,33 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
     expect(lastWrite(), 'r2: tram.png');
+  });
+
+  testWidgets('files added while the row moved keep what it got meanwhile', (
+    tester,
+  ) async {
+    await bookings(tester, () async => [await stored('Hotel.eml', 1)]);
+    const path = '/Users/me/CP ticket.pdf';
+    kit.fake.files[path] = Uint8List(5);
+    picked.add(const MediaSource.file('CP ticket.pdf', path, 5));
+    kit.fake.uploadGate = Completer<void>();
+    await tester.tap(fileCell('r1'));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('add files')));
+    await tester.pump();
+    // Meanwhile the row moves down and gets another file elsewhere.
+    final extra = await tester.runAsync(() => stored('Extra.pdf', 2));
+    final hotel = await tester.runAsync(() => stored('Hotel.eml', 1));
+    kit.fake.putRows(kit.page, kit.fake.rows.keys.single, [
+      row('r2', 'Train to Porto', const []),
+      row('r1', 'Hotel', [hotel!, extra!]),
+    ]);
+    await tester.pumpAndSettle();
+    kit.fake.uploadGate!.complete();
+    await tester.pumpAndSettle();
+    expect(lastWrite(), 'r1: Hotel.eml, Extra.pdf, CP ticket.pdf');
   });
 
   testWidgets('a cell takes at most 100 files', (tester) async {

@@ -36,7 +36,9 @@ class FileChips extends StatelessWidget {
             textDirection: TextDirection.ltr,
             maxLines: 1,
           )..layout(maxWidth: 150);
-          return 2 * _chipPadding + _chipIcon + 4 + painter.width + _chipGap;
+          final width = painter.width;
+          painter.dispose();
+          return 2 * _chipPadding + _chipIcon + 4 + width + _chipGap;
         }
 
         const more = 28.0;
