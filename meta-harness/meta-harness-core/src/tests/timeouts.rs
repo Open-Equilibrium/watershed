@@ -15,10 +15,20 @@ const GUARD: Duration = Duration::from_secs(600);
 async fn a_t3_command_that_never_finishes_gives_up() {
     use std::os::unix::fs::PermissionsExt;
     // A stand-in for the T3 executable that never exits.
-    let dir = std::env::temp_dir().join(format!("mh-timeout-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    // A fresh directory under a random name, created exclusively, so no path can be planted for it.
+    let mut bytes = [0u8; 8];
+    getrandom::fill(&mut bytes).unwrap();
+    let name: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let dir = std::env::temp_dir().join(format!("mh-timeout-{name}"));
+    std::fs::create_dir(&dir).unwrap();
     let script = dir.join("t3");
-    std::fs::write(&script, "#!/bin/sh\nsleep 600\n").unwrap();
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&script)
+        .unwrap();
+    std::io::Write::write_all(&mut file, b"#!/bin/sh\nsleep 600\n").unwrap();
+    drop(file);
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
     let answer = tokio::time::timeout(GUARD, crate::t3::links(&script, &dir))
         .await
