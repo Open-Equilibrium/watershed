@@ -9,7 +9,7 @@ use std::process::Command;
 use meta_harness_core::remote;
 
 use super::session::{AgentHost, run};
-use crate::keys::{DeviceTokens, Tokens};
+use crate::keys::{DeviceTokens, Tokens, random_hex};
 
 /// What pairing with an agent host gave: the host's name, and the name this device pairs under,
 /// which `meta host revoke` names to remove it there.
@@ -35,7 +35,7 @@ pub enum BridgeReach {
 /// `meta invite --device`, under this computer's name. Files the token it issues under `address`.
 /// Nothing is kept when pairing fails.
 pub fn pair_agent_host(address: String, code: String) -> Result<BridgePairing, String> {
-    let client = client_name(&computer_name(), &tag())?;
+    let client = client_name(&computer_name(), &tag()?)?;
     pair_with(&DeviceTokens {}, &address, &code, &client)
 }
 
@@ -55,10 +55,8 @@ pub(crate) fn client_name(computer: &str, tag: &str) -> Result<String, String> {
 }
 
 /// Four random lowercase hex digits that tell this pairing apart from another of the same name.
-pub(crate) fn tag() -> String {
-    let mut bytes = [0u8; 2];
-    getrandom::fill(&mut bytes).expect("the operating system provides random bytes");
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+pub(crate) fn tag() -> Result<String, String> {
+    Ok(random_hex()?[..4].to_owned())
 }
 
 /// This computer's name as its operating system shows it: the computer name on macOS, the host
@@ -80,7 +78,7 @@ fn computer_name() -> String {
 /// Forgets the device token filed under `address`. The host keeps this device paired until its
 /// own `meta host revoke` removes it.
 pub fn forget_agent_host(address: String) -> Result<(), String> {
-    forget_with(&DeviceTokens {}, &address)
+    DeviceTokens {}.delete(&address)
 }
 
 /// Whether this computer's Meta-Harness service answers; `home` is its data folder, else the
@@ -113,20 +111,16 @@ pub(crate) fn pair_with(
             "Liquid already holds a device token for {address}; forget that agent host before pairing it again."
         ));
     }
-    let (host, token) = run(remote::pair(address, code, client))?;
-    tokens.write(address, &token).map_err(|error| {
+    let paired = run(remote::pair(address, code, client))?;
+    tokens.write(address, &paired.token).map_err(|error| {
         format!(
-            "{error} The host keeps this device paired; `meta host revoke {client}` there removes it."
+            "{error} The host keeps this device paired; meta host revoke {client} there removes it."
         )
     })?;
     Ok(BridgePairing {
-        host,
+        host: paired.name,
         client: client.to_owned(),
     })
-}
-
-pub(crate) fn forget_with(tokens: &dyn Tokens, address: &str) -> Result<(), String> {
-    tokens.delete(address)
 }
 
 pub(crate) fn reach_remote_with(tokens: &dyn Tokens, address: &str) -> Result<BridgeReach, String> {

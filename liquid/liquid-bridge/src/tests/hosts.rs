@@ -7,11 +7,10 @@ use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use meta_harness_core::{Kind, Service, ServiceConfig, remote};
+use meta_harness_core::{Access, ClientKind, Service, ServiceConfig, remote};
 
 use crate::api::hosts::{
-    BridgeReach, client_name, forget_with, pair_with, reach_local_agent_host, reach_remote_with,
-    tag,
+    BridgeReach, client_name, pair_with, reach_local_agent_host, reach_remote_with, tag,
 };
 use crate::api::session::{AgentHost, RUNTIME};
 use crate::keys::{DeviceTokens, Tokens};
@@ -124,7 +123,7 @@ fn agent_hosts_pair_connect_reach_and_are_forgotten_here_only() {
     );
 
     let code = RUNTIME
-        .block_on(local.invite(Kind::Device))
+        .block_on(local.invite(ClientKind::Device, Access::Auto))
         .expect("a code");
     let pairing = pair_with(&tokens, &url, &code, client).expect("the device pairs");
     assert!(!pairing.host.is_empty());
@@ -138,7 +137,7 @@ fn agent_hosts_pair_connect_reach_and_are_forgotten_here_only() {
         .expect("the token is filed under the address");
 
     let again = RUNTIME
-        .block_on(local.invite(Kind::Device))
+        .block_on(local.invite(ClientKind::Device, Access::Auto))
         .expect("a code");
     assert!(
         pair_with(&tokens, &url, &again, client).is_err(),
@@ -155,7 +154,7 @@ fn agent_hosts_pair_connect_reach_and_are_forgotten_here_only() {
         .expect("remote access turns off");
     assert_eq!(reach_remote_with(&tokens, &url), Ok(BridgeReach::Offline));
 
-    forget_with(&tokens, &url).expect("the token is forgotten");
+    tokens.delete(&url).expect("the token is forgotten");
     assert_eq!(tokens.read(&url).unwrap(), None);
     assert!(
         reach_remote_with(&tokens, &url).is_err(),
@@ -196,7 +195,7 @@ fn a_device_pairs_under_liquid_the_computer_name_and_its_own_tag() {
         "liquid-lab-mac-mini-3f2a"
     );
     // Each pairing draws its own tag, so computers of the same name pair as different devices.
-    let drawn = tag();
+    let drawn = tag().unwrap();
     assert!(
         drawn.len() == 4
             && drawn
