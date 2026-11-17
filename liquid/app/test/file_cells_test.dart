@@ -11,7 +11,7 @@ import 'package:liquid/src/workspace/paste.dart';
 
 import 'page_kit.dart';
 
-/// The Table's file field (approved Whiteboard Block mockups, section 7, ADR-0305).
+/// The Table's file field (ADR-0305).
 void main() {
   final kit = PageKit();
   final picked = <MediaSource>[];

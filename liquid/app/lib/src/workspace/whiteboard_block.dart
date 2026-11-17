@@ -16,7 +16,7 @@ import 'workspace_state.dart';
 /// A Whiteboard's frame on the Page.
 const whiteboardHeight = 360.0;
 
-/// A Whiteboard Block on its Page (approved Whiteboard Block mockups, ADR-0306): a frame of
+/// A Whiteboard Block on its Page (ADR-0306): a frame of
 /// fixed height whose canvas has no edges. A click focuses it, and the tools draw on it in
 /// place; hovering shows full screen and ⋯ with Delete. It follows only its own Block
 /// (client architecture rule 6).
@@ -230,7 +230,7 @@ class _WhiteboardBlockState extends State<WhiteboardBlock> {
 }
 
 /// A Whiteboard full screen over the Page's area, at the same place and zoom: Fit shows
-/// everything drawn, esc or Done returns to the Page (approved mockups, section 6).
+/// everything drawn, esc or Done returns to the Page (ADR-0306).
 class WhiteboardFullScreen extends StatefulWidget {
   const WhiteboardFullScreen({
     super.key,

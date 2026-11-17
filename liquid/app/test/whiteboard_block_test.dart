@@ -14,7 +14,7 @@ import 'package:liquid/src/workspace/workspace_state.dart';
 import 'fake_workspace.dart';
 import 'page_kit.dart';
 
-/// Whiteboard Blocks (approved Whiteboard Block mockups, ADR-0306).
+/// Whiteboard Blocks (ADR-0306).
 void main() {
   final kit = PageKit();
 

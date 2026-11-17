@@ -18,7 +18,7 @@ IconData _iconOf(BridgeMedia file) =>
     file.mediaType.startsWith('image/') ? LucideIcons.image : LucideIcons.file;
 
 /// A file cell's files, one chip each with its icon and name; those that do not fit show
-/// as "+N" (approved Whiteboard Block mockups, section 7).
+/// as "+N" (ADR-0305).
 class FileChips extends StatelessWidget {
   const FileChips(this.files, {super.key});
 
@@ -110,8 +110,7 @@ class FileChips extends StatelessWidget {
 }
 
 /// A file cell's list, which ⏎ or a second click opens: each file with Save as… and
-/// Remove, and Add files…, which opens the file dialog (approved Whiteboard Block
-/// mockups, section 7). ↑↓ choose, ⏎ saves the chosen file or adds files, ⌫ removes the
+/// Remove, and Add files…, which opens the file dialog (ADR-0305). ↑↓ choose, ⏎ saves the chosen file or adds files, ⌫ removes the
 /// chosen file, esc closes it.
 class FilesPicker extends StatefulWidget {
   const FilesPicker({

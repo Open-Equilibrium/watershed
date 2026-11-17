@@ -817,7 +817,7 @@ class BoardSurfaceState extends State<BoardSurface> {
 
   // Keys.
 
-  /// The board's keys while it is focused (approved Whiteboard Block mockups, section 9).
+  /// The board's keys while it is focused (ADR-0306).
   KeyEventResult key(KeyEvent event) {
     // While a text box is written, its field takes the keys; esc ends it.
     if (_text != null) {
