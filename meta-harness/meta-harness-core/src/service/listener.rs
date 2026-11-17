@@ -49,6 +49,16 @@ impl Drop for Listening {
 }
 
 impl Listening {
+    /// Stops the listener and waits until its sockets are released, so its port can be bound at once.
+    async fn stop(mut self) {
+        for task in self.tasks.drain(..) {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+}
+
+impl Listening {
     fn status(&self) -> RemoteStatus {
         RemoteStatus {
             port: self.port,
@@ -166,7 +176,10 @@ pub(super) async fn on(shared: &Arc<Shared>, port: u16) -> Result<RemoteStatus, 
 pub(super) async fn off(shared: &Arc<Shared>) -> Result<(), String> {
     let _serial = shared.remote_serial.lock().await;
     hosts::set_remote_port(&shared.store.db(), None)?;
-    *lock(&shared.remote) = Remote::default();
+    let stopped = std::mem::take(&mut *lock(&shared.remote));
+    if let Some(listening) = stopped.listening {
+        listening.stop().await;
+    }
     Ok(())
 }
 
