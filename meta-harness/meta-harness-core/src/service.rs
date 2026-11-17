@@ -391,7 +391,10 @@ async fn serve(
     };
     let (mut sink, mut frames) = socket.split();
     let (out, mut outgoing) = mpsc::channel::<Message>(OUTGOING);
-    let writer = tokio::spawn(async move {
+    // The connection's tasks are owned here, so when the connection ends, aborted or not, they end too
+    // and nothing they hold outlives it (their state holds the service's data-folder lock).
+    let mut tasks = tokio::task::JoinSet::new();
+    tasks.spawn(async move {
         while let Some(message) = outgoing.recv().await {
             if sink.send(message).await.is_err() {
                 break;
@@ -446,11 +449,12 @@ async fn serve(
                 continue;
             }
         };
+        while tasks.try_join_next().is_some() {}
         streams.retain(|_, task| !task.is_finished());
         match request {
             api::Request::Call { id, call } => {
                 let (session, out) = (session.clone(), out.clone());
-                tokio::spawn(async move {
+                tasks.spawn(async move {
                     let reply = match session.call(call).await {
                         Ok(ok) => Reply::Ok { id, ok },
                         Err(error) => Reply::Error { id, error },
@@ -460,14 +464,14 @@ async fn serve(
             }
             api::Request::Stream { id, stream } => {
                 let (session, out) = (session.clone(), out.clone());
-                let task = tokio::spawn(async move {
+                let task = tasks.spawn(async move {
                     if let Err(error) = session.stream(id, stream, &out).await {
                         let _ = out.send(frame_of(&Reply::Error { id, error })).await;
                     }
                 });
                 // A client that reuses a live stream's id ends that stream, so none is left
                 // running without a way to cancel it.
-                if let Some(earlier) = streams.insert(id, task.abort_handle()) {
+                if let Some(earlier) = streams.insert(id, task) {
                     earlier.abort();
                 }
             }
@@ -478,10 +482,7 @@ async fn serve(
             }
         }
     }
-    for task in streams.values() {
-        task.abort();
-    }
-    writer.abort();
+    tasks.abort_all();
 }
 
 fn frame_of(reply: &Reply) -> Message {

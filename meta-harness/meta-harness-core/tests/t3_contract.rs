@@ -899,6 +899,37 @@ async fn an_approved_configuration_reaches_the_harness_homes_t3_runs_them_in() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_dropped_service_takes_its_streams_with_it_and_frees_its_folder() {
+    let (dir, repo, _) = fixture();
+    let home = dir.path().join("meta");
+    let (service, client) = start_service(&home).await;
+    // A stream the client keeps open, which the dropped service's connection still serves.
+    let _statuses = client
+        .project(&repo)
+        .await
+        .unwrap()
+        .git()
+        .watch()
+        .await
+        .unwrap();
+    drop(service);
+    let started = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            if let Ok(service) = Service::start(service_config(&home)).await {
+                return service;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await;
+    assert!(
+        started.is_ok(),
+        "the folder is still held by the dropped service's stream"
+    );
+    started.unwrap().stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_client_goes_on_after_the_service_restarts() {
     let (dir, repo, _) = fixture();
     let home = dir.path().join("meta");
