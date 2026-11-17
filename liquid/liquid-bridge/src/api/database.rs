@@ -6,6 +6,7 @@ use liquid_core::{
     Cell, Database, FieldId, FieldKind, Filter, Match, OptionId, Row, RowQuery, Sort,
 };
 
+use super::media::BridgeMedia;
 use super::workspace::id;
 
 /// The kind of a Database field.
@@ -21,6 +22,8 @@ pub enum BridgeFieldKind {
     Date,
     /// Ticked or not.
     Checkbox,
+    /// Files, each a finished attachment.
+    File,
 }
 
 impl BridgeFieldKind {
@@ -31,6 +34,7 @@ impl BridgeFieldKind {
             Self::Select => FieldKind::Select,
             Self::Date => FieldKind::Date,
             Self::Checkbox => FieldKind::Checkbox,
+            Self::File => FieldKind::File,
         }
     }
 
@@ -41,6 +45,7 @@ impl BridgeFieldKind {
             FieldKind::Select => Self::Select,
             FieldKind::Date => Self::Date,
             FieldKind::Checkbox => Self::Checkbox,
+            FieldKind::File => Self::File,
         }
     }
 }
@@ -60,6 +65,8 @@ pub enum BridgeCellKind {
     Date,
     /// `checked`.
     Checkbox,
+    /// `files`.
+    Files,
 }
 
 /// One cell's value.
@@ -73,6 +80,8 @@ pub struct BridgeCell {
     pub number: f64,
     /// Whether a checkbox is ticked.
     pub checked: bool,
+    /// Files in their order; the core reads each one's size from its attachment.
+    pub files: Vec<BridgeMedia>,
 }
 
 impl BridgeCell {
@@ -89,10 +98,25 @@ impl BridgeCell {
             BridgeCellKind::Select => Cell::Select(id(&self.text, OptionId::parse, "option")?),
             BridgeCellKind::Date => Cell::Date(text()?),
             BridgeCellKind::Checkbox => Cell::Checkbox(self.checked),
+            BridgeCellKind::Files => Cell::Files(
+                self.files
+                    .iter()
+                    .map(BridgeMedia::to_core)
+                    .collect::<Result<_, _>>()?,
+            ),
         })
     }
 
     fn of(cell: &Cell) -> Self {
+        if let Cell::Files(files) = cell {
+            return Self {
+                kind: BridgeCellKind::Files,
+                text: None,
+                number: 0.0,
+                checked: false,
+                files: files.iter().cloned().map(BridgeMedia::of).collect(),
+            };
+        }
         let (kind, text, number, checked) = match cell {
             Cell::Empty => (BridgeCellKind::Empty, None, 0.0, false),
             Cell::Text(text) => (BridgeCellKind::Text, Some(text.clone()), 0.0, false),
@@ -100,12 +124,14 @@ impl BridgeCell {
             Cell::Select(option) => (BridgeCellKind::Select, Some(option.to_string()), 0.0, false),
             Cell::Date(day) => (BridgeCellKind::Date, Some(day.clone()), 0.0, false),
             Cell::Checkbox(checked) => (BridgeCellKind::Checkbox, None, 0.0, *checked),
+            Cell::Files(_) => unreachable!("answered above"),
         };
         Self {
             kind,
             text,
             number,
             checked,
+            files: Vec::new(),
         }
     }
 }

@@ -7,4 +7,5 @@ mod media;
 mod record;
 mod session;
 mod stream;
+mod whiteboard;
 mod workspace;
