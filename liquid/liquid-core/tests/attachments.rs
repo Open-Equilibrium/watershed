@@ -276,3 +276,20 @@ fn an_upload_finishes_only_in_the_workspace_that_began_it() {
         Err(Error::Storage(_))
     ));
 }
+
+#[test]
+fn an_attachment_is_named_by_its_sha_256_and_different_files_by_different_names() {
+    let (mut workspace, ..) = page();
+    let abc = add(&mut workspace, b"abc");
+    assert_eq!(
+        abc.id.as_str(),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+    let first = bytes(PART + 3);
+    let mut second = first.clone();
+    second[PART + 1] ^= 1;
+    let (a, b) = (add(&mut workspace, &first), add(&mut workspace, &second));
+    assert_ne!(a.id, b.id);
+    assert_eq!(read_back(&mut workspace, &a), first);
+    assert_eq!(read_back(&mut workspace, &b), second);
+}

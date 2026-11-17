@@ -96,9 +96,15 @@ fn a_file_goes_in_from_its_path_shows_in_a_media_block_and_saves_out_unchanged()
     assert!(
         names
             .iter()
-            .all(|name| !name.to_string_lossy().ends_with(".liquid-saving")),
+            .all(|name| !name.to_string_lossy().starts_with(".liquid-saving-")),
         "no partial copy stays beside it: {names:?}"
     );
+    // A name as long as the file system allows saves too.
+    let long = folder.0.join(format!("{}.pdf", "b".repeat(251)));
+    workspace
+        .save_attachment(attachment.clone(), long.to_string_lossy().into())
+        .unwrap();
+    assert_eq!(std::fs::read(&long).unwrap(), file);
     assert_eq!(workspace.read_attachment(attachment).unwrap(), file);
 }
 

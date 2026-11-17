@@ -170,13 +170,8 @@ impl LiquidWorkspace {
         self.size(&id)?;
         let failed = |error: std::io::Error| format!("{path}: {error}");
         let target = std::path::Path::new(&path);
-        let name = target
-            .file_name()
-            .ok_or_else(|| format!("{path}: no file name"))?;
-        let mut hidden = std::ffi::OsString::from(".");
-        hidden.push(name);
-        hidden.push(format!(".{}.liquid-saving", random_hex()?));
-        let partial = target.with_file_name(hidden);
+        // A short name, so a target name as long as the file system allows still fits.
+        let partial = target.with_file_name(format!(".liquid-saving-{}", random_hex()?));
         // Only a file this call created is written, renamed or removed.
         let mut file = std::fs::OpenOptions::new()
             .write(true)
