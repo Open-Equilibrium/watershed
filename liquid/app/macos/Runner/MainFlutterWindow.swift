@@ -17,6 +17,9 @@ class MainFlutterWindow: NSWindow {
     FlutterMethodChannel(
       name: "liquid/liquid_key", binaryMessenger: flutterViewController.engine.binaryMessenger
     ).setMethodCallHandler(liquidKey)
+    FlutterMethodChannel(
+      name: "liquid/clipboard", binaryMessenger: flutterViewController.engine.binaryMessenger
+    ).setMethodCallHandler(readClipboard)
     logKeysIfAsked()
 
     super.awakeFromNib()
@@ -69,6 +72,30 @@ private func logKeysIfAsked() {
           + "liquid \(liquidKeyDown) repeat \(event.type == .keyDown && event.isARepeat)\n").utf8))
     return event
   }
+}
+
+/// What the clipboard holds for a paste into a Text Block (ADR-0305), which Flutter's own
+/// clipboard, plain text only, cannot tell: copied files' paths, an image as PNG, the editor
+/// data VS Code and its forks put beside copied code, HTML, and the plain text.
+private func readClipboard(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+  guard call.method == "read" else { return result(FlutterMethodNotImplemented) }
+  let board = NSPasteboard.general
+  var read: [String: Any] = [:]
+  let urls =
+    board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+    as? [URL] ?? []
+  if !urls.isEmpty { read["files"] = urls.map { $0.path } }
+  if let png = board.data(forType: .png) {
+    read["image"] = FlutterStandardTypedData(bytes: png)
+  } else if let tiff = board.data(forType: .tiff),
+    let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
+  {
+    read["image"] = FlutterStandardTypedData(bytes: png)
+  }
+  read["vscode"] = board.string(forType: NSPasteboard.PasteboardType("vscode-editor-data"))
+  read["html"] = board.string(forType: .html)
+  read["text"] = board.string(forType: .string)
+  result(read)
 }
 
 /// Turns the Liquid key on or off: the login item inside the app bundle remaps

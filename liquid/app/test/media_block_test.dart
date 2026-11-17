@@ -21,6 +21,7 @@ void main() {
     saveTo = null;
     MediaPlatform.pickFiles = () async => [...picked];
     MediaPlatform.saveLocation = (_) async => saveTo;
+    MediaPlatform.fileSize = (path) async => kit.fake.files[path]!.length;
   });
 
   List<BridgeBlockKind> kinds() => [
@@ -216,5 +217,46 @@ void main() {
     await tester.pump();
     await key(tester, LogicalKeyboardKey.arrowUp);
     expect(field(tester, 0).focusNode!.hasFocus, isTrue);
+  });
+
+  testWidgets('files dropped on a Page land where the line shows', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      const TextPart('The tram up to the castle:'),
+      const TextPart('What we planned to spend:'),
+    ]);
+    final paths = ['/Users/me/tram.mov', '/Users/me/budget.pdf'];
+    for (final path in paths) {
+      kit.fake.files[path] = Uint8List.fromList([1, 2, 3]);
+    }
+    Future<void> native(String method, Object arguments) async {
+      await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+        'desktop_drop',
+        const StandardMethodCodec().encodeMethodCall(
+          MethodCall(method, arguments),
+        ),
+        (_) {},
+      );
+      await tester.pump();
+    }
+
+    // Over the second line's upper half: the files go between the two lines.
+    final second = tester.getRect(block(1));
+    final at = [second.center.dx, second.top + 4];
+    await native('entered', at);
+    await native('updated', at);
+    expect(find.byKey(const Key('drop line')), findsOneWidget);
+    await native('performOperation', paths);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('drop line')), findsNothing);
+    expect(kinds(), [
+      BridgeBlockKind.text,
+      BridgeBlockKind.media,
+      BridgeBlockKind.media,
+      BridgeBlockKind.text,
+    ]);
+    expect(names(), ['tram.mov', 'budget.pdf']);
   });
 }

@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
@@ -36,13 +37,18 @@ class MediaSource {
   final int size;
 }
 
-/// What the system offers a Media Block: its file dialogs. Tests replace them.
+/// What the system offers a Media Block: its file dialogs and files' sizes. Tests replace
+/// them.
 abstract final class MediaPlatform {
   /// Asks for files to add; none if the person cancelled.
   static Future<List<MediaSource>> Function() pickFiles = () async => [
     for (final file in await openFiles())
-      MediaSource.file(file.name, file.path, await File(file.path).length()),
+      MediaSource.file(file.name, file.path, await fileSize(file.path)),
   ];
+
+  /// The size of the file at `path`.
+  static Future<int> Function(String path) fileSize = (path) =>
+      File(path).length();
 
   /// Asks where to save a copy of `name`; none if the person cancelled.
   static Future<String?> Function(String name) saveLocation = (name) async =>
@@ -594,6 +600,104 @@ class _MediaBlockState extends State<MediaBlock> {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Where files dropped on a Page land: a line above or below the Block under the pointer
+/// shows it, and each file becomes a Media Block there (ADR-0305).
+class MediaDropZone extends StatefulWidget {
+  const MediaDropZone({
+    super.key,
+    required this.views,
+    required this.view,
+    required this.index,
+    required this.child,
+  });
+
+  final PageViews views;
+  final BridgeView view;
+  final int index;
+  final Widget child;
+
+  @override
+  State<MediaDropZone> createState() => _MediaDropZoneState();
+}
+
+class _MediaDropZoneState extends State<MediaDropZone> {
+  /// Whether the files land above the Block, below it, or nowhere here.
+  bool? _above;
+
+  bool _isAbove(Offset at) => at.dy < (context.size?.height ?? 0) / 2;
+
+  void _at(Offset at) {
+    final above = _isAbove(at);
+    if (above != _above) setState(() => _above = above);
+  }
+
+  /// Adds the dropped files above or below the Block, as the drop's own position says:
+  /// the line is gone by then, as the drop first ends the drag.
+  Future<void> _drop(DropDoneDetails details) async {
+    final above = _isAbove(details.localPosition);
+    setState(() => _above = null);
+    final views = widget.views;
+    final index = widget.index;
+    String? after = widget.view.id;
+    if (above) {
+      final previous = index > 0 ? await views.viewAt(index - 1) : null;
+      if (index > 0 && previous == null) {
+        views.state.report(
+          'Liquid did not add the files, as the Page changed; drop them again.',
+        );
+        return;
+      }
+      after = previous?.id;
+    }
+    final sources = <MediaSource>[];
+    for (final item in details.files) {
+      if (item is DropItemDirectory) {
+        views.state.report('Liquid adds files, not folders: “${item.name}”.');
+        continue;
+      }
+      try {
+        sources.add(
+          MediaSource.file(
+            item.name,
+            item.path,
+            await MediaPlatform.fileSize(item.path),
+          ),
+        );
+      } on Object catch (error) {
+        views.state.report('Liquid could not read “${item.name}”: $error');
+      }
+    }
+    await addMedia(views, sources, after: after);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    final above = _above;
+    return DropTarget(
+      onDragEntered: (details) => _at(details.localPosition),
+      onDragUpdated: (details) => _at(details.localPosition),
+      onDragExited: (_) => setState(() => _above = null),
+      onDragDone: (details) => unawaited(_drop(details)),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          widget.child,
+          if (above != null)
+            Positioned(
+              key: const Key('drop line'),
+              left: 0,
+              right: 0,
+              top: above ? -1 : null,
+              bottom: above ? null : -1,
+              child: Container(height: 2, color: ws.accent),
+            ),
+        ],
       ),
     );
   }

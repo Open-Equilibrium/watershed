@@ -226,7 +226,15 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
               UploadRow(upload, key: ObjectKey(upload)),
         ],
       ),
-      child: KeyedSubtree(key: const ValueKey('block'), child: block),
+      child: KeyedSubtree(
+        key: const ValueKey('block'),
+        child: MediaDropZone(
+          views: _views,
+          view: view,
+          index: index,
+          child: block,
+        ),
+      ),
     ),
   );
 
