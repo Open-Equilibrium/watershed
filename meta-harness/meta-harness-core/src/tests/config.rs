@@ -359,3 +359,30 @@ fn a_failure_after_the_homes_took_the_revision_puts_the_current_one_back() {
         assert_eq!(store.pending().unwrap().len(), 1, "{fault}");
     }
 }
+
+#[test]
+fn a_failed_rollback_is_reported_with_the_failure_that_caused_it() {
+    let fixture = Fixture::new();
+    let store = &fixture.store;
+    let number = propose(store, vec![instruction("rules", "x")]);
+    let raw = rusqlite::Connection::open(fixture.dir.join("meta-harness.sqlite")).unwrap();
+    raw.execute_batch(
+        "CREATE TRIGGER refuse BEFORE INSERT ON revision BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+    )
+    .unwrap();
+    // The homes take the proposed blocks, then refuse the restore of the current ones.
+    let calls = std::cell::Cell::new(0);
+    let result = store.approve("cli", number, |_| {
+        calls.set(calls.get() + 1);
+        if calls.get() == 1 {
+            Ok(())
+        } else {
+            Err("the homes refuse writes".to_owned())
+        }
+    });
+    let error = result.unwrap_err();
+    assert!(
+        error.contains("refused") && error.contains("the homes refuse writes"),
+        "{error}"
+    );
+}

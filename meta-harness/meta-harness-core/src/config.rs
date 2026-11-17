@@ -297,8 +297,12 @@ impl Store {
             tx.commit().map_err(failed)
         });
         if let Err(error) = recorded {
-            let _ = write(&base.blocks);
-            return Err(error);
+            return Err(match write(&base.blocks) {
+                Ok(()) => error,
+                Err(restore) => {
+                    format!("{error}. The harness homes could not be restored: {restore}")
+                }
+            });
         }
         Ok(Current { revision, blocks })
     }
