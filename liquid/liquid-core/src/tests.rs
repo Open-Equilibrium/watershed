@@ -128,6 +128,9 @@ impl Store for Flaky {
     }
 
     fn put_part(&mut self, upload: &str, index: u64, bytes: &[u8]) -> Result<(), Error> {
+        if self.failing {
+            return Err(Error::Storage("disk full".into()));
+        }
         self.inner.put_part(upload, index, bytes)
     }
 
@@ -136,8 +139,9 @@ impl Store for Flaky {
         upload: &str,
         attachment: &AttachmentId,
         size: u64,
+        parts: u64,
     ) -> Result<(), Error> {
-        self.inner.finish_upload(upload, attachment, size)
+        self.inner.finish_upload(upload, attachment, size, parts)
     }
 
     fn discard_upload(&mut self, upload: &str) -> Result<(), Error> {
@@ -507,4 +511,22 @@ fn a_start_split_puts_the_new_text_block_above_a_view_whose_key_another_shares()
     let views = workspace.views(&page, 0, usize::MAX).unwrap();
     let at = |view: &ViewId| views.iter().position(|shown| &shown.id == view);
     assert!(at(&added) < at(&ViewId::stored("v-b2")), "{views:?}");
+}
+
+#[test]
+fn an_upload_whose_part_the_store_refused_never_finishes() {
+    let owner = Actor::Person(PersonId::new("benni"));
+    let mut workspace = Workspace::create(PersonId::new("benni"), Flaky::default()).unwrap();
+    let part = vec![7; crate::PART];
+    let mut upload = workspace
+        .begin_upload(&owner, 2 * crate::PART as u64)
+        .unwrap();
+    workspace.store.failing = true;
+    assert!(workspace.upload(&mut upload, &part).is_err());
+    workspace.store.failing = false;
+    assert!(
+        workspace.upload(&mut upload, &part).is_err(),
+        "a failed upload takes no more"
+    );
+    assert!(workspace.finish_upload(upload).is_err());
 }

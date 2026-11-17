@@ -269,3 +269,16 @@ fn a_large_file_comes_back_whole() {
     let attachment = add(&mut workspace, &file);
     assert_eq!(read_back(&mut workspace, &attachment), file);
 }
+
+#[test]
+fn an_upload_finishes_only_in_the_workspace_that_began_it() {
+    let (mut first, ..) = page();
+    let (mut second, ..) = page();
+    let mut upload = first.begin_upload(&owner(), 3).unwrap();
+    first.upload(&mut upload, b"abc").unwrap();
+    // The parts are in the first Workspace's store, so the second has nothing to name.
+    assert!(matches!(
+        second.finish_upload(upload),
+        Err(Error::Storage(_))
+    ));
+}

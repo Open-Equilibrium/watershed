@@ -69,11 +69,15 @@ pub struct Media {
 /// when it finishes. One that never finishes is dropped from the store when it next opens.
 pub struct Upload {
     key: String,
+    /// The session that began it, the only one it goes to.
+    session: automerge::ActorId,
     size: u64,
     written: u64,
     parts: u64,
     hasher: Sha256,
     buffer: Vec<u8>,
+    /// Whether the store refused a part, which leaves the upload unfinishable.
+    failed: bool,
 }
 
 impl Upload {
@@ -96,16 +100,23 @@ impl<S: Store> Workspace<S> {
             .collect();
         Ok(Upload {
             key,
+            session: self.device.clone(),
             size,
             written: 0,
             parts: 0,
             hasher: Sha256::new(),
             buffer: Vec::with_capacity(PART.min(size as usize)),
+            failed: false,
         })
     }
 
-    /// Adds the file's next bytes, refused if they pass its declared size.
+    /// Adds the file's next bytes, refused if they pass its declared size. Once the store
+    /// refused a part, the upload takes nothing more and never finishes.
     pub fn upload(&mut self, upload: &mut Upload, mut bytes: &[u8]) -> Result<(), Error> {
+        self.owns(upload)?;
+        if upload.failed {
+            return Err(failed());
+        }
         if upload.written + bytes.len() as u64 > upload.size {
             return Err(Error::TooLarge);
         }
@@ -124,6 +135,11 @@ impl<S: Store> Workspace<S> {
 
     /// Stores the rest and names the attachment; refused if fewer bytes came than declared.
     pub fn finish_upload(&mut self, mut upload: Upload) -> Result<Attachment, Error> {
+        self.owns(&upload)?;
+        if upload.failed {
+            self.store.discard_upload(&upload.key)?;
+            return Err(failed());
+        }
         if upload.written != upload.size {
             self.store.discard_upload(&upload.key)?;
             return Err(Error::OutOfRange);
@@ -139,7 +155,8 @@ impl<S: Store> Workspace<S> {
                 .map(|byte| format!("{byte:02x}"))
                 .collect(),
         );
-        self.store.finish_upload(&upload.key, &id, upload.size)?;
+        self.store
+            .finish_upload(&upload.key, &id, upload.size, upload.parts)?;
         Ok(Attachment {
             id,
             size: upload.size,
@@ -148,6 +165,7 @@ impl<S: Store> Workspace<S> {
 
     /// Drops an unfinished upload's parts.
     pub fn discard_upload(&mut self, upload: Upload) -> Result<(), Error> {
+        self.owns(&upload)?;
         self.store.discard_upload(&upload.key)
     }
 
@@ -165,11 +183,29 @@ impl<S: Store> Workspace<S> {
         self.store.part(id, index)
     }
 
+    /// Refuses an upload another Workspace session began, whose parts are in its store.
+    fn owns(&self, upload: &Upload) -> Result<(), Error> {
+        if upload.session == self.device {
+            Ok(())
+        } else {
+            Err(Error::Storage(
+                "the upload belongs to another Workspace session".into(),
+            ))
+        }
+    }
+
     fn flush(&mut self, upload: &mut Upload) -> Result<(), Error> {
-        self.store
-            .put_part(&upload.key, upload.parts, &upload.buffer)?;
+        let put = self
+            .store
+            .put_part(&upload.key, upload.parts, &upload.buffer);
+        upload.failed = put.is_err();
+        put?;
         upload.parts += 1;
         upload.buffer.clear();
         Ok(())
     }
+}
+
+fn failed() -> Error {
+    Error::Storage("the store refused a part of this upload; add the file again".into())
 }

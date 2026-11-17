@@ -46,13 +46,15 @@ pub trait Store {
     fn history(&mut self, before: Option<&ActionId>, limit: usize) -> Result<Vec<Action>, Error>;
     /// Keeps part `index` of the unfinished upload `upload`.
     fn put_part(&mut self, upload: &str, index: u64, bytes: &[u8]) -> Result<(), Error>;
-    /// Names `upload`'s parts `attachment`, durably; if that attachment is kept already,
-    /// drops them instead.
+    /// Names `upload`'s `parts` parts `attachment`, durably; if that attachment is kept
+    /// already, drops them instead. Refused if the store does not hold that many parts of the
+    /// upload, as for an upload another store began.
     fn finish_upload(
         &mut self,
         upload: &str,
         attachment: &AttachmentId,
         size: u64,
+        parts: u64,
     ) -> Result<(), Error>;
     /// Drops an unfinished upload's parts.
     fn discard_upload(&mut self, upload: &str) -> Result<(), Error>;
@@ -125,11 +127,18 @@ impl Store for MemoryStore {
         upload: &str,
         attachment: &AttachmentId,
         size: u64,
+        parts: u64,
     ) -> Result<(), Error> {
-        let parts = self.uploads.remove(upload).unwrap_or_default();
+        let kept = self.uploads.get(upload).map_or(0, Vec::len);
+        if kept as u64 != parts {
+            return Err(Error::Storage(format!(
+                "the upload has {kept} of its {parts} parts"
+            )));
+        }
+        let kept = self.uploads.remove(upload).unwrap_or_default();
         self.attachments
             .entry(attachment.clone())
-            .or_insert((size, parts));
+            .or_insert((size, kept));
         Ok(())
     }
 

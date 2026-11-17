@@ -31,7 +31,7 @@ const COMPACT_AFTER: usize = 1_000;
 /// and every write is durable in the store before it is acknowledged.
 pub struct Workspace<S: Store> {
     pub(crate) store: S,
-    device: ActorId,
+    pub(crate) device: ActorId,
     /// The Workspace document's owner, which never changes after its first change.
     owner: PersonId,
     pub(crate) docs: HashMap<Document, Loaded>,

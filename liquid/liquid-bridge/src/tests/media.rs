@@ -80,10 +80,15 @@ fn a_file_goes_in_from_its_path_shows_in_a_media_block_and_saves_out_unchanged()
     );
 
     let saved = folder.0.join("saved.pdf");
+    // Another file that happens to have a name Liquid could stage under stays as it is.
+    let neighbor = folder.0.join(".saved.pdf.liquid-saving");
+    std::fs::write(&neighbor, b"not Liquid's").unwrap();
     workspace
         .save_attachment(attachment.clone(), saved.to_string_lossy().into())
         .unwrap();
     assert_eq!(std::fs::read(&saved).unwrap(), file);
+    assert_eq!(std::fs::read(&neighbor).unwrap(), b"not Liquid's");
+    std::fs::remove_file(&neighbor).unwrap();
     let names: Vec<_> = std::fs::read_dir(&folder.0)
         .unwrap()
         .map(|entry| entry.unwrap().file_name())

@@ -209,18 +209,36 @@ impl Store for Sqlite {
         upload: &str,
         attachment: &AttachmentId,
         size: u64,
+        parts: u64,
     ) -> Result<(), Error> {
         let size = i64::try_from(size).map_err(failed)?;
         let transaction = self.connection.transaction().map_err(failed)?;
+        let kept: i64 = transaction
+            .query_row(
+                "SELECT count(*) FROM parts WHERE upload = ?1",
+                [upload],
+                |row| row.get(0),
+            )
+            .map_err(failed)?;
+        if kept as u64 != parts {
+            return Err(Error::Storage(format!(
+                "the upload has {kept} of its {parts} parts"
+            )));
+        }
         let added = transaction
             .execute(
                 "INSERT OR IGNORE INTO attachments (id, upload, size) VALUES (?1, ?2, ?3)",
                 params![attachment.as_str(), upload, size],
             )
             .map_err(failed)?;
+        // A copy of a kept attachment goes, unless it is the upload the attachment names.
         if added == 0 {
             transaction
-                .execute("DELETE FROM parts WHERE upload = ?1", [upload])
+                .execute(
+                    "DELETE FROM parts WHERE upload = ?1 \
+                     AND NOT EXISTS (SELECT 1 FROM attachments WHERE upload = ?1)",
+                    [upload],
+                )
                 .map_err(failed)?;
         }
         transaction.commit().map_err(failed)
@@ -306,9 +324,11 @@ mod tests {
         for upload in ["first", "second"] {
             store.put_part(upload, 0, b"tram").unwrap();
             store.put_part(upload, 1, b"28").unwrap();
-            store.finish_upload(upload, &id, 6).unwrap();
+            store.finish_upload(upload, &id, 6, 2).unwrap();
         }
         assert_eq!(parts(&store), 2, "the second copy's parts are dropped");
+        store.finish_upload("first", &id, 6, 2).unwrap();
+        assert_eq!(parts(&store), 2, "finishing again keeps the kept parts");
         store.put_part("unfinished", 0, b"castle").unwrap();
         store.put_part("discarded", 0, b"river").unwrap();
         store.discard_upload("discarded").unwrap();
@@ -346,7 +366,7 @@ mod tests {
         assert_eq!(version, VERSION);
         let id = AttachmentId::parse(&"b".repeat(64)).unwrap();
         store.put_part("upload", 0, b"tram").unwrap();
-        store.finish_upload("upload", &id, 4).unwrap();
+        store.finish_upload("upload", &id, 4, 1).unwrap();
         assert_eq!(store.attachment_size(&id).unwrap(), Some(4));
         std::fs::remove_dir_all(&dir).unwrap();
     }

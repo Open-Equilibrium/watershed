@@ -45,8 +45,8 @@ abstract class LiquidWorkspace implements RustOpaqueInterface {
   Future<Uint8List> readAttachment({required String attachment});
 
   /// Writes an attachment's bytes to `path`, which the person chose in the save dialog,
-  /// replacing what is there only once the whole copy is written: it goes to a hidden file
-  /// beside `path` first, so a save that fails leaves `path` as it was.
+  /// replacing what is there only once the whole copy is written: it goes to a new hidden
+  /// file of its own beside `path` first, so a save that fails leaves `path` as it was.
   Future<void> saveAttachment({
     required String attachment,
     required String path,
