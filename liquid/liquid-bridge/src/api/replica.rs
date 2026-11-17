@@ -13,8 +13,8 @@ use liquid_core::{
 use liquid_storage::Sqlite;
 
 use super::database::{BridgeDatabase, BridgeRow, row_query};
+use super::drawing::BridgeDrawing;
 use super::media::BridgeMedia;
-use super::whiteboard::BridgeWhiteboard;
 use super::workspace::{
     BridgeAnswer, BridgeApplied, BridgeArea, BridgeBlockKind, BridgeChange, BridgeMutation,
     BridgePage, BridgeQuery, BridgeQueryKind, BridgeResource, BridgeTextStyle, BridgeView, id,
@@ -165,8 +165,8 @@ impl LiquidWorkspace {
             | Mutation::SetCodeLanguage { page, .. }
             | Mutation::AddMediaBlock { page, .. }
             | Mutation::AddWhiteboardBlock { page, .. }
-            | Mutation::SetWhiteboardStyle { page, .. }
-            | Mutation::EditWhiteboard { page, .. }
+            | Mutation::SetDrawingStyle { page, .. }
+            | Mutation::EditDrawing { page, .. }
             | Mutation::AddDatabaseBlock { page, .. }
             | Mutation::RenameDatabase { page, .. }
             | Mutation::AddField { page, .. }
@@ -260,7 +260,7 @@ impl LiquidWorkspace {
             style: None,
             language: None,
             media: None,
-            whiteboard: None,
+            drawing: None,
             database: None,
             rows: Vec::new(),
         };
@@ -345,14 +345,16 @@ impl LiquidWorkspace {
                     .map_err(message)?
                     .map(BridgeMedia::of);
             }
-            BridgeQueryKind::Whiteboard => {
+            BridgeQueryKind::Drawing => {
                 let page = id(&query.page, PageId::parse, "page")?;
                 *read = Some(page.clone());
                 let block = id(&query.block, BlockId::parse, "block")?;
-                answer.whiteboard = workspace
-                    .whiteboard(&page, &block)
+                let pages = u32::try_from(start).unwrap_or(u32::MAX)
+                    ..u32::try_from(start.saturating_add(limit)).unwrap_or(u32::MAX);
+                answer.drawing = workspace
+                    .drawing(&page, &block, pages)
                     .map_err(message)?
-                    .map(BridgeWhiteboard::of);
+                    .map(BridgeDrawing::of);
             }
             BridgeQueryKind::Database => {
                 let page = id(&query.page, PageId::parse, "page")?;

@@ -4,7 +4,7 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 
-import '../rust/api/whiteboard.dart';
+import '../rust/api/drawing.dart';
 import '../rust/api/workspace.dart';
 import '../workspace/follow.dart';
 import '../workspace/page_views.dart';
@@ -81,7 +81,7 @@ class BoardController extends ChangeNotifier {
 
   /// The elements, bottom to top; none until first read.
   List<BridgeElement> elements = const [];
-  BridgeWhiteboardStyle style = BridgeWhiteboardStyle.handDrawn;
+  BridgeDrawingStyle style = BridgeDrawingStyle.handDrawn;
   bool loaded = false;
 
   /// Where the canvas looks: the board point at the view's top left, and the zoom.
@@ -116,7 +116,7 @@ class BoardController extends ChangeNotifier {
   int _reads = 0;
   var _disposed = false;
 
-  bool get handDrawn => style == BridgeWhiteboardStyle.handDrawn;
+  bool get handDrawn => style == BridgeDrawingStyle.handDrawn;
 
   void _report(Object error) => _state.report('$error');
 
@@ -127,14 +127,14 @@ class BoardController extends ChangeNotifier {
     final writing = _writing;
     try {
       final answer = await _state.read(
-        query(BridgeQueryKind.whiteboard, page: views.page, block: view.block),
+        query(BridgeQueryKind.drawing, page: views.page, block: view.block),
       );
       if (_disposed || asked != _reads || writing != _writing) return;
       if (_holds > 0) {
         _heldRead = true;
         return;
       }
-      final board = answer.whiteboard;
+      final board = answer.drawing;
       if (board == null) {
         // Gone, as another device deleted it: full screen shows it no more.
         if (views.fullBoard.value?.id == view.id) views.fullBoard.value = null;
@@ -193,10 +193,10 @@ class BoardController extends ChangeNotifier {
     try {
       await views.write(
         mutation(
-          BridgeMutationKind.editWhiteboard,
+          BridgeMutationKind.editDrawing,
           page: views.page,
           block: view.block,
-          whiteboard: BridgeWhiteboardEdit(
+          drawing: BridgeDrawingEdit(
             add: add,
             change: change,
             remove: remove,
@@ -229,6 +229,7 @@ class BoardController extends ChangeNotifier {
     rotation: c.rotation,
     color: c.color,
     width: c.width,
+    docPage: element.docPage,
     pen: element.pen,
     points: element.points,
     shape: element.shape,
@@ -241,18 +242,18 @@ class BoardController extends ChangeNotifier {
   /// Switches the whole board between hand-drawn and clean.
   Future<void> toggleStyle() async {
     final next = handDrawn
-        ? BridgeWhiteboardStyle.clean
-        : BridgeWhiteboardStyle.handDrawn;
+        ? BridgeDrawingStyle.clean
+        : BridgeDrawingStyle.handDrawn;
     style = next;
     notifyListeners();
     _writing++;
     try {
       await views.write(
         mutation(
-          BridgeMutationKind.setWhiteboardStyle,
+          BridgeMutationKind.setDrawingStyle,
           page: views.page,
           block: view.block,
-          whiteboardStyle: next,
+          drawingStyle: next,
         ),
         [view.block],
       );

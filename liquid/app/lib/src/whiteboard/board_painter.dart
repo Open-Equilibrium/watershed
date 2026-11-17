@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../rust/api/whiteboard.dart';
+import '../rust/api/drawing.dart';
 import '../theme/tokens.g.dart';
 import 'board.dart';
 import 'board_controller.dart';

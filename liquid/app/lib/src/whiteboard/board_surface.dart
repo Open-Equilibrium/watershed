@@ -5,7 +5,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../rust/api/whiteboard.dart';
+import '../rust/api/drawing.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'board.dart';
@@ -469,6 +469,7 @@ class BoardSurfaceState extends State<BoardSurface> {
           rotation: element.rotation,
           color: element.color,
           width: element.width,
+          docPage: element.docPage,
           pen: element.pen,
           points: packPoints(piece),
         );
@@ -483,6 +484,7 @@ class BoardSurfaceState extends State<BoardSurface> {
           rotation: made.rotation,
           color: made.color,
           width: made.width,
+          docPage: made.docPage,
           pen: made.pen,
           points: made.points,
           shape: made.shape,
@@ -524,6 +526,7 @@ class BoardSurfaceState extends State<BoardSurface> {
           rotation: piece.rotation,
           color: piece.color,
           width: piece.width,
+          docPage: piece.docPage,
           pen: piece.pen,
           points: piece.points,
           shape: piece.shape,
@@ -708,6 +711,7 @@ class BoardSurfaceState extends State<BoardSurface> {
     rotation: rotation,
     color: element.color,
     width: element.width,
+    docPage: element.docPage,
     pen: element.pen,
     points: element.points,
     shape: element.shape,
@@ -807,6 +811,7 @@ class BoardSurfaceState extends State<BoardSurface> {
     rotation: element.rotation,
     color: element.color,
     width: element.width,
+    docPage: element.docPage,
     pen: element.pen,
     points: element.points,
     shape: element.shape,

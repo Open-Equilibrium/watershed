@@ -5,9 +5,9 @@
 #![allow(clippy::unwrap_used)]
 
 use liquid_core::{
-    Actor, Applied, BlockId, BlockKind, Content, Created, Element, ElementChange, ElementId, Error,
-    Frame, InkColor, MAX_BOARD_POINTS, MAX_ELEMENTS, MAX_POINTS, MemoryStore, Mutation, Origin,
-    PageId, Pen, PersonId, Request, Shape, WhiteboardStyle,
+    Actor, Applied, BlockId, BlockKind, Content, Created, DrawingStyle, Element, ElementChange,
+    ElementId, Error, Frame, InkColor, MAX_BOARD_POINTS, MAX_ELEMENTS, MAX_POINTS, MemoryStore,
+    Mutation, Origin, PageId, Pen, PersonId, Request, Shape,
 };
 
 type Workspace = liquid_core::Workspace<MemoryStore>;
@@ -83,6 +83,7 @@ fn stroke(xs: &[f32]) -> Element {
         ),
         color: InkColor::Data3,
         width: 1,
+        doc_page: 0,
         content: Content::Stroke {
             pen: Pen::Fountain,
             points: points(&drawn),
@@ -95,6 +96,7 @@ fn rectangle() -> Element {
         frame: frame(40.0, 66.0, 150.0, 70.0),
         color: InkColor::Data1,
         width: 1,
+        doc_page: 0,
         content: Content::Shape {
             shape: Shape::Rectangle,
             seed: 7,
@@ -107,6 +109,7 @@ fn text(text: &str) -> Element {
         frame: frame(115.0, 97.0, 120.0, 24.0),
         color: InkColor::Text,
         width: 1,
+        doc_page: 0,
         content: Content::Text { text: text.into() },
     }
 }
@@ -118,7 +121,7 @@ fn edit(
     change: Vec<ElementChange>,
     remove: Vec<ElementId>,
 ) -> Mutation {
-    Mutation::EditWhiteboard {
+    Mutation::EditDrawing {
         page: page.clone(),
         block: block.clone(),
         add,
@@ -148,7 +151,11 @@ fn elements(
     page: &PageId,
     block: &BlockId,
 ) -> Vec<(ElementId, Element)> {
-    workspace.whiteboard(page, block).unwrap().unwrap().elements
+    workspace
+        .drawing(page, block, 0..1)
+        .unwrap()
+        .unwrap()
+        .elements
 }
 
 #[test]
@@ -158,10 +165,10 @@ fn a_whiteboard_keeps_its_elements_in_drawing_order() {
         workspace.views(&page, 0, 10).unwrap()[0].kind,
         BlockKind::Whiteboard
     );
-    let board = workspace.whiteboard(&page, &block).unwrap().unwrap();
+    let board = workspace.drawing(&page, &block, 0..1).unwrap().unwrap();
     assert_eq!(
         board.style,
-        WhiteboardStyle::HandDrawn,
+        DrawingStyle::HandDrawn,
         "hand-drawn by default"
     );
     assert!(board.elements.is_empty());
@@ -321,19 +328,23 @@ fn erasing_part_of_a_stroke_replaces_it_by_its_pieces_in_one_action() {
 #[test]
 fn the_style_belongs_to_the_whole_board() {
     let (mut workspace, page, block) = board();
-    let set = |style| Mutation::SetWhiteboardStyle {
+    let set = |style| Mutation::SetDrawingStyle {
         page: page.clone(),
         block: block.clone(),
         style,
     };
-    apply(&mut workspace, set(WhiteboardStyle::Clean)).unwrap();
+    apply(&mut workspace, set(DrawingStyle::Clean)).unwrap();
     workspace.close_page(&page);
     assert_eq!(
-        workspace.whiteboard(&page, &block).unwrap().unwrap().style,
-        WhiteboardStyle::Clean
+        workspace
+            .drawing(&page, &block, 0..1)
+            .unwrap()
+            .unwrap()
+            .style,
+        DrawingStyle::Clean
     );
     assert_eq!(
-        apply(&mut workspace, set(WhiteboardStyle::Clean)),
+        apply(&mut workspace, set(DrawingStyle::Clean)),
         Err(Error::NoChange)
     );
 }

@@ -42,7 +42,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 521453942;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -158675851;
 
 // Section: executor
 
@@ -4590,6 +4590,38 @@ fn wire__crate__api__replica__LiquidWorkspace_subscribe_impl(
         },
     )
 }
+fn wire__crate__api__drawing__bridge_drawing_edit_default_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "bridge_drawing_edit_default",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok = Ok::<_, ()>(crate::api::drawing::BridgeDrawingEdit::default())?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__events__bridge_usage_default_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -4616,39 +4648,6 @@ fn wire__crate__api__events__bridge_usage_default_impl(
             move |context| {
                 transform_result_sse::<_, ()>((move || {
                     let output_ok = Ok::<_, ()>(crate::api::events::BridgeUsage::default())?;
-                    std::result::Result::Ok(output_ok)
-                })())
-            }
-        },
-    )
-}
-fn wire__crate__api__whiteboard__bridge_whiteboard_edit_default_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "bridge_whiteboard_edit_default",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            deserializer.end();
-            move |context| {
-                transform_result_sse::<_, ()>((move || {
-                    let output_ok =
-                        Ok::<_, ()>(crate::api::whiteboard::BridgeWhiteboardEdit::default())?;
                     std::result::Result::Ok(output_ok)
                 })())
             }
@@ -5033,8 +5032,8 @@ impl SseDecode for crate::api::workspace::BridgeAnswer {
             <Option<crate::api::workspace::BridgeTextStyle>>::sse_decode(deserializer);
         let mut var_language = <Option<String>>::sse_decode(deserializer);
         let mut var_media = <Option<crate::api::media::BridgeMedia>>::sse_decode(deserializer);
-        let mut var_whiteboard =
-            <Option<crate::api::whiteboard::BridgeWhiteboard>>::sse_decode(deserializer);
+        let mut var_drawing =
+            <Option<crate::api::drawing::BridgeDrawing>>::sse_decode(deserializer);
         let mut var_database =
             <Option<crate::api::database::BridgeDatabase>>::sse_decode(deserializer);
         let mut var_rows = <Vec<crate::api::database::BridgeRow>>::sse_decode(deserializer);
@@ -5047,7 +5046,7 @@ impl SseDecode for crate::api::workspace::BridgeAnswer {
             style: var_style,
             language: var_language,
             media: var_media,
-            whiteboard: var_whiteboard,
+            drawing: var_drawing,
             database: var_database,
             rows: var_rows,
         };
@@ -5280,26 +5279,66 @@ impl SseDecode for crate::api::database::BridgeDatabase {
     }
 }
 
-impl SseDecode for crate::api::whiteboard::BridgeElement {
+impl SseDecode for crate::api::drawing::BridgeDrawing {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_style = <crate::api::drawing::BridgeDrawingStyle>::sse_decode(deserializer);
+        let mut var_elements = <Vec<crate::api::drawing::BridgeElement>>::sse_decode(deserializer);
+        return crate::api::drawing::BridgeDrawing {
+            style: var_style,
+            elements: var_elements,
+        };
+    }
+}
+
+impl SseDecode for crate::api::drawing::BridgeDrawingEdit {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_add = <Vec<crate::api::drawing::BridgeElement>>::sse_decode(deserializer);
+        let mut var_change =
+            <Vec<crate::api::drawing::BridgeElementChange>>::sse_decode(deserializer);
+        let mut var_remove = <Vec<String>>::sse_decode(deserializer);
+        return crate::api::drawing::BridgeDrawingEdit {
+            add: var_add,
+            change: var_change,
+            remove: var_remove,
+        };
+    }
+}
+
+impl SseDecode for crate::api::drawing::BridgeDrawingStyle {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::drawing::BridgeDrawingStyle::HandDrawn,
+            1 => crate::api::drawing::BridgeDrawingStyle::Clean,
+            _ => unreachable!("Invalid variant for BridgeDrawingStyle: {}", inner),
+        };
+    }
+}
+
+impl SseDecode for crate::api::drawing::BridgeElement {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_id = <Option<String>>::sse_decode(deserializer);
-        let mut var_kind = <crate::api::whiteboard::BridgeElementKind>::sse_decode(deserializer);
+        let mut var_kind = <crate::api::drawing::BridgeElementKind>::sse_decode(deserializer);
         let mut var_x = <f64>::sse_decode(deserializer);
         let mut var_y = <f64>::sse_decode(deserializer);
         let mut var_w = <f64>::sse_decode(deserializer);
         let mut var_h = <f64>::sse_decode(deserializer);
         let mut var_rotation = <f64>::sse_decode(deserializer);
-        let mut var_color = <crate::api::whiteboard::BridgeInkColor>::sse_decode(deserializer);
+        let mut var_color = <crate::api::drawing::BridgeInkColor>::sse_decode(deserializer);
         let mut var_width = <i64>::sse_decode(deserializer);
-        let mut var_pen = <crate::api::whiteboard::BridgePen>::sse_decode(deserializer);
+        let mut var_docPage = <i64>::sse_decode(deserializer);
+        let mut var_pen = <crate::api::drawing::BridgePen>::sse_decode(deserializer);
         let mut var_points = <Vec<u8>>::sse_decode(deserializer);
-        let mut var_shape = <crate::api::whiteboard::BridgeShape>::sse_decode(deserializer);
+        let mut var_shape = <crate::api::drawing::BridgeShape>::sse_decode(deserializer);
         let mut var_seed = <i64>::sse_decode(deserializer);
         let mut var_arrowhead = <bool>::sse_decode(deserializer);
         let mut var_corners = <Vec<f64>>::sse_decode(deserializer);
         let mut var_text = <String>::sse_decode(deserializer);
-        return crate::api::whiteboard::BridgeElement {
+        return crate::api::drawing::BridgeElement {
             id: var_id,
             kind: var_kind,
             x: var_x,
@@ -5309,6 +5348,7 @@ impl SseDecode for crate::api::whiteboard::BridgeElement {
             rotation: var_rotation,
             color: var_color,
             width: var_width,
+            doc_page: var_docPage,
             pen: var_pen,
             points: var_points,
             shape: var_shape,
@@ -5320,7 +5360,7 @@ impl SseDecode for crate::api::whiteboard::BridgeElement {
     }
 }
 
-impl SseDecode for crate::api::whiteboard::BridgeElementChange {
+impl SseDecode for crate::api::drawing::BridgeElementChange {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_id = <String>::sse_decode(deserializer);
@@ -5329,11 +5369,11 @@ impl SseDecode for crate::api::whiteboard::BridgeElementChange {
         let mut var_w = <f64>::sse_decode(deserializer);
         let mut var_h = <f64>::sse_decode(deserializer);
         let mut var_rotation = <f64>::sse_decode(deserializer);
-        let mut var_color = <crate::api::whiteboard::BridgeInkColor>::sse_decode(deserializer);
+        let mut var_color = <crate::api::drawing::BridgeInkColor>::sse_decode(deserializer);
         let mut var_width = <i64>::sse_decode(deserializer);
         let mut var_text = <Option<String>>::sse_decode(deserializer);
         let mut var_arrowhead = <Option<bool>>::sse_decode(deserializer);
-        return crate::api::whiteboard::BridgeElementChange {
+        return crate::api::drawing::BridgeElementChange {
             id: var_id,
             x: var_x,
             y: var_y,
@@ -5348,14 +5388,14 @@ impl SseDecode for crate::api::whiteboard::BridgeElementChange {
     }
 }
 
-impl SseDecode for crate::api::whiteboard::BridgeElementKind {
+impl SseDecode for crate::api::drawing::BridgeElementKind {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut inner = <i32>::sse_decode(deserializer);
         return match inner {
-            0 => crate::api::whiteboard::BridgeElementKind::Stroke,
-            1 => crate::api::whiteboard::BridgeElementKind::Shape,
-            2 => crate::api::whiteboard::BridgeElementKind::Text,
+            0 => crate::api::drawing::BridgeElementKind::Stroke,
+            1 => crate::api::drawing::BridgeElementKind::Shape,
+            2 => crate::api::drawing::BridgeElementKind::Text,
             _ => unreachable!("Invalid variant for BridgeElementKind: {}", inner),
         };
     }
@@ -5570,15 +5610,19 @@ impl SseDecode for crate::api::git::BridgeGitStatus {
     }
 }
 
-impl SseDecode for crate::api::whiteboard::BridgeInkColor {
+impl SseDecode for crate::api::drawing::BridgeInkColor {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut inner = <i32>::sse_decode(deserializer);
         return match inner {
-            0 => crate::api::whiteboard::BridgeInkColor::Text,
-            1 => crate::api::whiteboard::BridgeInkColor::Data1,
-            2 => crate::api::whiteboard::BridgeInkColor::Data2,
-            3 => crate::api::whiteboard::BridgeInkColor::Data3,
+            0 => crate::api::drawing::BridgeInkColor::Text,
+            1 => crate::api::drawing::BridgeInkColor::Data1,
+            2 => crate::api::drawing::BridgeInkColor::Data2,
+            3 => crate::api::drawing::BridgeInkColor::Data3,
+            4 => crate::api::drawing::BridgeInkColor::Yellow,
+            5 => crate::api::drawing::BridgeInkColor::Green,
+            6 => crate::api::drawing::BridgeInkColor::Blue,
+            7 => crate::api::drawing::BridgeInkColor::Pink,
             _ => unreachable!("Invalid variant for BridgeInkColor: {}", inner),
         };
     }
@@ -5843,10 +5887,10 @@ impl SseDecode for crate::api::workspace::BridgeMutation {
         let mut var_cell = <Option<crate::api::database::BridgeCell>>::sse_decode(deserializer);
         let mut var_mediaType = <Option<String>>::sse_decode(deserializer);
         let mut var_attachment = <Option<String>>::sse_decode(deserializer);
-        let mut var_whiteboardStyle =
-            <Option<crate::api::whiteboard::BridgeWhiteboardStyle>>::sse_decode(deserializer);
-        let mut var_whiteboard =
-            <Option<crate::api::whiteboard::BridgeWhiteboardEdit>>::sse_decode(deserializer);
+        let mut var_drawingStyle =
+            <Option<crate::api::drawing::BridgeDrawingStyle>>::sse_decode(deserializer);
+        let mut var_drawing =
+            <Option<crate::api::drawing::BridgeDrawingEdit>>::sse_decode(deserializer);
         return crate::api::workspace::BridgeMutation {
             kind: var_kind,
             area: var_area,
@@ -5868,8 +5912,8 @@ impl SseDecode for crate::api::workspace::BridgeMutation {
             cell: var_cell,
             media_type: var_mediaType,
             attachment: var_attachment,
-            whiteboard_style: var_whiteboardStyle,
-            whiteboard: var_whiteboard,
+            drawing_style: var_drawingStyle,
+            drawing: var_drawing,
         };
     }
 }
@@ -5894,8 +5938,8 @@ impl SseDecode for crate::api::workspace::BridgeMutationKind {
             12 => crate::api::workspace::BridgeMutationKind::SetCodeLanguage,
             13 => crate::api::workspace::BridgeMutationKind::AddMediaBlock,
             14 => crate::api::workspace::BridgeMutationKind::AddWhiteboardBlock,
-            15 => crate::api::workspace::BridgeMutationKind::SetWhiteboardStyle,
-            16 => crate::api::workspace::BridgeMutationKind::EditWhiteboard,
+            15 => crate::api::workspace::BridgeMutationKind::SetDrawingStyle,
+            16 => crate::api::workspace::BridgeMutationKind::EditDrawing,
             17 => crate::api::workspace::BridgeMutationKind::AddDatabaseBlock,
             18 => crate::api::workspace::BridgeMutationKind::RenameDatabase,
             19 => crate::api::workspace::BridgeMutationKind::AddField,
@@ -5963,14 +6007,15 @@ impl SseDecode for crate::api::hosts::BridgePairing {
     }
 }
 
-impl SseDecode for crate::api::whiteboard::BridgePen {
+impl SseDecode for crate::api::drawing::BridgePen {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut inner = <i32>::sse_decode(deserializer);
         return match inner {
-            0 => crate::api::whiteboard::BridgePen::Ball,
-            1 => crate::api::whiteboard::BridgePen::Fountain,
-            2 => crate::api::whiteboard::BridgePen::Brush,
+            0 => crate::api::drawing::BridgePen::Ball,
+            1 => crate::api::drawing::BridgePen::Fountain,
+            2 => crate::api::drawing::BridgePen::Brush,
+            3 => crate::api::drawing::BridgePen::Highlighter,
             _ => unreachable!("Invalid variant for BridgePen: {}", inner),
         };
     }
@@ -6102,7 +6147,7 @@ impl SseDecode for crate::api::workspace::BridgeQueryKind {
             3 => crate::api::workspace::BridgeQueryKind::Text,
             4 => crate::api::workspace::BridgeQueryKind::Code,
             5 => crate::api::workspace::BridgeQueryKind::Media,
-            6 => crate::api::workspace::BridgeQueryKind::Whiteboard,
+            6 => crate::api::workspace::BridgeQueryKind::Drawing,
             7 => crate::api::workspace::BridgeQueryKind::Database,
             8 => crate::api::workspace::BridgeQueryKind::Rows,
             _ => unreachable!("Invalid variant for BridgeQueryKind: {}", inner),
@@ -6317,15 +6362,15 @@ impl SseDecode for crate::api::details::BridgeScheduleKind {
     }
 }
 
-impl SseDecode for crate::api::whiteboard::BridgeShape {
+impl SseDecode for crate::api::drawing::BridgeShape {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut inner = <i32>::sse_decode(deserializer);
         return match inner {
-            0 => crate::api::whiteboard::BridgeShape::Line,
-            1 => crate::api::whiteboard::BridgeShape::Rectangle,
-            2 => crate::api::whiteboard::BridgeShape::Ellipse,
-            3 => crate::api::whiteboard::BridgeShape::Triangle,
+            0 => crate::api::drawing::BridgeShape::Line,
+            1 => crate::api::drawing::BridgeShape::Rectangle,
+            2 => crate::api::drawing::BridgeShape::Ellipse,
+            3 => crate::api::drawing::BridgeShape::Triangle,
             _ => unreachable!("Invalid variant for BridgeShape: {}", inner),
         };
     }
@@ -6605,47 +6650,6 @@ impl SseDecode for crate::api::workspace::BridgeView {
     }
 }
 
-impl SseDecode for crate::api::whiteboard::BridgeWhiteboard {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_style =
-            <crate::api::whiteboard::BridgeWhiteboardStyle>::sse_decode(deserializer);
-        let mut var_elements =
-            <Vec<crate::api::whiteboard::BridgeElement>>::sse_decode(deserializer);
-        return crate::api::whiteboard::BridgeWhiteboard {
-            style: var_style,
-            elements: var_elements,
-        };
-    }
-}
-
-impl SseDecode for crate::api::whiteboard::BridgeWhiteboardEdit {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_add = <Vec<crate::api::whiteboard::BridgeElement>>::sse_decode(deserializer);
-        let mut var_change =
-            <Vec<crate::api::whiteboard::BridgeElementChange>>::sse_decode(deserializer);
-        let mut var_remove = <Vec<String>>::sse_decode(deserializer);
-        return crate::api::whiteboard::BridgeWhiteboardEdit {
-            add: var_add,
-            change: var_change,
-            remove: var_remove,
-        };
-    }
-}
-
-impl SseDecode for crate::api::whiteboard::BridgeWhiteboardStyle {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut inner = <i32>::sse_decode(deserializer);
-        return match inner {
-            0 => crate::api::whiteboard::BridgeWhiteboardStyle::HandDrawn,
-            1 => crate::api::whiteboard::BridgeWhiteboardStyle::Clean,
-            _ => unreachable!("Invalid variant for BridgeWhiteboardStyle: {}", inner),
-        };
-    }
-}
-
 impl SseDecode for f64 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -6721,13 +6725,13 @@ impl SseDecode for Vec<crate::api::details::BridgeAutomation> {
     }
 }
 
-impl SseDecode for Vec<crate::api::whiteboard::BridgeElement> {
+impl SseDecode for Vec<crate::api::drawing::BridgeElement> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut len_ = <i32>::sse_decode(deserializer);
         let mut ans_ = Vec::with_capacity(len_ as usize);
         for idx_ in 0..len_ {
-            ans_.push(<crate::api::whiteboard::BridgeElement>::sse_decode(
+            ans_.push(<crate::api::drawing::BridgeElement>::sse_decode(
                 deserializer,
             ));
         }
@@ -6735,13 +6739,13 @@ impl SseDecode for Vec<crate::api::whiteboard::BridgeElement> {
     }
 }
 
-impl SseDecode for Vec<crate::api::whiteboard::BridgeElementChange> {
+impl SseDecode for Vec<crate::api::drawing::BridgeElementChange> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut len_ = <i32>::sse_decode(deserializer);
         let mut ans_ = Vec::with_capacity(len_ as usize);
         for idx_ in 0..len_ {
-            ans_.push(<crate::api::whiteboard::BridgeElementChange>::sse_decode(
+            ans_.push(<crate::api::drawing::BridgeElementChange>::sse_decode(
                 deserializer,
             ));
         }
@@ -7210,6 +7214,45 @@ impl SseDecode for Option<crate::api::database::BridgeDatabase> {
     }
 }
 
+impl SseDecode for Option<crate::api::drawing::BridgeDrawing> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::drawing::BridgeDrawing>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::drawing::BridgeDrawingEdit> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::drawing::BridgeDrawingEdit>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::drawing::BridgeDrawingStyle> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::drawing::BridgeDrawingStyle>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<crate::api::database::BridgeFieldKind> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -7335,45 +7378,6 @@ impl SseDecode for Option<crate::api::details::BridgeUsageLimits> {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<crate::api::details::BridgeUsageLimits>::sse_decode(
-                deserializer,
-            ));
-        } else {
-            return None;
-        }
-    }
-}
-
-impl SseDecode for Option<crate::api::whiteboard::BridgeWhiteboard> {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        if (<bool>::sse_decode(deserializer)) {
-            return Some(<crate::api::whiteboard::BridgeWhiteboard>::sse_decode(
-                deserializer,
-            ));
-        } else {
-            return None;
-        }
-    }
-}
-
-impl SseDecode for Option<crate::api::whiteboard::BridgeWhiteboardEdit> {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        if (<bool>::sse_decode(deserializer)) {
-            return Some(<crate::api::whiteboard::BridgeWhiteboardEdit>::sse_decode(
-                deserializer,
-            ));
-        } else {
-            return None;
-        }
-    }
-}
-
-impl SseDecode for Option<crate::api::whiteboard::BridgeWhiteboardStyle> {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        if (<bool>::sse_decode(deserializer)) {
-            return Some(<crate::api::whiteboard::BridgeWhiteboardStyle>::sse_decode(
                 deserializer,
             ));
         } else {
@@ -7780,15 +7784,15 @@ fn pde_ffi_dispatcher_primary_impl(
             rust_vec_len,
             data_len,
         ),
-        88 => {
-            wire__crate__api__events__bridge_usage_default_impl(port, ptr, rust_vec_len, data_len)
-        }
-        89 => wire__crate__api__whiteboard__bridge_whiteboard_edit_default_impl(
+        88 => wire__crate__api__drawing__bridge_drawing_edit_default_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
+        89 => {
+            wire__crate__api__events__bridge_usage_default_impl(port, ptr, rust_vec_len, data_len)
+        }
         90 => wire__crate__api__hosts__forget_agent_host_impl(port, ptr, rust_vec_len, data_len),
         91 => wire__crate__api__hosts__pair_agent_host_impl(port, ptr, rust_vec_len, data_len),
         92 => {
@@ -7902,7 +7906,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeAnswer {
             self.style.into_into_dart().into_dart(),
             self.language.into_into_dart().into_dart(),
             self.media.into_into_dart().into_dart(),
-            self.whiteboard.into_into_dart().into_dart(),
+            self.drawing.into_into_dart().into_dart(),
             self.database.into_into_dart().into_dart(),
             self.rows.into_into_dart().into_dart(),
         ]
@@ -8249,7 +8253,71 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::database::BridgeDatabase>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::api::whiteboard::BridgeElement {
+impl flutter_rust_bridge::IntoDart for crate::api::drawing::BridgeDrawing {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.style.into_into_dart().into_dart(),
+            self.elements.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::drawing::BridgeDrawing
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::drawing::BridgeDrawing>
+    for crate::api::drawing::BridgeDrawing
+{
+    fn into_into_dart(self) -> crate::api::drawing::BridgeDrawing {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::drawing::BridgeDrawingEdit {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.add.into_into_dart().into_dart(),
+            self.change.into_into_dart().into_dart(),
+            self.remove.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::drawing::BridgeDrawingEdit
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::drawing::BridgeDrawingEdit>
+    for crate::api::drawing::BridgeDrawingEdit
+{
+    fn into_into_dart(self) -> crate::api::drawing::BridgeDrawingEdit {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::drawing::BridgeDrawingStyle {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::HandDrawn => 0.into_dart(),
+            Self::Clean => 1.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::drawing::BridgeDrawingStyle
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::drawing::BridgeDrawingStyle>
+    for crate::api::drawing::BridgeDrawingStyle
+{
+    fn into_into_dart(self) -> crate::api::drawing::BridgeDrawingStyle {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::drawing::BridgeElement {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.id.into_into_dart().into_dart(),
@@ -8261,6 +8329,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::whiteboard::BridgeElement {
             self.rotation.into_into_dart().into_dart(),
             self.color.into_into_dart().into_dart(),
             self.width.into_into_dart().into_dart(),
+            self.doc_page.into_into_dart().into_dart(),
             self.pen.into_into_dart().into_dart(),
             self.points.into_into_dart().into_dart(),
             self.shape.into_into_dart().into_dart(),
@@ -8273,18 +8342,18 @@ impl flutter_rust_bridge::IntoDart for crate::api::whiteboard::BridgeElement {
     }
 }
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::api::whiteboard::BridgeElement
+    for crate::api::drawing::BridgeElement
 {
 }
-impl flutter_rust_bridge::IntoIntoDart<crate::api::whiteboard::BridgeElement>
-    for crate::api::whiteboard::BridgeElement
+impl flutter_rust_bridge::IntoIntoDart<crate::api::drawing::BridgeElement>
+    for crate::api::drawing::BridgeElement
 {
-    fn into_into_dart(self) -> crate::api::whiteboard::BridgeElement {
+    fn into_into_dart(self) -> crate::api::drawing::BridgeElement {
         self
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::api::whiteboard::BridgeElementChange {
+impl flutter_rust_bridge::IntoDart for crate::api::drawing::BridgeElementChange {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.id.into_into_dart().into_dart(),
@@ -8302,18 +8371,18 @@ impl flutter_rust_bridge::IntoDart for crate::api::whiteboard::BridgeElementChan
     }
 }
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::api::whiteboard::BridgeElementChange
+    for crate::api::drawing::BridgeElementChange
 {
 }
-impl flutter_rust_bridge::IntoIntoDart<crate::api::whiteboard::BridgeElementChange>
-    for crate::api::whiteboard::BridgeElementChange
+impl flutter_rust_bridge::IntoIntoDart<crate::api::drawing::BridgeElementChange>
+    for crate::api::drawing::BridgeElementChange
 {
-    fn into_into_dart(self) -> crate::api::whiteboard::BridgeElementChange {
+    fn into_into_dart(self) -> crate::api::drawing::BridgeElementChange {
         self
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::api::whiteboard::BridgeElementKind {
+impl flutter_rust_bridge::IntoDart for crate::api::drawing::BridgeElementKind {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
             Self::Stroke => 0.into_dart(),
@@ -8324,13 +8393,13 @@ impl flutter_rust_bridge::IntoDart for crate::api::whiteboard::BridgeElementKind
     }
 }
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::api::whiteboard::BridgeElementKind
+    for crate::api::drawing::BridgeElementKind
 {
 }
-impl flutter_rust_bridge::IntoIntoDart<crate::api::whiteboard::BridgeElementKind>
-    for crate::api::whiteboard::BridgeElementKind
+impl flutter_rust_bridge::IntoIntoDart<crate::api::drawing::BridgeElementKind>
+    for crate::api::drawing::BridgeElementKind
 {
-    fn into_into_dart(self) -> crate::api::whiteboard::BridgeElementKind {
+    fn into_into_dart(self) -> crate::api::drawing::BridgeElementKind {
         self
     }
 }
@@ -8614,25 +8683,29 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::git::BridgeGitStatus>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::api::whiteboard::BridgeInkColor {
+impl flutter_rust_bridge::IntoDart for crate::api::drawing::BridgeInkColor {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
             Self::Text => 0.into_dart(),
             Self::Data1 => 1.into_dart(),
             Self::Data2 => 2.into_dart(),
             Self::Data3 => 3.into_dart(),
+            Self::Yellow => 4.into_dart(),
+            Self::Green => 5.into_dart(),
+            Self::Blue => 6.into_dart(),
+            Self::Pink => 7.into_dart(),
             _ => unreachable!(),
         }
     }
 }
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::api::whiteboard::BridgeInkColor
+    for crate::api::drawing::BridgeInkColor
 {
 }
-impl flutter_rust_bridge::IntoIntoDart<crate::api::whiteboard::BridgeInkColor>
-    for crate::api::whiteboard::BridgeInkColor
+impl flutter_rust_bridge::IntoIntoDart<crate::api::drawing::BridgeInkColor>
+    for crate::api::drawing::BridgeInkColor
 {
-    fn into_into_dart(self) -> crate::api::whiteboard::BridgeInkColor {
+    fn into_into_dart(self) -> crate::api::drawing::BridgeInkColor {
         self
     }
 }
@@ -8978,8 +9051,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeMutation {
             self.cell.into_into_dart().into_dart(),
             self.media_type.into_into_dart().into_dart(),
             self.attachment.into_into_dart().into_dart(),
-            self.whiteboard_style.into_into_dart().into_dart(),
-            self.whiteboard.into_into_dart().into_dart(),
+            self.drawing_style.into_into_dart().into_dart(),
+            self.drawing.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -9014,8 +9087,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeMutationKind
             Self::SetCodeLanguage => 12.into_dart(),
             Self::AddMediaBlock => 13.into_dart(),
             Self::AddWhiteboardBlock => 14.into_dart(),
-            Self::SetWhiteboardStyle => 15.into_dart(),
-            Self::EditWhiteboard => 16.into_dart(),
+            Self::SetDrawingStyle => 15.into_dart(),
+            Self::EditDrawing => 16.into_dart(),
             Self::AddDatabaseBlock => 17.into_dart(),
             Self::RenameDatabase => 18.into_dart(),
             Self::AddField => 19.into_dart(),
@@ -9128,24 +9201,25 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::hosts::BridgePairing>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::api::whiteboard::BridgePen {
+impl flutter_rust_bridge::IntoDart for crate::api::drawing::BridgePen {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
             Self::Ball => 0.into_dart(),
             Self::Fountain => 1.into_dart(),
             Self::Brush => 2.into_dart(),
+            Self::Highlighter => 3.into_dart(),
             _ => unreachable!(),
         }
     }
 }
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::api::whiteboard::BridgePen
+    for crate::api::drawing::BridgePen
 {
 }
-impl flutter_rust_bridge::IntoIntoDart<crate::api::whiteboard::BridgePen>
-    for crate::api::whiteboard::BridgePen
+impl flutter_rust_bridge::IntoIntoDart<crate::api::drawing::BridgePen>
+    for crate::api::drawing::BridgePen
 {
-    fn into_into_dart(self) -> crate::api::whiteboard::BridgePen {
+    fn into_into_dart(self) -> crate::api::drawing::BridgePen {
         self
     }
 }
@@ -9292,7 +9366,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeQueryKind {
             Self::Text => 3.into_dart(),
             Self::Code => 4.into_dart(),
             Self::Media => 5.into_dart(),
-            Self::Whiteboard => 6.into_dart(),
+            Self::Drawing => 6.into_dart(),
             Self::Database => 7.into_dart(),
             Self::Rows => 8.into_dart(),
             _ => unreachable!(),
@@ -9604,7 +9678,7 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::details::BridgeScheduleKind>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::api::whiteboard::BridgeShape {
+impl flutter_rust_bridge::IntoDart for crate::api::drawing::BridgeShape {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
             Self::Line => 0.into_dart(),
@@ -9616,13 +9690,13 @@ impl flutter_rust_bridge::IntoDart for crate::api::whiteboard::BridgeShape {
     }
 }
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::api::whiteboard::BridgeShape
+    for crate::api::drawing::BridgeShape
 {
 }
-impl flutter_rust_bridge::IntoIntoDart<crate::api::whiteboard::BridgeShape>
-    for crate::api::whiteboard::BridgeShape
+impl flutter_rust_bridge::IntoIntoDart<crate::api::drawing::BridgeShape>
+    for crate::api::drawing::BridgeShape
 {
-    fn into_into_dart(self) -> crate::api::whiteboard::BridgeShape {
+    fn into_into_dart(self) -> crate::api::drawing::BridgeShape {
         self
     }
 }
@@ -10006,70 +10080,6 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::workspace::BridgeView>
         self
     }
 }
-// Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::api::whiteboard::BridgeWhiteboard {
-    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [
-            self.style.into_into_dart().into_dart(),
-            self.elements.into_into_dart().into_dart(),
-        ]
-        .into_dart()
-    }
-}
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::api::whiteboard::BridgeWhiteboard
-{
-}
-impl flutter_rust_bridge::IntoIntoDart<crate::api::whiteboard::BridgeWhiteboard>
-    for crate::api::whiteboard::BridgeWhiteboard
-{
-    fn into_into_dart(self) -> crate::api::whiteboard::BridgeWhiteboard {
-        self
-    }
-}
-// Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::api::whiteboard::BridgeWhiteboardEdit {
-    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [
-            self.add.into_into_dart().into_dart(),
-            self.change.into_into_dart().into_dart(),
-            self.remove.into_into_dart().into_dart(),
-        ]
-        .into_dart()
-    }
-}
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::api::whiteboard::BridgeWhiteboardEdit
-{
-}
-impl flutter_rust_bridge::IntoIntoDart<crate::api::whiteboard::BridgeWhiteboardEdit>
-    for crate::api::whiteboard::BridgeWhiteboardEdit
-{
-    fn into_into_dart(self) -> crate::api::whiteboard::BridgeWhiteboardEdit {
-        self
-    }
-}
-// Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::api::whiteboard::BridgeWhiteboardStyle {
-    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        match self {
-            Self::HandDrawn => 0.into_dart(),
-            Self::Clean => 1.into_dart(),
-            _ => unreachable!(),
-        }
-    }
-}
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::api::whiteboard::BridgeWhiteboardStyle
-{
-}
-impl flutter_rust_bridge::IntoIntoDart<crate::api::whiteboard::BridgeWhiteboardStyle>
-    for crate::api::whiteboard::BridgeWhiteboardStyle
-{
-    fn into_into_dart(self) -> crate::api::whiteboard::BridgeWhiteboardStyle {
-        self
-    }
-}
 
 impl SseEncode for flutter_rust_bridge::for_generated::anyhow::Error {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -10274,7 +10284,7 @@ impl SseEncode for crate::api::workspace::BridgeAnswer {
         <Option<crate::api::workspace::BridgeTextStyle>>::sse_encode(self.style, serializer);
         <Option<String>>::sse_encode(self.language, serializer);
         <Option<crate::api::media::BridgeMedia>>::sse_encode(self.media, serializer);
-        <Option<crate::api::whiteboard::BridgeWhiteboard>>::sse_encode(self.whiteboard, serializer);
+        <Option<crate::api::drawing::BridgeDrawing>>::sse_encode(self.drawing, serializer);
         <Option<crate::api::database::BridgeDatabase>>::sse_encode(self.database, serializer);
         <Vec<crate::api::database::BridgeRow>>::sse_encode(self.rows, serializer);
     }
@@ -10450,21 +10460,55 @@ impl SseEncode for crate::api::database::BridgeDatabase {
     }
 }
 
-impl SseEncode for crate::api::whiteboard::BridgeElement {
+impl SseEncode for crate::api::drawing::BridgeDrawing {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::api::drawing::BridgeDrawingStyle>::sse_encode(self.style, serializer);
+        <Vec<crate::api::drawing::BridgeElement>>::sse_encode(self.elements, serializer);
+    }
+}
+
+impl SseEncode for crate::api::drawing::BridgeDrawingEdit {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Vec<crate::api::drawing::BridgeElement>>::sse_encode(self.add, serializer);
+        <Vec<crate::api::drawing::BridgeElementChange>>::sse_encode(self.change, serializer);
+        <Vec<String>>::sse_encode(self.remove, serializer);
+    }
+}
+
+impl SseEncode for crate::api::drawing::BridgeDrawingStyle {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::drawing::BridgeDrawingStyle::HandDrawn => 0,
+                crate::api::drawing::BridgeDrawingStyle::Clean => 1,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::api::drawing::BridgeElement {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <Option<String>>::sse_encode(self.id, serializer);
-        <crate::api::whiteboard::BridgeElementKind>::sse_encode(self.kind, serializer);
+        <crate::api::drawing::BridgeElementKind>::sse_encode(self.kind, serializer);
         <f64>::sse_encode(self.x, serializer);
         <f64>::sse_encode(self.y, serializer);
         <f64>::sse_encode(self.w, serializer);
         <f64>::sse_encode(self.h, serializer);
         <f64>::sse_encode(self.rotation, serializer);
-        <crate::api::whiteboard::BridgeInkColor>::sse_encode(self.color, serializer);
+        <crate::api::drawing::BridgeInkColor>::sse_encode(self.color, serializer);
         <i64>::sse_encode(self.width, serializer);
-        <crate::api::whiteboard::BridgePen>::sse_encode(self.pen, serializer);
+        <i64>::sse_encode(self.doc_page, serializer);
+        <crate::api::drawing::BridgePen>::sse_encode(self.pen, serializer);
         <Vec<u8>>::sse_encode(self.points, serializer);
-        <crate::api::whiteboard::BridgeShape>::sse_encode(self.shape, serializer);
+        <crate::api::drawing::BridgeShape>::sse_encode(self.shape, serializer);
         <i64>::sse_encode(self.seed, serializer);
         <bool>::sse_encode(self.arrowhead, serializer);
         <Vec<f64>>::sse_encode(self.corners, serializer);
@@ -10472,7 +10516,7 @@ impl SseEncode for crate::api::whiteboard::BridgeElement {
     }
 }
 
-impl SseEncode for crate::api::whiteboard::BridgeElementChange {
+impl SseEncode for crate::api::drawing::BridgeElementChange {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.id, serializer);
@@ -10481,21 +10525,21 @@ impl SseEncode for crate::api::whiteboard::BridgeElementChange {
         <f64>::sse_encode(self.w, serializer);
         <f64>::sse_encode(self.h, serializer);
         <f64>::sse_encode(self.rotation, serializer);
-        <crate::api::whiteboard::BridgeInkColor>::sse_encode(self.color, serializer);
+        <crate::api::drawing::BridgeInkColor>::sse_encode(self.color, serializer);
         <i64>::sse_encode(self.width, serializer);
         <Option<String>>::sse_encode(self.text, serializer);
         <Option<bool>>::sse_encode(self.arrowhead, serializer);
     }
 }
 
-impl SseEncode for crate::api::whiteboard::BridgeElementKind {
+impl SseEncode for crate::api::drawing::BridgeElementKind {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <i32>::sse_encode(
             match self {
-                crate::api::whiteboard::BridgeElementKind::Stroke => 0,
-                crate::api::whiteboard::BridgeElementKind::Shape => 1,
-                crate::api::whiteboard::BridgeElementKind::Text => 2,
+                crate::api::drawing::BridgeElementKind::Stroke => 0,
+                crate::api::drawing::BridgeElementKind::Shape => 1,
+                crate::api::drawing::BridgeElementKind::Text => 2,
                 _ => {
                     unimplemented!("");
                 }
@@ -10676,15 +10720,19 @@ impl SseEncode for crate::api::git::BridgeGitStatus {
     }
 }
 
-impl SseEncode for crate::api::whiteboard::BridgeInkColor {
+impl SseEncode for crate::api::drawing::BridgeInkColor {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <i32>::sse_encode(
             match self {
-                crate::api::whiteboard::BridgeInkColor::Text => 0,
-                crate::api::whiteboard::BridgeInkColor::Data1 => 1,
-                crate::api::whiteboard::BridgeInkColor::Data2 => 2,
-                crate::api::whiteboard::BridgeInkColor::Data3 => 3,
+                crate::api::drawing::BridgeInkColor::Text => 0,
+                crate::api::drawing::BridgeInkColor::Data1 => 1,
+                crate::api::drawing::BridgeInkColor::Data2 => 2,
+                crate::api::drawing::BridgeInkColor::Data3 => 3,
+                crate::api::drawing::BridgeInkColor::Yellow => 4,
+                crate::api::drawing::BridgeInkColor::Green => 5,
+                crate::api::drawing::BridgeInkColor::Blue => 6,
+                crate::api::drawing::BridgeInkColor::Pink => 7,
                 _ => {
                     unimplemented!("");
                 }
@@ -10898,14 +10946,11 @@ impl SseEncode for crate::api::workspace::BridgeMutation {
         <Option<crate::api::database::BridgeCell>>::sse_encode(self.cell, serializer);
         <Option<String>>::sse_encode(self.media_type, serializer);
         <Option<String>>::sse_encode(self.attachment, serializer);
-        <Option<crate::api::whiteboard::BridgeWhiteboardStyle>>::sse_encode(
-            self.whiteboard_style,
+        <Option<crate::api::drawing::BridgeDrawingStyle>>::sse_encode(
+            self.drawing_style,
             serializer,
         );
-        <Option<crate::api::whiteboard::BridgeWhiteboardEdit>>::sse_encode(
-            self.whiteboard,
-            serializer,
-        );
+        <Option<crate::api::drawing::BridgeDrawingEdit>>::sse_encode(self.drawing, serializer);
     }
 }
 
@@ -10929,8 +10974,8 @@ impl SseEncode for crate::api::workspace::BridgeMutationKind {
                 crate::api::workspace::BridgeMutationKind::SetCodeLanguage => 12,
                 crate::api::workspace::BridgeMutationKind::AddMediaBlock => 13,
                 crate::api::workspace::BridgeMutationKind::AddWhiteboardBlock => 14,
-                crate::api::workspace::BridgeMutationKind::SetWhiteboardStyle => 15,
-                crate::api::workspace::BridgeMutationKind::EditWhiteboard => 16,
+                crate::api::workspace::BridgeMutationKind::SetDrawingStyle => 15,
+                crate::api::workspace::BridgeMutationKind::EditDrawing => 16,
                 crate::api::workspace::BridgeMutationKind::AddDatabaseBlock => 17,
                 crate::api::workspace::BridgeMutationKind::RenameDatabase => 18,
                 crate::api::workspace::BridgeMutationKind::AddField => 19,
@@ -10992,14 +11037,15 @@ impl SseEncode for crate::api::hosts::BridgePairing {
     }
 }
 
-impl SseEncode for crate::api::whiteboard::BridgePen {
+impl SseEncode for crate::api::drawing::BridgePen {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <i32>::sse_encode(
             match self {
-                crate::api::whiteboard::BridgePen::Ball => 0,
-                crate::api::whiteboard::BridgePen::Fountain => 1,
-                crate::api::whiteboard::BridgePen::Brush => 2,
+                crate::api::drawing::BridgePen::Ball => 0,
+                crate::api::drawing::BridgePen::Fountain => 1,
+                crate::api::drawing::BridgePen::Brush => 2,
+                crate::api::drawing::BridgePen::Highlighter => 3,
                 _ => {
                     unimplemented!("");
                 }
@@ -11096,7 +11142,7 @@ impl SseEncode for crate::api::workspace::BridgeQueryKind {
                 crate::api::workspace::BridgeQueryKind::Text => 3,
                 crate::api::workspace::BridgeQueryKind::Code => 4,
                 crate::api::workspace::BridgeQueryKind::Media => 5,
-                crate::api::workspace::BridgeQueryKind::Whiteboard => 6,
+                crate::api::workspace::BridgeQueryKind::Drawing => 6,
                 crate::api::workspace::BridgeQueryKind::Database => 7,
                 crate::api::workspace::BridgeQueryKind::Rows => 8,
                 _ => {
@@ -11272,15 +11318,15 @@ impl SseEncode for crate::api::details::BridgeScheduleKind {
     }
 }
 
-impl SseEncode for crate::api::whiteboard::BridgeShape {
+impl SseEncode for crate::api::drawing::BridgeShape {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <i32>::sse_encode(
             match self {
-                crate::api::whiteboard::BridgeShape::Line => 0,
-                crate::api::whiteboard::BridgeShape::Rectangle => 1,
-                crate::api::whiteboard::BridgeShape::Ellipse => 2,
-                crate::api::whiteboard::BridgeShape::Triangle => 3,
+                crate::api::drawing::BridgeShape::Line => 0,
+                crate::api::drawing::BridgeShape::Rectangle => 1,
+                crate::api::drawing::BridgeShape::Ellipse => 2,
+                crate::api::drawing::BridgeShape::Triangle => 3,
                 _ => {
                     unimplemented!("");
                 }
@@ -11478,39 +11524,6 @@ impl SseEncode for crate::api::workspace::BridgeView {
     }
 }
 
-impl SseEncode for crate::api::whiteboard::BridgeWhiteboard {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <crate::api::whiteboard::BridgeWhiteboardStyle>::sse_encode(self.style, serializer);
-        <Vec<crate::api::whiteboard::BridgeElement>>::sse_encode(self.elements, serializer);
-    }
-}
-
-impl SseEncode for crate::api::whiteboard::BridgeWhiteboardEdit {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <Vec<crate::api::whiteboard::BridgeElement>>::sse_encode(self.add, serializer);
-        <Vec<crate::api::whiteboard::BridgeElementChange>>::sse_encode(self.change, serializer);
-        <Vec<String>>::sse_encode(self.remove, serializer);
-    }
-}
-
-impl SseEncode for crate::api::whiteboard::BridgeWhiteboardStyle {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <i32>::sse_encode(
-            match self {
-                crate::api::whiteboard::BridgeWhiteboardStyle::HandDrawn => 0,
-                crate::api::whiteboard::BridgeWhiteboardStyle::Clean => 1,
-                _ => {
-                    unimplemented!("");
-                }
-            },
-            serializer,
-        );
-    }
-}
-
 impl SseEncode for f64 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -11572,22 +11585,22 @@ impl SseEncode for Vec<crate::api::details::BridgeAutomation> {
     }
 }
 
-impl SseEncode for Vec<crate::api::whiteboard::BridgeElement> {
+impl SseEncode for Vec<crate::api::drawing::BridgeElement> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
-            <crate::api::whiteboard::BridgeElement>::sse_encode(item, serializer);
+            <crate::api::drawing::BridgeElement>::sse_encode(item, serializer);
         }
     }
 }
 
-impl SseEncode for Vec<crate::api::whiteboard::BridgeElementChange> {
+impl SseEncode for Vec<crate::api::drawing::BridgeElementChange> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
-            <crate::api::whiteboard::BridgeElementChange>::sse_encode(item, serializer);
+            <crate::api::drawing::BridgeElementChange>::sse_encode(item, serializer);
         }
     }
 }
@@ -11942,6 +11955,36 @@ impl SseEncode for Option<crate::api::database::BridgeDatabase> {
     }
 }
 
+impl SseEncode for Option<crate::api::drawing::BridgeDrawing> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::drawing::BridgeDrawing>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::drawing::BridgeDrawingEdit> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::drawing::BridgeDrawingEdit>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::drawing::BridgeDrawingStyle> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::drawing::BridgeDrawingStyle>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<crate::api::database::BridgeFieldKind> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -12048,36 +12091,6 @@ impl SseEncode for Option<crate::api::details::BridgeUsageLimits> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::details::BridgeUsageLimits>::sse_encode(value, serializer);
-        }
-    }
-}
-
-impl SseEncode for Option<crate::api::whiteboard::BridgeWhiteboard> {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <bool>::sse_encode(self.is_some(), serializer);
-        if let Some(value) = self {
-            <crate::api::whiteboard::BridgeWhiteboard>::sse_encode(value, serializer);
-        }
-    }
-}
-
-impl SseEncode for Option<crate::api::whiteboard::BridgeWhiteboardEdit> {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <bool>::sse_encode(self.is_some(), serializer);
-        if let Some(value) = self {
-            <crate::api::whiteboard::BridgeWhiteboardEdit>::sse_encode(value, serializer);
-        }
-    }
-}
-
-impl SseEncode for Option<crate::api::whiteboard::BridgeWhiteboardStyle> {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <bool>::sse_encode(self.is_some(), serializer);
-        if let Some(value) = self {
-            <crate::api::whiteboard::BridgeWhiteboardStyle>::sse_encode(value, serializer);
         }
     }
 }

@@ -10,6 +10,70 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 // These functions are ignored because they are not marked as `pub`: `color`, `of`, `of`, `of`, `to_core`, `to_core`, `to_core`, `width`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
+/// A drawing's style and elements, bottom to top.
+class BridgeDrawing {
+  /// How it draws its shapes and text.
+  final BridgeDrawingStyle style;
+
+  /// Its elements, bottom to top.
+  final List<BridgeElement> elements;
+
+  const BridgeDrawing({required this.style, required this.elements});
+
+  @override
+  int get hashCode => style.hashCode ^ elements.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeDrawing &&
+          runtimeType == other.runtimeType &&
+          style == other.style &&
+          elements == other.elements;
+}
+
+/// Elements removed, changed and added in one Action.
+class BridgeDrawingEdit {
+  /// New elements, each above all before.
+  final List<BridgeElement> add;
+
+  /// Changes to live elements.
+  final List<BridgeElementChange> change;
+
+  /// Elements to remove.
+  final List<String> remove;
+
+  const BridgeDrawingEdit({
+    required this.add,
+    required this.change,
+    required this.remove,
+  });
+
+  static Future<BridgeDrawingEdit> default_() =>
+      RustLib.instance.api.crateApiDrawingBridgeDrawingEditDefault();
+
+  @override
+  int get hashCode => add.hashCode ^ change.hashCode ^ remove.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeDrawingEdit &&
+          runtimeType == other.runtimeType &&
+          add == other.add &&
+          change == other.change &&
+          remove == other.remove;
+}
+
+/// How a drawing shows its shapes and text.
+enum BridgeDrawingStyle {
+  /// As Excalidraw draws, text in Excalifont.
+  handDrawn,
+
+  /// Exact lines, text in Liquid's typeface.
+  clean,
+}
+
 /// A stroke, shape or text: where it lies, turned `rotation` radians clockwise around its
 /// center, and how it looks.
 class BridgeElement {
@@ -39,6 +103,9 @@ class BridgeElement {
 
   /// Its line width, or a text's size: 0, 1 or 2.
   final PlatformInt64 width;
+
+  /// The page of an annotated document it lies on, from 0; 0 on a Whiteboard.
+  final PlatformInt64 docPage;
 
   /// A stroke's pen.
   final BridgePen pen;
@@ -71,6 +138,7 @@ class BridgeElement {
     required this.rotation,
     required this.color,
     required this.width,
+    required this.docPage,
     required this.pen,
     required this.points,
     required this.shape,
@@ -91,6 +159,7 @@ class BridgeElement {
       rotation.hashCode ^
       color.hashCode ^
       width.hashCode ^
+      docPage.hashCode ^
       pen.hashCode ^
       points.hashCode ^
       shape.hashCode ^
@@ -113,6 +182,7 @@ class BridgeElement {
           rotation == other.rotation &&
           color == other.color &&
           width == other.width &&
+          docPage == other.docPage &&
           pen == other.pen &&
           points == other.points &&
           shape == other.shape &&
@@ -222,6 +292,18 @@ enum BridgeInkColor {
 
   /// Data color 3.
   data3,
+
+  /// The yellow tag color.
+  yellow,
+
+  /// The green tag color.
+  green,
+
+  /// The blue tag color.
+  blue,
+
+  /// The pink tag color.
+  pink,
 }
 
 /// The pen a stroke was drawn with.
@@ -234,6 +316,9 @@ enum BridgePen {
 
   /// A line that follows the pressure most.
   brush,
+
+  /// Broad, translucent ink beneath the rest.
+  highlighter,
 }
 
 /// A shape.
@@ -249,68 +334,4 @@ enum BridgeShape {
 
   /// A triangle with `corners`.
   triangle,
-}
-
-/// A Whiteboard's style and elements, bottom to top.
-class BridgeWhiteboard {
-  /// How it draws its shapes and text.
-  final BridgeWhiteboardStyle style;
-
-  /// Its elements, bottom to top.
-  final List<BridgeElement> elements;
-
-  const BridgeWhiteboard({required this.style, required this.elements});
-
-  @override
-  int get hashCode => style.hashCode ^ elements.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeWhiteboard &&
-          runtimeType == other.runtimeType &&
-          style == other.style &&
-          elements == other.elements;
-}
-
-/// Elements removed, changed and added in one Action.
-class BridgeWhiteboardEdit {
-  /// New elements, each above all before.
-  final List<BridgeElement> add;
-
-  /// Changes to live elements.
-  final List<BridgeElementChange> change;
-
-  /// Elements to remove.
-  final List<String> remove;
-
-  const BridgeWhiteboardEdit({
-    required this.add,
-    required this.change,
-    required this.remove,
-  });
-
-  static Future<BridgeWhiteboardEdit> default_() =>
-      RustLib.instance.api.crateApiWhiteboardBridgeWhiteboardEditDefault();
-
-  @override
-  int get hashCode => add.hashCode ^ change.hashCode ^ remove.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeWhiteboardEdit &&
-          runtimeType == other.runtimeType &&
-          add == other.add &&
-          change == other.change &&
-          remove == other.remove;
-}
-
-/// How a Whiteboard draws its shapes and text.
-enum BridgeWhiteboardStyle {
-  /// As Excalidraw draws, text in Excalifont.
-  handDrawn,
-
-  /// Exact lines, text in Liquid's typeface.
-  clean,
 }

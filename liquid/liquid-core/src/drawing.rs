@@ -1,15 +1,19 @@
-//! Whiteboard Blocks: pen strokes, shapes and text, each an element of the Block's entry in
-//! its home Page's document, so edits on two devices merge per element (ADR-0306). A
-//! stroke's points never change once drawn; erasing part of it replaces it by its pieces.
+//! Drawings: the pen strokes, shapes and text of a Whiteboard Block (ADR-0306) or of an
+//! annotated Media Block's pages (ADR-0307), each an element of the Block's entry in its
+//! home Page's document, so edits on two devices merge per element. A stroke's points never
+//! change once drawn; erasing part of it replaces it by its pieces.
 //!
 //! ```text
-//! blocks: { <block>: { kind: "whiteboard", style, deleted,
+//! blocks: { <block>: { kind: "whiteboard" or "media", style, deleted,
 //!                      elements: { <element>: { sort, deleted, kind, x, y, w, h, rotation,
-//!                                               color, width,
+//!                                               color, width, doc-page?,
 //!                                               (stroke) pen, points, count,
 //!                                               (shape) shape, seed, arrowhead?, corners?,
 //!                                               (text) text } } } }
 //! ```
+
+use std::collections::HashMap;
+use std::ops::Range;
 
 use automerge::transaction::Transactable;
 use automerge::{AutoCommit, ObjId, ObjType, ReadDoc, ScalarValue, ScalarValueRef, ValueRef};
@@ -34,13 +38,17 @@ const SEED: &str = "seed";
 const ARROWHEAD: &str = "arrowhead";
 const CORNERS: &str = "corners";
 const TEXT: &str = "text";
+const DOC_PAGE: &str = "doc-page";
 
-/// The most live elements a Whiteboard holds.
+/// The most live elements a Whiteboard, or one page of an annotated document, holds.
 pub const MAX_ELEMENTS: usize = 10_000;
+/// The most pages of a document that take ink.
+pub const MAX_DOC_PAGES: u32 = 2_000;
 /// The most points one stroke holds.
 pub const MAX_POINTS: usize = 10_000;
-/// The most points all of a Whiteboard's live strokes hold together, so the whole board
-/// reads and crosses the bridge bounded, at 12 bytes a point (client architecture rule 3).
+/// The most points all of a Whiteboard's, or one document page's, live strokes hold
+/// together, so a board or a page reads and crosses the bridge bounded, at 12 bytes a point
+/// (client architecture rule 3).
 pub const MAX_BOARD_POINTS: usize = 1_000_000;
 /// The most characters one text element holds.
 pub const MAX_ELEMENT_TEXT: usize = 10_000;
@@ -49,20 +57,20 @@ const MAX_COORDINATE: f64 = 1e7;
 /// A stored point: x, y and pressure as little-endian f32.
 const POINT: usize = 12;
 
-/// How a Whiteboard draws its shapes and text; one setting for the whole board.
+/// How a drawing shows its shapes and text; one setting for the whole Block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum WhiteboardStyle {
+pub enum DrawingStyle {
     /// As Excalidraw draws at its Bold width and Artist sloppiness, text in Excalifont.
     HandDrawn,
     /// Exact lines, text in Liquid's typeface.
     Clean,
 }
 
-/// A Whiteboard's content.
+/// A Block's drawing, or the part of it on the pages read.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Whiteboard {
+pub struct Drawing {
     /// How it draws its shapes and text.
-    pub style: WhiteboardStyle,
+    pub style: DrawingStyle,
     /// Its live elements, bottom to top.
     pub elements: Vec<(ElementId, Element)>,
 }
@@ -109,7 +117,7 @@ impl Frame {
 }
 
 /// An element's color, one of the design tokens' text and data colors, so a board reads in
-/// both themes.
+/// both themes, or for the highlighter one of their light tag colors.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InkColor {
     /// The text color.
@@ -120,6 +128,14 @@ pub enum InkColor {
     Data2,
     /// Data color 3.
     Data3,
+    /// The yellow tag color.
+    Yellow,
+    /// The green tag color.
+    Green,
+    /// The blue tag color.
+    Blue,
+    /// The pink tag color.
+    Pink,
 }
 
 /// The pen a stroke was drawn with, as GoodNotes offers them.
@@ -131,6 +147,8 @@ pub enum Pen {
     Fountain,
     /// A line that follows the pressure most.
     Brush,
+    /// Broad, translucent ink beneath the rest, as GoodNotes' highlighter.
+    Highlighter,
 }
 
 /// A shape.
@@ -193,15 +211,18 @@ pub enum Content {
     },
 }
 
-/// A stroke, shape or text on a Whiteboard.
+/// A stroke, shape or text on a Whiteboard or a document's page.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Element {
-    /// Where it lies.
+    /// Where it lies, in its page's points.
     pub frame: Frame,
     /// Its color.
     pub color: InkColor,
     /// Its line width, or a text's size: 0, 1 or 2 for thin, medium and bold or S, M and L.
     pub width: u8,
+    /// The page of an annotated document it lies on, from 0; always 0 on a Whiteboard.
+    #[serde(default)]
+    pub doc_page: u32,
     /// What it is.
     pub content: Content,
 }
@@ -242,10 +263,10 @@ fn unhex<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>, D::Error
         .collect()
 }
 
-fn style_name(style: WhiteboardStyle) -> &'static str {
+fn style_name(style: DrawingStyle) -> &'static str {
     match style {
-        WhiteboardStyle::HandDrawn => "hand-drawn",
-        WhiteboardStyle::Clean => "clean",
+        DrawingStyle::HandDrawn => "hand-drawn",
+        DrawingStyle::Clean => "clean",
     }
 }
 
@@ -255,6 +276,10 @@ fn color_name(color: InkColor) -> &'static str {
         InkColor::Data1 => "data-1",
         InkColor::Data2 => "data-2",
         InkColor::Data3 => "data-3",
+        InkColor::Yellow => "yellow",
+        InkColor::Green => "green",
+        InkColor::Blue => "blue",
+        InkColor::Pink => "pink",
     }
 }
 
@@ -263,6 +288,7 @@ fn pen_name(pen: Pen) -> &'static str {
         Pen::Ball => "ball",
         Pen::Fountain => "fountain",
         Pen::Brush => "brush",
+        Pen::Highlighter => "highlighter",
     }
 }
 
@@ -283,42 +309,67 @@ pub(crate) fn create(doc: &mut AutoCommit, block: &BlockId) -> Result<(), Error>
         block.as_str(),
         &[
             (KIND, "whiteboard"),
-            (STYLE, style_name(WhiteboardStyle::HandDrawn)),
+            (STYLE, style_name(DrawingStyle::HandDrawn)),
         ],
     )?;
     doc.put_object(&entry, ELEMENTS, ObjType::Map)?;
     Ok(())
 }
 
-fn elements_of(doc: &AutoCommit, block: &BlockId) -> Result<(ObjId, ObjId), Error> {
-    let entry =
-        model::of_kind(doc, block.as_str(), BlockKind::Whiteboard).ok_or(Error::NotFound)?;
-    let elements = model::child(doc, &entry, ELEMENTS).ok_or(Error::NotFound)?;
+/// A Block that holds a drawing: a Whiteboard, or a Media Block, whose file's pages take
+/// ink; and whether it has pages.
+fn holder(doc: &AutoCommit, block: &BlockId) -> Result<(ObjId, bool), Error> {
+    if let Some(entry) = model::of_kind(doc, block.as_str(), BlockKind::Whiteboard) {
+        return Ok((entry, false));
+    }
+    let entry = model::of_kind(doc, block.as_str(), BlockKind::Media).ok_or(Error::NotFound)?;
+    Ok((entry, true))
+}
+
+/// The drawing's elements, made on a Media Block's first annotation.
+fn elements_for_writing(doc: &mut AutoCommit, block: &BlockId) -> Result<(ObjId, ObjId), Error> {
+    let (entry, _) = holder(doc, block)?;
+    let elements = match model::child(doc, &entry, ELEMENTS) {
+        Some(elements) => elements,
+        None => doc.put_object(&entry, ELEMENTS, ObjType::Map)?,
+    };
     Ok((entry, elements))
 }
 
 pub(crate) fn set_style(
     doc: &mut AutoCommit,
     block: &BlockId,
-    style: WhiteboardStyle,
+    style: DrawingStyle,
 ) -> Result<(), Error> {
-    let (entry, _) = elements_of(doc, block)?;
+    let (entry, _) = holder(doc, block)?;
     doc.put(&entry, STYLE, style_name(style))?;
     Ok(())
 }
 
-/// A live Whiteboard's style and elements; none if `block` is no live Whiteboard. An
-/// element this version cannot read, as a later one may write, is left out.
-pub(crate) fn read(doc: &AutoCommit, block: &BlockId) -> Result<Option<Whiteboard>, Error> {
-    let Ok((entry, elements)) = elements_of(doc, block) else {
+/// A live drawing's style and its elements on the document pages `pages` (a Whiteboard's
+/// are all on page 0); none if `block` holds no drawing. An element this version cannot
+/// read, as a later one may write, is left out.
+pub(crate) fn read(
+    doc: &AutoCommit,
+    block: &BlockId,
+    pages: Range<u32>,
+) -> Result<Option<Drawing>, Error> {
+    let Ok((entry, _)) = holder(doc, block) else {
         return Ok(None);
     };
     let style = match model::string(doc, &entry, STYLE).as_deref() {
-        Some("clean") => WhiteboardStyle::Clean,
-        _ => WhiteboardStyle::HandDrawn,
+        Some("clean") => DrawingStyle::Clean,
+        _ => DrawingStyle::HandDrawn,
+    };
+    let Some(elements) = model::child(doc, &entry, ELEMENTS) else {
+        return Ok(Some(Drawing {
+            style,
+            elements: Vec::new(),
+        }));
     };
     let mut read: Vec<(Option<String>, ElementId, Element)> = Stored::all(doc, &elements)
         .into_iter()
+        .filter(|stored| pages.contains(&stored.doc_page()))
         .filter_map(|stored| {
             let element = stored.element()?;
             Some((stored.sort, ElementId::stored(&stored.id), element))
@@ -345,7 +396,7 @@ pub(crate) fn read(doc: &AutoCommit, block: &BlockId) -> Result<Option<Whiteboar
         Content::Stroke { points, .. } => !points.is_empty() && points.len() % POINT == 0,
         _ => true,
     });
-    Ok(Some(Whiteboard {
+    Ok(Some(Drawing {
         style,
         elements: elements_read,
     }))
@@ -364,8 +415,13 @@ pub(crate) fn edit(
     change: &[ElementChange],
     remove: &[ElementId],
 ) -> Result<Vec<ElementId>, Error> {
+    let (_, paged) = holder(doc, block)?;
     for element in add {
         check(element)?;
+        let last = if paged { MAX_DOC_PAGES - 1 } else { 0 };
+        if element.doc_page > last {
+            return Err(Error::WrongKind);
+        }
     }
     for changed in change {
         if !changed.frame.valid()
@@ -378,7 +434,7 @@ pub(crate) fn edit(
             return Err(Error::WrongKind);
         }
     }
-    let (_, elements) = elements_of(doc, block)?;
+    let (_, elements) = elements_for_writing(doc, block)?;
     let mut live = Stored::all(doc, &elements);
     for id in remove {
         let at = live
@@ -411,13 +467,20 @@ pub(crate) fn edit(
             doc.put(&obj, ARROWHEAD, arrowhead)?;
         }
     }
-    if live.len() + add.len() > MAX_ELEMENTS {
-        return Err(Error::TooMany);
+    // Each page holds a board's caps.
+    let mut pages: HashMap<u32, (usize, usize)> = HashMap::new();
+    for stored in &live {
+        let held = pages.entry(stored.doc_page()).or_default();
+        held.0 += 1;
+        held.1 += stored.count();
     }
-    let added_points: usize = add.iter().map(point_count).sum();
-    let points: usize = live.iter().map(|stored| stored.count()).sum();
-    if points + added_points > MAX_BOARD_POINTS {
-        return Err(Error::TooMany);
+    for element in add {
+        let held = pages.entry(element.doc_page).or_default();
+        held.0 += 1;
+        held.1 += point_count(element);
+        if held.0 > MAX_ELEMENTS || held.1 > MAX_BOARD_POINTS {
+            return Err(Error::TooMany);
+        }
     }
     let mut last = live
         .iter()
@@ -446,7 +509,7 @@ fn point_count(element: &Element) -> usize {
     }
 }
 
-/// Refuses an element no Whiteboard can hold.
+/// Refuses an element no drawing can hold.
 fn check(element: &Element) -> Result<(), Error> {
     if !element.frame.valid() || element.width > 2 {
         return Err(Error::WrongKind);
@@ -507,6 +570,9 @@ fn write(
     put_frame(doc, &obj, &element.frame)?;
     doc.put(&obj, COLOR, color_name(element.color))?;
     doc.put(&obj, WIDTH, u64::from(element.width))?;
+    if element.doc_page > 0 {
+        doc.put(&obj, DOC_PAGE, u64::from(element.doc_page))?;
+    }
     match &element.content {
         Content::Stroke { pen, points } => {
             doc.put(&obj, KIND, "stroke")?;
@@ -614,6 +680,11 @@ impl Stored {
             .map(|(_, value)| *value)
     }
 
+    /// The document page it lies on.
+    fn doc_page(&self) -> u32 {
+        self.number(DOC_PAGE).map_or(0, |page| page as u32)
+    }
+
     /// How many points it holds, if it is a stroke.
     fn count(&self) -> usize {
         match self.text(KIND) {
@@ -636,6 +707,10 @@ impl Stored {
             "data-1" => InkColor::Data1,
             "data-2" => InkColor::Data2,
             "data-3" => InkColor::Data3,
+            "yellow" => InkColor::Yellow,
+            "green" => InkColor::Green,
+            "blue" => InkColor::Blue,
+            "pink" => InkColor::Pink,
             _ => return None,
         };
         let width = self.number(WIDTH).filter(|width| *width <= 2.0)? as u8;
@@ -645,6 +720,7 @@ impl Stored {
                     "ball" => Pen::Ball,
                     "fountain" => Pen::Fountain,
                     "brush" => Pen::Brush,
+                    "highlighter" => Pen::Highlighter,
                     _ => return None,
                 },
                 points: Vec::new(),
@@ -672,6 +748,7 @@ impl Stored {
             frame,
             color,
             width,
+            doc_page: self.doc_page(),
             content,
         })
     }

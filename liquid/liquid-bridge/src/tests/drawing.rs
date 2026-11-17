@@ -1,15 +1,16 @@
-//! Whiteboard Blocks and file cells as Dart builds and reads them (ADR-0305, ADR-0306):
-//! elements cross as flat messages with a stroke's points as bytes, and a file cell names
-//! finished attachments whose sizes the core reads.
+//! Drawings and file cells as Dart builds and reads them (ADR-0305 to ADR-0307): a
+//! Whiteboard's or an annotated PDF's elements cross as flat messages with a stroke's points
+//! as bytes, a PDF's in windows of pages, and a file cell names finished attachments whose
+//! sizes the core reads.
 
 use super::workspace::{Folder, Memory, lisbon, mutation, query};
 use crate::api::database::{BridgeCell, BridgeCellKind, BridgeFieldKind};
+use crate::api::drawing::{
+    BridgeDrawingEdit, BridgeDrawingStyle, BridgeElement, BridgeElementChange, BridgeElementKind,
+    BridgeInkColor, BridgePen, BridgeShape,
+};
 use crate::api::media::BridgeMedia;
 use crate::api::replica::LiquidWorkspace;
-use crate::api::whiteboard::{
-    BridgeElement, BridgeElementChange, BridgeElementKind, BridgeInkColor, BridgePen, BridgeShape,
-    BridgeWhiteboardEdit, BridgeWhiteboardStyle,
-};
 use crate::api::workspace::{
     BridgeBlockKind, BridgeMutation, BridgeMutationKind, BridgeQuery, BridgeQueryKind,
 };
@@ -25,6 +26,7 @@ fn element(kind: BridgeElementKind) -> BridgeElement {
         rotation: 0.25,
         color: BridgeInkColor::Data1,
         width: 1,
+        doc_page: 0,
         pen: BridgePen::Ball,
         points: Vec::new(),
         shape: BridgeShape::Rectangle,
@@ -76,14 +78,14 @@ fn a_whiteboard_s_elements_cross_whole_and_come_back_as_drawn() {
             ..element(BridgeElementKind::Text)
         },
     ];
-    let edit = |whiteboard: BridgeWhiteboardEdit| BridgeMutation {
+    let edit = |whiteboard: BridgeDrawingEdit| BridgeMutation {
         page: Some(page.clone()),
         block: Some(block.clone()),
-        whiteboard: Some(whiteboard),
-        ..mutation(BridgeMutationKind::EditWhiteboard)
+        drawing: Some(whiteboard),
+        ..mutation(BridgeMutationKind::EditDrawing)
     };
     let applied = workspace
-        .apply(edit(BridgeWhiteboardEdit {
+        .apply(edit(BridgeDrawingEdit {
             add: drawn.clone(),
             ..Default::default()
         }))
@@ -94,14 +96,14 @@ fn a_whiteboard_s_elements_cross_whole_and_come_back_as_drawn() {
             .query(BridgeQuery {
                 page: Some(page.clone()),
                 block: Some(block.clone()),
-                ..query(BridgeQueryKind::Whiteboard)
+                ..query(BridgeQueryKind::Drawing)
             })
             .unwrap()
-            .whiteboard
+            .drawing
             .unwrap()
     };
     let board = read();
-    assert_eq!(board.style, BridgeWhiteboardStyle::HandDrawn);
+    assert_eq!(board.style, BridgeDrawingStyle::HandDrawn);
     let expected: Vec<_> = drawn
         .into_iter()
         .zip(&applied.elements)
@@ -113,7 +115,7 @@ fn a_whiteboard_s_elements_cross_whole_and_come_back_as_drawn() {
     assert_eq!(board.elements, expected);
 
     workspace
-        .apply(edit(BridgeWhiteboardEdit {
+        .apply(edit(BridgeDrawingEdit {
             change: vec![BridgeElementChange {
                 id: applied.elements[3].clone(),
                 x: 1.0,
@@ -134,12 +136,12 @@ fn a_whiteboard_s_elements_cross_whole_and_come_back_as_drawn() {
         .apply(BridgeMutation {
             page: Some(page.clone()),
             block: Some(block.clone()),
-            whiteboard_style: Some(BridgeWhiteboardStyle::Clean),
-            ..mutation(BridgeMutationKind::SetWhiteboardStyle)
+            drawing_style: Some(BridgeDrawingStyle::Clean),
+            ..mutation(BridgeMutationKind::SetDrawingStyle)
         })
         .unwrap();
     let board = read();
-    assert_eq!(board.style, BridgeWhiteboardStyle::Clean);
+    assert_eq!(board.style, BridgeDrawingStyle::Clean);
     assert_eq!(board.elements.len(), 3);
     assert_eq!(board.elements[2].text, "Porto");
     assert_eq!(board.elements[2].color, BridgeInkColor::Data3);
@@ -151,6 +153,63 @@ fn a_whiteboard_s_elements_cross_whole_and_come_back_as_drawn() {
         .unwrap()
         .views;
     assert_eq!(views[1].kind, BridgeBlockKind::Whiteboard);
+}
+
+#[test]
+fn a_pdf_s_drawing_reads_in_windows_of_its_pages() {
+    let folder = Folder::new("annotation");
+    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_, page, _, intro) = lisbon(&workspace);
+    let attachment = workspace.add_bytes(b"%PDF-1.7".to_vec()).unwrap();
+    let block = workspace
+        .apply(BridgeMutation {
+            page: Some(page.clone()),
+            after: Some(intro),
+            text: Some("Rental agreement.pdf".into()),
+            media_type: Some("application/pdf".into()),
+            attachment: Some(attachment),
+            ..mutation(BridgeMutationKind::AddMediaBlock)
+        })
+        .unwrap()
+        .block;
+    let marks = [0, 4, 5].map(|doc_page| BridgeElement {
+        pen: BridgePen::Highlighter,
+        color: BridgeInkColor::Yellow,
+        doc_page,
+        kind: BridgeElementKind::Shape,
+        ..element(BridgeElementKind::Shape)
+    });
+    workspace
+        .apply(BridgeMutation {
+            page: Some(page.clone()),
+            block: block.clone(),
+            drawing: Some(BridgeDrawingEdit {
+                add: marks.to_vec(),
+                ..Default::default()
+            }),
+            ..mutation(BridgeMutationKind::EditDrawing)
+        })
+        .unwrap();
+    let window = workspace
+        .query(BridgeQuery {
+            page: Some(page.clone()),
+            block,
+            start: 4,
+            limit: 1,
+            ..query(BridgeQueryKind::Drawing)
+        })
+        .unwrap()
+        .drawing
+        .unwrap();
+    assert_eq!(
+        window
+            .elements
+            .iter()
+            .map(|element| (element.doc_page, element.color))
+            .collect::<Vec<_>>(),
+        [(4, BridgeInkColor::Yellow)],
+        "the one page asked for"
+    );
 }
 
 #[test]

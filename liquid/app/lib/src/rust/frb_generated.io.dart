@@ -5,6 +5,7 @@
 
 import 'api/database.dart';
 import 'api/details.dart';
+import 'api/drawing.dart';
 import 'api/events.dart';
 import 'api/git.dart';
 import 'api/hosts.dart';
@@ -12,7 +13,6 @@ import 'api/media.dart';
 import 'api/replica.dart';
 import 'api/session.dart';
 import 'api/thread.dart';
-import 'api/whiteboard.dart';
 import 'api/workspace.dart';
 
 import 'dart:async';
@@ -208,6 +208,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeDatabase dco_decode_box_autoadd_bridge_database(dynamic raw);
 
   @protected
+  BridgeDrawing dco_decode_box_autoadd_bridge_drawing(dynamic raw);
+
+  @protected
+  BridgeDrawingEdit dco_decode_box_autoadd_bridge_drawing_edit(dynamic raw);
+
+  @protected
+  BridgeDrawingStyle dco_decode_box_autoadd_bridge_drawing_style(dynamic raw);
+
+  @protected
   BridgeFieldKind dco_decode_box_autoadd_bridge_field_kind(dynamic raw);
 
   @protected
@@ -248,19 +257,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeUsageLimits dco_decode_box_autoadd_bridge_usage_limits(dynamic raw);
-
-  @protected
-  BridgeWhiteboard dco_decode_box_autoadd_bridge_whiteboard(dynamic raw);
-
-  @protected
-  BridgeWhiteboardEdit dco_decode_box_autoadd_bridge_whiteboard_edit(
-    dynamic raw,
-  );
-
-  @protected
-  BridgeWhiteboardStyle dco_decode_box_autoadd_bridge_whiteboard_style(
-    dynamic raw,
-  );
 
   @protected
   PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
@@ -309,6 +305,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeDatabase dco_decode_bridge_database(dynamic raw);
+
+  @protected
+  BridgeDrawing dco_decode_bridge_drawing(dynamic raw);
+
+  @protected
+  BridgeDrawingEdit dco_decode_bridge_drawing_edit(dynamic raw);
+
+  @protected
+  BridgeDrawingStyle dco_decode_bridge_drawing_style(dynamic raw);
 
   @protected
   BridgeElement dco_decode_bridge_element(dynamic raw);
@@ -526,15 +531,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeView dco_decode_bridge_view(dynamic raw);
 
   @protected
-  BridgeWhiteboard dco_decode_bridge_whiteboard(dynamic raw);
-
-  @protected
-  BridgeWhiteboardEdit dco_decode_bridge_whiteboard_edit(dynamic raw);
-
-  @protected
-  BridgeWhiteboardStyle dco_decode_bridge_whiteboard_style(dynamic raw);
-
-  @protected
   double dco_decode_f_64(dynamic raw);
 
   @protected
@@ -681,6 +677,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeDatabase? dco_decode_opt_box_autoadd_bridge_database(dynamic raw);
 
   @protected
+  BridgeDrawing? dco_decode_opt_box_autoadd_bridge_drawing(dynamic raw);
+
+  @protected
+  BridgeDrawingEdit? dco_decode_opt_box_autoadd_bridge_drawing_edit(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeDrawingStyle? dco_decode_opt_box_autoadd_bridge_drawing_style(
+    dynamic raw,
+  );
+
+  @protected
   BridgeFieldKind? dco_decode_opt_box_autoadd_bridge_field_kind(dynamic raw);
 
   @protected
@@ -714,19 +723,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeUsageLimits? dco_decode_opt_box_autoadd_bridge_usage_limits(
-    dynamic raw,
-  );
-
-  @protected
-  BridgeWhiteboard? dco_decode_opt_box_autoadd_bridge_whiteboard(dynamic raw);
-
-  @protected
-  BridgeWhiteboardEdit? dco_decode_opt_box_autoadd_bridge_whiteboard_edit(
-    dynamic raw,
-  );
-
-  @protected
-  BridgeWhiteboardStyle? dco_decode_opt_box_autoadd_bridge_whiteboard_style(
     dynamic raw,
   );
 
@@ -912,6 +908,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeDrawing sse_decode_box_autoadd_bridge_drawing(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeDrawingEdit sse_decode_box_autoadd_bridge_drawing_edit(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeDrawingStyle sse_decode_box_autoadd_bridge_drawing_style(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeFieldKind sse_decode_box_autoadd_bridge_field_kind(
     SseDeserializer deserializer,
   );
@@ -970,21 +981,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  BridgeWhiteboard sse_decode_box_autoadd_bridge_whiteboard(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  BridgeWhiteboardEdit sse_decode_box_autoadd_bridge_whiteboard_edit(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  BridgeWhiteboardStyle sse_decode_box_autoadd_bridge_whiteboard_style(
-    SseDeserializer deserializer,
-  );
-
-  @protected
   PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
 
   @protected
@@ -1037,6 +1033,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeDatabase sse_decode_bridge_database(SseDeserializer deserializer);
+
+  @protected
+  BridgeDrawing sse_decode_bridge_drawing(SseDeserializer deserializer);
+
+  @protected
+  BridgeDrawingEdit sse_decode_bridge_drawing_edit(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeDrawingStyle sse_decode_bridge_drawing_style(
+    SseDeserializer deserializer,
+  );
 
   @protected
   BridgeElement sse_decode_bridge_element(SseDeserializer deserializer);
@@ -1296,19 +1305,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeView sse_decode_bridge_view(SseDeserializer deserializer);
 
   @protected
-  BridgeWhiteboard sse_decode_bridge_whiteboard(SseDeserializer deserializer);
-
-  @protected
-  BridgeWhiteboardEdit sse_decode_bridge_whiteboard_edit(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  BridgeWhiteboardStyle sse_decode_bridge_whiteboard_style(
-    SseDeserializer deserializer,
-  );
-
-  @protected
   double sse_decode_f_64(SseDeserializer deserializer);
 
   @protected
@@ -1497,6 +1493,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeDrawing? sse_decode_opt_box_autoadd_bridge_drawing(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeDrawingEdit? sse_decode_opt_box_autoadd_bridge_drawing_edit(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeDrawingStyle? sse_decode_opt_box_autoadd_bridge_drawing_style(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeFieldKind? sse_decode_opt_box_autoadd_bridge_field_kind(
     SseDeserializer deserializer,
   );
@@ -1548,21 +1559,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeUsageLimits? sse_decode_opt_box_autoadd_bridge_usage_limits(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  BridgeWhiteboard? sse_decode_opt_box_autoadd_bridge_whiteboard(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  BridgeWhiteboardEdit? sse_decode_opt_box_autoadd_bridge_whiteboard_edit(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  BridgeWhiteboardStyle? sse_decode_opt_box_autoadd_bridge_whiteboard_style(
     SseDeserializer deserializer,
   );
 
@@ -1780,6 +1776,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_drawing(
+    BridgeDrawing self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_drawing_edit(
+    BridgeDrawingEdit self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_drawing_style(
+    BridgeDrawingStyle self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_field_kind(
     BridgeFieldKind self,
     SseSerializer serializer,
@@ -1864,24 +1878,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_box_autoadd_bridge_whiteboard(
-    BridgeWhiteboard self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_box_autoadd_bridge_whiteboard_edit(
-    BridgeWhiteboardEdit self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_box_autoadd_bridge_whiteboard_style(
-    BridgeWhiteboardStyle self,
-    SseSerializer serializer,
-  );
-
-  @protected
   void sse_encode_box_autoadd_i_64(
     PlatformInt64 self,
     SseSerializer serializer,
@@ -1956,6 +1952,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_database(
     BridgeDatabase self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_drawing(BridgeDrawing self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_bridge_drawing_edit(
+    BridgeDrawingEdit self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_drawing_style(
+    BridgeDrawingStyle self,
     SseSerializer serializer,
   );
 
@@ -2308,24 +2319,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bridge_view(BridgeView self, SseSerializer serializer);
 
   @protected
-  void sse_encode_bridge_whiteboard(
-    BridgeWhiteboard self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_bridge_whiteboard_edit(
-    BridgeWhiteboardEdit self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_bridge_whiteboard_style(
-    BridgeWhiteboardStyle self,
-    SseSerializer serializer,
-  );
-
-  @protected
   void sse_encode_f_64(double self, SseSerializer serializer);
 
   @protected
@@ -2575,6 +2568,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_bridge_drawing(
+    BridgeDrawing? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_drawing_edit(
+    BridgeDrawingEdit? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_drawing_style(
+    BridgeDrawingStyle? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_bridge_field_kind(
     BridgeFieldKind? self,
     SseSerializer serializer,
@@ -2637,24 +2648,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_usage_limits(
     BridgeUsageLimits? self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_opt_box_autoadd_bridge_whiteboard(
-    BridgeWhiteboard? self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_opt_box_autoadd_bridge_whiteboard_edit(
-    BridgeWhiteboardEdit? self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_opt_box_autoadd_bridge_whiteboard_style(
-    BridgeWhiteboardStyle? self,
     SseSerializer serializer,
   );
 

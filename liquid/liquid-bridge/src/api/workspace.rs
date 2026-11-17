@@ -19,8 +19,8 @@ use liquid_core::{
 use super::database::{
     BridgeCell, BridgeDatabase, BridgeFieldKind, BridgeFilter, BridgeRow, BridgeSort,
 };
+use super::drawing::{BridgeDrawing, BridgeDrawingEdit, BridgeDrawingStyle};
 use super::media::BridgeMedia;
-use super::whiteboard::{BridgeWhiteboard, BridgeWhiteboardEdit, BridgeWhiteboardStyle};
 
 /// The most items one query answers, so no answer carries an unbounded list.
 pub const MAX_WINDOW: i64 = 500;
@@ -62,11 +62,12 @@ pub enum BridgeMutationKind {
     AddMediaBlock,
     /// Adds an empty, hand-drawn Whiteboard Block to `page`, after the View `after` or first.
     AddWhiteboardBlock,
-    /// Sets the Whiteboard `block`'s `whiteboard_style` on its home `page`.
-    SetWhiteboardStyle,
-    /// Removes, changes and adds the Whiteboard `block`'s elements on its home `page` as
-    /// `whiteboard` says, in one Action.
-    EditWhiteboard,
+    /// Sets the drawing style of the Whiteboard or Media `block` on its home `page` to
+    /// `drawing_style`.
+    SetDrawingStyle,
+    /// Removes, changes and adds the elements of the Whiteboard's or Media `block`'s drawing
+    /// on its home `page` as `drawing` says, in one Action.
+    EditDrawing,
     /// Adds a Database Block named `text`, with a text field "Name", to `page`, after the
     /// View `after` or first.
     AddDatabaseBlock,
@@ -188,10 +189,10 @@ pub struct BridgeMutation {
     pub media_type: Option<String>,
     /// A finished attachment's name.
     pub attachment: Option<String>,
-    /// A Whiteboard's new style.
-    pub whiteboard_style: Option<BridgeWhiteboardStyle>,
-    /// A Whiteboard's elements removed, changed and added.
-    pub whiteboard: Option<BridgeWhiteboardEdit>,
+    /// A drawing's new style.
+    pub drawing_style: Option<BridgeDrawingStyle>,
+    /// A drawing's elements removed, changed and added.
+    pub drawing: Option<BridgeDrawingEdit>,
 }
 
 /// What an applied write recorded and created.
@@ -235,9 +236,11 @@ pub enum BridgeQueryKind {
     /// The Media `block`'s file and attachment on its home `page` into `media`; none once
     /// the Block is removed or if it is no Media Block.
     Media,
-    /// The Whiteboard `block`'s style and elements on its home `page` into `whiteboard`;
-    /// none once the Block is removed or if it is no Whiteboard.
-    Whiteboard,
+    /// The Whiteboard's or Media `block`'s drawing on its home `page` into `drawing`: its
+    /// style and its elements on the document pages from `start`, at most `limit` of them
+    /// (a Whiteboard's are on page 0); none once the Block is removed or if it holds no
+    /// drawing.
+    Drawing,
     /// The Database `block`'s name and fields on its home `page` into `database`; none
     /// once the Block is removed or if it is no Database.
     Database,
@@ -336,8 +339,8 @@ pub struct BridgeAnswer {
     pub language: Option<String>,
     /// A Media Block's file and attachment.
     pub media: Option<BridgeMedia>,
-    /// A Whiteboard's style and elements.
-    pub whiteboard: Option<BridgeWhiteboard>,
+    /// A drawing's style and elements.
+    pub drawing: Option<BridgeDrawing>,
     /// A Database's name and fields.
     pub database: Option<BridgeDatabase>,
     /// A Database's rows.
@@ -514,21 +517,21 @@ impl BridgeMutation {
                 page: page()?,
                 after: optional_id(&self.after, ViewId::parse, "after")?,
             },
-            BridgeMutationKind::SetWhiteboardStyle => Mutation::SetWhiteboardStyle {
+            BridgeMutationKind::SetDrawingStyle => Mutation::SetDrawingStyle {
                 page: page()?,
                 block: block()?,
                 style: self
-                    .whiteboard_style
-                    .ok_or("whiteboard_style is missing")?
+                    .drawing_style
+                    .ok_or("drawing_style is missing")?
                     .to_core(),
             },
-            BridgeMutationKind::EditWhiteboard => {
+            BridgeMutationKind::EditDrawing => {
                 let (add, change, remove) = self
-                    .whiteboard
+                    .drawing
                     .as_ref()
-                    .ok_or("whiteboard is missing")?
+                    .ok_or("drawing is missing")?
                     .to_core()?;
-                Mutation::EditWhiteboard {
+                Mutation::EditDrawing {
                     page: page()?,
                     block: block()?,
                     add,

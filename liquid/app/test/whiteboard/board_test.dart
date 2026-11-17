@@ -1,7 +1,7 @@
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:liquid/src/rust/api/whiteboard.dart';
+import 'package:liquid/src/rust/api/drawing.dart';
 import 'package:liquid/src/whiteboard/board.dart';
 import 'package:liquid/src/whiteboard/ink_geometry.dart';
 
@@ -39,6 +39,7 @@ void main() {
           rotation: 0,
           color: shape.color,
           width: shape.width,
+          docPage: shape.docPage,
           pen: shape.pen,
           points: shape.points,
           shape: shape.shape,
@@ -70,6 +71,7 @@ void main() {
         rotation: 0,
         color: shape.color,
         width: 1,
+        docPage: 0,
         pen: shape.pen,
         points: shape.points,
         shape: shape.shape,

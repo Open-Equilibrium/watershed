@@ -5,11 +5,10 @@
 
 import '../frb_generated.dart';
 import 'database.dart';
+import 'drawing.dart';
 import 'media.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
-
-import 'whiteboard.dart';
 
 // These functions are ignored because they are not marked as `pub`: `id`, `message`, `normalized`, `of`, `of`, `optional_id`, `page`, `place`, `to_core`, `to_core`, `units`, `window`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
@@ -40,8 +39,8 @@ class BridgeAnswer {
   /// A Media Block's file and attachment.
   final BridgeMedia? media;
 
-  /// A Whiteboard's style and elements.
-  final BridgeWhiteboard? whiteboard;
+  /// A drawing's style and elements.
+  final BridgeDrawing? drawing;
 
   /// A Database's name and fields.
   final BridgeDatabase? database;
@@ -58,7 +57,7 @@ class BridgeAnswer {
     this.style,
     this.language,
     this.media,
-    this.whiteboard,
+    this.drawing,
     this.database,
     required this.rows,
   });
@@ -73,7 +72,7 @@ class BridgeAnswer {
       style.hashCode ^
       language.hashCode ^
       media.hashCode ^
-      whiteboard.hashCode ^
+      drawing.hashCode ^
       database.hashCode ^
       rows.hashCode;
 
@@ -90,7 +89,7 @@ class BridgeAnswer {
           style == other.style &&
           language == other.language &&
           media == other.media &&
-          whiteboard == other.whiteboard &&
+          drawing == other.drawing &&
           database == other.database &&
           rows == other.rows;
 }
@@ -293,11 +292,11 @@ class BridgeMutation {
   /// A finished attachment's name.
   final String? attachment;
 
-  /// A Whiteboard's new style.
-  final BridgeWhiteboardStyle? whiteboardStyle;
+  /// A drawing's new style.
+  final BridgeDrawingStyle? drawingStyle;
 
-  /// A Whiteboard's elements removed, changed and added.
-  final BridgeWhiteboardEdit? whiteboard;
+  /// A drawing's elements removed, changed and added.
+  final BridgeDrawingEdit? drawing;
 
   const BridgeMutation({
     required this.kind,
@@ -320,8 +319,8 @@ class BridgeMutation {
     this.cell,
     this.mediaType,
     this.attachment,
-    this.whiteboardStyle,
-    this.whiteboard,
+    this.drawingStyle,
+    this.drawing,
   });
 
   @override
@@ -346,8 +345,8 @@ class BridgeMutation {
       cell.hashCode ^
       mediaType.hashCode ^
       attachment.hashCode ^
-      whiteboardStyle.hashCode ^
-      whiteboard.hashCode;
+      drawingStyle.hashCode ^
+      drawing.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -374,8 +373,8 @@ class BridgeMutation {
           cell == other.cell &&
           mediaType == other.mediaType &&
           attachment == other.attachment &&
-          whiteboardStyle == other.whiteboardStyle &&
-          whiteboard == other.whiteboard;
+          drawingStyle == other.drawingStyle &&
+          drawing == other.drawing;
 }
 
 /// What a [`BridgeMutation`] does; each kind names the parts it fills.
@@ -429,12 +428,13 @@ enum BridgeMutationKind {
   /// Adds an empty, hand-drawn Whiteboard Block to `page`, after the View `after` or first.
   addWhiteboardBlock,
 
-  /// Sets the Whiteboard `block`'s `whiteboard_style` on its home `page`.
-  setWhiteboardStyle,
+  /// Sets the drawing style of the Whiteboard or Media `block` on its home `page` to
+  /// `drawing_style`.
+  setDrawingStyle,
 
-  /// Removes, changes and adds the Whiteboard `block`'s elements on its home `page` as
-  /// `whiteboard` says, in one Action.
-  editWhiteboard,
+  /// Removes, changes and adds the elements of the Whiteboard's or Media `block`'s drawing
+  /// on its home `page` as `drawing` says, in one Action.
+  editDrawing,
 
   /// Adds a Database Block named `text`, with a text field "Name", to `page`, after the
   /// View `after` or first.
@@ -580,9 +580,11 @@ enum BridgeQueryKind {
   /// the Block is removed or if it is no Media Block.
   media,
 
-  /// The Whiteboard `block`'s style and elements on its home `page` into `whiteboard`;
-  /// none once the Block is removed or if it is no Whiteboard.
-  whiteboard,
+  /// The Whiteboard's or Media `block`'s drawing on its home `page` into `drawing`: its
+  /// style and its elements on the document pages from `start`, at most `limit` of them
+  /// (a Whiteboard's are on page 0); none once the Block is removed or if it holds no
+  /// drawing.
+  drawing,
 
   /// The Database `block`'s name and fields on its home `page` into `database`; none
   /// once the Block is removed or if it is no Database.

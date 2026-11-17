@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/media.dart';
 import 'package:liquid/src/rust/api/replica.dart';
-import 'package:liquid/src/rust/api/whiteboard.dart';
+import 'package:liquid/src/rust/api/drawing.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 
 /// An in-memory Workspace behind the bridge's calls: areas and Page trees, with a change for
@@ -36,7 +36,7 @@ class FakeWorkspace implements LiquidWorkspace {
   final rows = <String, List<BridgeRow>>{};
 
   /// Each Whiteboard's style and elements, bottom to top.
-  final whiteboards = <String, BridgeWhiteboard>{};
+  final whiteboards = <String, BridgeDrawing>{};
 
   /// Fails every apply with this text.
   String? refuse;
@@ -474,8 +474,8 @@ class FakeWorkspace implements LiquidWorkspace {
           boundary: false,
           kind: BridgeBlockKind.whiteboard,
         );
-        whiteboards[view.block] = const BridgeWhiteboard(
-          style: BridgeWhiteboardStyle.handDrawn,
+        whiteboards[view.block] = const BridgeDrawing(
+          style: BridgeDrawingStyle.handDrawn,
           elements: [],
         );
         page.insert(
@@ -493,20 +493,20 @@ class FakeWorkspace implements LiquidWorkspace {
           block: view.block,
           view: view.id,
         );
-      case BridgeMutationKind.setWhiteboardStyle:
+      case BridgeMutationKind.setDrawingStyle:
         final board = whiteboards[mutation.block] ?? (throw 'not found');
-        if (board.style == mutation.whiteboardStyle) {
+        if (board.style == mutation.drawingStyle) {
           throw 'the write changes nothing';
         }
-        whiteboards[mutation.block!] = BridgeWhiteboard(
-          style: mutation.whiteboardStyle!,
+        whiteboards[mutation.block!] = BridgeDrawing(
+          style: mutation.drawingStyle!,
           elements: board.elements,
         );
         _changed(_blockResource(mutation));
         return BridgeApplied(elements: const [], action: _id());
-      case BridgeMutationKind.editWhiteboard:
+      case BridgeMutationKind.editDrawing:
         final board = whiteboards[mutation.block] ?? (throw 'not found');
-        final edit = mutation.whiteboard!;
+        final edit = mutation.drawing!;
         final elements = [...board.elements];
         for (final removed in edit.remove) {
           final at = elements.indexWhere((element) => element.id == removed);
@@ -522,7 +522,7 @@ class FakeWorkspace implements LiquidWorkspace {
         for (final (index, element) in edit.add.indexed) {
           elements.add(withId(element, ids[index]));
         }
-        whiteboards[mutation.block!] = BridgeWhiteboard(
+        whiteboards[mutation.block!] = BridgeDrawing(
           style: board.style,
           elements: elements,
         );
@@ -692,12 +692,12 @@ class FakeWorkspace implements LiquidWorkspace {
         media: media[query.block],
         rows: const [],
       ),
-      BridgeQueryKind.whiteboard => BridgeAnswer(
+      BridgeQueryKind.drawing => BridgeAnswer(
         areas: const [],
         pages: const [],
         views: const [],
         count: 0,
-        whiteboard: whiteboards[query.block],
+        drawing: whiteboards[query.block],
         rows: const [],
       ),
       BridgeQueryKind.database => BridgeAnswer(
@@ -796,6 +796,7 @@ BridgeElement withId(BridgeElement element, String id) => BridgeElement(
   rotation: element.rotation,
   color: element.color,
   width: element.width,
+  docPage: element.docPage,
   pen: element.pen,
   points: element.points,
   shape: element.shape,
@@ -817,6 +818,7 @@ BridgeElement changed(BridgeElement element, BridgeElementChange change) =>
       rotation: change.rotation,
       color: change.color,
       width: change.width,
+      docPage: element.docPage,
       pen: element.pen,
       points: element.points,
       shape: element.shape,
