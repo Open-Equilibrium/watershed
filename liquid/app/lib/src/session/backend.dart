@@ -35,6 +35,9 @@ abstract interface class ProjectBackend {
 
   /// The name T3 shows for this host, such as the computer's name.
   Future<String> environmentName();
+
+  /// Releases the agent host's connection once Liquid no longer shows the project.
+  void close();
 }
 
 /// What Liquid needs from one session.
@@ -214,6 +217,11 @@ class RustProjectBackend implements ProjectBackend {
       _host.setWriterModel(choice: model);
   @override
   Future<String> environmentName() => _host.environmentName();
+  @override
+  void close() {
+    _project.dispose();
+    _host.dispose();
+  }
 }
 
 /// One session on the agent host, reached through the Rust bridge.

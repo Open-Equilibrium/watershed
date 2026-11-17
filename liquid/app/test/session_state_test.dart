@@ -1222,6 +1222,13 @@ void main() {
       expect(state.notice.value?.text, 'Could not merge back: not ready');
     });
   });
+
+  test('disposing a session releases its agent host project at once', () async {
+    await open();
+    expect(project.closed, isFalse);
+    await state.dispose();
+    expect(project.closed, isTrue);
+  });
 }
 
 /// A session that refuses to merge back.

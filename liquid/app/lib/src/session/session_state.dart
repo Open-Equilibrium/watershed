@@ -914,5 +914,7 @@ class SessionState {
   Future<void> dispose() async {
     await _detach();
     git.value.dispose();
+    // The agent host's connection closes now, not when Dart collects the project.
+    _project.close();
   }
 }

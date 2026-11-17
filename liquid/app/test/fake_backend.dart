@@ -97,6 +97,12 @@ class FakeProject implements ProjectBackend {
 
   @override
   Future<String> environmentName() async => hostName;
+
+  /// Whether Liquid released the project.
+  bool closed = false;
+
+  @override
+  void close() => closed = true;
 }
 
 /// One session on the fake host: [emit] streams events; everything else is recorded in [calls].
