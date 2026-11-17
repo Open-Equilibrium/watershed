@@ -108,6 +108,9 @@ pub struct Manager {
     home_of: fn(&str) -> Option<String>,
     start: Vec<Step>,
     stop: Vec<Step>,
+    /// Run after the previous file is restored, so the manager loads it again. A failure is
+    /// reported, not required.
+    restore: Vec<Step>,
 }
 
 impl Manager {
@@ -129,6 +132,7 @@ impl Manager {
                 step("launchctl", &["bootstrap", &domain, &plist], true),
             ],
             stop: vec![step("launchctl", &["bootout", &target], false)],
+            restore: Vec::new(),
             file,
         }
     }
@@ -149,6 +153,7 @@ impl Manager {
                 &["--user", "disable", "--now", UNIT],
                 false,
             )],
+            restore: vec![step("systemctl", &["--user", "daemon-reload"], false)],
         }
     }
 
@@ -198,7 +203,13 @@ impl Manager {
                 },
             };
             return Err(match restored {
-                Ok(()) => error,
+                Ok(()) => {
+                    // Only required steps fail as Err, and none is required here.
+                    let reloads = run_all(&self.restore, &mut run).unwrap_or_default();
+                    reloads
+                        .iter()
+                        .fold(error, |message, failure| format!("{message}. {failure}"))
+                }
                 Err(e) => format!(
                     "{error}. The previous service file could not be restored: {e} ({})",
                     self.file.display()
@@ -565,6 +576,30 @@ mod tests {
         assert!(result.is_err());
         // Uninstall checks the folder this file names, so the old one must still be named.
         assert_eq!(manager.recorded_home(), Ok(Some(old.home)));
+    }
+
+    #[test]
+    fn a_failed_restart_reloads_the_restored_unit() {
+        let dir = Dir::new();
+        let manager = Manager::systemd(&dir.0.join("config"));
+        installed(&manager, &plan(&dir.0));
+        let outside = Plan::new(dir.0.join("bin/meta"), dir.0.join("outside"), |_| None).unwrap();
+        let mut ran = Vec::new();
+        let result = manager.install(&outside, |step| {
+            ran.push(format!("{} {}", step.program, step.args.join(" ")));
+            if step.args.iter().any(|arg| arg == "restart") {
+                Err("restart failed".to_owned())
+            } else {
+                Ok(())
+            }
+        });
+        assert!(result.is_err());
+        // systemd keeps the definition it loaded until it reads the restored file again.
+        assert_eq!(
+            ran.last().map(String::as_str),
+            Some("systemctl --user daemon-reload"),
+            "{ran:?}"
+        );
     }
 
     #[test]
