@@ -316,6 +316,26 @@ void main() {
     expect(checks(remote), 3);
   });
 
+  testWidgets('the Add dialog asks for a ws:// address before pairing', (
+    tester,
+  ) async {
+    await show(tester, controller());
+    await tester.tap(find.widgetWithText(GhostButton, 'Add agent host'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(0), '127.0.0.1:3774');
+    await tester.enterText(find.byType(TextField).at(1), 'AAAA-AAAA');
+    await tester.tap(find.widgetWithText(PrimaryButton, 'Add agent host'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'Enter the address as ws://HOST:PORT, as meta invite prints it.',
+      ),
+      findsOneWidget,
+    );
+    expect(bridge.calls.where((call) => call.startsWith('pair')), isEmpty);
+  });
+
   testWidgets('uses a host for sessions at once', (tester) async {
     await show(tester, controller(settings: AgentHostsSettings([mini])));
     expect(find.text('Used for sessions'), findsOneWidget);
