@@ -319,25 +319,31 @@ void main() {
     expect(checks(remote), 3);
   });
 
-  testWidgets('the Add dialog asks for a ws:// address before pairing', (
-    tester,
-  ) async {
-    await show(tester, controller());
-    await tester.tap(find.widgetWithText(GhostButton, 'Add agent host'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).at(0), '127.0.0.1:3774');
-    await tester.enterText(find.byType(TextField).at(1), 'AAAA-AAAA');
-    await tester.tap(find.widgetWithText(PrimaryButton, 'Add agent host'));
-    await tester.pumpAndSettle();
-
-    expect(
-      find.text(
+  testWidgets(
+    'the Add dialog shows the ws:// address refusal from the bridge',
+    (tester) async {
+      // The bridge pairs through the core, which refuses an address that is not ws:// before it connects.
+      bridge.pairError = AnyhowException(
         'Enter the address as ws://HOST:PORT, as meta invite prints it.',
-      ),
-      findsOneWidget,
-    );
-    expect(bridge.calls.where((call) => call.startsWith('pair')), isEmpty);
-  });
+      );
+      await show(tester, controller());
+      await tester.tap(find.widgetWithText(GhostButton, 'Add agent host'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).at(0), '127.0.0.1:3774');
+      await tester.enterText(find.byType(TextField).at(1), 'AAAA-AAAA');
+      await tester.tap(find.widgetWithText(PrimaryButton, 'Add agent host'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+          'Could not add the agent host; nothing changed in Liquid. Enter the address as ws://HOST:PORT, as meta invite prints it.',
+        ),
+        findsOneWidget,
+      );
+      expect(bridge.calls, contains('pair 127.0.0.1:3774 AAAA-AAAA'));
+      expect(saved, isEmpty);
+    },
+  );
 
   testWidgets('uses a host for sessions at once', (tester) async {
     await show(tester, controller(settings: AgentHostsSettings([mini])));
