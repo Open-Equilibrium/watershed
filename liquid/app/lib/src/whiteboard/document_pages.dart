@@ -114,31 +114,28 @@ class DocumentPages {
     final pdf = _pdf;
     if (pdf == null || _asked[index] == width) return;
     _asked[index] = width;
-    pdf
-        .render(index, width)
-        .then(
-          (image) {
-            if (_closed || _asked[index] != width) {
-              image.dispose();
-              return;
-            }
-            _drawn.remove(index)?.$2.dispose();
-            _drawn[index] = (width, image);
-            // The least recently shown go first; pages in view stay, however many.
-            final oldest = [
-              for (final page in _drawn.keys)
-                if (!_inView.contains(page)) page,
-            ];
-            for (final page in oldest.take(math.max(0, _drawn.length - kept))) {
-              _drawn.remove(page)?.$2.dispose();
-              _asked.remove(page);
-            }
-            onDrawn();
-          },
-          onError: (Object _) {
-            _asked.remove(index);
-          },
-        );
+    pdf.render(index, width).then(
+      (image) {
+        if (_closed || _asked[index] != width) {
+          image.dispose();
+          return;
+        }
+        _drawn.remove(index)?.$2.dispose();
+        _drawn[index] = (width, image);
+        // The least recently shown go first; pages in view stay, however many.
+        final oldest = [
+          for (final page in _drawn.keys)
+            if (!_inView.contains(page)) page,
+        ];
+        for (final page in oldest.take(math.max(0, _drawn.length - kept))) {
+          _drawn.remove(page)?.$2.dispose();
+          _asked.remove(page);
+        }
+        onDrawn();
+      },
+      // A page that cannot be drawn is not asked for again at this width.
+      onError: (Object _) {},
+    );
   }
 
   /// The page whose middle lies nearest the board point `at`.

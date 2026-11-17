@@ -49,4 +49,27 @@ void main() {
     expect(renders, 60, reason: 'each of the 60 pages in view once');
     pages.close();
   });
+
+  test('a page the renderer cannot draw is not asked for again', () async {
+    var renders = 0;
+    final pages = DocumentPages.pdf(
+      PdfPages(const [Size(595, 842)], (index, width) async {
+        renders++;
+        throw StateError('render');
+      }, () async {}),
+      onDrawn: () {},
+    );
+    for (var frame = 0; frame < 4; frame++) {
+      final recorder = ui.PictureRecorder();
+      pages.paint(
+        Canvas(recorder),
+        const Rect.fromLTWH(-400, -20, 800, 900),
+        0.5,
+      );
+      recorder.endRecording().dispose();
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(renders, 1);
+    pages.close();
+  });
 }
