@@ -76,6 +76,6 @@ async fn a_peer_that_goes_silent_after_connecting_fails_its_calls() {
     let answer = tokio::time::timeout(GUARD, host.status())
         .await
         .expect("the call gives up");
-    let error = answer.err().expect("a silent peer fails the call");
+    let error = answer.expect_err("a silent peer fails the call");
     assert!(connection_lost(&error), "{error}");
 }
