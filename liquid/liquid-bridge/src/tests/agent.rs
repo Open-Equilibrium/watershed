@@ -119,7 +119,8 @@ fn follow_until(
     let deadline = Instant::now() + STREAM_DEADLINE;
     let mut events = Vec::new();
     while !done(session, &snapshot, &events) {
-        let event = next_before(&receiver, deadline);
+        let event =
+            next_before(&receiver, deadline).expect("the session goes on before its deadline");
         assert!(event.sequence > snapshot.sequence || event.kind == BridgeEventKind::FellBehind);
         events.push(event);
         session.confirm_applied(i64::try_from(events.len()).expect("count"));
@@ -131,11 +132,11 @@ fn follow_until(
 /// collecting it. A stream that keeps sending unrelated events runs out of it too.
 const STREAM_DEADLINE: Duration = Duration::from_secs(60);
 
-/// The next item of `receiver` before `deadline`; a stream that runs past it fails the test.
-fn next_before<T>(receiver: &mpsc::Receiver<T>, deadline: Instant) -> T {
-    receiver
-        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-        .expect("the stream ends before its deadline")
+/// The next item of `receiver` before `deadline`, or `None` once the stream ended or the deadline
+/// passed. The deadline is checked first, so an item that is already queued does not get past it.
+fn next_before<T>(receiver: &mpsc::Receiver<T>, deadline: Instant) -> Option<T> {
+    let left = deadline.checked_duration_since(Instant::now())?;
+    receiver.recv_timeout(left).ok()
 }
 
 /// Receives events until one satisfies `done`, and gives every event received, that one included.
@@ -146,7 +147,8 @@ fn receive_until(
     let deadline = Instant::now() + STREAM_DEADLINE;
     let mut events = Vec::new();
     loop {
-        let event = next_before(receiver, deadline);
+        let event =
+            next_before(receiver, deadline).expect("the session goes on before its deadline");
         let last = done(&event);
         events.push(event);
         if last {
@@ -361,7 +363,7 @@ fn git_runs_through_the_bridge_with_its_progress() {
     // The collection ends at the run's Finished step, or at the deadline for a run that never does.
     let deadline = Instant::now() + STREAM_DEADLINE;
     let mut steps = Vec::new();
-    while let Ok(step) = receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+    while let Some(step) = next_before(&receiver, deadline) {
         let finished = step.kind == BridgeGitProgressKind::Finished;
         steps.push(step);
         if finished {
@@ -602,10 +604,10 @@ fn servers_automations_and_lineage_follows_resume_after_meta_harness_restarts() 
         .expect("the scheduled tasks resume");
     // A change that came as the service stopped may read the lineage during the outage, which
     // fails; the follow then reads again once Meta-Harness answers.
-    let mut lineage_reads = std::iter::from_fn(|| lineage_seen.recv_timeout(wait).ok());
+    let deadline = Instant::now() + STREAM_DEADLINE;
     assert!(
-        lineage_reads.any(|read| read.is_ok()),
-        "the lineage resumes"
+        std::iter::from_fn(|| next_before(&lineage_seen, deadline)).any(|read| read.is_ok()),
+        "the lineage resumes before its deadline"
     );
     stop(service);
 }
