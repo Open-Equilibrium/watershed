@@ -11,6 +11,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -69,7 +70,9 @@ async function main(argv) {
   if (basename(t3) !== t3Name) {
     throw new Error(`the T3 Code folder must be named ${t3Name}, not ${basename(t3)}`);
   }
-  if (!statSync(join(t3, "t3")).isFile()) throw new Error(`${t3} holds no t3 program`);
+  // The folder a link names is packed, never the link: copied alone, it would not unpack elsewhere.
+  const t3Source = realpathSync(t3);
+  if (!statSync(join(t3Source, "t3")).isFile()) throw new Error(`${t3} holds no t3 program`);
   // A prepared release is never replaced, so the output must be new.
   if (existsSync(output)) throw new Error(`${output} already exists`);
   mkdirSync(output);
@@ -90,7 +93,7 @@ async function main(argv) {
     const t3Destination = join(stage, "lib", "meta-harness", t3Name);
     mkdirSync(dirname(t3Destination), { recursive: true });
     // Relative links stay relative: without verbatimSymlinks they name this machine's folders.
-    cpSync(t3, t3Destination, { recursive: true, verbatimSymlinks: true });
+    cpSync(t3Source, t3Destination, { recursive: true, verbatimSymlinks: true });
     writeFileSync(join(stage, "bundle-info"), `${version}\n${platform}\n`);
 
     const archive = join(output, `${name}.tar.gz`);
