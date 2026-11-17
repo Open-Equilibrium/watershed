@@ -247,10 +247,17 @@ fn write(path: &Path, text: &str) -> Result<(), String> {
         .create_new(true)
         .open(&temporary)
         .map_err(|e| failed(&temporary, &e))?;
-    file.write_all(text.as_bytes())
-        .map_err(|e| failed(&temporary, &e))?;
+    let written = file
+        .write_all(text.as_bytes())
+        .map_err(|e| failed(&temporary, &e));
     drop(file);
-    std::fs::rename(&temporary, path).map_err(|e| failed(path, &e))
+    let result =
+        written.and_then(|()| std::fs::rename(&temporary, path).map_err(|e| failed(path, &e)));
+    // A failed write or rename leaves the temporary file behind otherwise.
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
 }
 
 fn remove(path: &Path) -> Result<(), String> {
