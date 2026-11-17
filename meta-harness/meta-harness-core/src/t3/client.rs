@@ -39,6 +39,9 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 /// Issues an owner token, as `t3 auth session issue` does.
 type Issue = Arc<dyn Fn() -> BoxFuture<'static, Result<String, String>> + Send + Sync>;
 
+/// Why T3 failed a stream's request, shared by its waiter and its subscription.
+type Failure = Arc<Mutex<Option<String>>>;
+
 enum Waiter {
     Call(oneshot::Sender<Result<Value, String>>),
     /// An open stream and, for a subscription, the request frame that opened it, which is sent
@@ -47,6 +50,7 @@ enum Waiter {
     Stream {
         items: mpsc::UnboundedSender<Item>,
         frame: Option<Value>,
+        failure: Failure,
     },
 }
 
@@ -98,9 +102,16 @@ pub(crate) struct Subscription {
     items: mpsc::UnboundedReceiver<Item>,
     id: String,
     link: Link,
+    failure: Failure,
 }
 
 impl Subscription {
+    /// Why T3 failed the request, once `recv` returned `None` on T3's failure; `None` after an
+    /// ordinary end or while the request runs.
+    pub fn failure(&self) -> Option<String> {
+        lock(&self.failure).clone()
+    }
+
     /// The next item T3 sent; `None` once the request ended. Taking a chunk's last item
     /// acknowledges the chunk, so T3 sends the next one only after the consumer took this one.
     pub async fn recv(&mut self) -> Option<Value> {
@@ -199,18 +210,21 @@ impl Client {
         let id = self.next_id();
         let (items, receiver) = mpsc::unbounded_channel();
         let frame = request_frame(&id, tag, payload);
+        let failure = Failure::default();
         self.request(
             &id,
             &frame,
             Waiter::Stream {
                 items,
                 frame: resend.then(|| frame.clone()),
+                failure: failure.clone(),
             },
         )?;
         Ok(Subscription {
             items: receiver,
             id,
             link: self.link.clone(),
+            failure,
         })
     }
 
@@ -366,9 +380,18 @@ fn dispatch(link: &Link, ack: &mpsc::UnboundedSender<Message>, frame: Value) {
             } else {
                 Err(frame["exit"]["cause"].to_string())
             };
-            // An ended stream leaves the waiters, which ends its items.
-            if let Some(Waiter::Call(reply)) = lock(link).waiters.remove(request_id) {
-                let _ = reply.send(result);
+            // An ended request leaves its waiter, which ends its items. A failed stream keeps T3's
+            // cause for its subscription, stored before the items end.
+            match lock(link).waiters.remove(request_id) {
+                Some(Waiter::Call(reply)) => {
+                    let _ = reply.send(result);
+                }
+                Some(Waiter::Stream { failure, .. }) => {
+                    if let Err(cause) = result {
+                        *lock(&failure) = Some(cause);
+                    }
+                }
+                None => {}
             }
         }
         _ => {}

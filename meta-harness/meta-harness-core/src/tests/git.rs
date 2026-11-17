@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::Message;
 
-use super::fake_t3::{Fake, ok};
+use super::fake_t3::{Fake, fail, ok};
 use crate::git::{
     BranchChanges, BranchPullRequest, ChangedFile, Git, GitAction, GitActionRequest, GitProgress,
     GitStatus, LineCount, Ref, Refs, ResolvedPullRequest,
@@ -384,6 +384,34 @@ async fn a_stacked_action_that_fails_says_why_and_ends() {
     let sent = &fake.payloads("git.runStackedAction")[0];
     assert_eq!(sent["commitMessage"], "fix");
     assert!(sent.get("filePaths").is_none() && sent.get("featureBranch").is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stacked_action_that_t3_fails_is_reported_as_failed_with_its_reason() {
+    // T3 ends the action with its failure, sending no progress event.
+    let (_fake, git) = checkout(|_, _, id| {
+        vec![fail(
+            id,
+            json!({"_tag": "Fail", "error": "nothing to commit"}),
+        )]
+    })
+    .await;
+    let receiver = git
+        .run(GitActionRequest {
+            action: GitAction::Commit,
+            message: None,
+            files: None,
+            feature_branch: false,
+        })
+        .await
+        .unwrap();
+    let ended = tokio::time::timeout(std::time::Duration::from_secs(10), progress(receiver))
+        .await
+        .expect("the action ends");
+    assert!(
+        matches!(ended.as_slice(), [GitProgress::Failed(message)] if message.contains("nothing to commit")),
+        "{ended:?}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -387,14 +387,15 @@ impl Git {
                     return;
                 }
             }
-            // The connection ended before the action did; T3 may have done part of it.
-            let _ = sender
-                .send(GitProgress::Failed(
-                    "T3 closed the connection before the action finished. Check the branch before \
-                     running it again."
-                        .to_owned(),
-                ))
-                .await;
+            // T3 failed the action, or the connection ended before it did; T3 may have done part of
+            // it.
+            let message = match stream.failure() {
+                Some(cause) => format!("T3 failed the action: {cause}"),
+                None => "T3 closed the connection before the action finished. Check the branch \
+                         before running it again."
+                    .to_owned(),
+            };
+            let _ = sender.send(GitProgress::Failed(message)).await;
         });
         Ok(receiver)
     }
