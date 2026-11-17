@@ -68,6 +68,23 @@ Path inkOutline(List<InkPoint> points, StrokeOptions options) {
   return path;
 }
 
+/// The most points a stroke holds, as the core caps it.
+const maxStrokePoints = 10000;
+
+/// `ink` as strokes of at most [maxStrokePoints] points, each starting where the one
+/// before ends, so a long stroke is kept whole rather than refused.
+List<List<InkPoint>> splitInk(Iterable<InkPoint> ink) {
+  final points = ink.toList();
+  final pieces = <List<InkPoint>>[];
+  for (var start = 0; start < points.length - 1 || pieces.isEmpty;) {
+    final end = (start + maxStrokePoints).clamp(0, points.length);
+    pieces.add(points.sublist(start, end));
+    if (end >= points.length) break;
+    start = end - 1;
+  }
+  return pieces;
+}
+
 /// The box `points` fill.
 Rect pointsBounds(List<InkPoint> points) {
   var (left, top, right, bottom) = (
@@ -134,6 +151,7 @@ Rect boundsOf(BridgeElement element) {
 /// change, so a stroke is decoded and outlined once.
 class BoardCache {
   final _points = <String, List<InkPoint>>{};
+  final _bounds = <String, Rect>{};
   final _outlines = <String, Path>{};
   final _shapes =
       <(String, double, double, bool, int, BridgeShape, bool), Path>{};
@@ -142,6 +160,12 @@ class BoardCache {
   List<InkPoint> points(BridgeElement element) => switch (element.id) {
     final id? => _points.putIfAbsent(id, () => _decode(element.points)),
     null => _decode(element.points),
+  };
+
+  /// The box a stroke's points fill as drawn, measured once.
+  Rect bounds(BridgeElement element) => switch (element.id) {
+    final id? => _bounds.putIfAbsent(id, () => pointsBounds(points(element))),
+    null => pointsBounds(points(element)),
   };
 
   static List<InkPoint> _decode(Uint8List bytes) {
@@ -183,6 +207,7 @@ class BoardCache {
   void keepOnly(Iterable<String> ids) {
     final kept = ids.toSet();
     _points.removeWhere((id, _) => !kept.contains(id));
+    _bounds.removeWhere((id, _) => !kept.contains(id));
     _outlines.removeWhere((key, _) => !kept.contains(key.split(' ').first));
     _shapes.removeWhere((key, _) => !kept.contains(key.$1));
   }
@@ -284,7 +309,7 @@ List<Offset> samplesOf(BridgeElement element, BoardCache cache) {
 
 /// Where a stroke's drawn point lies on the board, its frame stretching its points.
 Offset strokePoint(BridgeElement element, BoardCache cache, Offset drawn) {
-  final source = pointsBounds(cache.points(element));
+  final source = cache.bounds(element);
   final sx = source.width == 0 ? 1.0 : element.w / source.width;
   final sy = source.height == 0 ? 1.0 : element.h / source.height;
   return turned(
@@ -298,6 +323,8 @@ Offset strokePoint(BridgeElement element, BoardCache cache, Offset drawn) {
 
 /// Whether a board point lies on an element, within `slop`.
 bool touches(BridgeElement element, BoardCache cache, Offset at, double slop) {
+  // Most elements lie far away; their box says so without walking their points.
+  if (!boundsOf(element).inflate(slop).contains(at)) return false;
   switch (element.kind) {
     case BridgeElementKind.stroke:
       final points = cache.points(element);

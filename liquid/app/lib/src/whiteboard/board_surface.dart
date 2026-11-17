@@ -284,14 +284,15 @@ class BoardSurfaceState extends State<BoardSurface> {
       unawaited(
         board.edit(
           add: [
-            newElement(
-              BridgeElementKind.stroke,
-              frame: pointsBounds(_ink),
-              color: _inkColor,
-              width: _inkWidth,
-              pen: snapping ? BridgePen.ball : tools.pen,
-              points: packPoints(_ink),
-            ),
+            for (final piece in splitInk(_ink))
+              newElement(
+                BridgeElementKind.stroke,
+                frame: pointsBounds(piece),
+                color: _inkColor,
+                width: _inkWidth,
+                pen: snapping ? BridgePen.ball : tools.pen,
+                points: packPoints(piece),
+              ),
           ],
         ),
       );

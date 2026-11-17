@@ -114,7 +114,7 @@ class BoardPainter extends CustomPainter {
     }
     switch (element.kind) {
       case BridgeElementKind.stroke:
-        final source = pointsBounds(board.cache.points(element));
+        final source = board.cache.bounds(element);
         if (source.isFinite) {
           final sx = source.width == 0 ? 1.0 : element.w / source.width;
           final sy = source.height == 0 ? 1.0 : element.h / source.height;
