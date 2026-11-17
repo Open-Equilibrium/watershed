@@ -451,8 +451,11 @@ pub enum Error {
     /// too many objects were placed at one spot, or one before a neighbor with no usable key;
     /// moving that neighbor frees the spot.
     TooLong,
-    /// An attachment is larger than [`crate::MAX_ATTACHMENT`] or than its declared size.
+    /// An attachment is larger than [`crate::MAX_ATTACHMENT`].
     TooLarge,
+    /// A file brought more or fewer bytes than its upload declared, as one that changes
+    /// while it is added does.
+    Changed,
     /// The system's random source failed, so no new identity could be made.
     Random,
     /// The CRDT library failed; the message is its own.

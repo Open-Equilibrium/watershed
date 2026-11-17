@@ -184,17 +184,11 @@ fn a_file_past_5_gib_or_past_its_declared_size_is_refused() {
 
     // A file that grows while it is read is refused, so the cap holds.
     let mut upload = workspace.begin_upload(&owner(), 4).unwrap();
-    assert_eq!(
-        workspace.upload(&mut upload, b"12345"),
-        Err(Error::TooLarge)
-    );
+    assert_eq!(workspace.upload(&mut upload, b"12345"), Err(Error::Changed));
     // One that shrinks is refused at the end.
     let mut upload = workspace.begin_upload(&owner(), 4).unwrap();
     workspace.upload(&mut upload, b"123").unwrap();
-    assert_eq!(
-        workspace.finish_upload(upload).err(),
-        Some(Error::OutOfRange)
-    );
+    assert_eq!(workspace.finish_upload(upload).err(), Some(Error::Changed));
 
     let stranger = Actor::Person(PersonId::new("someone else"));
     assert!(matches!(

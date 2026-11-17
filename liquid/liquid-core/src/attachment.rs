@@ -118,7 +118,7 @@ impl<S: Store> Workspace<S> {
             return Err(failed());
         }
         if upload.written + bytes.len() as u64 > upload.size {
-            return Err(Error::TooLarge);
+            return Err(Error::Changed);
         }
         upload.written += bytes.len() as u64;
         upload.hasher.update(bytes);
@@ -142,7 +142,7 @@ impl<S: Store> Workspace<S> {
         }
         if upload.written != upload.size {
             self.store.discard_upload(&upload.key)?;
-            return Err(Error::OutOfRange);
+            return Err(Error::Changed);
         }
         if !upload.buffer.is_empty() {
             self.flush(&mut upload)?;

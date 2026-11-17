@@ -370,6 +370,7 @@ pub(crate) fn message(error: Error) -> String {
         Error::TooMany => "the Database holds the most fields or options it may".into(),
         Error::TooLong => "no more fit at this spot; move one of its neighbors first".into(),
         Error::TooLarge => "a file can be at most 5 GiB".into(),
+        Error::Changed => "the file changed while it was added; add it again".into(),
         Error::Random => "the random source failed".into(),
         Error::Document(message) | Error::Storage(message) => message,
     }
