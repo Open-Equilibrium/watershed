@@ -458,24 +458,30 @@ async fn serve(
                     .and_then(|v| v["id"].as_u64());
                 if let Some(id) = id {
                     let error = format!("Meta-Harness does not understand this request: {error}");
-                    // A second reply while one waits means a client that does not read: it is
-                    // disconnected. The reply waits on a task of its own, so the loop goes on
-                    // noticing revocation and shutdown; one that takes no reply within
-                    // REPLY_WAIT is disconnected too.
-                    let Ok(permit) = replying.clone().try_acquire_owned() else {
-                        break;
-                    };
-                    let (out, stalled) = (out.clone(), stalled.clone());
-                    tasks.spawn(async move {
-                        let _permit = permit;
-                        let reply = frame_of(&Reply::Error { id, error });
-                        if tokio::time::timeout(REPLY_WAIT, out.send(reply))
-                            .await
-                            .is_err()
-                        {
-                            let _ = stalled.try_send(());
+                    let reply = frame_of(&Reply::Error { id, error });
+                    match out.try_send(reply) {
+                        Ok(()) => {}
+                        // A full queue waits for room on a task of its own, so the loop goes on
+                        // noticing revocation and shutdown. A second reply while one waits means a
+                        // client that does not read: it is disconnected, as one that takes no
+                        // reply within REPLY_WAIT is.
+                        Err(mpsc::error::TrySendError::Full(reply)) => {
+                            let Ok(permit) = replying.clone().try_acquire_owned() else {
+                                break;
+                            };
+                            let (out, stalled) = (out.clone(), stalled.clone());
+                            tasks.spawn(async move {
+                                let _permit = permit;
+                                if tokio::time::timeout(REPLY_WAIT, out.send(reply))
+                                    .await
+                                    .is_err()
+                                {
+                                    let _ = stalled.try_send(());
+                                }
+                            });
                         }
-                    });
+                        Err(mpsc::error::TrySendError::Closed(_)) => break,
+                    }
                 }
                 continue;
             }
