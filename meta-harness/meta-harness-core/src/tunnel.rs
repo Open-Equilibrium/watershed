@@ -2,25 +2,28 @@
 //! connection in binary WebSocket messages to another host's remote listener. There the receiving
 //! host serves HTTP on the WebSocket: a request for a path a link uses goes to its T3 with the Host
 //! header and the body unchanged, and its answer streams back; any other path is refused with 403,
-//! without T3 contact.
+//! without T3 contact. A decision that approves a link at a level above the one its host was invited
+//! at is refused the same way (ADR-0300, ADR-0301).
 
 use std::convert::Infallible;
 
 use futures_util::{SinkExt, StreamExt};
 use http_body_util::combinators::BoxBody;
-use http_body_util::{BodyExt, Empty};
-use hyper::body::{Bytes, Incoming};
+use http_body_util::{BodyExt, Empty, Full, Limited};
+use hyper::body::{Body, Bytes, Incoming};
 use hyper::client::conn::http1 as client;
 use hyper::server::conn::http1 as server;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
+use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, duplex, split};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::api;
+use crate::hosts::Access;
 
 /// The bytes a tunnel message carries at most.
 const CHUNK: usize = 16 * 1024;
@@ -33,10 +36,19 @@ const BUFFER: usize = 64 * 1024;
 const LINK_PATHS: [&str; 5] = [
     "/.well-known/t3/environment",
     "/oauth/mcp/register",
-    "/oauth/mcp/decision",
+    DECISION_PATH,
     "/oauth/mcp/token",
     "/mcp",
 ];
+
+/// The path of the decision that approves a link's sign-in, whose level the tunnel checks.
+const DECISION_PATH: &str = "/oauth/mcp/decision";
+
+/// The bytes of a decision that the tunnel reads at most, which no decision needs more of.
+const DECISION: usize = 64 * 1024;
+
+/// An error that a body or its reader reports.
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// Copies bytes both ways between `stream` and `socket`, as binary messages, until either side
 /// closes.
@@ -85,14 +97,14 @@ where
 
 /// Serves HTTP on the WebSocket `socket` of a host's tunnel, for T3 at `t3`, until the client
 /// closes it: the requests for a link's paths reach T3, and the others get 403 (see the module).
-pub(crate) async fn serve<S>(socket: WebSocketStream<S>, t3: String)
+pub(crate) async fn serve<S>(socket: WebSocketStream<S>, t3: String, level: Access)
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let (ours, theirs) = duplex(BUFFER);
     let http = server::Builder::new().serve_connection(
         TokioIo::new(theirs),
-        service_fn(move |request| forward(request, t3.clone())),
+        service_fn(move |request| forward(request, t3.clone(), level)),
     );
     // The relay ends by itself once the HTTP connection has dropped its side and every answer byte
     // is sent, so an answer that ends the connection is not cut short. The connection ends when
@@ -100,23 +112,65 @@ where
     let _ = tokio::join!(relay(ours, socket), http);
 }
 
-/// Answers `request`: a path a link uses goes to T3 at `t3`, and any other is refused.
+/// Answers `request`: a path a link uses goes to T3 at `t3`, and any other is refused. A link's
+/// decision goes on only when it asks for no more than `level`, the level its host was invited at.
 async fn forward(
     request: Request<Incoming>,
     t3: String,
+    level: Access,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Infallible> {
-    if !LINK_PATHS.contains(&request.uri().path()) {
+    let path = request.uri().path();
+    if !LINK_PATHS.contains(&path) {
         return Ok(answer(StatusCode::FORBIDDEN));
     }
+    let request = if path == DECISION_PATH {
+        match checked(request, level).await {
+            Ok(request) => request,
+            Err(status) => return Ok(answer(status)),
+        }
+    } else {
+        request.map(|body| body.boxed())
+    };
     Ok(match send(request, &t3).await {
         Some(response) => response.map(|body| body.boxed()),
         None => answer(StatusCode::BAD_GATEWAY),
     })
 }
 
+/// Reads the body of a decision and passes `request` on with it, when the decision asks for no
+/// more than `level`. A body over [`DECISION`] bytes is too large; one that is no JSON, or asks for
+/// an access that names no level, is refused, since the tunnel cannot tell what it would grant.
+pub(crate) async fn checked<B>(
+    request: Request<B>,
+    level: Access,
+) -> Result<Request<BoxBody<Bytes, hyper::Error>>, StatusCode>
+where
+    B: Body<Data = Bytes> + Send + 'static,
+    B::Error: Into<BoxError>,
+{
+    let (parts, body) = request.into_parts();
+    let bytes = Limited::new(body, DECISION)
+        .collect()
+        .await
+        .map_err(|_| StatusCode::PAYLOAD_TOO_LARGE)?
+        .to_bytes();
+    let decision: Value = serde_json::from_slice(&bytes).map_err(|_| StatusCode::FORBIDDEN)?;
+    match &decision["decision"]["access"] {
+        // A decision that names no level, such as a refusal, grants nothing.
+        Value::Null => {}
+        Value::String(asked) if Access::parse(asked).is_some_and(|asked| asked <= level) => {}
+        _ => return Err(StatusCode::FORBIDDEN),
+    }
+    let body = Full::new(bytes).map_err(|never| match never {}).boxed();
+    Ok(Request::from_parts(parts, body))
+}
+
 /// Sends `request` to T3 at `t3` unchanged, over a connection that lasts as long as the body of
 /// the answer, which streams back as it comes.
-async fn send(request: Request<Incoming>, t3: &str) -> Option<Response<Incoming>> {
+async fn send(
+    request: Request<BoxBody<Bytes, hyper::Error>>,
+    t3: &str,
+) -> Option<Response<Incoming>> {
     let socket = TcpStream::connect(t3).await.ok()?;
     let (mut sender, connection) = client::handshake(TokioIo::new(socket)).await.ok()?;
     tokio::spawn(async move {

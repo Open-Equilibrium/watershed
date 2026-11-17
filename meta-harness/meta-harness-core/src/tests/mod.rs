@@ -12,4 +12,5 @@ mod pull_request;
 mod remote;
 mod statistics;
 mod thread;
+mod tunnel;
 mod visible;

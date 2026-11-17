@@ -1140,6 +1140,36 @@ async fn a_link_without_an_access_level_takes_the_level_its_host_invited() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_host_invited_at_approval_required_cannot_link_at_auto_but_links_at_that_level() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
+    let (_a, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let port_b = free_port();
+    a.remote_on(free_port()).await.unwrap();
+    b.remote_on(port_b).await.unwrap();
+    a.host_agents(true).await.unwrap();
+    b.host_agents(true).await.unwrap();
+    let url_b = format!("ws://127.0.0.1:{port_b}");
+    // The tunnel of b refuses T3's approval of a link above the level b invited (ADR-0301).
+    let code = b
+        .invite(ClientKind::Host, Access::ApprovalRequired)
+        .await
+        .unwrap();
+    assert!(a.host_add(&url_b, &code, Some(Access::Auto)).await.is_err());
+    let code = b
+        .invite(ClientKind::Host, Access::ApprovalRequired)
+        .await
+        .unwrap();
+    let (_, access) = a
+        .host_add(&url_b, &code, Some(Access::ApprovalRequired))
+        .await
+        .unwrap();
+    assert_eq!(access, Access::ApprovalRequired);
+    assert!(a.hosts().await.unwrap().hosts[0].reachable);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_host_invited_read_only_gets_a_pairing_code_that_grants_orchestration_read_only() {
     let (dir, _repo, _home) = fixture();
     let home = dir.path().join("b");

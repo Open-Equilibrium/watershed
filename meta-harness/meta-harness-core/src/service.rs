@@ -314,11 +314,11 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream, listener: Listener) {
     };
     let (caller, owner) = match admission {
         Some(Admission::Session(caller, owner)) => (caller, owner),
-        Some(Admission::Tunnel(owner, _access)) => {
+        Some(Admission::Tunnel(owner, access)) => {
             let mut revocations = shared.revoked.subscribe();
             let mut stopping = shared.stopping.clone();
             tokio::select! {
-                () = tunnel::serve(socket, shared.host.t3_address().to_owned()) => {}
+                () = tunnel::serve(socket, shared.host.t3_address().to_owned(), access) => {}
                 () = revoked(&mut revocations, Some(&owner)) => {}
                 _ = stopping.wait_for(|stopped| *stopped) => {}
             }
