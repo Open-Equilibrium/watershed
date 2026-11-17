@@ -173,21 +173,43 @@ class CellSelection extends ChangeNotifier {
 
   /// Adds `sources` to the file cell at `row` and `field`, after its files, once they are
   /// in; files another write added meanwhile stay.
-  Future<void> addFiles(int row, int field, List<MediaSource> sources) async {
+  Future<void> addFiles(int row, int field, List<MediaSource> sources) {
+    // One add at a time, so each starts from the files the one before wrote.
+    final done = _adding.then((_) => _addFiles(row, field, sources));
+    _adding = done.then<void>((_) {}, onError: (Object _) {});
+    return done;
+  }
+
+  Future<void> _adding = Future.value();
+
+  /// The files last written to each cell, by row and field, until a read shows them.
+  final _written = <(String, String), List<BridgeMedia>>{};
+
+  Future<void> _addFiles(int row, int field, List<MediaSource> sources) async {
     final all = fields();
     final read = rowAt(row);
     if (read == null || field >= all.length) return;
     final column = all[field];
     if (column.kind != BridgeFieldKind.file || sources.isEmpty) return;
-    List<BridgeMedia> filesOf(BridgeRow row) => [
-      ...?row.cells
-          .where((cell) => cell.field == column.id)
-          .firstOrNull
-          ?.value
-          .files,
-    ];
+    final key = (read.id, column.id);
+    List<BridgeMedia> filesOf(BridgeRow row) {
+      final shown = [
+        ...?row.cells
+            .where((cell) => cell.field == column.id)
+            .firstOrNull
+            ?.value
+            .files,
+      ];
+      // A write not yet read back is what the cell holds.
+      final written = _written[key];
+      if (written == null) return shown;
+      if (_sameFiles(shown, written)) _written.remove(key);
+      return written;
+    }
+
+    String full() => 'A cell holds at most $maxCellFiles files.';
     if (filesOf(read).length + sources.length > maxCellFiles) {
-      report('A cell holds at most $maxCellFiles files.');
+      report(full());
       return;
     }
     final added = await attach(sources);
@@ -203,18 +225,35 @@ class CellSelection extends ChangeNotifier {
       );
       return;
     }
-    final current = filesOf(now);
-    _write(
-      read,
-      column,
-      BridgeCell(
-        kind: BridgeCellKind.files,
-        number: 0,
-        checked: false,
-        files: [...current, ...added],
-      ),
-    );
+    final files = [...filesOf(now), ...added];
+    if (files.length > maxCellFiles) {
+      report(full());
+      return;
+    }
+    _written[key] = files;
+    try {
+      await write(
+        read,
+        column,
+        BridgeCell(
+          kind: BridgeCellKind.files,
+          number: 0,
+          checked: false,
+          files: files,
+        ),
+      );
+    } on Object {
+      // Refused: the Page shows why, and the cell holds what is stored.
+      _written.remove(key);
+    }
   }
+
+  static bool _sameFiles(List<BridgeMedia> a, List<BridgeMedia> b) =>
+      a.length == b.length &&
+      [
+        for (var at = 0; at < a.length; at++)
+          a[at].attachment == b[at].attachment,
+      ].every((same) => same);
 
   /// Opens the file dialog and adds the chosen files to the selected file cell.
   Future<void> addPickedFiles() async {
@@ -644,8 +683,11 @@ class CellSelection extends ChangeNotifier {
         if (event is! KeyRepeatEvent) _toggle(row, field, cell);
       case LogicalKeyboardKey.keyV
           when field.kind == BridgeFieldKind.file && isPaste(event):
-        final (at, column) = selected!;
-        unawaited(_pasteFiles(at, column));
+        // A held ⌘V pastes once.
+        if (event is! KeyRepeatEvent) {
+          final (at, column) = selected!;
+          unawaited(_pasteFiles(at, column));
+        }
       case LogicalKeyboardKey.backspace || LogicalKeyboardKey.delete:
         if (cell != null && cell.kind != BridgeCellKind.empty) {
           _write(row, field, _cell(BridgeCellKind.empty));

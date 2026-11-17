@@ -495,6 +495,22 @@ void main() {
     expect(headed.height, greaterThan(plain.height));
   });
 
+  testWidgets('full screen closes once its Whiteboard is gone', (tester) async {
+    await kit.show(tester, [const WhiteboardPart()]);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: tester.getCenter(board()));
+    addTearDown(mouse.removePointer);
+    await tester.pump();
+    final shown = kit.boardOf(tester);
+    await tester.tap(find.byKey(const Key('whiteboard full screen')));
+    await tester.pumpAndSettle();
+    // Another device deleted it.
+    kit.fake.whiteboards.clear();
+    await shown.read();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('whiteboard full')), findsNothing);
+  });
+
   testWidgets('⋯ › Delete removes the Whiteboard', (tester) async {
     await kit.show(tester, [
       const TextPart('Intro'),

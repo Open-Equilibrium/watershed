@@ -135,7 +135,11 @@ class BoardController extends ChangeNotifier {
         return;
       }
       final board = answer.whiteboard;
-      if (board == null) return;
+      if (board == null) {
+        // Gone, as another device deleted it: full screen shows it no more.
+        if (views.fullBoard.value?.id == view.id) views.fullBoard.value = null;
+        return;
+      }
       elements = board.elements;
       style = board.style;
       loaded = true;

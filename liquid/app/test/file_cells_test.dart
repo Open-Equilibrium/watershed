@@ -254,6 +254,30 @@ void main() {
     expect(lastWrite(), 'r1: Hotel.eml, Extra.pdf, CP ticket.pdf');
   });
 
+  testWidgets(
+    'a held ⌘V pastes once, and quick adds keep each other\'s files',
+    (tester) async {
+      await bookings(tester, () async => const []);
+      for (final name in ['a.pdf', 'b.pdf']) {
+        kit.fake.files['/Users/me/$name'] = Uint8List(3);
+      }
+      readClipboard = () async => const Pasted(files: ['/Users/me/a.pdf']);
+      await tester.tap(fileCell('r2'));
+      await tester.pumpAndSettle();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.keyV);
+      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyV);
+      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyV);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.keyV);
+      // A second paste right away, before the first is read back.
+      readClipboard = () async => const Pasted(files: ['/Users/me/b.pdf']);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+      expect(lastWrite(), 'r2: a.pdf, b.pdf');
+    },
+  );
+
   testWidgets('a cell takes at most 100 files', (tester) async {
     await bookings(tester, () async => [await stored('Hotel.eml', 1)]);
     kit.fake.files['/Users/me/a.pdf'] = Uint8List(1);
