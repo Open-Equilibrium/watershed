@@ -171,3 +171,29 @@ fn a_token_form_names_one_client_id_however_it_is_encoded() {
     assert_eq!(form_field(repeated.as_bytes(), "client_id"), None);
     assert_eq!(form_field(b"code=x", "client_id"), None);
 }
+
+#[tokio::test]
+async fn a_decision_without_a_level_passes_only_as_a_refusal() {
+    // T3's approvals carry a level; only its deny names none, and grants nothing.
+    let approval = json!({
+        "authorization": {"client_id": CLIENT_ID},
+        "decision": {"_tag": "pairing-code", "code": "CODE"},
+    });
+    assert_eq!(
+        passes(approval.to_string().into_bytes(), Access::Auto).await,
+        Err(StatusCode::FORBIDDEN)
+    );
+    let session = json!({
+        "authorization": {"client_id": CLIENT_ID},
+        "decision": {"_tag": "browser-session", "csrfToken": "token"},
+    });
+    assert_eq!(
+        passes(session.to_string().into_bytes(), Access::Auto).await,
+        Err(StatusCode::FORBIDDEN)
+    );
+    let deny = json!({"authorization": {"client_id": CLIENT_ID}, "decision": {"_tag": "deny"}});
+    assert_eq!(
+        passes(deny.to_string().into_bytes(), Access::Auto).await,
+        Ok(())
+    );
+}

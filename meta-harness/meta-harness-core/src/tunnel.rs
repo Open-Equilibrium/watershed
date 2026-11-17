@@ -303,8 +303,8 @@ where
         return Err(StatusCode::FORBIDDEN);
     }
     match &decision["decision"]["access"] {
-        // A decision that names no level, such as a refusal, grants nothing.
-        Value::Null => {}
+        // T3's deny names no level and grants nothing; every approval must name one within `level`.
+        Value::Null if decision["decision"]["_tag"] == "deny" => {}
         Value::String(asked) if Access::parse(asked).is_some_and(|asked| asked <= level) => {}
         _ => return Err(StatusCode::FORBIDDEN),
     }
