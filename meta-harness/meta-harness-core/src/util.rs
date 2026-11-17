@@ -11,6 +11,11 @@ use tokio::net::{TcpListener, TcpStream};
 /// or a pairing (ADR-0288, ADR-0299).
 pub(crate) const TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How often a connection pings its peer, and how long a peer may stay silent before the connection
+/// ends: a half-open peer answers no ping (ADR-0299).
+pub(crate) const PING: Duration = Duration::from_secs(30);
+pub(crate) const IDLE: Duration = Duration::from_secs(90);
+
 /// `bytes` in lower-case hex.
 pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()

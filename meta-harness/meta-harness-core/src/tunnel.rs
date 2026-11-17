@@ -24,7 +24,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::api;
 use crate::hosts::Access;
-use crate::util::TIMEOUT;
+use crate::util::{IDLE, PING, TIMEOUT};
 
 /// The bytes a tunnel message carries at most.
 const CHUNK: usize = 16 * 1024;
@@ -52,7 +52,7 @@ const DECISION: usize = 64 * 1024;
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// Copies bytes both ways between `stream` and `socket`, as binary messages, until either side
-/// closes.
+/// closes or the peer stays silent for [`IDLE`]: this side pings every [`PING`].
 pub(crate) async fn relay<T, S>(stream: T, socket: WebSocketStream<S>)
 where
     T: AsyncRead + AsyncWrite + Unpin,
@@ -62,15 +62,23 @@ where
     let (mut sink, mut frames) = socket.split();
     let up = async {
         let mut buffer = vec![0u8; CHUNK];
+        let mut ping = tokio::time::interval(PING);
         loop {
-            match reader.read(&mut buffer).await {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    if sink
-                        .send(Message::Binary(buffer[..n].to_vec().into()))
-                        .await
-                        .is_err()
-                    {
+            tokio::select! {
+                read = reader.read(&mut buffer) => match read {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        if sink
+                            .send(Message::Binary(buffer[..n].to_vec().into()))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                },
+                _ = ping.tick() => {
+                    if sink.send(Message::Ping(Vec::new().into())).await.is_err() {
                         break;
                     }
                 }
@@ -78,7 +86,8 @@ where
         }
     };
     let down = async {
-        while let Some(Ok(frame)) = frames.next().await {
+        // Any frame, a pong included, comes at least every PING from a peer that is there.
+        while let Ok(Some(Ok(frame))) = tokio::time::timeout(IDLE, frames.next()).await {
             match frame {
                 Message::Binary(bytes) => {
                     if writer.write_all(&bytes).await.is_err() {

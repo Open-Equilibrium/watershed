@@ -28,6 +28,7 @@ use crate::api::{
 use crate::config::{Homes, Proposed, Store, now_ms, provider_instances};
 use crate::hosts::{self, Links};
 
+use crate::util::{IDLE, PING};
 use crate::{AcpAgent, Host, HostConfig, Project, Thread, tunnel};
 use admit::{Admission, Caller, Listener, admit, header, revoked};
 
@@ -39,6 +40,9 @@ const OUTGOING: usize = 256;
 
 /// Threads a connection keeps followed after their last call; a stream keeps its own thread.
 const FOLLOWED: usize = 32;
+
+/// How many remote connections may be in their handshake at once; the excess is closed (ADR-0299).
+const HANDSHAKES: usize = 32;
 
 /// How long a new connection may take to complete its handshake.
 const HANDSHAKE: std::time::Duration = std::time::Duration::from_secs(10);
@@ -114,6 +118,8 @@ struct Shared {
     remote: std::sync::Mutex<Option<listener::Listening>>,
     /// The hosts this one links to and their tunnels.
     links: Links,
+    /// The handshake slots of the remote listener (see [`HANDSHAKES`]).
+    handshakes: Arc<tokio::sync::Semaphore>,
 }
 
 impl Service {
@@ -187,6 +193,7 @@ impl Service {
             remote_bind,
             remote: std::sync::Mutex::new(None),
             links,
+            handshakes: Arc::new(tokio::sync::Semaphore::new(HANDSHAKES)),
         });
         // Remote access stays on across restarts (ADR-0299); a port it cannot take is reported.
         let remembered = hosts::remote_port(&shared.store.db())?;
@@ -295,7 +302,17 @@ async fn accept(
     ends: tokio::sync::watch::Receiver<bool>,
 ) {
     crate::util::accept_each(listener, move |socket| {
-        serve(shared.clone(), socket, kind, ends.clone())
+        // A remote connection needs one of the handshake slots; with none free it is closed.
+        let slot = match kind {
+            Listener::Local => Ok(None),
+            Listener::Remote => shared.handshakes.clone().try_acquire_owned().map(Some),
+        };
+        let (shared, ends) = (shared.clone(), ends.clone());
+        async move {
+            if let Ok(slot) = slot {
+                serve(shared, socket, kind, ends, slot).await;
+            }
+        }
     })
     .await;
 }
@@ -309,6 +326,7 @@ async fn serve(
     socket: TcpStream,
     listener: Listener,
     ends: tokio::sync::watch::Receiver<bool>,
+    slot: Option<tokio::sync::OwnedSemaphorePermit>,
 ) {
     let mut client = String::new();
     let mut admission = None;
@@ -332,6 +350,8 @@ async fn serve(
     else {
         return;
     };
+    // The handshake is over, so its slot is free for the next connection.
+    drop(slot);
     let (caller, owner) = match admission {
         Some(Admission::Session(caller, owner)) => (caller, owner),
         Some(Admission::Tunnel(owner, access)) => {
@@ -374,13 +394,25 @@ async fn serve(
         threads: Mutex::default(),
     });
     let mut streams: HashMap<u64, AbortHandle> = HashMap::new();
+    let mut ping = tokio::time::interval(PING);
+    let mut heard = tokio::time::Instant::now();
     loop {
+        // The ping is sent after the select, so no guard it holds lives across that await.
         let frame = tokio::select! {
-            frame = frames.next() => frame,
+            frame = frames.next() => Some(frame),
             _ = stopping.wait_for(|stopped| *stopped) => break,
             () = revoked(&mut revocations, owner.as_deref()) => break,
+            _ = ping.tick() => None,
+        };
+        let Some(frame) = frame else {
+            if heard.elapsed() > IDLE {
+                break;
+            }
+            let _ = out.send(Message::Ping(Vec::new().into())).await;
+            continue;
         };
         let Some(Ok(frame)) = frame else { break };
+        heard = tokio::time::Instant::now();
         let Message::Text(text) = frame else { continue };
         let request = match serde_json::from_str::<api::Request>(&text) {
             Ok(request) => request,

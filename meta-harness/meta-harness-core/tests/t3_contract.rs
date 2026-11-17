@@ -964,6 +964,28 @@ async fn connects(url: &str, token: &str, name: &str) -> bool {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_remote_listener_closes_a_handshake_beyond_its_limit_at_once() {
+    let (dir, _repo, _home) = fixture();
+    let (_service, local) = start_service(&dir.path().join("meta")).await;
+    let port = free_port();
+    local.remote_on(port).await.unwrap();
+    let address = format!("127.0.0.1:{port}");
+    // Connections that never complete a handshake take the whole limit. The listener accepts in
+    // order, so the next connection is accepted only after them.
+    let idle =
+        futures_util::future::join_all((0..32).map(|_| tokio::net::TcpStream::connect(&address)))
+            .await;
+    let mut extra = tokio::net::TcpStream::connect(&address).await.unwrap();
+    let mut byte = [0u8; 1];
+    let closed = tokio::time::timeout(Duration::from_secs(5), extra.read(&mut byte))
+        .await
+        .expect("closed without waiting for a handshake")
+        .unwrap();
+    assert_eq!(closed, 0, "the extra connection is closed");
+    drop(idle);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn turning_remote_access_off_ends_the_connections_it_admitted() {
     let (dir, _repo, _home) = fixture();
     let (_service, local) = start_service(&dir.path().join("meta")).await;
