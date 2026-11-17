@@ -407,11 +407,13 @@ async fn a_snapshot_names_the_events_it_already_contains() {
         .turns
         .iter()
         .any(|t| t.status == TurnStatus::Completed);
-    let finished_after = received
+    let completions_after = received
         .iter()
-        .any(|e| matches!(e.event, AgentEvent::TurnCompleted { .. }));
-    assert!(
-        finished_before != finished_after,
+        .filter(|e| matches!(e.event, AgentEvent::TurnCompleted { .. }))
+        .count();
+    assert_eq!(
+        usize::from(finished_before) + completions_after,
+        1,
         "the completion is in the snapshot or the stream, exactly once"
     );
     assert!(after.transcript.iter().any(|item| item.text == "Appended."));
