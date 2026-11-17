@@ -276,7 +276,8 @@ class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
     final failure = await switchTo(address, () => choice == _choices);
     if (failure == null || choice != _choices) return;
     try {
-      await _write(previous);
+      // Only the active choice goes back, on the list as it is now: a host paired meanwhile stays.
+      await _write(value.withActive(previous.activeAddress));
     } on Object catch (error) {
       throw AgentHostsError(
         'Could not use ${_nameOf(address, previous)} for sessions, and the saved choice could not be restored, so the next start uses ${_nameOf(address, previous)}. ${messageOf(error)}',

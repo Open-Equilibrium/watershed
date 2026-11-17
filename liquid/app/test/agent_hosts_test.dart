@@ -42,7 +42,10 @@ class FakeAgentHosts implements AgentHostBridge {
   Future<BridgePairing> pair(String address, String code) async {
     calls.add('pair $address $code');
     if (pairError case final error?) throw error;
-    return BridgePairing(host: 'Studio mini', client: client);
+    return BridgePairing(
+      host: address == remote ? 'Studio mini' : 'Lab',
+      client: client,
+    );
   }
 
   @override
@@ -686,6 +689,27 @@ void main() {
       );
     },
   );
+
+  test('a failed switch keeps a host paired while it was running', () async {
+    final opening = Completer<String?>();
+    final hosts = AgentHostsController(
+      settings: AgentHostsSettings([mini]),
+      bridge: bridge,
+      save: (next) async => saved.add(next),
+      switchTo: (address, _) => opening.future,
+    );
+    const lab = 'ws://lab:3774';
+
+    final choosing = hosts.use(remote);
+    await pumpEventQueue();
+    await hosts.pair(lab, 'BBBB-BBBB');
+    opening.complete('no answer');
+
+    await expectLater(choosing, throwsA(isA<AgentHostsError>()));
+    expect(hosts.value.hosts.map((host) => host.address), [remote, lab]);
+    expect(hosts.value.activeAddress, isNull);
+    expect(saved.last.hosts.map((host) => host.address), [remote, lab]);
+  });
 
   test('a host whose list cannot be saved is forgotten again, and a failed forget is said', () async {
     final hosts = AgentHostsController(
