@@ -197,9 +197,11 @@ impl Store for Sqlite {
     }
 
     fn put_part(&mut self, upload: &str, index: u64, bytes: &[u8]) -> Result<(), Error> {
+        // SQLite keeps i64; a larger index would wrap into a negative one.
+        let index = i64::try_from(index).map_err(failed)?;
         self.connection
             .prepare_cached("INSERT INTO parts (upload, idx, bytes) VALUES (?1, ?2, ?3)")
-            .and_then(|mut insert| insert.execute(params![upload, index as i64, bytes]))
+            .and_then(|mut insert| insert.execute(params![upload, index, bytes]))
             .map_err(failed)?;
         Ok(())
     }
@@ -213,15 +215,17 @@ impl Store for Sqlite {
     ) -> Result<(), Error> {
         let size = i64::try_from(size).map_err(failed)?;
         let transaction = self.connection.transaction().map_err(failed)?;
-        // Parts run from 0 without a gap: as many as their highest index says.
-        let (kept, last): (i64, Option<i64>) = transaction
+        // Parts run from 0 without a gap: the lowest index 0 and the highest one less
+        // than their count.
+        let (kept, first, last): (i64, Option<i64>, Option<i64>) = transaction
             .query_row(
-                "SELECT count(*), max(idx) FROM parts WHERE upload = ?1",
+                "SELECT count(*), min(idx), max(idx) FROM parts WHERE upload = ?1",
                 [upload],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .map_err(failed)?;
-        if kept as u64 != parts || last.map_or(0, |last| last + 1) != kept {
+        let gapless = kept == 0 || (first == Some(0) && last == Some(kept - 1));
+        if kept as u64 != parts || !gapless {
             return Err(Error::Storage(format!(
                 "the upload has {kept} of its {parts} parts"
             )));
@@ -345,6 +349,8 @@ mod tests {
             "parts must run from 0 without a gap"
         );
         store.discard_upload("gap").unwrap();
+        // An index past i64 is refused, so it never wraps into a negative one.
+        assert!(store.put_part("wrap", u64::MAX, b"z").is_err());
         store.put_part("unfinished", 0, b"castle").unwrap();
         store.put_part("discarded", 0, b"river").unwrap();
         store.discard_upload("discarded").unwrap();
