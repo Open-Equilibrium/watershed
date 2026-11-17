@@ -958,6 +958,41 @@ async fn the_service_refuses_a_client_that_names_no_api_version_or_another() {
     service.stop().await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_that_stops_reading_its_replies_is_disconnected() {
+    use futures_util::SinkExt;
+    use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
+    let (dir, _repo, _home) = fixture();
+    let (service, _local) = start_service(&dir.path().join("meta")).await;
+    let mut request = service.url.as_str().into_client_request().unwrap();
+    request.headers_mut().insert(
+        "authorization",
+        format!("Bearer {}", service.token).parse().unwrap(),
+    );
+    request
+        .headers_mut()
+        .insert("meta-harness-api", "1".parse().unwrap());
+    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    // Each malformed request is answered, and the answers are never read.
+    let disconnected = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            if socket
+                .send(Message::Text(r#"{"id":1,"bogus":true}"#.into()))
+                .await
+                .is_err()
+            {
+                return;
+            }
+        }
+    })
+    .await;
+    assert!(
+        disconnected.is_ok(),
+        "the service disconnects a client that never reads"
+    );
+    service.stop().await;
+}
+
 /// Whether a client named `name` with `token` connects to the remote listener at `url`.
 async fn connects(url: &str, token: &str, name: &str) -> bool {
     remote::Host::connect_to(url, token, name).await.is_ok()

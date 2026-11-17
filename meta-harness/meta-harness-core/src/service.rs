@@ -437,7 +437,11 @@ async fn serve(
                     .and_then(|v| v["id"].as_u64());
                 if let Some(id) = id {
                     let error = format!("Meta-Harness does not understand this request: {error}");
-                    let _ = out.send(frame_of(&Reply::Error { id, error })).await;
+                    // A client that does not read its replies is disconnected, rather than holding
+                    // the loop, which must go on noticing revocation and shutdown.
+                    if out.try_send(frame_of(&Reply::Error { id, error })).is_err() {
+                        break;
+                    }
                 }
                 continue;
             }
