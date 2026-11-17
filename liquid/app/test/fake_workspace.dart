@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:liquid/src/rust/api/database.dart';
+import 'package:liquid/src/rust/api/media.dart';
 import 'package:liquid/src/rust/api/replica.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 
@@ -17,6 +19,16 @@ class FakeWorkspace implements LiquidWorkspace {
   final texts = <String, String>{};
   final styles = <String, BridgeTextStyle>{};
   final languages = <String, String>{};
+
+  /// The files on disk the app may add, by path; the finished attachments, by name; each
+  /// Media Block's file; and each copy saved, by path.
+  final files = <String, Uint8List>{};
+  final attachments = <String, Uint8List>{};
+  final media = <String, BridgeMedia>{};
+  final saved = <String, Uint8List>{};
+
+  /// Holds each file's last step, its name, until it completes.
+  Completer<void>? uploadGate;
 
   /// Each Database Block's name and fields, and its rows in order.
   final databases = <String, BridgeDatabase>{};
@@ -406,6 +418,31 @@ class FakeWorkspace implements LiquidWorkspace {
         );
         _changed(_blockResource(mutation));
         return BridgeApplied(action: _id());
+      case BridgeMutationKind.addMediaBlock:
+        final file = attachments[mutation.attachment]!;
+        final page = views.putIfAbsent(mutation.page!, () => []);
+        final view = BridgeView(
+          id: _id(),
+          block: _id(),
+          boundary: false,
+          kind: BridgeBlockKind.media,
+        );
+        media[view.block] = BridgeMedia(
+          name: mutation.text!,
+          mediaType: mutation.mediaType ?? '',
+          attachment: mutation.attachment!,
+          size: file.length,
+        );
+        page.insert(
+          mutation.after == null
+              ? 0
+              : page.indexWhere((view) => view.id == mutation.after) + 1,
+          view,
+        );
+        _changed(
+          BridgeResource(kind: BridgeResourceKind.views, page: mutation.page),
+        );
+        return BridgeApplied(action: _id(), block: view.block, view: view.id);
       case BridgeMutationKind.addDatabaseBlock:
         final page = views.putIfAbsent(mutation.page!, () => []);
         final view = BridgeView(
@@ -557,6 +594,14 @@ class FakeWorkspace implements LiquidWorkspace {
         language: _isCode(query.block) ? languages[query.block] ?? '' : null,
         rows: const [],
       ),
+      BridgeQueryKind.media => BridgeAnswer(
+        areas: const [],
+        pages: const [],
+        views: const [],
+        count: 0,
+        media: media[query.block],
+        rows: const [],
+      ),
       BridgeQueryKind.database => BridgeAnswer(
         areas: const [],
         pages: const [],
@@ -574,6 +619,43 @@ class FakeWorkspace implements LiquidWorkspace {
       ),
     };
   }
+
+  /// The name an attachment of `bytes` gets: its content, as the core names it by hash.
+  String _attachment(Uint8List bytes) {
+    final name = Object.hashAll(bytes).toUnsigned(32).toRadixString(16);
+    attachments[name.padLeft(64, '0')] = bytes;
+    return name.padLeft(64, '0');
+  }
+
+  @override
+  Future<String> addBytes({required List<int> bytes}) async =>
+      _attachment(Uint8List.fromList(bytes));
+
+  @override
+  Stream<BridgeUpload> addFile({required String path}) async* {
+    final bytes = files[path];
+    if (bytes == null) throw '$path: No such file or directory';
+    const part = 1 << 20;
+    for (var at = part; at < bytes.length; at += part) {
+      yield BridgeUpload(written: at, size: bytes.length);
+    }
+    await uploadGate?.future;
+    yield BridgeUpload(
+      written: bytes.length,
+      size: bytes.length,
+      attachment: _attachment(bytes),
+    );
+  }
+
+  @override
+  Future<Uint8List> readAttachment({required String attachment}) async =>
+      attachments[attachment] ?? (throw 'not found');
+
+  @override
+  Future<void> saveAttachment({
+    required String attachment,
+    required String path,
+  }) async => saved[path] = attachments[attachment] ?? (throw 'not found');
 
   @override
   Stream<BridgeChange> subscribe({

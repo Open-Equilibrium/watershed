@@ -5,6 +5,7 @@
 
 import '../frb_generated.dart';
 import 'database.dart';
+import 'media.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
@@ -34,6 +35,9 @@ class BridgeAnswer {
   /// A Code Block's language, with its code; empty for plain text.
   final String? language;
 
+  /// A Media Block's file and attachment.
+  final BridgeMedia? media;
+
   /// A Database's name and fields.
   final BridgeDatabase? database;
 
@@ -48,6 +52,7 @@ class BridgeAnswer {
     this.text,
     this.style,
     this.language,
+    this.media,
     this.database,
     required this.rows,
   });
@@ -61,6 +66,7 @@ class BridgeAnswer {
       text.hashCode ^
       style.hashCode ^
       language.hashCode ^
+      media.hashCode ^
       database.hashCode ^
       rows.hashCode;
 
@@ -76,6 +82,7 @@ class BridgeAnswer {
           text == other.text &&
           style == other.style &&
           language == other.language &&
+          media == other.media &&
           database == other.database &&
           rows == other.rows;
 }
@@ -176,6 +183,9 @@ enum BridgeBlockKind {
   /// A Code Block.
   code,
 
+  /// A Media Block.
+  media,
+
   /// A Block of a kind a later version adds, which shows as a placeholder (ADR-0245).
   unknown,
 }
@@ -260,6 +270,12 @@ class BridgeMutation {
   /// A cell's new value.
   final BridgeCell? cell;
 
+  /// A file's media type, such as `image/png`; empty if unknown.
+  final String? mediaType;
+
+  /// A finished attachment's name.
+  final String? attachment;
+
   const BridgeMutation({
     required this.kind,
     this.area,
@@ -279,6 +295,8 @@ class BridgeMutation {
     this.fieldKind,
     required this.color,
     this.cell,
+    this.mediaType,
+    this.attachment,
   });
 
   @override
@@ -300,7 +318,9 @@ class BridgeMutation {
       row.hashCode ^
       fieldKind.hashCode ^
       color.hashCode ^
-      cell.hashCode;
+      cell.hashCode ^
+      mediaType.hashCode ^
+      attachment.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -324,7 +344,9 @@ class BridgeMutation {
           row == other.row &&
           fieldKind == other.fieldKind &&
           color == other.color &&
-          cell == other.cell;
+          cell == other.cell &&
+          mediaType == other.mediaType &&
+          attachment == other.attachment;
 }
 
 /// What a [`BridgeMutation`] does; each kind names the parts it fills.
@@ -370,6 +392,10 @@ enum BridgeMutationKind {
   /// Sets the Code Block `block`'s language on its home `page` to `text`; empty for plain
   /// text.
   setCodeLanguage,
+
+  /// Adds a Media Block for the file `text` of `media_type`, kept as the finished
+  /// `attachment`, to `page`, after the View `after` or first.
+  addMediaBlock,
 
   /// Adds a Database Block named `text`, with a text field "Name", to `page`, after the
   /// View `after` or first.
@@ -510,6 +536,10 @@ enum BridgeQueryKind {
   /// The Code `block`'s code and language on its home `page` into `text` and `language`;
   /// none once the Block is removed or if it is no Code Block.
   code,
+
+  /// The Media `block`'s file and attachment on its home `page` into `media`; none once
+  /// the Block is removed or if it is no Media Block.
+  media,
 
   /// The Database `block`'s name and fields on its home `page` into `database`; none
   /// once the Block is removed or if it is no Database.

@@ -5,6 +5,7 @@
 
 import '../frb_generated.dart';
 import 'database.dart';
+import 'media.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
@@ -16,6 +17,14 @@ import 'workspace.dart';
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<LiquidWorkspace>>
 abstract class LiquidWorkspace implements RustOpaqueInterface {
+  /// Adds pasted bytes as an attachment and answers its name.
+  Future<String> addBytes({required List<int> bytes});
+
+  /// Adds the file at `path` as an attachment, sending its progress and, last, its name;
+  /// a refusal arrives as the stream's error. Add a Media Block for it with
+  /// `AddMediaBlock`.
+  Stream<BridgeUpload> addFile({required String path});
+
   /// Applies one write as the device's person through Liquid's interface, then tells the
   /// subscribers of every resource it changed.
   Future<BridgeApplied> apply({required BridgeMutation mutation});
@@ -31,6 +40,16 @@ abstract class LiquidWorkspace implements RustOpaqueInterface {
 
   /// Reads one bounded window, one Block's text or one Database's fields.
   Future<BridgeAnswer> query({required BridgeQuery query});
+
+  /// The bytes of an attachment of at most [`MAX_SHOWN`] bytes, to show it as an image.
+  Future<Uint8List> readAttachment({required String attachment});
+
+  /// Writes an attachment's bytes to `path`, which the person chose in the save dialog,
+  /// replacing what is there.
+  Future<void> saveAttachment({
+    required String attachment,
+    required String path,
+  });
 
   /// Streams `resource`'s changes to Dart under the identity `subscription`, which Dart
   /// chooses and passes to [`LiquidWorkspace::close`] when it cancels the stream. The first

@@ -12,6 +12,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'anchored_menu.dart';
 import 'follow.dart';
+import 'media_block.dart';
 import 'page_editor.dart';
 import 'page_views.dart';
 import 'slash_commands.dart';
@@ -208,6 +209,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       return;
     }
     if (choice.block == BridgeBlockKind.code) return _turnIntoCode();
+    if (choice.block == BridgeBlockKind.media) return _addMedia();
     final views = widget.views;
     final view = widget.view;
     final last = widget.index == (views.count ?? 0) - 1;
@@ -567,6 +569,35 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         .write(change, [block], chain: chain)
         .then<void>((_) {}, onError: (Object _) {}),
   );
+
+  /// Opens the file dialog and adds the chosen files as Media Blocks in this line's place;
+  /// a line that ends the Page stays below them, so the Page goes on (ADR-0305).
+  Future<void> _addMedia() async {
+    final views = widget.views;
+    final view = widget.view;
+    final index = widget.index;
+    final last = index == (views.count ?? 0) - 1;
+    final List<MediaSource> sources;
+    try {
+      sources = await MediaPlatform.pickFiles();
+    } on Object catch (error) {
+      _state.report('Liquid could not open the file dialog: $error');
+      return;
+    }
+    if (sources.isEmpty) return;
+    String? after = view.id;
+    if (last) {
+      final above = index > 0 ? await views.viewAt(index - 1) : null;
+      if (index > 0 && above == null) {
+        _state.report(
+          'Liquid did not add the files, as the Page changed; choose Media again.',
+        );
+        return;
+      }
+      after = above?.id;
+    }
+    await addMedia(views, sources, after: after, replacing: last ? null : view);
+  }
 
   /// Turns this Text Block into a Code Block, which takes the caret at its start once built
   /// (ADR-0302).

@@ -71,17 +71,24 @@ const slashCommands = [
     style: BridgeTextStyle.todo,
   ),
   SlashCommand('Quote', LucideIcons.textQuote, style: BridgeTextStyle.quote),
-  SlashCommand(
-    'Table',
-    LucideIcons.table,
-    block: BridgeBlockKind.database,
-    description: 'Fields and rows',
-  ),
+  // The Blocks, in alphabetical order (ADR-0305).
   SlashCommand(
     'Code',
     LucideIcons.code,
     block: BridgeBlockKind.code,
     description: 'Code with syntax colors',
+  ),
+  SlashCommand(
+    'Media',
+    LucideIcons.image,
+    block: BridgeBlockKind.media,
+    description: 'An image or a file',
+  ),
+  SlashCommand(
+    'Table',
+    LucideIcons.table,
+    block: BridgeBlockKind.database,
+    description: 'Fields and rows',
   ),
 ];
 

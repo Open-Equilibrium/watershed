@@ -80,4 +80,6 @@ abstract final class LucideIcons {
   static const chevronUp = IconData(0xe070, fontFamily: _family);
   static const code = IconData(0xe093, fontFamily: _family);
   static const copy = IconData(0xe09e, fontFamily: _family);
+  static const image = IconData(0xe0f6, fontFamily: _family);
+  static const download = IconData(0xe0b2, fontFamily: _family);
 }
