@@ -39,7 +39,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Configuration proposal** — A change to Meta-Harness's central configuration that takes effect only once someone on the account approves it, which makes a new revision (ADR-0298).
 - **Configuration revision** — One state of the central configuration: 0 before the first approval, then one more with each approved proposal (ADR-0298).
 - **Harness home** — The configuration folder Meta-Harness owns for one harness, such as Claude Code's `CLAUDE_CONFIG_DIR` or Codex's `CODEX_HOME`, which T3 Code starts the harness with; the person's own harness configuration stays untouched (ADR-0298).
-- **Meta-Harness service** — The `meta serve` process that owns a data folder (`META_HARNESS_HOME`, else `~/.meta-harness`), runs the pinned T3 Code server and serves Meta-Harness's API to clients such as `meta` and Liquid (ADR-0304).
+- **Meta-Harness service** — The `meta serve` process that owns a data folder (`META_HARNESS_HOME`, else `~/.meta-harness`), runs the pinned T3 Code server and serves Meta-Harness's API to clients such as `meta` and Liquid (ADR-0297).
 - **Meta-Harness API version** — The number a client names in the `meta-harness-api` header of its handshake; the service admits only its own ([V-Spec](docs/concept/V-Spec_MetaHarness.html#surfaces)).
 - **Remote access** — The service's listener on this computer's Tailscale addresses, off until a person turns it on (ADR-0299).
 - **Pairing code** — The single-use code that `meta invite` issues so that one device or host can pair with this computer's remote access (ADR-0299).
@@ -193,6 +193,8 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Text Block** — One paragraph, heading, list item, to-do or quote; ⏎ ends it and starts the next.
 - **Table** — The Block of typed fields and rows, kept in its home Page's document and shown through Views such as Table, Board and Calendar. The core calls it the Database Block (ADR-0244).
 - **Code Block** — A Block of code with syntax colors that Liquid never runs; a Text Block turns into one with ``` or the slash command Code (ADR-0302).
+- **Media Block** — A Block that shows an image or a file, kept as an attachment (ADR-0305).
+- **Attachment** — A file's bytes in a Workspace, kept in the encrypted replica in parts and named by the SHA-256 of its bytes, so a file added twice is kept once (ADR-0305).
 - **Calculation Block** — A Block of lines that each pair a label with a value or formula, laid out as labels left and values right, for reports in Excel's layout (ADR-0244).
 - **Section** — Consecutive Text Blocks up to `---`, a Block of another type or the Page's edge; Arrange mode places it as one tile, inside which its Text Blocks can be arranged in columns. It is layout only and owns no content, rights or Views (ADR-0235).
 - **Chat** — Liquid's one kind of conversation, as in WhatsApp: one-to-one or a group, whose participants are people or agents alike; a Block that Pages can show. A planned replacement for separate agent sessions and projects (ADR-0239, ADR-0241).

@@ -13,6 +13,7 @@ use liquid_core::{
 use liquid_storage::Sqlite;
 
 use super::database::{BridgeDatabase, BridgeRow, row_query};
+use super::media::BridgeMedia;
 use super::workspace::{
     BridgeAnswer, BridgeApplied, BridgeArea, BridgeBlockKind, BridgeChange, BridgeMutation,
     BridgePage, BridgeQuery, BridgeQueryKind, BridgeResource, BridgeTextStyle, BridgeView, id,
@@ -34,8 +35,8 @@ pub struct LiquidWorkspace {
 /// A taken replica lock, released when dropped.
 struct ReplicaLock(File);
 
-struct Inner {
-    workspace: Workspace<Sqlite>,
+pub(super) struct Inner {
+    pub(super) workspace: Workspace<Sqlite>,
     subscriptions: Subscriptions,
 }
 
@@ -102,7 +103,7 @@ const STOPPED: &str = "the Workspace stopped after an internal error; quit and r
 impl LiquidWorkspace {
     /// The Workspace's state, unless a call failed while holding it: what that call left may
     /// hold changes it never committed, so every later call is refused.
-    fn state(&self) -> Result<MutexGuard<'_, Inner>, String> {
+    pub(super) fn state(&self) -> Result<MutexGuard<'_, Inner>, String> {
         self.inner.lock().map_err(|_| STOPPED.to_string())
     }
 
@@ -161,6 +162,7 @@ impl LiquidWorkspace {
             | Mutation::TurnIntoCode { page, .. }
             | Mutation::TurnIntoText { page, .. }
             | Mutation::SetCodeLanguage { page, .. }
+            | Mutation::AddMediaBlock { page, .. }
             | Mutation::AddDatabaseBlock { page, .. }
             | Mutation::RenameDatabase { page, .. }
             | Mutation::AddField { page, .. }
@@ -249,6 +251,7 @@ impl LiquidWorkspace {
             text: None,
             style: None,
             language: None,
+            media: None,
             database: None,
             rows: Vec::new(),
         };
@@ -298,6 +301,7 @@ impl LiquidWorkspace {
                             BlockKind::Text => BridgeBlockKind::Text,
                             BlockKind::Database => BridgeBlockKind::Database,
                             BlockKind::Code => BridgeBlockKind::Code,
+                            BlockKind::Media => BridgeBlockKind::Media,
                             BlockKind::Unknown => BridgeBlockKind::Unknown,
                         },
                     })
@@ -321,6 +325,15 @@ impl LiquidWorkspace {
                     answer.text = Some(code.text);
                     answer.language = Some(code.language);
                 }
+            }
+            BridgeQueryKind::Media => {
+                let page = id(&query.page, PageId::parse, "page")?;
+                *read = Some(page.clone());
+                let block = id(&query.block, BlockId::parse, "block")?;
+                answer.media = workspace
+                    .media(&page, &block)
+                    .map_err(message)?
+                    .map(BridgeMedia::of);
             }
             BridgeQueryKind::Database => {
                 let page = id(&query.page, PageId::parse, "page")?;

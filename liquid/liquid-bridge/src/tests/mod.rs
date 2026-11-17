@@ -3,6 +3,7 @@ mod convert;
 mod database;
 mod details;
 mod hosts;
+mod media;
 mod record;
 mod session;
 mod stream;

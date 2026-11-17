@@ -7,7 +7,7 @@ Native targets and current availability follow [PLATFORMS.md](../PLATFORMS.md).
 ## Layout
 
 - `app/` — the Flutter app. Its exact Flutter release is pinned in `app/pubspec.yaml`, which CI reads.
-- `liquid-bridge/` — the Rust side of the flutter_rust_bridge bindings (ADR-0186). It reaches agent sessions through the Meta-Harness service as a client (ADR-0215, ADR-0304), and opens the Workspace with its key from the keychain (ADR-0216, ADR-0237); neither core depends on the bridge; `app/hook/build.dart` compiles it into the app (ADR-0213).
+- `liquid-bridge/` — the Rust side of the flutter_rust_bridge bindings (ADR-0186). It reaches agent sessions through the Meta-Harness service as a client (ADR-0215, ADR-0297), and opens the Workspace with its key from the keychain (ADR-0216, ADR-0237); neither core depends on the bridge; `app/hook/build.dart` compiles it into the app (ADR-0213).
 - `liquid-core/` — the Workspace core: object model, mutation pipeline and History over Automerge (ADR-0235, ADR-0238), committing every write to a store.
 - `liquid-storage/` — the local replica: that store in SQLite with SQLCipher (ADR-0237). Build hosts: [TESTING.md](../TESTING.md#development-toolchain).
 

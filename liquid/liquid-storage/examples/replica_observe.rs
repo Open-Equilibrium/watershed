@@ -1,12 +1,15 @@
 //! Observation workload for the local replica (PERFORMANCE.md, Liquid). A first run types with
 //! one durable commit per keystroke, builds a long Page and prints the replica's path; a second
 //! run, a new process as when Liquid starts again, reopens that Page and removes the replica.
-//! It prints a summary and never compares with a threshold. Run from the repository root:
+//! A run with `--attachment` adds one file as an attachment in its own replica and reads it
+//! back (ADR-0305). It prints a summary and never compares with a threshold. Run from the
+//! repository root:
 //!
 //! ```sh
 //! cargo build --release -p liquid-storage --example replica_observe
 //! /usr/bin/time -l target/release/examples/replica_observe
 //! /usr/bin/time -l target/release/examples/replica_observe <printed path>
+//! /usr/bin/time -l target/release/examples/replica_observe --attachment
 //! ```
 
 use std::path::Path;
@@ -16,6 +19,8 @@ use liquid_core::{Actor, Created, Mutation, Origin, PageId, PersonId, Request, W
 use liquid_storage::Sqlite;
 
 const KEYSTROKES: usize = 2_000;
+/// The attachment workload's file: 256 MiB, as a short video is.
+const ATTACHMENT: usize = 256 << 20;
 const BLOCKS: usize = 1_000;
 const KEY: [u8; 32] = [7; 32];
 
@@ -67,8 +72,12 @@ fn summary(name: &str, mut times: Vec<Duration>) {
 }
 
 fn main() {
-    if let Some(path) = std::env::args().nth(1) {
-        reopen(Path::new(&path));
+    if let Some(argument) = std::env::args().nth(1) {
+        if argument == "--attachment" {
+            attachment();
+        } else {
+            reopen(Path::new(&argument));
+        }
         return;
     }
     let dir = std::env::temp_dir().join(format!("liquid-replica-observe-{}", std::process::id()));
@@ -180,4 +189,59 @@ fn reopen(path: &Path) {
         }
     }
     let _ = std::fs::remove_dir(path.parent().expect("the replica is in its own directory"));
+}
+
+/// Adds a 256 MiB file to a new replica part by part, as the bridge reads one from disk,
+/// then reads it back part by part, as Save as… writes it out, and removes the replica.
+fn attachment() {
+    let dir =
+        std::env::temp_dir().join(format!("liquid-attachment-observe-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("the temporary directory can be created");
+    let path = dir.join("replica.db");
+    let mut workspace = Workspace::create(
+        PersonId::new("observer"),
+        Sqlite::open(&path, &KEY).expect("a new replica opens"),
+    )
+    .expect("the replica accepts a new Workspace");
+    let part: Vec<u8> = (0..liquid_core::PART).map(|at| (at % 251) as u8).collect();
+    let owner = Actor::Person(PersonId::new("observer"));
+    let start = Instant::now();
+    let mut upload = workspace
+        .begin_upload(&owner, ATTACHMENT as u64)
+        .expect("the file is within the cap");
+    let mut times = Vec::new();
+    for _ in 0..ATTACHMENT / liquid_core::PART {
+        let started = Instant::now();
+        workspace
+            .upload(&mut upload, &part)
+            .expect("the store keeps the part");
+        times.push(started.elapsed());
+    }
+    let attachment = workspace
+        .finish_upload(upload)
+        .expect("the upload finishes");
+    let added = start.elapsed();
+    summary("adding a 256 MiB file, per 1 MiB part", times);
+    println!(
+        "adding it whole, with its SHA-256: {:.2} s, {:.0} MiB/s",
+        added.as_secs_f64(),
+        256.0 / added.as_secs_f64()
+    );
+    let start = Instant::now();
+    let mut index = 0;
+    while workspace
+        .attachment_part(&attachment.id, index)
+        .expect("the store reads the part")
+        .is_some()
+    {
+        index += 1;
+    }
+    let read = start.elapsed();
+    println!(
+        "reading it back part by part: {:.2} s, {:.0} MiB/s",
+        read.as_secs_f64(),
+        256.0 / read.as_secs_f64()
+    );
+    drop(workspace);
+    std::fs::remove_dir_all(&dir).expect("the replica is removed");
 }

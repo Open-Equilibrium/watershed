@@ -1,6 +1,6 @@
 // Packs already-built Meta-Harness parts into the download a person verifies and unpacks: `meta`,
 // the T3 Code folder meta-harness/t3.lock pins, the installer and the license files (ADR-0286,
-// ADR-0303). It only packs: it never builds, signs or publishes.
+// ADR-0296). It only packs: it never builds, signs or publishes.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {

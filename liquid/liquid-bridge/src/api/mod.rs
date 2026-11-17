@@ -5,6 +5,7 @@ pub mod details;
 pub mod events;
 pub mod git;
 pub mod hosts;
+pub mod media;
 pub(crate) mod record;
 pub mod replica;
 pub mod session;

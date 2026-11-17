@@ -1,4 +1,4 @@
-//! Meta-Harness's service (ADR-0286, ADR-0304): it owns a data folder, starts the pinned T3 Code
+//! Meta-Harness's service (ADR-0286, ADR-0297): it owns a data folder, starts the pinned T3 Code
 //! server there and serves the API (see [`crate::api`]) on a WebSocket at 127.0.0.1, as T3 Code
 //! serves its own clients. Every connection must carry the bearer token the service writes, with
 //! its address, into `connection.json`, which only the user can read.

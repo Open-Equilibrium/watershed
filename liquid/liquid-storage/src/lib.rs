@@ -2,8 +2,8 @@
 //! SQLCipher and in write-ahead-log mode (ADR-0237). SQL stays inside this crate (client
 //! architecture rule 15).
 //!
-//! The database holds each document's chunks, Automerge changes and snapshots, and every
-//! recorded Action. A commit is one transaction that reaches the storage medium, so an
+//! The database holds each document's chunks, Automerge changes and snapshots, every
+//! recorded Action, and the attachments' parts (ADR-0305). A commit is one transaction that reaches the storage medium, so an
 //! acknowledged write survives the app being killed and a power loss.
 
 #![deny(missing_docs)]
@@ -11,12 +11,12 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
-use liquid_core::{Action, ActionId, Commit, Document, Error, Store, Write};
+use liquid_core::{Action, ActionId, AttachmentId, Commit, Document, Error, Store, Write};
 use rusqlite::{Connection, ErrorCode, OptionalExtension, params};
 
 /// The schema version this crate writes; [`Sqlite::open`] creates it in a new database and
 /// refuses a newer one.
-const VERSION: i64 = 1;
+const VERSION: i64 = 2;
 
 const SCHEMA: &str = "
     CREATE TABLE chunks (
@@ -29,6 +29,23 @@ const SCHEMA: &str = "
         seq INTEGER PRIMARY KEY,
         id TEXT NOT NULL UNIQUE,
         record TEXT NOT NULL
+    );
+";
+
+/// What schema version 2 adds: attachments, each one upload's parts under the SHA-256 of
+/// its bytes. Parts of an upload no attachment names are unfinished.
+const ATTACHMENTS: &str = "
+    CREATE TABLE parts (
+        seq INTEGER PRIMARY KEY,
+        upload TEXT NOT NULL,
+        idx INTEGER NOT NULL,
+        bytes BLOB NOT NULL,
+        UNIQUE (upload, idx)
+    );
+    CREATE TABLE attachments (
+        id TEXT PRIMARY KEY,
+        upload TEXT NOT NULL,
+        size INTEGER NOT NULL
     );
 ";
 
@@ -87,19 +104,23 @@ impl Sqlite {
                 "PRAGMA synchronous = FULL; PRAGMA fullfsync = ON; PRAGMA checkpoint_fullfsync = ON;",
             )
             .map_err(failed)?;
-        match version {
-            0 => connection
-                .execute_batch(&format!(
-                    "BEGIN; {SCHEMA} PRAGMA user_version = {VERSION}; COMMIT;"
-                ))
-                .map_err(failed)?,
-            VERSION => {}
+        let create = match version {
+            0 => format!("{SCHEMA} {ATTACHMENTS}"),
+            1 => ATTACHMENTS.to_string(),
+            VERSION => String::new(),
             newer => {
                 return Err(Error::Storage(format!(
                     "schema version {newer} is newer than this Liquid"
                 )));
             }
-        }
+        };
+        // An upload the last session never finished is dropped.
+        connection
+            .execute_batch(&format!(
+                "BEGIN; {create} PRAGMA user_version = {VERSION}; \
+                 DELETE FROM parts WHERE upload NOT IN (SELECT upload FROM attachments); COMMIT;"
+            ))
+            .map_err(failed)?;
         Ok(Self { connection })
     }
 }
@@ -174,6 +195,90 @@ impl Store for Sqlite {
             .map(|record| serde_json::from_str(&record.map_err(failed)?).map_err(failed))
             .collect()
     }
+
+    fn put_part(&mut self, upload: &str, index: u64, bytes: &[u8]) -> Result<(), Error> {
+        self.connection
+            .prepare_cached("INSERT INTO parts (upload, idx, bytes) VALUES (?1, ?2, ?3)")
+            .and_then(|mut insert| insert.execute(params![upload, index as i64, bytes]))
+            .map_err(failed)?;
+        Ok(())
+    }
+
+    fn finish_upload(
+        &mut self,
+        upload: &str,
+        attachment: &AttachmentId,
+        size: u64,
+        parts: u64,
+    ) -> Result<(), Error> {
+        let size = i64::try_from(size).map_err(failed)?;
+        let transaction = self.connection.transaction().map_err(failed)?;
+        let kept: i64 = transaction
+            .query_row(
+                "SELECT count(*) FROM parts WHERE upload = ?1",
+                [upload],
+                |row| row.get(0),
+            )
+            .map_err(failed)?;
+        if kept as u64 != parts {
+            return Err(Error::Storage(format!(
+                "the upload has {kept} of its {parts} parts"
+            )));
+        }
+        let added = transaction
+            .execute(
+                "INSERT OR IGNORE INTO attachments (id, upload, size) VALUES (?1, ?2, ?3)",
+                params![attachment.as_str(), upload, size],
+            )
+            .map_err(failed)?;
+        // A copy of a kept attachment goes, unless it is the upload the attachment names.
+        if added == 0 {
+            transaction
+                .execute(
+                    "DELETE FROM parts WHERE upload = ?1 \
+                     AND NOT EXISTS (SELECT 1 FROM attachments WHERE upload = ?1)",
+                    [upload],
+                )
+                .map_err(failed)?;
+        }
+        transaction.commit().map_err(failed)
+    }
+
+    fn discard_upload(&mut self, upload: &str) -> Result<(), Error> {
+        self.connection
+            .execute("DELETE FROM parts WHERE upload = ?1", [upload])
+            .map_err(failed)?;
+        Ok(())
+    }
+
+    fn attachment_size(&mut self, attachment: &AttachmentId) -> Result<Option<u64>, Error> {
+        let size: Option<i64> = self
+            .connection
+            .prepare_cached("SELECT size FROM attachments WHERE id = ?1")
+            .and_then(|mut query| {
+                query
+                    .query_row([attachment.as_str()], |row| row.get(0))
+                    .optional()
+            })
+            .map_err(failed)?;
+        size.map(|size| u64::try_from(size).map_err(failed))
+            .transpose()
+    }
+
+    fn part(&mut self, attachment: &AttachmentId, index: u64) -> Result<Option<Vec<u8>>, Error> {
+        self.connection
+            .prepare_cached(
+                "SELECT parts.bytes FROM attachments JOIN parts \
+                 ON parts.upload = attachments.upload AND parts.idx = ?2 \
+                 WHERE attachments.id = ?1",
+            )
+            .and_then(|mut query| {
+                query
+                    .query_row(params![attachment.as_str(), index as i64], |row| row.get(0))
+                    .optional()
+            })
+            .map_err(failed)
+    }
 }
 
 #[cfg(test)]
@@ -189,6 +294,80 @@ mod tests {
             .connection
             .execute_batch("CREATE VIRTUAL TABLE probe USING fts5(text);")
             .unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "liquid-storage-{name}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn parts(store: &Sqlite) -> i64 {
+        store
+            .connection
+            .query_row("SELECT count(*) FROM parts", [], |row| row.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn a_file_added_twice_is_kept_once_and_an_unfinished_one_goes_at_the_next_open() {
+        let dir = scratch("parts");
+        let path = dir.join("replica.db");
+        let mut store = Sqlite::open(&path, &[1; 32]).unwrap();
+        let id = AttachmentId::parse(&"a".repeat(64)).unwrap();
+        for upload in ["first", "second"] {
+            store.put_part(upload, 0, b"tram").unwrap();
+            store.put_part(upload, 1, b"28").unwrap();
+            store.finish_upload(upload, &id, 6, 2).unwrap();
+        }
+        assert_eq!(parts(&store), 2, "the second copy's parts are dropped");
+        store.finish_upload("first", &id, 6, 2).unwrap();
+        assert_eq!(parts(&store), 2, "finishing again keeps the kept parts");
+        store.put_part("unfinished", 0, b"castle").unwrap();
+        store.put_part("discarded", 0, b"river").unwrap();
+        store.discard_upload("discarded").unwrap();
+        assert_eq!(parts(&store), 3);
+        drop(store);
+
+        let mut store = Sqlite::open(&path, &[1; 32]).unwrap();
+        assert_eq!(parts(&store), 2, "the unfinished upload is gone");
+        assert_eq!(store.part(&id, 1).unwrap().as_deref(), Some(&b"28"[..]));
+        assert_eq!(store.attachment_size(&id).unwrap(), Some(6));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_replica_of_the_first_schema_gains_attachments() {
+        let dir = scratch("upgrade");
+        let path = dir.join("replica.db");
+        let connection = Connection::open(&path).unwrap();
+        let hex = "01".repeat(32);
+        connection
+            .execute_batch(&format!(
+                "PRAGMA key = \"x'{hex}'\"; CREATE TABLE chunks (seq INTEGER PRIMARY KEY, \
+                 document TEXT NOT NULL, bytes BLOB NOT NULL); CREATE TABLE actions (seq \
+                 INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, record TEXT NOT NULL); \
+                 PRAGMA user_version = 1;"
+            ))
+            .unwrap();
+        drop(connection);
+
+        let mut store = Sqlite::open(&path, &[1; 32]).unwrap();
+        let version: i64 = store
+            .connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, VERSION);
+        let id = AttachmentId::parse(&"b".repeat(64)).unwrap();
+        store.put_part("upload", 0, b"tram").unwrap();
+        store.finish_upload("upload", &id, 4, 1).unwrap();
+        assert_eq!(store.attachment_size(&id).unwrap(), Some(4));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

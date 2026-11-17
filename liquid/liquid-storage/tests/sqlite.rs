@@ -258,3 +258,30 @@ fn history_keeps_a_number_cell_exactly() {
     let newest = store.history(None, 1).unwrap().remove(0);
     assert_eq!(newest.operation, Operation::Mutation(set));
 }
+
+#[test]
+fn an_attachment_is_kept_encrypted_and_there_after_a_reopen() {
+    let scratch = Scratch::new("attachment");
+    let (mut workspace, ..) = lisbon_open(&scratch.db());
+    let mut file = b"Tram 28 timetable ".repeat(100_000);
+    file.truncate(liquid_core::PART + 1000);
+    let mut upload = workspace.begin_upload(&owner(), file.len() as u64).unwrap();
+    workspace.upload(&mut upload, &file).unwrap();
+    let attachment = workspace.finish_upload(upload).unwrap();
+
+    let mut bytes = std::fs::read(scratch.db()).unwrap();
+    bytes.extend(std::fs::read(scratch.0.join("replica.db-wal")).unwrap_or_default());
+    let plain = b"Tram 28 timetable";
+    assert!(!bytes.windows(plain.len()).any(|window| window == plain));
+
+    drop(workspace);
+    let mut store = Sqlite::open(&scratch.db(), &KEY).unwrap();
+    assert_eq!(
+        store.attachment_size(&attachment.id).unwrap(),
+        Some(file.len() as u64)
+    );
+    let mut read = store.part(&attachment.id, 0).unwrap().unwrap();
+    read.extend(store.part(&attachment.id, 1).unwrap().unwrap());
+    assert_eq!(read, file);
+    assert_eq!(store.part(&attachment.id, 2).unwrap(), None);
+}

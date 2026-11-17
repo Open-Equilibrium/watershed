@@ -8,6 +8,7 @@ import 'api/details.dart';
 import 'api/events.dart';
 import 'api/git.dart';
 import 'api/hosts.dart';
+import 'api/media.dart';
 import 'api/replica.dart';
 import 'api/session.dart';
 import 'api/thread.dart';
@@ -167,6 +168,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  RustStreamSink<BridgeUpload> dco_decode_StreamSink_bridge_upload_Sse(
+    dynamic raw,
+  );
+
+  @protected
   RustStreamSink<List<BridgeAutomation>>
   dco_decode_StreamSink_list_bridge_automation_Sse(dynamic raw);
 
@@ -205,6 +211,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeItem dco_decode_box_autoadd_bridge_item(dynamic raw);
+
+  @protected
+  BridgeMedia dco_decode_box_autoadd_bridge_media(dynamic raw);
 
   @protected
   BridgeModelChoice dco_decode_box_autoadd_bridge_model_choice(dynamic raw);
@@ -342,6 +351,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeMatch dco_decode_bridge_match(dynamic raw);
 
   @protected
+  BridgeMedia dco_decode_bridge_media(dynamic raw);
+
+  @protected
   BridgeModel dco_decode_bridge_model(dynamic raw);
 
   @protected
@@ -464,6 +476,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeTurnStatus dco_decode_bridge_turn_status(dynamic raw);
 
   @protected
+  BridgeUpload dco_decode_bridge_upload(dynamic raw);
+
+  @protected
   BridgeUsage dco_decode_bridge_usage(dynamic raw);
 
   @protected
@@ -582,6 +597,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Int64List dco_decode_list_prim_i_64_strict(dynamic raw);
 
   @protected
+  List<int> dco_decode_list_prim_u_8_loose(dynamic raw);
+
+  @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
 
   @protected
@@ -611,6 +629,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeItem? dco_decode_opt_box_autoadd_bridge_item(dynamic raw);
+
+  @protected
+  BridgeMedia? dco_decode_opt_box_autoadd_bridge_media(dynamic raw);
 
   @protected
   BridgeModelChoice? dco_decode_opt_box_autoadd_bridge_model_choice(
@@ -770,6 +791,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  RustStreamSink<BridgeUpload> sse_decode_StreamSink_bridge_upload_Sse(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   RustStreamSink<List<BridgeAutomation>>
   sse_decode_StreamSink_list_bridge_automation_Sse(
     SseDeserializer deserializer,
@@ -822,6 +848,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeItem sse_decode_box_autoadd_bridge_item(SseDeserializer deserializer);
+
+  @protected
+  BridgeMedia sse_decode_box_autoadd_bridge_media(SseDeserializer deserializer);
 
   @protected
   BridgeModelChoice sse_decode_box_autoadd_bridge_model_choice(
@@ -987,6 +1016,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeMatch sse_decode_bridge_match(SseDeserializer deserializer);
 
   @protected
+  BridgeMedia sse_decode_bridge_media(SseDeserializer deserializer);
+
+  @protected
   BridgeModel sse_decode_bridge_model(SseDeserializer deserializer);
 
   @protected
@@ -1131,6 +1163,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeTurnStatus sse_decode_bridge_turn_status(SseDeserializer deserializer);
+
+  @protected
+  BridgeUpload sse_decode_bridge_upload(SseDeserializer deserializer);
 
   @protected
   BridgeUsage sse_decode_bridge_usage(SseDeserializer deserializer);
@@ -1283,6 +1318,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Int64List sse_decode_list_prim_i_64_strict(SseDeserializer deserializer);
 
   @protected
+  List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer);
+
+  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
@@ -1326,6 +1364,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeItem? sse_decode_opt_box_autoadd_bridge_item(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeMedia? sse_decode_opt_box_autoadd_bridge_media(
     SseDeserializer deserializer,
   );
 
@@ -1521,6 +1564,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_StreamSink_bridge_upload_Sse(
+    RustStreamSink<BridgeUpload> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_StreamSink_list_bridge_automation_Sse(
     RustStreamSink<List<BridgeAutomation>> self,
     SseSerializer serializer,
@@ -1583,6 +1632,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_item(
     BridgeItem self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_media(
+    BridgeMedia self,
     SseSerializer serializer,
   );
 
@@ -1821,6 +1876,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bridge_match(BridgeMatch self, SseSerializer serializer);
 
   @protected
+  void sse_encode_bridge_media(BridgeMedia self, SseSerializer serializer);
+
+  @protected
   void sse_encode_bridge_model(BridgeModel self, SseSerializer serializer);
 
   @protected
@@ -2022,6 +2080,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_upload(BridgeUpload self, SseSerializer serializer);
+
+  @protected
   void sse_encode_bridge_usage(BridgeUsage self, SseSerializer serializer);
 
   @protected
@@ -2220,6 +2281,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_prim_u_8_loose(List<int> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_prim_u_8_strict(
     Uint8List self,
     SseSerializer serializer,
@@ -2273,6 +2337,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_item(
     BridgeItem? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_media(
+    BridgeMedia? self,
     SseSerializer serializer,
   );
 

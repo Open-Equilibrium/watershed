@@ -161,7 +161,7 @@ mod tests {
     }
 
     /// A key past the cap, as another device may send, reads as no key, as placing does
-    /// (ADR-0297).
+    /// (ADR-0304).
     #[test]
     fn a_stored_key_past_the_cap_orders_as_no_key() {
         let mut doc = model::document(&ActorId::random());

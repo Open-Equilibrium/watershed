@@ -1,5 +1,5 @@
 //! Agent sessions for the Liquid app: Meta-Harness's service, a project's threads and one followed
-//! thread (ADR-0280, ADR-0304). Calls run on flutter_rust_bridge's worker threads, never on the
+//! thread (ADR-0280, ADR-0297). Calls run on flutter_rust_bridge's worker threads, never on the
 //! Dart main isolate, and events stream to Dart as they arrive (ADR-0182).
 
 use std::collections::HashMap;
