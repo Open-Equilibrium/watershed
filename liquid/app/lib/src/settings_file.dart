@@ -92,6 +92,9 @@ class SavedSettings<T> extends ValueNotifier<T> {
     });
   }
 
+  /// The receiver of what goes wrong with these settings, or none.
+  void Function(String problem)? get report => _report;
+
   /// Receives what goes wrong with these settings; problems wait until it is set.
   set report(void Function(String problem)? report) {
     _report = report;

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -32,7 +33,8 @@ class LiquidApp extends StatelessWidget {
     this.workspaceProblem,
   });
 
-  final Launch launch;
+  /// The agent session Liquid shows; a new one replaces the shown one at once (ADR-0295).
+  final ValueListenable<Launch> launch;
 
   /// The Workspace, or why it did not open.
   final WorkspaceState? workspace;
@@ -49,54 +51,58 @@ class LiquidApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final state = launch.state;
     final appearance = this.appearance ?? AppearanceController();
     return ValueListenableBuilder(
       valueListenable: appearance,
-      builder: (context, chosen, _) => MaterialApp(
-        title: 'Liquid',
-        debugShowCheckedModeBanner: false,
-        theme: liquidTheme(Brightness.light),
-        darkTheme: liquidTheme(Brightness.dark),
-        themeMode: chosen.theme.mode,
-        // Numbers and days read as in the person's region, Material's and Cupertino's
-        // texts in its language, English for one either does not know (ADR-0246).
-        localizationsDelegates: GlobalMaterialLocalizations.delegates,
-        supportedLocales: [
-          const Locale('en'),
-          for (final language in _languages)
-            if (language != 'en') Locale(language),
-        ],
-        localeListResolutionCallback: (locales, _) =>
-            locales
-                ?.where((locale) => _languages.contains(locale.languageCode))
-                .firstOrNull ??
+      builder: (context, chosen, _) => ValueListenableBuilder(
+        valueListenable: launch,
+        builder: (context, current, _) => MaterialApp(
+          title: 'Liquid',
+          debugShowCheckedModeBanner: false,
+          theme: liquidTheme(Brightness.light),
+          darkTheme: liquidTheme(Brightness.dark),
+          themeMode: chosen.theme.mode,
+          // Numbers and days read as in the person's region, Material's and Cupertino's
+          // texts in its language, English for one either does not know (ADR-0246).
+          localizationsDelegates: GlobalMaterialLocalizations.delegates,
+          supportedLocales: [
             const Locale('en'),
-        builder: (context, child) =>
-            UiScale(scale: chosen.textSize.scale, child: child!),
-        home: state != null || workspace != null
-            ? AgentShell(
-                state: state,
-                info: launch.info,
-                workspace: workspace,
-                workspaceProblem: workspaceProblem,
-                shortcuts: shortcuts,
-                diffSettings: diffSettings,
-                cardSettings: cardSettings,
-                appearance: appearance,
-                agentHosts: agentHosts,
-              )
-            : Scaffold(
-                body: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Text(
-                      [?workspaceProblem, ?launch.problem].join('\n\n'),
-                      textAlign: TextAlign.center,
+            for (final language in _languages)
+              if (language != 'en') Locale(language),
+          ],
+          localeListResolutionCallback: (locales, _) =>
+              locales
+                  ?.where((locale) => _languages.contains(locale.languageCode))
+                  .firstOrNull ??
+              const Locale('en'),
+          builder: (context, child) =>
+              UiScale(scale: chosen.textSize.scale, child: child!),
+          home: current.state != null || workspace != null
+              ? AgentShell(
+                  key: ObjectKey(current),
+                  state: current.state,
+                  info: current.info,
+                  workspace: workspace,
+                  workspaceProblem: workspaceProblem,
+                  agentProblem: current.problem,
+                  shortcuts: shortcuts,
+                  diffSettings: diffSettings,
+                  cardSettings: cardSettings,
+                  appearance: appearance,
+                  agentHosts: agentHosts,
+                )
+              : Scaffold(
+                  body: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Text(
+                        [?workspaceProblem, ?current.problem].join('\n\n'),
+                        textAlign: TextAlign.center,
+                      ),
                     ),
                   ),
                 ),
-              ),
+        ),
       ),
     );
   }

@@ -1,7 +1,12 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/launch.dart';
+import 'package:liquid/src/session/session_state.dart';
+
+import 'fake_backend.dart';
 
 const _usage = 'Start Liquid with LIQUID_PROJECT set to a project directory.';
 
@@ -62,6 +67,34 @@ void main() {
       );
     },
   );
+
+  test('shows another agent host at once, and keeps the one shown when it does not connect', () async {
+    const info = SessionInfo(project: 'acme-api');
+    final shown = Launch.session(SessionState(FakeProject()), info);
+    final surface = ValueNotifier(shown);
+    final asked = <String?>[];
+
+    final failure = await showAgentHost(surface, (address) async {
+      asked.add(address);
+      return const Launch.problem('no answer');
+    }, 'ws://studio.local:3774');
+    expect(failure, 'no answer');
+    expect(surface.value, same(shown));
+
+    final next = Launch.session(SessionState(FakeProject()), info);
+    expect(
+      await showAgentHost(surface, (address) async {
+        asked.add(address);
+        return next;
+      }, null),
+      isNull,
+    );
+    expect(surface.value, same(next));
+    expect(asked, [
+      'ws://studio.local:3774',
+      null,
+    ], reason: 'This Mac is asked by null');
+  });
 
   test('names the project by its directory', () {
     expect(projectName('/work/acme-api/'), 'acme-api');

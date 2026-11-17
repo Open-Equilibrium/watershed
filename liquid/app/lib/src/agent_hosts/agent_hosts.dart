@@ -160,18 +160,18 @@ class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
   AgentHostsController({
     required AgentHostsSettings settings,
     required this.bridge,
-    required this.running,
     required this.save,
+    required this.switchTo,
   }) : super(settings);
 
   final AgentHostBridge bridge;
 
-  /// The address of the host this session connected to at launch, or null for This Mac. A new
-  /// active host applies at the next start.
-  final String? running;
-
   /// Writes the settings to Liquid's settings file.
   final Future<void> Function(AgentHostsSettings settings) save;
+
+  /// Shows the host at an address (null: This Mac) as the agent area; returns why it cannot be shown,
+  /// or null once it is.
+  final Future<String?> Function(String? address) switchTo;
 
   Future<T> _step<T>(String failed, Future<T> Function() step) async {
     try {
@@ -222,12 +222,30 @@ class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
     );
   }
 
-  /// Makes the host at `address` the active one, or This Mac for null.
-  Future<void> use(String? address) => _step(
-    'Could not change the agent host for sessions; nothing changed.',
-    () => _write(value.withActive(address)),
-  );
+  /// Makes the host at `address` the one sessions run on, or This Mac for null. The choice is saved
+  /// first and shown at once; when the host cannot be shown, the saved choice goes back.
+  Future<void> use(String? address) async {
+    final previous = value;
+    final failed =
+        'Could not use ${_nameOf(address, previous)} for sessions; nothing changed.';
+    await _step(failed, () => _write(previous.withActive(address)));
+    final failure = await switchTo(address);
+    if (failure == null) return;
+    try {
+      await _write(previous);
+    } on Object catch (error) {
+      throw AgentHostsError(
+        'Could not use ${_nameOf(address, previous)} for sessions, and the saved choice could not be restored, so the next start uses ${_nameOf(address, previous)}. ${messageOf(error)}',
+      );
+    }
+    throw AgentHostsError('$failed $failure');
+  }
 
   /// Whether the host at `address` answers now; null is This Mac.
   Future<BridgeReach> reach(String? address) => bridge.reach(address);
+
+  static String _nameOf(String? address, AgentHostsSettings settings) =>
+      address == null
+      ? 'This Mac'
+      : settings.hosts.firstWhere((host) => host.address == address).name;
 }

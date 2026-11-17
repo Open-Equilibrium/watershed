@@ -197,9 +197,6 @@ class _AgentHostsPaneState extends State<AgentHostsPane> {
     valueListenable: widget.hosts,
     builder: (context, settings, _) {
       final active = settings.activeAddress;
-      final activeName =
-          settings.hosts.where((host) => host.active).firstOrNull?.name ??
-          'This Mac';
       return SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(
           WsMetrics.space6,
@@ -245,11 +242,6 @@ class _AgentHostsPaneState extends State<AgentHostsPane> {
               ),
             if (_problem case final problem?)
               WarningNotice(problem, danger: true),
-            if (active != widget.hosts.running)
-              WarningNotice(
-                'Restart Liquid to use $activeName for sessions.',
-                info: true,
-              ),
           ],
         ),
       );

@@ -58,6 +58,7 @@ class Sidebar extends StatelessWidget {
     this.info,
     this.workspace,
     this.workspaceProblem,
+    this.agentProblem,
     this.onSettings,
     this.onNewSession,
     this.onShowSession,
@@ -70,6 +71,9 @@ class Sidebar extends StatelessWidget {
   /// The Workspace, or why it did not open.
   final WorkspaceState? workspace;
   final String? workspaceProblem;
+
+  /// Why no agent session started, such as an agent host that does not answer.
+  final String? agentProblem;
   final VoidCallback? onSettings;
 
   /// Starts a new session as ⌘N does: in the chat, ready to describe the task.
@@ -124,6 +128,11 @@ class Sidebar extends StatelessWidget {
                       if (workspace case final workspace?)
                         Explorer(state: workspace),
                       if (workspaceProblem case final problem?)
+                        Padding(
+                          padding: const EdgeInsets.only(top: WsMetrics.space3),
+                          child: WarningNotice(problem),
+                        ),
+                      if (agentProblem case final problem?)
                         Padding(
                           padding: const EdgeInsets.only(top: WsMetrics.space3),
                           child: WarningNotice(problem),

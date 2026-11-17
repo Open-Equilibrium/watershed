@@ -48,9 +48,11 @@ Future<void> main() async {
     '$settings/Workspace',
     show: launch.state == null,
   );
+  // The agent area Liquid shows; choosing another agent host replaces it at once (ADR-0295).
+  final surface = ValueNotifier(launch);
   runApp(
     LiquidApp(
-      launch: launch,
+      launch: surface,
       workspace: workspace,
       workspaceProblem: workspaceProblem,
       shortcuts: await ShortcutController.load(
@@ -71,8 +73,15 @@ Future<void> main() async {
         bridge: RustAgentHostBridge(
           home: Platform.environment['META_HARNESS_HOME'],
         ),
-        running: agentHosts.activeAddress,
         save: (next) => agentHostsFile.save(next.toJson()),
+        switchTo: (address) => showAgentHost(
+          surface,
+          (address) => launchFromEnvironment(
+            Platform.environment,
+            activeAddress: address,
+          ),
+          address,
+        ),
       ),
     ),
   );

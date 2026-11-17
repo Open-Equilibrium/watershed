@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+
 import 'agent/sidebar.dart';
 import 'agent_hosts/agent_hosts.dart';
 import 'rust/api/session.dart';
@@ -72,12 +74,30 @@ Future<Launch> launchFromEnvironment(
   } on Object catch (error) {
     if (activeAddress != null) {
       return Launch.problem(
-        'Liquid could not connect to the agent host $activeAddress: ${messageOf(error)}. Its saved entry is unchanged; choose This Mac or another agent host in Settings → Agent hosts.',
+        'Liquid could not connect to the agent host $activeAddress: ${messageOf(error)}.',
       );
     }
     // The bridge's error says that Meta-Harness is not running and where Liquid looked.
     return Launch.problem('$error');
   }
+}
+
+/// Shows the agent host at `address` (null: This Mac) as Liquid's agent area at once, and releases the
+/// session it replaces. `connect` returns why the host cannot be shown, and then the area stays as it
+/// was; the answer is null once it is shown.
+Future<String?> showAgentHost(
+  ValueNotifier<Launch> surface,
+  Future<Launch> Function(String? address) connect,
+  String? address,
+) async {
+  final next = await connect(address);
+  if (next.state == null) {
+    return next.problem ?? 'Liquid could not start sessions on it.';
+  }
+  final previous = surface.value.state;
+  surface.value = next;
+  if (previous != null) unawaited(previous.dispose());
+  return null;
 }
 
 /// Opens the Workspace whose replica lives in `dir` and follows it, or says why it did not

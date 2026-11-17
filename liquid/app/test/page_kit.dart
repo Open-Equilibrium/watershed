@@ -163,7 +163,10 @@ class PageKit {
     }
     await tester.pumpWidget(
       app
-          ? LiquidApp(launch: const Launch.problem(null), workspace: workspace)
+          ? LiquidApp(
+              launch: ValueNotifier(const Launch.problem(null)),
+              workspace: workspace,
+            )
           : MaterialApp(
               theme: liquidTheme(Brightness.light),
               home: AgentShell(

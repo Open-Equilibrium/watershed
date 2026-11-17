@@ -7,7 +7,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/agent_hosts/agent_hosts.dart';
+import 'package:liquid/src/app.dart';
 import 'package:liquid/src/controls.dart';
+import 'package:liquid/src/launch.dart';
+import 'package:liquid/src/workspace/workspace_state.dart';
 import 'package:liquid/src/rust/api/hosts.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/shortcuts/keymap.dart';
@@ -16,6 +19,7 @@ import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
 import 'fake_host.dart';
+import 'fake_workspace.dart';
 
 const remote = 'ws://studio.local:3774';
 const client = 'liquid-studio-s-mac';
@@ -51,15 +55,19 @@ class FakeAgentHosts implements AgentHostBridge {
 void main() {
   late FakeAgentHosts bridge;
   late List<AgentHostsSettings> saved;
+  late List<String?> switched;
 
   AgentHostsController controller({
     AgentHostsSettings settings = const AgentHostsSettings(),
-    String? running,
+    String? switchFailure,
   }) => AgentHostsController(
     settings: settings,
     bridge: bridge,
-    running: running,
     save: (next) async => saved.add(next),
+    switchTo: (address) async {
+      switched.add(address);
+      return switchFailure;
+    },
   );
 
   setUp(() {
@@ -67,6 +75,7 @@ void main() {
       ..reaches[null] = BridgeReach.connected
       ..reaches[remote] = BridgeReach.connected;
     saved = [];
+    switched = [];
   });
 
   /// Opens Settings → Agent hosts over the agent surface, as ⌘, and the section do.
@@ -186,7 +195,6 @@ void main() {
               active: true,
             ),
           ]),
-          running: remote,
         ),
       );
 
@@ -242,9 +250,7 @@ void main() {
     },
   );
 
-  testWidgets('uses a host for sessions, which a restart applies', (
-    tester,
-  ) async {
+  testWidgets('uses a host for sessions at once', (tester) async {
     await show(
       tester,
       controller(
@@ -257,10 +263,88 @@ void main() {
 
     await chooseInRow(tester, remote, 'Use for sessions');
 
+    expect(switched, [remote]);
     expect(saved.last.activeAddress, remote);
     expect(find.text('Used for sessions'), findsOneWidget);
+    expect(find.textContaining('Restart'), findsNothing);
+  });
+
+  testWidgets(
+    'a host whose agent area cannot open is not used, and the saved choice goes back',
+    (tester) async {
+      await show(
+        tester,
+        controller(
+          settings: const AgentHostsSettings([
+            SavedAgentHost(
+              name: 'Studio mini',
+              address: remote,
+              client: client,
+            ),
+          ]),
+          switchFailure:
+              'Liquid could not connect to the agent host $remote: no answer.',
+        ),
+      );
+
+      await chooseInRow(tester, remote, 'Use for sessions');
+
+      expect(
+        find.text(
+          'Could not use Studio mini for sessions; nothing changed. Liquid could not connect to the agent host $remote: no answer.',
+        ),
+        findsOneWidget,
+      );
+      expect(saved.map((next) => next.activeAddress), [remote, null]);
+    },
+  );
+
+  testWidgets('switching the agent host shows its sessions at once', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 900));
+    final before = SessionState(
+      FakeProject()..threadList = [threadOf('old', title: 'Old host session')],
+    );
+    final after = SessionState(
+      FakeProject()..threadList = [threadOf('new', title: 'New host session')],
+    );
+    await before.loadStart();
+    await after.loadStart();
+    final surface = ValueNotifier(Launch.session(before, info));
+    await tester.pumpWidget(LiquidApp(launch: surface));
+    await tester.pumpAndSettle();
+    expect(find.text('Old host session'), findsOneWidget);
+
+    surface.value = Launch.session(after, info);
+    await tester.pumpAndSettle();
+
+    expect(find.text('New host session'), findsOneWidget);
+    expect(find.text('Old host session'), findsNothing);
+  });
+
+  testWidgets('says why no agent host is in use while the Workspace opens', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 900));
+    final workspace = WorkspaceState(FakeWorkspace());
+    await workspace.start(show: true);
+    await tester.pumpWidget(
+      LiquidApp(
+        launch: ValueNotifier(
+          const Launch.problem(
+            'Liquid could not connect to the agent host ws://studio.local:3774: no answer.',
+          ),
+        ),
+        workspace: workspace,
+      ),
+    );
+    await tester.pumpAndSettle();
+
     expect(
-      find.text('Restart Liquid to use Studio mini for sessions.'),
+      find.text(
+        'Liquid could not connect to the agent host ws://studio.local:3774: no answer.',
+      ),
       findsOneWidget,
     );
   });
@@ -305,8 +389,8 @@ void main() {
     final hosts = AgentHostsController(
       settings: const AgentHostsSettings(),
       bridge: bridge,
-      running: null,
       save: (_) async => throw const FileSystemException('disk full'),
+      switchTo: (_) async => null,
     );
 
     await expectLater(
