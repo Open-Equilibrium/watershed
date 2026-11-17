@@ -204,6 +204,16 @@ impl Host {
                 {
                     refused_version(&response)
                 }
+                // A service that no longer knows this device's token refuses it; a later attempt
+                // would be refused again, so the device must be paired again.
+                tokio_tungstenite::tungstenite::Error::Http(response)
+                    if response.status() == StatusCode::UNAUTHORIZED =>
+                {
+                    format!(
+                        "Meta-Harness at {url} no longer accepts this device's pairing; pair this \
+                         device again."
+                    )
+                }
                 e => format!("Could not reach Meta-Harness at {url}: {e}"),
             })?;
         let (mut sink, mut frames) = socket.split();
