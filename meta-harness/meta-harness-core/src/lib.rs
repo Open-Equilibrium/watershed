@@ -17,6 +17,7 @@ mod statistics;
 mod t3;
 mod thread;
 mod tunnel;
+mod util;
 mod visible;
 
 pub use api::RemoteStatus;
@@ -56,8 +57,6 @@ pub(crate) fn spawn(
     command: &mut tokio::process::Command,
 ) -> std::io::Result<tokio::process::Child> {
     static SPAWNING: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _alone = SPAWNING
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _alone = util::lock(&SPAWNING);
     command.spawn()
 }

@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::Mutex;
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,7 @@ use tokio::task::JoinHandle;
 
 use super::{Access, ClientInfo};
 use crate::config::{Store, count, failed, now_ms, sql};
+use crate::util::lock;
 use crate::{remote, t3, tunnel};
 
 /// How long after a link was made it is made again: T3 links last 30 days (ADR-0288).
@@ -138,10 +139,6 @@ fn set_linked(db: &Connection, name: &str, at: u64) -> Result<(), String> {
     )
     .map(|_| ())
     .map_err(failed)
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// The address of the tunnel that reaches the host linked on `port`, as T3 lists its links.
@@ -310,6 +307,11 @@ impl Links {
         for (_, task) in lock(&self.tunnels).drain() {
             task.abort();
         }
+    }
+
+    /// A pairing code from this host's T3 Code, which another host's link redeems (ADR-0288).
+    pub(crate) async fn pairing_code(&self) -> Result<String, String> {
+        t3::pairing_code(&self.t3, &self.t3_home).await
     }
 
     /// Asks the peer for a pairing code over its host token and has T3 link through the tunnel.

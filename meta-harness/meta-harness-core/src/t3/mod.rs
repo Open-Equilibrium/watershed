@@ -20,8 +20,7 @@ use serde_json::Value;
 pub(crate) fn fresh_id(prefix: &str) -> String {
     let mut bytes = [0u8; 12];
     getrandom::fill(&mut bytes).expect("the operating system provides random bytes");
-    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-    format!("{prefix}-{hex}")
+    format!("{prefix}-{}", crate::util::hex(&bytes))
 }
 
 /// Milliseconds since the Unix epoch of an ISO 8601 UTC time such as

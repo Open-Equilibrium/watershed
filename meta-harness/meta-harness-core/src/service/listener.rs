@@ -6,7 +6,6 @@
 use std::net::{IpAddr, SocketAddr};
 use std::process::Stdio;
 use std::sync::Arc;
-use std::sync::PoisonError;
 
 use serde_json::Value;
 use tokio::net::TcpListener;
@@ -84,7 +83,7 @@ fn serve_on(
 
 fn store(shared: &Shared, listening: Option<Listening>) {
     // The previous listener, if any, stops as it is replaced.
-    *shared.remote.lock().unwrap_or_else(PoisonError::into_inner) = listening;
+    *crate::util::lock(&shared.remote) = listening;
 }
 
 /// Listens on `port` at start, when remote access was on.
@@ -116,10 +115,7 @@ pub(super) fn off(shared: &Arc<Shared>) -> Result<(), String> {
 
 /// Where the remote listener answers, while it is on.
 pub(super) fn status(shared: &Shared) -> Option<RemoteStatus> {
-    shared
-        .remote
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+    crate::util::lock(&shared.remote)
         .as_ref()
         .map(Listening::status)
 }

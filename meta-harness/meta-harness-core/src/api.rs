@@ -30,6 +30,16 @@ pub const TUNNEL_HEADER: &str = "meta-harness-tunnel";
 /// The API version this build speaks: the calls, streams and frames below.
 pub const API_VERSION: u32 = 1;
 
+/// The frame a service answers a pairing with: its name and the token the client presents from now
+/// on (ADR-0299).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct Pairing {
+    /// The service's name for itself, which the client keeps as the host's name.
+    pub name: String,
+    /// The token the client presents from now on.
+    pub token: String,
+}
+
 /// A call with one answer.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]

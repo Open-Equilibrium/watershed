@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::config::failed;
+use crate::util::hex;
 
 pub(crate) use links::Links;
 pub use links::{HostList, LinkedHostInfo};
@@ -111,10 +112,6 @@ pub(crate) fn new_token() -> String {
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes).expect("the operating system provides random bytes");
     hex(&bytes)
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// The digest a code or token is stored and compared by.

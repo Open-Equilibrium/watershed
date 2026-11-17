@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use futures_util::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
@@ -23,6 +23,7 @@ use crate::api::{
 };
 use crate::config::{Change, Current, LogEntry, Proposal};
 use crate::hosts::{Access, ClientKind, HostList};
+use crate::util::lock;
 use crate::{
     Automation, Context, GitActionRequest, GitProgress, GitStatus, Lineage, LineageChanges,
     LocalServer, ModelChoice, Permissions, Provider, PullRequestDetail, Refs, RequestId,
@@ -117,10 +118,6 @@ struct Link {
     waiters: Arc<Mutex<Option<HashMap<u64, Waiter>>>>,
 }
 
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
 struct Inner {
     endpoint: Endpoint,
     client: String,
@@ -180,13 +177,11 @@ impl Host {
         }
         let (url, token) = self.inner.endpoint.resolve()?;
         let bearer = format!("Bearer {token}");
-        let version = api::API_VERSION.to_string();
         let request = handshake(
             &url,
             &[
                 ("authorization", bearer.as_str()),
                 (api::CLIENT_HEADER, self.inner.client.as_str()),
-                (api::API_HEADER, version.as_str()),
             ],
         )?;
         let (socket, _) = tokio_tungstenite::connect_async(request)
@@ -433,13 +428,18 @@ impl Host {
 
 /// The request for a WebSocket handshake to `url` that carries `headers`.
 pub(crate) fn handshake(url: &str, headers: &[(&'static str, &str)]) -> Result<Request, String> {
+    let version = api::API_VERSION.to_string();
     let mut request = url
         .into_client_request()
         .map_err(|e| format!("Bad Meta-Harness address {url}: {e}"))?;
-    for (name, value) in headers {
+    for (name, value) in headers
+        .iter()
+        .copied()
+        .chain([(api::API_HEADER, version.as_str())])
+    {
         let value =
             HeaderValue::from_str(value).map_err(|_| format!("{name} is not a header value."))?;
-        request.headers_mut().insert(*name, value);
+        request.headers_mut().insert(name, value);
     }
     Ok(request)
 }
@@ -448,14 +448,9 @@ pub(crate) fn handshake(url: &str, headers: &[(&'static str, &str)]) -> Result<R
 /// that the other side issued. Answers the other side's name and the token this client uses from
 /// now on (ADR-0299).
 pub async fn pair(address: &str, code: &str, client: &str) -> Result<(String, String), String> {
-    let version = api::API_VERSION.to_string();
     let request = handshake(
         address,
-        &[
-            (api::PAIRING_HEADER, code),
-            (api::CLIENT_HEADER, client),
-            (api::API_HEADER, version.as_str()),
-        ],
+        &[(api::PAIRING_HEADER, code), (api::CLIENT_HEADER, client)],
     )?;
     let (mut socket, _) = tokio_tungstenite::connect_async(request)
         .await
@@ -476,12 +471,9 @@ pub async fn pair(address: &str, code: &str, client: &str) -> Result<(String, St
         }
     };
     let _ = socket.close(None).await;
-    let value: Value = serde_json::from_str(&answer)
+    let pairing: api::Pairing = serde_json::from_str(&answer)
         .map_err(|e| format!("Meta-Harness answered unexpectedly: {e}"))?;
-    match (value["name"].as_str(), value["token"].as_str()) {
-        (Some(name), Some(token)) => Ok((name.to_owned(), token.to_owned())),
-        _ => Err("Meta-Harness answered unexpectedly: it named no token.".to_owned()),
-    }
+    Ok((pairing.name, pairing.token))
 }
 
 /// The reason a service gave for refusing a handshake, from its body.

@@ -5,7 +5,6 @@
 //! without T3 contact.
 
 use std::convert::Infallible;
-use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use http_body_util::combinators::BoxBody;
@@ -141,25 +140,18 @@ fn answer(status: StatusCode) -> Response<BoxBody<Bytes, hyper::Error>> {
 /// Accepts connections on `listener` and tunnels each one to the remote listener at `address`,
 /// with the host token `token`, until the task is aborted.
 pub(crate) async fn listen(listener: TcpListener, address: String, token: String) {
-    loop {
-        match listener.accept().await {
-            Ok((tcp, _)) => {
-                tokio::spawn(open(tcp, address.clone(), token.clone()));
-            }
-            // Such as too many open files: the tunnel keeps listening.
-            Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
-        }
-    }
+    crate::util::accept_each(listener, move |tcp| {
+        open(tcp, address.clone(), token.clone())
+    })
+    .await;
 }
 
 /// Opens the tunnel to `address` for `tcp`. A peer that refuses or cannot be reached closes `tcp`.
 async fn open(tcp: TcpStream, address: String, token: String) {
-    let version = api::API_VERSION.to_string();
     let Ok(request) = crate::remote::handshake(
         &address,
         &[
             ("authorization", format!("Bearer {token}").as_str()),
-            (api::API_HEADER, version.as_str()),
             (api::TUNNEL_HEADER, "t3"),
         ],
     ) else {

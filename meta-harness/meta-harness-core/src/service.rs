@@ -27,7 +27,6 @@ use crate::api::{
 };
 use crate::config::{Homes, Proposed, Store, now_ms, provider_instances};
 use crate::hosts::{self, Links};
-use crate::t3::pairing_code;
 
 use crate::{AcpAgent, Host, HostConfig, Project, Thread, tunnel};
 use admit::{Admission, Caller, Listener, admit, header, revoked};
@@ -111,9 +110,6 @@ struct Shared {
     name: String,
     /// Where the remote listener binds; `None` for the Tailscale addresses.
     remote_bind: Option<Vec<IpAddr>>,
-    /// The pinned `t3` executable and T3's data folder, for its command line.
-    t3: PathBuf,
-    t3_home: PathBuf,
     /// The remote listener while remote access is on.
     remote: std::sync::Mutex<Option<listener::Listening>>,
     /// The hosts this one links to and their tunnels.
@@ -189,8 +185,6 @@ impl Service {
             revoked,
             name,
             remote_bind,
-            t3: config.t3,
-            t3_home,
             remote: std::sync::Mutex::new(None),
             links,
         });
@@ -232,13 +226,7 @@ impl Drop for Service {
         self.relink.abort();
         self.shared.links.stop();
         // The remote listener's tasks hold the shared state, so they end with it.
-        drop(
-            self.shared
-                .remote
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take(),
-        );
+        drop(crate::util::lock(&self.shared.remote).take());
         let _ = self.stopping.send(true);
         let _ = std::fs::remove_file(&self.connection_file);
     }
@@ -296,13 +284,7 @@ async fn relink(shared: Arc<Shared>) {
 
 /// Serves each connection that `listener` accepts, until the task ends.
 async fn accept(listener: TcpListener, shared: Arc<Shared>, kind: Listener) {
-    loop {
-        match listener.accept().await {
-            Ok((socket, _)) => drop(tokio::spawn(serve(shared.clone(), socket, kind))),
-            // Such as too many open files: the service keeps listening.
-            Err(_) => tokio::time::sleep(std::time::Duration::from_millis(100)).await,
-        }
-    }
+    crate::util::accept_each(listener, move |socket| serve(shared.clone(), socket, kind)).await;
 }
 
 /// One client connection: its handshake must admit it (see [`admit`]); then each request runs on
@@ -343,7 +325,11 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream, listener: Listener) {
             return;
         }
         Some(Admission::Paired(token)) => {
-            let answer = json!({"token": token, "name": shared.name}).to_string();
+            let answer = serde_json::to_string(&api::Pairing {
+                name: shared.name.clone(),
+                token,
+            })
+            .expect("pairings serialize");
             let _ = socket.send(Message::Text(answer.into())).await;
             let _ = socket.close(None).await;
             return;
@@ -542,7 +528,7 @@ impl Session {
     async fn hosts_call(&self, call: HostsCall) -> Result<Value, String> {
         let shared = &self.shared;
         match call {
-            HostsCall::T3Pairing => to(pairing_code(&shared.t3, &shared.t3_home).await?),
+            HostsCall::T3Pairing => to(shared.links.pairing_code().await?),
             HostsCall::Revoke(name) => {
                 hosts::revoke(&shared.store.db(), &name)?;
                 // The client's open connections end with its token (ADR-0299).
