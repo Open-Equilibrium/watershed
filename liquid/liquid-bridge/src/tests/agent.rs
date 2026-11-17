@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Barrier, mpsc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use meta_harness_core::{AcpAgent, CONNECTION_FILE, Service, ServiceConfig};
 
@@ -116,11 +116,10 @@ fn follow_until(
     let snapshot = session
         .forward(move |event| sender.send(event).is_ok())
         .expect("the session follows");
+    let deadline = Instant::now() + STREAM_DEADLINE;
     let mut events = Vec::new();
     while !done(session, &snapshot, &events) {
-        let event = receiver
-            .recv_timeout(Duration::from_secs(60))
-            .expect("the session goes on");
+        let event = next_before(&receiver, deadline);
         assert!(event.sequence > snapshot.sequence || event.kind == BridgeEventKind::FellBehind);
         events.push(event);
         session.confirm_applied(i64::try_from(events.len()).expect("count"));
@@ -128,16 +127,26 @@ fn follow_until(
     (snapshot, events)
 }
 
+/// How long a stream may take to deliver what a test waits for, counted from when the test starts
+/// collecting it. A stream that keeps sending unrelated events runs out of it too.
+const STREAM_DEADLINE: Duration = Duration::from_secs(60);
+
+/// The next item of `receiver` before `deadline`; a stream that runs past it fails the test.
+fn next_before<T>(receiver: &mpsc::Receiver<T>, deadline: Instant) -> T {
+    receiver
+        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .expect("the stream ends before its deadline")
+}
+
 /// Receives events until one satisfies `done`, and gives every event received, that one included.
 fn receive_until(
     receiver: &mpsc::Receiver<BridgeEvent>,
     done: impl Fn(&BridgeEvent) -> bool,
 ) -> Vec<BridgeEvent> {
+    let deadline = Instant::now() + STREAM_DEADLINE;
     let mut events = Vec::new();
     loop {
-        let event = receiver
-            .recv_timeout(Duration::from_secs(60))
-            .expect("the session goes on");
+        let event = next_before(receiver, deadline);
         let last = done(&event);
         events.push(event);
         if last {
@@ -349,9 +358,16 @@ fn git_runs_through_the_bridge_with_its_progress() {
         move |step| sender.send(step).is_ok(),
     )
     .expect("runs");
-    // A run that never ends stops the collection after a while, so the test fails, not hangs.
-    let steps: Vec<_> =
-        std::iter::from_fn(|| receiver.recv_timeout(Duration::from_secs(10)).ok()).collect();
+    // The collection ends at the run's Finished step, or at the deadline for a run that never does.
+    let deadline = Instant::now() + STREAM_DEADLINE;
+    let mut steps = Vec::new();
+    while let Ok(step) = receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+        let finished = step.kind == BridgeGitProgressKind::Finished;
+        steps.push(step);
+        if finished {
+            break;
+        }
+    }
     assert!(steps.iter().any(|s| s.kind == BridgeGitProgressKind::Phase));
     assert_eq!(
         steps.last().map(|s| s.kind),
