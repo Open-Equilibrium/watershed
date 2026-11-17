@@ -156,8 +156,11 @@ class BoardPainter extends CustomPainter {
     fontSize: textSizes[size.clamp(0, 2)],
     height: 1.25,
     color: color,
-    fontFamily: hand ? handFont : null,
-    fontFamilyFallback: hand ? null : WsMetrics.fontUi,
+    // Clean text takes Liquid's typeface, also where no theme is around it.
+    fontFamily: hand ? handFont : WsMetrics.fontUi.first,
+    fontFamilyFallback: hand
+        ? WsMetrics.fontUi
+        : WsMetrics.fontUi.skip(1).toList(),
   );
 
   void _draft(Canvas canvas) {
