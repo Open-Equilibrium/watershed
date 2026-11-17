@@ -269,11 +269,7 @@ impl Links {
         code: &str,
         access: Option<Access>,
     ) -> Result<(String, Access), String> {
-        if !address.starts_with("ws://") {
-            return Err(
-                "Enter the address as ws://HOST:PORT, as meta invite prints it.".to_owned(),
-            );
-        }
+        remote::check_address(address)?;
         let _serial = self.serial.lock().await;
         if let Some(name) = linked_at(&store.db(), address)? {
             return Err(format!(

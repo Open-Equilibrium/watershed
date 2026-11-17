@@ -5976,9 +5976,11 @@ impl SseDecode for crate::api::session::BridgeQuestionAnswer {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_question = <String>::sse_decode(deserializer);
         let mut var_values = <Vec<String>>::sse_decode(deserializer);
+        let mut var_typed = <bool>::sse_decode(deserializer);
         return crate::api::session::BridgeQuestionAnswer {
             question: var_question,
             values: var_values,
+            typed: var_typed,
         };
     }
 }
@@ -8873,6 +8875,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::session::BridgeQuestionAnswer
         [
             self.question.into_into_dart().into_dart(),
             self.values.into_into_dart().into_dart(),
+            self.typed.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -10461,6 +10464,7 @@ impl SseEncode for crate::api::session::BridgeQuestionAnswer {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.question, serializer);
         <Vec<String>>::sse_encode(self.values, serializer);
+        <bool>::sse_encode(self.typed, serializer);
     }
 }
 

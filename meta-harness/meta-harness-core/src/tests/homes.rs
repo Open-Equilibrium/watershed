@@ -275,3 +275,38 @@ fn a_skill_file_named_like_a_temporary_file_is_written_whole() {
         assert_eq!(read(&home.join("skills/example/a.txt")), "text");
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn a_link_planted_at_the_temporary_name_is_never_written_through() {
+    let dir = Dir::new();
+    let homes = Homes::under(&dir.0.join("meta"));
+    std::fs::create_dir_all(&homes.codex).unwrap();
+    let sentinel = dir.0.join("outside");
+    std::fs::write(&sentinel, "keep").unwrap();
+    let planted = homes.codex.join(".AGENTS.md.meta-harness-tmp");
+    std::os::unix::fs::symlink(&sentinel, planted).unwrap();
+
+    homes.write(&blocks(), &dir.0.join("person")).unwrap();
+
+    assert_eq!(read(&sentinel), "keep");
+    assert_eq!(
+        read(&homes.codex.join("AGENTS.md")),
+        "Run the tests.\n\nWrite short sentences.\n"
+    );
+}
+
+#[test]
+fn a_write_that_cannot_replace_its_file_leaves_no_temporary_file() {
+    let dir = Dir::new();
+    let homes = Homes::under(&dir.0.join("meta"));
+    // A folder where the instructions file goes, which the file cannot replace.
+    std::fs::create_dir_all(homes.claude.join("CLAUDE.md")).unwrap();
+    assert!(homes.write(&blocks(), &dir.0.join("person")).is_err());
+    let leftover: Vec<_> = std::fs::read_dir(&homes.claude)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .filter(|name| name.to_string_lossy().ends_with(".meta-harness-tmp"))
+        .collect();
+    assert!(leftover.is_empty(), "{leftover:?}");
+}

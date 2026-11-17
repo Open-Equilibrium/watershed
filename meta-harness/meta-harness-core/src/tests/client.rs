@@ -7,12 +7,12 @@ use serde_json::json;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::fake_t3::{Fake, fail, frame, ok};
-use crate::t3::Client;
+use crate::t3::{Client, Failure};
 
 const WAIT: Duration = Duration::from_secs(10);
 
 async fn connect(fake: &Fake) -> Client {
-    Client::connect(&fake.origin, || Ok("token".to_owned()))
+    Client::connect(&fake.origin, || Box::pin(async { Ok("token".to_owned()) }))
         .await
         .unwrap()
 }
@@ -294,4 +294,53 @@ async fn a_client_whose_t3_stays_gone_closes_for_good() {
         .expect("the stream ends once the retries failed");
     assert!(ended.is_none());
     assert!(client.call("x", json!({})).await.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dropped_call_forgets_its_waiter() {
+    let fake = Fake::start(|_, _, _| Vec::new()).await;
+    let client = connect(&fake).await;
+    let call = tokio::spawn({
+        let client = client.clone();
+        async move { client.call("slow", json!({})).await }
+    });
+    fake.received("slow", 1).await;
+    assert_eq!(client.waiting(), 1);
+    call.abort();
+    assert!(call.await.unwrap_err().is_cancelled());
+    assert_eq!(client.waiting(), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_t3_that_accepts_a_connection_and_never_answers_fails_the_connect() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    // Accepts every connection and answers none of them.
+    tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((socket, _)) = listener.accept().await {
+            held.push(socket);
+        }
+    });
+    let connect = Client::connect(&origin, || Box::pin(async { Ok("token".to_owned()) }));
+    let answer = tokio::time::timeout(Duration::from_secs(600), connect)
+        .await
+        .expect("the connect gives up");
+    assert!(answer.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_action_that_loses_its_connection_records_why_it_ended() {
+    let fake = Fake::start(|_, _, _| Vec::new()).await;
+    let client = connect(&fake).await;
+    let mut action = client.action("subscribe", json!({})).await.unwrap();
+    fake.received("subscribe", 1).await;
+    fake.push("subscribe", vec![json!("one")]);
+    assert_eq!(action.recv().await, Some(json!("one")));
+    fake.drop_connection();
+    let ended = tokio::time::timeout(WAIT, action.recv())
+        .await
+        .expect("the action ends with its connection");
+    assert_eq!(ended, None);
+    assert_eq!(action.failure(), Some(Failure::ConnectionLost));
 }

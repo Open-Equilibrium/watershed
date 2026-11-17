@@ -9,7 +9,7 @@ mod server;
 pub use live::Watch;
 
 pub(crate) use cli::{link, links, pairing_code, revoke_session, sessions, unlink};
-pub(crate) use client::Client;
+pub(crate) use client::{Client, Failure};
 pub(crate) use projection::{Change, Projection, prompt_of};
 pub(crate) use server::Server;
 pub use server::t3_version;

@@ -6,6 +6,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -158,6 +159,8 @@ const TABLES: [&str; 3] = ["revision", "proposal", "log"];
 /// Meta-Harness's configuration store, one SQLite file.
 pub(crate) struct Store {
     db: Mutex<Connection>,
+    /// Whether the harness homes hold the current revision; see [`Store::reconciled`].
+    reconciled: AtomicBool,
 }
 
 impl Store {
@@ -175,7 +178,22 @@ impl Store {
         }
         db.execute_batch(&format!("BEGIN; {schema} {} COMMIT;", crate::hosts::SCHEMA))
             .map_err(failed)?;
-        Ok(Self { db: Mutex::new(db) })
+        Ok(Self {
+            db: Mutex::new(db),
+            reconciled: AtomicBool::new(true),
+        })
+    }
+
+    /// Whether the harness homes hold the current revision. A failed write that its restore could
+    /// not undo leaves them not reconciled, until a later write succeeds: an approval's, or the
+    /// service's at start.
+    pub fn reconciled(&self) -> bool {
+        self.reconciled.load(Ordering::SeqCst)
+    }
+
+    /// Records whether the last write of the current revision into the harness homes succeeded.
+    pub fn set_reconciled(&self, reconciled: bool) {
+        self.reconciled.store(reconciled, Ordering::SeqCst);
     }
 
     /// The connection to the store, which the hosts' tables share.
@@ -254,7 +272,8 @@ impl Store {
     /// Approves proposal `number` for `client`: its changes apply to the current revision, which
     /// makes a new one once `write` put its blocks into the harness homes. While `write` runs, no
     /// other approval does, so the homes always end on the current revision; if it fails, nothing
-    /// is approved and `write` puts the current revision back.
+    /// is approved and `write` puts the current revision back. If that restore fails too, the homes
+    /// are not reconciled until an approval's write succeeds, which puts its whole revision in.
     pub fn approve(
         &self,
         client: &str,
@@ -296,9 +315,20 @@ impl Store {
             )?;
             tx.commit().map_err(failed)
         });
-        if let Err(error) = recorded {
-            let _ = write(&base.blocks);
-            return Err(error);
+        match recorded {
+            Ok(()) => self.set_reconciled(true),
+            Err(error) => {
+                return Err(match write(&base.blocks) {
+                    Ok(()) => {
+                        self.set_reconciled(true);
+                        error
+                    }
+                    Err(restore) => {
+                        self.set_reconciled(false);
+                        format!("{error}. The harness homes could not be restored: {restore}")
+                    }
+                });
+            }
         }
         Ok(Current { revision, blocks })
     }

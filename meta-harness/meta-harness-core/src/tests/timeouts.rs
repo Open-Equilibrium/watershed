@@ -56,3 +56,26 @@ async fn a_peer_that_answers_no_connection_is_given_up_on() {
     // A timed-out connection is lost, so a reconnecting stream tries again rather than ending.
     assert!(connection_lost(&error), "{error}");
 }
+
+#[tokio::test]
+async fn a_peer_that_goes_silent_after_connecting_fails_its_calls() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}", listener.local_addr().unwrap());
+    // Completes each handshake, then answers nothing and keeps the connection open.
+    tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((socket, _)) = listener.accept().await {
+            if let Ok(connection) = tokio_tungstenite::accept_async(socket).await {
+                held.push(connection);
+            }
+        }
+    });
+    let host = Host::connect_to(&url, "token", "test").await.unwrap();
+    // The handshake ran on real time; the silence after it is what the idle limit measures.
+    tokio::time::pause();
+    let answer = tokio::time::timeout(GUARD, host.status())
+        .await
+        .expect("the call gives up");
+    let error = answer.expect_err("a silent peer fails the call");
+    assert!(connection_lost(&error), "{error}");
+}

@@ -47,6 +47,13 @@ const HANDSHAKES: usize = 32;
 /// How long a new connection may take to complete its handshake.
 const HANDSHAKE: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// How long a reply to a malformed request may wait for room in the outgoing queue.
+const REPLY_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How many requests one connection may have in progress at once: a call, or a stream until it
+/// ends. A client that sends more is disconnected; no Liquid client issues anywhere near this many.
+const REQUESTS: usize = 256;
+
 /// The refusal of a call or stream that the caller's kind does not make (ADR-0299).
 const REFUSED_CALL: &str = "This client may not make that call.";
 
@@ -152,9 +159,11 @@ impl Service {
             .or_else(|| std::env::home_dir().map(|h| h.join(".codex")))
             .ok_or("The home folder is unknown.")?;
         // A revision the homes cannot take must not keep the service from serving its revert.
-        if let Err(error) = homes.write(&store.current()?.blocks, &person_codex) {
+        let written = homes.write(&store.current()?.blocks, &person_codex);
+        if let Err(error) = &written {
             eprintln!("meta: {error}");
         }
+        store.set_reconciled(written.is_ok());
         let t3_home = config.home.join("t3");
         let (links_t3, links_home) = (config.t3.clone(), t3_home.clone());
         let host = Arc::new(
@@ -410,6 +419,12 @@ async fn serve(
         threads: Mutex::default(),
     });
     let mut streams: HashMap<u64, AbortHandle> = HashMap::new();
+    // Signalled by a malformed request's reply that the queue did not take in time.
+    let (stalled, mut stalls) = mpsc::channel::<()>(1);
+    // The one malformed request whose reply may wait for queue room.
+    let replying = Arc::new(tokio::sync::Semaphore::new(1));
+    // Each request in progress holds one of these until its task ends.
+    let requests = Arc::new(tokio::sync::Semaphore::new(REQUESTS));
     let mut ping = crate::util::pings();
     let mut heard = tokio::time::Instant::now();
     loop {
@@ -418,6 +433,9 @@ async fn serve(
             frame = frames.next() => Some(frame),
             _ = stopping.wait_for(|stopped| *stopped) => break,
             () = revoked(&mut revocations, owner.as_deref()) => break,
+            _ = stalls.recv() => break,
+            // Finished tasks are reaped as they finish, so none is kept after its end.
+            Some(_) = tasks.join_next() => continue,
             _ = ping.tick() => None,
         };
         let Some(frame) = frame else {
@@ -440,21 +458,44 @@ async fn serve(
                     .and_then(|v| v["id"].as_u64());
                 if let Some(id) = id {
                     let error = format!("Meta-Harness does not understand this request: {error}");
-                    // A client that does not read its replies is disconnected, rather than holding
-                    // the loop, which must go on noticing revocation and shutdown.
-                    if out.try_send(frame_of(&Reply::Error { id, error })).is_err() {
-                        break;
+                    let reply = frame_of(&Reply::Error { id, error });
+                    match out.try_send(reply) {
+                        Ok(()) => {}
+                        // A full queue waits for room on a task of its own, so the loop goes on
+                        // noticing revocation and shutdown. A second reply while one waits means a
+                        // client that does not read: it is disconnected, as one that takes no
+                        // reply within REPLY_WAIT is.
+                        Err(mpsc::error::TrySendError::Full(reply)) => {
+                            let Ok(permit) = replying.clone().try_acquire_owned() else {
+                                break;
+                            };
+                            let (out, stalled) = (out.clone(), stalled.clone());
+                            tasks.spawn(async move {
+                                let _permit = permit;
+                                if tokio::time::timeout(REPLY_WAIT, out.send(reply))
+                                    .await
+                                    .is_err()
+                                {
+                                    let _ = stalled.try_send(());
+                                }
+                            });
+                        }
+                        Err(mpsc::error::TrySendError::Closed(_)) => break,
                     }
                 }
                 continue;
             }
         };
-        while tasks.try_join_next().is_some() {}
         streams.retain(|_, task| !task.is_finished());
         match request {
             api::Request::Call { id, call } => {
+                // A client past its requests in progress is disconnected, rather than queued.
+                let Ok(permit) = requests.clone().try_acquire_owned() else {
+                    break;
+                };
                 let (session, out) = (session.clone(), out.clone());
                 tasks.spawn(async move {
+                    let _permit = permit;
                     let reply = match session.call(call).await {
                         Ok(ok) => Reply::Ok { id, ok },
                         Err(error) => Reply::Error { id, error },
@@ -463,8 +504,12 @@ async fn serve(
                 });
             }
             api::Request::Stream { id, stream } => {
+                let Ok(permit) = requests.clone().try_acquire_owned() else {
+                    break;
+                };
                 let (session, out) = (session.clone(), out.clone());
                 let task = tasks.spawn(async move {
+                    let _permit = permit;
                     if let Err(error) = session.stream(id, stream, &out).await {
                         let _ = out.send(frame_of(&Reply::Error { id, error })).await;
                     }
@@ -648,6 +693,7 @@ impl Session {
                 t3_version: crate::t3_version().to_owned(),
                 pid: std::process::id(),
                 revision: self.shared.store.current()?.revision,
+                reconciled: self.shared.store.reconciled(),
             }),
             HostCall::Providers => to(host.providers().await?),
             HostCall::EnvironmentName => to(host.environment_name().await?),

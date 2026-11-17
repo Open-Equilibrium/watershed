@@ -51,6 +51,7 @@ class AgentShell extends StatefulWidget {
     this.cardSettings,
     this.appearance,
     this.agentHosts,
+    this.settings,
     this.parseDiff = parsePatchInBackground,
   }) : assert((state == null) == (info == null));
 
@@ -80,6 +81,10 @@ class AgentShell extends StatefulWidget {
   /// The agent hosts Settings lists (ADR-0295); without it Settings show no Agent hosts section.
   final AgentHostsController? agentHosts;
 
+  /// Where Settings are: closed (null), or open at a section. The app keeps it while the agent
+  /// session it shows changes; without it, the shell keeps its own.
+  final ValueNotifier<SettingsSection?>? settings;
+
   /// How the Diff panel reads a patch; tests pass the synchronous parser.
   final PatchParser parseDiff;
 
@@ -99,7 +104,8 @@ class _AgentShellState extends State<AgentShell> {
   final _diffOpen = ValueNotifier(false);
   final _card = CardVisibility();
   final _cardToggleFocus = FocusNode(debugLabel: 'session card');
-  final _settings = ValueNotifier(false);
+  late final _settings =
+      widget.settings ?? ValueNotifier<SettingsSection?>(null);
   final _focus = FocusNode(debugLabel: 'shell');
   late final _shortcuts = widget.shortcuts ?? ShortcutController.memory();
   late final _diffSettings = widget.diffSettings ?? DiffSettingsController();
@@ -187,15 +193,20 @@ class _AgentShellState extends State<AgentShell> {
 
   /// Settings replace the main area; closing them gives the keys back to the shell.
   void _toggleSettings() {
-    _settings.value = !_settings.value;
-    if (!_settings.value) _focus.requestFocus();
+    _settings.value = _settings.value == null ? _firstSection : null;
+    if (_settings.value == null) _focus.requestFocus();
   }
+
+  /// Appearance opens first where the app has it, else Shortcuts.
+  SettingsSection get _firstSection => widget.appearance != null
+      ? SettingsSection.appearance
+      : SettingsSection.shortcuts;
 
   /// A request closes Settings and any menu or dialog, which would cover it or take the keys
   /// meant for it; once none is left, a first start asks for the profile again.
   void _requestChanged() {
     if (widget.state!.request.value != null) {
-      _settings.value = false;
+      _settings.value = null;
       Navigator.of(context).popUntil((route) => route.isFirst);
     } else if (_shortcuts.firstStart && ModalRoute.of(context)!.isCurrent) {
       unawaited(_askProfile());
@@ -250,7 +261,7 @@ class _AgentShellState extends State<AgentShell> {
     _diffOpen.dispose();
     _card.dispose();
     _cardToggleFocus.dispose();
-    _settings.dispose();
+    if (widget.settings == null) _settings.dispose();
     _focus.dispose();
     for (final (settings, report, outcome) in _hooks) {
       if (settings.report == report) settings.report = null;
@@ -266,12 +277,12 @@ class _AgentShellState extends State<AgentShell> {
 
   /// A Page opened from anywhere shows in place of Settings.
   void _pageOpened() {
-    if (widget.workspace?.open.value != null) _settings.value = false;
+    if (widget.workspace?.open.value != null) _settings.value = null;
   }
 
   /// Shows the agent session in place of the open Page.
   void _showSession() {
-    _settings.value = false;
+    _settings.value = null;
     widget.workspace?.open.value = null;
   }
 
@@ -332,7 +343,7 @@ class _AgentShellState extends State<AgentShell> {
     final area =
         workspace.open.value?.area ?? workspace.areas.value.firstOrNull?.id;
     if (area == null) return;
-    _settings.value = false;
+    _settings.value = null;
     unawaited(workspace.newPage(area).catchError((_) {}));
   }
 
@@ -468,9 +479,11 @@ class _AgentShellState extends State<AgentShell> {
                         ?widget.workspace?.open,
                       ]),
                       builder: (context, agent) {
-                        if (_settings.value) {
+                        if (_settings.value case final section?) {
                           return SettingsPage(
                             shortcuts: _shortcuts,
+                            section: section,
+                            onSection: (next) => _settings.value = next,
                             appearance: widget.appearance,
                             cardSettings: _cardSettings,
                             onClose: _toggleSettings,

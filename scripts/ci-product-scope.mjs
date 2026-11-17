@@ -42,6 +42,7 @@ let selected = new Set(PRODUCTS);
 if (process.env.GITHUB_EVENT_NAME !== "workflow_dispatch") {
   const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
   let base;
+  let ownTip = false;
   switch (process.env.GITHUB_EVENT_NAME) {
     case "pull_request":
       base = event.pull_request?.base?.sha;
@@ -57,6 +58,8 @@ if (process.env.GITHUB_EVENT_NAME !== "workflow_dispatch") {
         const mergeBase = git("merge-base", "HEAD", "origin/main");
         if (mergeBase.status !== 0) throw new Error("Cannot find the branch's CI base");
         base = mergeBase.stdout.trim();
+        // A push to main finds its own tip as that base: no change is named, so every gate runs.
+        ownTip = base === git("rev-parse", "HEAD").stdout.trim();
       }
       break;
     default:
@@ -65,9 +68,11 @@ if (process.env.GITHUB_EVENT_NAME !== "workflow_dispatch") {
   if (typeof base !== "string" || !/^[a-f0-9]{40}$/i.test(base)) {
     throw new Error("CI comparison requires a commit SHA");
   }
-  const paths = changed(base);
-  docs = paths.length > 0;
-  selected = new Set(paths.filter((path) => !DOCUMENTATION.test(path)).flatMap(owners));
+  if (!ownTip) {
+    const paths = changed(base);
+    docs = paths.length > 0;
+    selected = new Set(paths.filter((path) => !DOCUMENTATION.test(path)).flatMap(owners));
+  }
 }
 // Flow Agent's gates test the whole workspace; the others test the Liquid stack.
 const packages = selected.has("flow_agent") ? "--workspace" : "-p meta-harness-cli -p meta-harness-core -p liquid_bridge -p liquid-core -p liquid-storage";

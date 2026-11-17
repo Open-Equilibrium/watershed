@@ -878,14 +878,19 @@ fn a_question_s_options_show_hidden_characters_and_answer_with_the_agent_s_label
         request: Request::Questions(questions.clone()),
     });
     assert_eq!(shown.questions[0].options, vec!["keep<U+202E>", "drop"]);
-    // The card answers with what it showed; the agent gets its own label back, and typed text
-    // stays as typed.
+    // The card answers with what it showed; the agent gets its own label back.
     assert_eq!(
         convert::answer_values(
             &questions,
             "pick",
-            vec!["keep<U+202E>".to_owned(), "typed".to_owned()]
+            vec!["keep<U+202E>".to_owned(), "drop".to_owned()],
+            false
         ),
-        vec!["keep\u{202e}", "typed"]
+        vec!["keep\u{202e}", "drop"]
+    );
+    // Typed text stays as typed, even when it reads as a label the card showed.
+    assert_eq!(
+        convert::answer_values(&questions, "pick", vec!["keep<U+202E>".to_owned()], true),
+        vec!["keep<U+202E>"]
     );
 }

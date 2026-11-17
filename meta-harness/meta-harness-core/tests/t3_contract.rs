@@ -110,6 +110,20 @@ fn free_port() -> u16 {
         .port()
 }
 
+/// Turns on `host`'s remote access on a free port and answers that port. A port found free can
+/// be taken by another test before the service binds it, so a taken one is tried again.
+async fn remote_on_free(host: &remote::Host) -> u16 {
+    for _ in 0..5 {
+        let port = free_port();
+        match host.remote_on(port).await {
+            Ok(_) => return port,
+            Err(error) if error.contains("already in use") => continue,
+            Err(error) => panic!("{error}"),
+        }
+    }
+    panic!("no free port for remote access");
+}
+
 fn worktree() -> Workspace {
     Workspace::NewWorktree {
         base: "main".to_owned(),
@@ -407,11 +421,13 @@ async fn a_snapshot_names_the_events_it_already_contains() {
         .turns
         .iter()
         .any(|t| t.status == TurnStatus::Completed);
-    let finished_after = received
+    let completions_after = received
         .iter()
-        .any(|e| matches!(e.event, AgentEvent::TurnCompleted { .. }));
-    assert!(
-        finished_before != finished_after,
+        .filter(|e| matches!(e.event, AgentEvent::TurnCompleted { .. }))
+        .count();
+    assert_eq!(
+        usize::from(finished_before) + completions_after,
+        1,
         "the completion is in the snapshot or the stream, exactly once"
     );
     assert!(after.transcript.iter().any(|item| item.text == "Appended."));
@@ -989,12 +1005,11 @@ async fn the_service_refuses_a_client_that_names_no_api_version_or_another() {
     service.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_client_that_stops_reading_its_replies_is_disconnected() {
-    use futures_util::SinkExt;
-    use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
-    let (dir, _repo, _home) = fixture();
-    let (service, _local) = start_service(&dir.path().join("meta")).await;
+/// An authenticated client connection to `service`, which the test reads and writes itself.
+async fn open_client(
+    service: &Service,
+) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     let mut request = service.url.as_str().into_client_request().unwrap();
     request.headers_mut().insert(
         "authorization",
@@ -1003,12 +1018,25 @@ async fn a_client_that_stops_reading_its_replies_is_disconnected() {
     request
         .headers_mut()
         .insert("meta-harness-api", "1".parse().unwrap());
-    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    tokio_tungstenite::connect_async(request).await.unwrap().0
+}
+
+/// Connects as a client that never reads its replies and sends `text` until the service
+/// disconnects it; answers how long that took, or `None` if it did not within `limit`.
+async fn disconnected_after_flood(
+    service: &Service,
+    text: &str,
+    limit: Duration,
+) -> Option<Duration> {
+    use futures_util::SinkExt;
+    use tokio_tungstenite::tungstenite::Message;
+    let mut socket = open_client(service).await;
+    let started = std::time::Instant::now();
     // Each malformed request is answered, and the answers are never read.
-    let disconnected = tokio::time::timeout(Duration::from_secs(60), async {
+    tokio::time::timeout(limit, async {
         loop {
             if socket
-                .send(Message::Text(r#"{"id":1,"bogus":true}"#.into()))
+                .send(Message::Text(text.to_owned().into()))
                 .await
                 .is_err()
             {
@@ -1016,10 +1044,39 @@ async fn a_client_that_stops_reading_its_replies_is_disconnected() {
             }
         }
     })
-    .await;
+    .await
+    .ok()
+    .map(|()| started.elapsed())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_that_stops_reading_its_replies_is_disconnected() {
+    let (dir, _repo, _home) = fixture();
+    let (service, _local) = start_service(&dir.path().join("meta")).await;
     assert!(
-        disconnected.is_ok(),
+        disconnected_after_flood(
+            &service,
+            r#"{"id":1,"bogus":true}"#,
+            Duration::from_secs(60)
+        )
+        .await
+        .is_some(),
         "the service disconnects a client that never reads"
+    );
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_malformed_request_while_a_reply_waits_for_room_disconnects_at_once() {
+    let (dir, _repo, _home) = fixture();
+    let (service, _local) = start_service(&dir.path().join("meta")).await;
+    // The first reply that finds the queue full waits up to 10 s, but the next malformed request
+    // closes the connection rather than queueing behind it.
+    assert!(
+        disconnected_after_flood(&service, r#"{"id":1,"bogus":true}"#, Duration::from_secs(8))
+            .await
+            .is_some(),
+        "a second malformed request closes the connection while one reply waits"
     );
     service.stop().await;
 }
@@ -1033,8 +1090,7 @@ async fn connects(url: &str, token: &str, name: &str) -> bool {
 async fn a_client_name_keeps_no_control_characters() {
     let (dir, _repo, _home) = fixture();
     let (_service, local) = start_service(&dir.path().join("meta")).await;
-    let port = free_port();
-    local.remote_on(port).await.unwrap();
+    let port = remote_on_free(&local).await;
     let url = format!("ws://127.0.0.1:{port}");
     let code = local
         .invite(ClientKind::Device, Access::Auto)
@@ -1079,8 +1135,7 @@ async fn remote_access_that_cannot_bind_at_start_says_so_and_binds_once_the_port
     let (dir, _repo, _home) = fixture();
     let meta = dir.path().join("meta");
     let (service, local) = start_service(&meta).await;
-    let port = free_port();
-    local.remote_on(port).await.unwrap();
+    let port = remote_on_free(&local).await;
     drop(local);
     service.stop().await;
     // Another program holds the port while the service starts.
@@ -1109,8 +1164,7 @@ async fn remote_access_that_cannot_bind_at_start_says_so_and_binds_once_the_port
 async fn the_remote_listener_closes_a_handshake_beyond_its_limit_at_once() {
     let (dir, _repo, _home) = fixture();
     let (_service, local) = start_service(&dir.path().join("meta")).await;
-    let port = free_port();
-    local.remote_on(port).await.unwrap();
+    let port = remote_on_free(&local).await;
     let address = format!("127.0.0.1:{port}");
     // Connections that never complete a handshake take the whole limit. The listener accepts in
     // order, so the next connection is accepted only after them.
@@ -1131,8 +1185,7 @@ async fn the_remote_listener_closes_a_handshake_beyond_its_limit_at_once() {
 async fn turning_remote_access_off_ends_the_connections_it_admitted() {
     let (dir, _repo, _home) = fixture();
     let (_service, local) = start_service(&dir.path().join("meta")).await;
-    let port = free_port();
-    local.remote_on(port).await.unwrap();
+    let port = remote_on_free(&local).await;
     let url = format!("ws://127.0.0.1:{port}");
     let code = local
         .invite(ClientKind::Device, Access::Auto)
@@ -1319,9 +1372,8 @@ async fn a_link_without_an_access_level_takes_the_level_its_host_invited() {
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    a.remote_on(free_port()).await.unwrap();
-    b.remote_on(port_b).await.unwrap();
+    remote_on_free(&a).await;
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let url_b = format!("ws://127.0.0.1:{port_b}");
@@ -1342,9 +1394,8 @@ async fn a_host_invited_at_approval_required_cannot_link_at_auto_but_links_at_th
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    a.remote_on(free_port()).await.unwrap();
-    b.remote_on(port_b).await.unwrap();
+    remote_on_free(&a).await;
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let url_b = format!("ws://127.0.0.1:{port_b}");
@@ -1372,9 +1423,8 @@ async fn a_host_pairs_under_a_tagged_name_that_its_revoke_message_quotes() {
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    a.remote_on(free_port()).await.unwrap();
-    b.remote_on(port_b).await.unwrap();
+    remote_on_free(&a).await;
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let url_b = format!("ws://127.0.0.1:{port_b}");
@@ -1436,8 +1486,7 @@ async fn a_host_invited_read_only_gets_a_pairing_code_that_grants_orchestration_
     let (dir, _repo, _home) = fixture();
     let home = dir.path().join("b");
     let (_b, b) = start_service(&home).await;
-    let port = free_port();
-    b.remote_on(port).await.unwrap();
+    let port = remote_on_free(&b).await;
     let url = format!("ws://127.0.0.1:{port}");
     let code = b.invite(ClientKind::Host, Access::ReadOnly).await.unwrap();
     let paired = remote::pair(&url, &code, "other").await.unwrap();
@@ -1457,9 +1506,8 @@ async fn a_host_link_whose_tunnel_port_is_taken_at_restart_moves_to_a_new_port()
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
     let (a_service, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    a.remote_on(free_port()).await.unwrap();
-    b.remote_on(port_b).await.unwrap();
+    remote_on_free(&a).await;
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
@@ -1536,9 +1584,8 @@ async fn a_peer_that_never_answers_a_link_is_given_up_on_and_holds_no_other_chan
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    a.remote_on(free_port()).await.unwrap();
-    b.remote_on(port_b).await.unwrap();
+    remote_on_free(&a).await;
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let silent = silent_peer().await;
@@ -1562,8 +1609,7 @@ async fn a_peer_that_never_answers_a_link_is_given_up_on_and_holds_no_other_chan
 async fn a_name_already_paired_is_refused_and_its_code_is_still_good() {
     let (dir, _repo, _home) = fixture();
     let (_service, local) = start_service(&dir.path().join("meta")).await;
-    let port = free_port();
-    local.remote_on(port).await.unwrap();
+    let port = remote_on_free(&local).await;
     let url = format!("ws://127.0.0.1:{port}");
     let first = local
         .invite(ClientKind::Device, Access::Auto)
@@ -1611,9 +1657,8 @@ async fn a_host_asking_for_more_than_it_was_invited_at_is_refused_before_linking
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    a.remote_on(free_port()).await.unwrap();
-    b.remote_on(port_b).await.unwrap();
+    remote_on_free(&a).await;
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let code = b.invite(ClientKind::Host, Access::ReadOnly).await.unwrap();
@@ -1641,9 +1686,8 @@ async fn a_host_asking_for_less_than_its_invite_names_its_pairing_and_level() {
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    a.remote_on(free_port()).await.unwrap();
-    b.remote_on(port_b).await.unwrap();
+    remote_on_free(&a).await;
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let code = b
@@ -1678,9 +1722,8 @@ async fn a_link_made_is_reported_made_even_when_its_time_cannot_be_stored() {
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    a.remote_on(free_port()).await.unwrap();
-    b.remote_on(port_b).await.unwrap();
+    remote_on_free(&a).await;
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     // Every update of a link's row fails, as a store that cannot be written does.
@@ -1705,8 +1748,7 @@ async fn a_host_link_older_than_25_days_is_made_again_when_the_service_starts() 
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
     let (a_service, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    b.remote_on(port_b).await.unwrap();
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
@@ -1767,9 +1809,8 @@ async fn linked(dir: &Path) -> Linked {
     let (home_a, home_b) = (dir.join("a"), dir.join("b"));
     let (a_service, a) = start_service(&home_a).await;
     let (b_service, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    a.remote_on(free_port()).await.unwrap();
-    b.remote_on(port_b).await.unwrap();
+    remote_on_free(&a).await;
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let url_b = format!("ws://127.0.0.1:{port_b}");
@@ -2176,8 +2217,7 @@ async fn a_decision_with_another_pairings_client_id_is_refused_by_the_tunnel() {
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
     let (_c, c) = start_service(&home_c).await;
-    let port_b = free_port();
-    b.remote_on(port_b).await.unwrap();
+    let port_b = remote_on_free(&b).await;
     for host in [&a, &b, &c] {
         host.host_agents(true).await.unwrap();
     }
@@ -2211,8 +2251,7 @@ async fn a_token_exchange_with_another_pairings_client_id_is_refused_by_the_tunn
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
     let (_c, c) = start_service(&home_c).await;
-    let port_b = free_port();
-    b.remote_on(port_b).await.unwrap();
+    let port_b = remote_on_free(&b).await;
     for host in [&a, &b, &c] {
         host.host_agents(true).await.unwrap();
     }
@@ -2255,9 +2294,8 @@ async fn revoking_a_name_with_no_client_still_ends_the_sign_ins_made_under_it() 
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    a.remote_on(free_port()).await.unwrap();
-    b.remote_on(port_b).await.unwrap();
+    remote_on_free(&a).await;
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let url_b = format!("ws://127.0.0.1:{port_b}");
@@ -2304,8 +2342,7 @@ async fn revoking_a_host_ends_the_t3_sessions_its_link_made() {
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
     let (_c, c) = start_service(&home_c).await;
-    let port_b = free_port();
-    b.remote_on(port_b).await.unwrap();
+    let port_b = remote_on_free(&b).await;
     for host in [&a, &b, &c] {
         host.host_agents(true).await.unwrap();
     }
@@ -2343,4 +2380,90 @@ async fn revoking_a_host_ends_the_t3_sessions_its_link_made() {
         401,
         "T3 refuses the revoked session's token: {refused:?}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_that_stops_reading_while_it_sends_calls_is_disconnected() {
+    let (dir, _repo, _home) = fixture();
+    let (service, _local) = start_service(&dir.path().join("meta")).await;
+    // Each call is answered by the service at once, so the replies fill the queue and then the
+    // calls wait in tasks, which the service bounds per connection.
+    assert!(
+        disconnected_after_flood(
+            &service,
+            r#"{"id":1,"call":{"host":"status"}}"#,
+            Duration::from_secs(8)
+        )
+        .await
+        .is_some(),
+        "a client that never reads its replies is disconnected"
+    );
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_that_reads_each_reply_is_not_limited_by_the_calls_before_it() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+    let (dir, _repo, _home) = fixture();
+    let (service, _local) = start_service(&dir.path().join("meta")).await;
+    let mut socket = open_client(&service).await;
+    // Each call is answered before the next is sent, so none waits behind another.
+    for id in 1..=300u64 {
+        let call = serde_json::json!({"id": id, "call": {"host": "status"}});
+        socket
+            .send(Message::Text(call.to_string().into()))
+            .await
+            .unwrap();
+        let Message::Text(text) = socket.next().await.unwrap().unwrap() else {
+            panic!("a reply is text");
+        };
+        let reply: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(reply["id"], id);
+        assert!(reply.get("ok").is_some(), "{reply}");
+    }
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_that_reads_gets_two_malformed_requests_in_one_burst_answered() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+    let (dir, _repo, _home) = fixture();
+    let (service, _local) = start_service(&dir.path().join("meta")).await;
+    let mut socket = open_client(&service).await;
+    // Both frames go out before either reply is read: a newer client sends several calls at once.
+    for id in [1u64, 2] {
+        socket
+            .send(Message::Text(
+                serde_json::json!({"id": id, "bogus": true})
+                    .to_string()
+                    .into(),
+            ))
+            .await
+            .unwrap();
+    }
+    for id in [1u64, 2] {
+        let Message::Text(text) = socket.next().await.unwrap().unwrap() else {
+            panic!("a reply is text");
+        };
+        let reply: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(reply["id"], id);
+        assert!(reply.get("error").is_some(), "{reply}");
+    }
+    // The connection is still open: a valid call is answered on it.
+    socket
+        .send(Message::Text(
+            serde_json::json!({"id": 3, "call": {"host": "status"}})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    let Message::Text(text) = socket.next().await.unwrap().unwrap() else {
+        panic!("a reply is text");
+    };
+    let reply: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(reply["id"], 3);
+    service.stop().await;
 }

@@ -249,6 +249,33 @@ fn a_host_code_is_refused_and_saves_nothing() {
 }
 
 #[test]
+fn a_revoked_device_is_told_to_pair_again_and_is_not_shown_offline() {
+    let home = Home::new();
+    let (service, local, url) = remote_service(&home);
+    let tokens = Memory::default();
+    let client = "liquid-studio-s-mac";
+    let code = RUNTIME
+        .block_on(local.invite(ClientKind::Device, Access::Auto))
+        .expect("a code");
+    pair_with(&tokens, &url, &code, client).expect("the device pairs");
+    RUNTIME
+        .block_on(local.revoke_client(client))
+        .expect("the device is revoked by name");
+
+    // The host's refusal, as the core words it: a later attempt would be refused again, so it is
+    // not a lost connection that Settings shows as Offline or Liquid retries.
+    let refusal = format!(
+        "Meta-Harness at {url} no longer accepts this device's pairing; pair this device again."
+    );
+    assert_eq!(reach_remote_with(&tokens, &url), Err(refusal.clone()));
+    assert_eq!(
+        AgentHost::connect_remote_with(&tokens, &url).err(),
+        Some(refusal)
+    );
+    stop(service);
+}
+
+#[test]
 fn a_host_token_is_not_reachable_as_a_device() {
     let home = Home::new();
     let (service, local, url) = remote_service(&home);

@@ -332,6 +332,14 @@ pub struct Status {
     pub pid: u32,
     /// The current configuration revision.
     pub revision: u64,
+    /// Whether the harness homes hold that revision; false after a failed write that is not yet
+    /// repaired by a write that succeeds. Absent in an older service's status, which is reconciled.
+    #[serde(default = "reconciled_when_absent")]
+    pub reconciled: bool,
+}
+
+fn reconciled_when_absent() -> bool {
+    true
 }
 
 /// Where the remote listener answers, while it is on.
@@ -343,4 +351,16 @@ pub struct RemoteStatus {
     pub addresses: Vec<String>,
     /// Why remote access is on but does not listen yet, such as a port that another program holds.
     pub waiting: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Status;
+
+    #[test]
+    fn a_status_of_an_older_service_reads_as_reconciled() {
+        let status: Status =
+            serde_json::from_str(r#"{"t3_version":"0.1.9","pid":7,"revision":3}"#).unwrap();
+        assert!(status.reconciled);
+    }
 }

@@ -23,7 +23,7 @@ use crate::api::{
 };
 use crate::config::{Change, Current, LogEntry, Proposal};
 use crate::hosts::{Access, ClientKind, HostList};
-use crate::util::{TIMEOUT, lock};
+use crate::util::{IDLE, TIMEOUT, lock};
 use crate::{
     Automation, Context, GitActionRequest, GitProgress, GitStatus, Lineage, LineageChanges,
     LocalServer, ModelChoice, Permissions, Provider, PullRequestDetail, Refs, RequestId,
@@ -204,13 +204,23 @@ impl Host {
                 {
                     refused_version(&response)
                 }
+                // A service that no longer knows this device's token refuses it; a later attempt
+                // would be refused again, so the device must be paired again.
+                tokio_tungstenite::tungstenite::Error::Http(response)
+                    if response.status() == StatusCode::UNAUTHORIZED =>
+                {
+                    format!(
+                        "Meta-Harness at {url} no longer accepts this device's pairing; pair this \
+                         device again."
+                    )
+                }
                 e => format!("Could not reach Meta-Harness at {url}: {e}"),
             })?;
         let (mut sink, mut frames) = socket.split();
         let (out, mut outgoing) = mpsc::unbounded_channel::<Message>();
         let waiters: Arc<Mutex<Option<HashMap<u64, Waiter>>>> =
             Arc::new(Mutex::new(Some(HashMap::new())));
-        tokio::spawn(async move {
+        let writer = tokio::spawn(async move {
             while let Some(message) = outgoing.recv().await {
                 if sink.send(message).await.is_err() {
                     break;
@@ -223,14 +233,18 @@ impl Host {
         // Held weakly, so dropping every handle of this client closes the connection.
         let cancel = out.downgrade();
         tokio::spawn(async move {
-            while let Some(Ok(frame)) = frames.next().await {
+            // Any frame, a pong included, comes at least every PING from a service that is there;
+            // one silent for IDLE is gone, though its socket never closed.
+            while let Ok(Some(Ok(frame))) = tokio::time::timeout(IDLE, frames.next()).await {
                 if let Message::Text(text) = frame
                     && let Ok(reply) = serde_json::from_str::<Reply>(&text)
                 {
                     deliver(&read, &cancel, reply);
                 }
             }
-            // The connection is gone: every waiting call fails and every stream ends.
+            // The connection is gone: its writer closes the socket, every waiting call fails and
+            // every stream ends.
+            writer.abort();
             for (_, waiter) in lock(&read).take().into_iter().flatten() {
                 match waiter {
                     Waiter::Call(answer) => drop(answer.send(Err(LOST_CALL.to_owned()))),
@@ -448,10 +462,21 @@ pub(crate) fn handshake(url: &str, headers: &[(&'static str, &str)]) -> Result<R
     Ok(request)
 }
 
+/// Refuses an address that is not `ws://…`, the form `meta invite` prints. Every caller that links
+/// or pairs with a host checks it here, so each one gives the same refusal.
+pub fn check_address(address: &str) -> Result<(), String> {
+    if address.starts_with("ws://") {
+        Ok(())
+    } else {
+        Err("Enter the address as ws://HOST:PORT, as meta invite prints it.".to_owned())
+    }
+}
+
 /// Pairs this client with the remote listener at `address` (`ws://…`), using `code`, a pairing code
 /// that the other side issued. Answers the other side's name, the token this client uses from now
 /// on and the access it was paired at (ADR-0299, ADR-0300).
 pub async fn pair(address: &str, code: &str, client: &str) -> Result<api::Pairing, String> {
+    check_address(address)?;
     let request = handshake(
         address,
         &[(api::PAIRING_HEADER, code), (api::CLIENT_HEADER, client)],

@@ -109,6 +109,13 @@ async fn settle() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 }
 
+/// Waits for `next` for at most a second, so a stream that stops short fails rather than hangs.
+async fn within<T>(next: impl Future<Output = T>) -> T {
+    tokio::time::timeout(Duration::from_secs(1), next)
+        .await
+        .expect("delivered within a second")
+}
+
 fn paused_runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread()
         .enable_time()
@@ -216,7 +223,7 @@ fn forwards_streaming_text_once_its_window_passed() {
             events.send(delta("Hel")).await.expect("sent");
             tokio::time::sleep(ms(30)).await;
             events.send(delta("lo")).await.expect("sent");
-            assert_eq!(deliveries.recv().await, streamed(ms(50), "Hello"));
+            assert_eq!(within(deliveries.recv()).await, streamed(ms(50), "Hello"));
             // Anything else ends the window at once, with the text before it.
             tokio::time::sleep(ms(10)).await;
             events.send(delta("!")).await.expect("sent");
@@ -225,9 +232,9 @@ fn forwards_streaming_text_once_its_window_passed() {
                 checkpoint: None,
             };
             events.send(ev(completed)).await.expect("sent");
-            assert_eq!(deliveries.recv().await, streamed(ms(60), "!"));
+            assert_eq!(within(deliveries.recv()).await, streamed(ms(60), "!"));
             assert_eq!(
-                deliveries.recv().await,
+                within(deliveries.recv()).await,
                 Some((ms(60), BridgeEventKind::TurnCompleted, None))
             );
         });
@@ -451,7 +458,9 @@ fn closing_the_credit_ends_a_resubscription_that_is_still_pending() {
             |_event| true,
         ));
         drop(sender);
-        reached.recv().await.expect("the resubscription starts");
+        within(reached.recv())
+            .await
+            .expect("the resubscription starts");
         // An ordinary confirmation does not end the attempt; only the session's drop does.
         credit.confirm(0);
         settle().await;
@@ -469,6 +478,42 @@ fn closing_the_credit_ends_a_resubscription_that_is_still_pending() {
             1,
             "the pending resubscription was released"
         );
+    });
+}
+
+#[test]
+fn what_waits_goes_out_while_a_resubscription_is_pending() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let (events, receiver) = tokio::sync::mpsc::channel(4096);
+        let (delivered, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
+        // The subscription closes, and the resubscription that replaces it never answers.
+        let forwarding = tokio::spawn(forward(
+            receiver,
+            std::future::pending::<Option<tokio::sync::mpsc::Receiver<ThreadEvent>>>,
+            credit.clone(),
+            move |event| delivered.send(event).is_ok(),
+        ));
+        for item in 1..=WINDOW as u64 + 1 {
+            events.send(started(item)).await.expect("sent");
+        }
+        drop(events);
+        settle().await;
+        assert_eq!(taken(&mut deliveries).len(), WINDOW);
+        // Liquid confirms the window while the resubscription still waits; the event past the
+        // window goes out at once rather than when the resubscription answers.
+        credit.confirm(WINDOW as u64);
+        settle().await;
+        assert_eq!(
+            taken(&mut deliveries).len(),
+            1,
+            "what waits is sent while the resubscription is pending"
+        );
+        credit.close();
+        tokio::time::timeout(Duration::from_secs(1), forwarding)
+            .await
+            .expect("forward returns once the session closed")
+            .expect("forward completes");
     });
 }
 

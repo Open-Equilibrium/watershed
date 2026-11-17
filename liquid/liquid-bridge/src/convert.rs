@@ -92,8 +92,17 @@ fn usage(usage: Usage) -> BridgeUsage {
 }
 
 /// The answer to question `id` as the agent sent its options: each option label the card showed
-/// written out becomes the agent's label again; typed text stays as typed.
-pub(crate) fn answer_values(questions: &[Question], id: &str, values: Vec<String>) -> Vec<String> {
+/// written out becomes the agent's label again. Typed text goes as typed, even when it reads as
+/// such a label.
+pub(crate) fn answer_values(
+    questions: &[Question],
+    id: &str,
+    values: Vec<String>,
+    typed: bool,
+) -> Vec<String> {
+    if typed {
+        return values;
+    }
     let options = questions
         .iter()
         .find(|q| q.id == id)

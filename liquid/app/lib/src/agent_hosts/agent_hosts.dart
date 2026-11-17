@@ -215,7 +215,8 @@ class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
 
   /// Pairs with the host at `address` using `code`, then saves it.
   Future<SavedAgentHost> pair(String address, String code) async {
-    const failed = 'Could not add the agent host; nothing changed.';
+    // Liquid saves nothing here; a host that refused the code may keep a pairing, which its message says.
+    const failed = 'Could not add the agent host; nothing changed in Liquid.';
     final paired = await _step(failed, () => bridge.pair(address, code));
     final host = SavedAgentHost(
       name: paired.host,

@@ -5073,11 +5073,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeQuestionAnswer dco_decode_bridge_question_answer(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
     return BridgeQuestionAnswer(
       question: dco_decode_String(arr[0]),
       values: dco_decode_list_String(arr[1]),
+      typed: dco_decode_bool(arr[2]),
     );
   }
 
@@ -7003,7 +7004,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_question = sse_decode_String(deserializer);
     var var_values = sse_decode_list_String(deserializer);
-    return BridgeQuestionAnswer(question: var_question, values: var_values);
+    var var_typed = sse_decode_bool(deserializer);
+    return BridgeQuestionAnswer(
+      question: var_question,
+      values: var_values,
+      typed: var_typed,
+    );
   }
 
   @protected
@@ -9182,6 +9188,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.question, serializer);
     sse_encode_list_String(self.values, serializer);
+    sse_encode_bool(self.typed, serializer);
   }
 
   @protected

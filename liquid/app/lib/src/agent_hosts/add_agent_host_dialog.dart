@@ -54,15 +54,6 @@ class _AddAgentHostDialogState extends State<AddAgentHostDialog> {
       );
       return;
     }
-    // The same sentence as the core's check (meta-harness-core hosts/links.rs), which the bridge
-    // cannot call.
-    if (!address.startsWith('ws://')) {
-      setState(
-        () => _problem =
-            'Enter the address as ws://HOST:PORT, as meta invite prints it.',
-      );
-      return;
-    }
     if (listed case final host?) {
       setState(
         () => _problem =

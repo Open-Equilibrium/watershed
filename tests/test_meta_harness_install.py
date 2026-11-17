@@ -222,6 +222,28 @@ class PackagerTest(unittest.TestCase):
                              for member in bundle.getmembers() if member.issym()}
                     self.assertEqual(links, {f"lib/meta-harness/t3-{T3_VERSION}-{target}/helper": "t3"})
 
+    def test_a_symlinked_t3_folder_is_packed_as_the_folder_it_names(self):
+        for target in PLATFORMS:
+            with self.subTest(platform=target), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                write(root / "real" / "t3", b"synthetic T3 program", 0o755)
+                link = root / "links" / f"t3-{T3_VERSION}-{target}"
+                link.parent.mkdir()
+                link.symlink_to(root / "real")
+                meta = write(root / "fixtures" / "meta", b"synthetic meta program", 0o755)
+                output = root / "download"
+                result = subprocess.run(
+                    ["node", str(PACKAGER), "--meta", str(meta), "--t3", str(link), "--platform",
+                     target, "--output", str(output)],
+                    capture_output=True, text=True, timeout=60,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                name = f"meta-harness-{META_VERSION}-{target}"
+                with tarfile.open(output / f"{name}.tar.gz", "r:gz") as bundle:
+                    member = bundle.getmember(f"{name}/lib/meta-harness/t3-{T3_VERSION}-{target}/t3")
+                    self.assertTrue(member.isfile())
+                    self.assertEqual(bundle.extractfile(member).read(), b"synthetic T3 program")
+
     def test_refuses_an_existing_output_and_another_t3_version(self):
         for target in PLATFORMS:
             with self.subTest(platform=target), tempfile.TemporaryDirectory() as temporary:

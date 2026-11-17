@@ -41,9 +41,18 @@ impl Plan {
         if path.is_empty() {
             path = vec!["/usr/bin".to_owned(), "/bin".to_owned()];
         }
+        // Service files hold text, so a path that is not UTF-8 would be written as another path.
+        let utf8 = |p: &Path| {
+            p.to_str().map(str::to_owned).ok_or_else(|| {
+                format!(
+                    "{} is not UTF-8, which a login service cannot carry.",
+                    p.display()
+                )
+            })
+        };
         let mut environment = vec![
             ("PATH", path.join(":")),
-            ("META_HARNESS_HOME", home.to_string_lossy().into_owned()),
+            ("META_HARNESS_HOME", utf8(&home)?),
         ];
         for name in PASSED {
             if let Some(value) = var(name).filter(|v| v.starts_with('/')) {
@@ -51,8 +60,8 @@ impl Plan {
             }
         }
         // A service file is line-based; a control character would end or break an entry.
-        let program_text = program.to_string_lossy();
-        for value in std::iter::once(program_text.as_ref())
+        let program_text = utf8(&program)?;
+        for value in std::iter::once(program_text.as_str())
             .chain(environment.iter().map(|(_, v)| v.as_str()))
         {
             if value.chars().any(char::is_control) {
@@ -95,8 +104,13 @@ pub struct Manager {
     /// The service file.
     pub file: PathBuf,
     render: fn(&Plan) -> String,
+    /// The data folder a service file's text names.
+    home_of: fn(&str) -> Option<String>,
     start: Vec<Step>,
     stop: Vec<Step>,
+    /// Run after the previous file is restored, so the manager loads it again. A failure is
+    /// reported, not required.
+    restore: Vec<Step>,
 }
 
 impl Manager {
@@ -110,6 +124,7 @@ impl Manager {
         let plist = file.to_string_lossy().into_owned();
         Self {
             render: plist_of,
+            home_of: plist_home,
             // A job that is still loaded refuses bootstrap, and a persisted disable blocks it.
             start: vec![
                 step("launchctl", &["bootout", &target], false),
@@ -117,6 +132,7 @@ impl Manager {
                 step("launchctl", &["bootstrap", &domain, &plist], true),
             ],
             stop: vec![step("launchctl", &["bootout", &target], false)],
+            restore: Vec::new(),
             file,
         }
     }
@@ -126,6 +142,7 @@ impl Manager {
         Self {
             file: config.join("systemd/user").join(UNIT),
             render: unit_of,
+            home_of: unit_home,
             start: vec![
                 step("systemctl", &["--user", "daemon-reload"], true),
                 step("systemctl", &["--user", "enable", UNIT], true),
@@ -136,6 +153,7 @@ impl Manager {
                 &["--user", "disable", "--now", UNIT],
                 false,
             )],
+            restore: vec![step("systemctl", &["--user", "daemon-reload"], false)],
         }
     }
 
@@ -167,9 +185,47 @@ impl Manager {
         let folder = self.file.parent().expect("a service file has a folder");
         std::fs::create_dir_all(folder)
             .map_err(|e| format!("Could not create {}: {e}", folder.display()))?;
+        let previous = match std::fs::read(&self.file) {
+            Ok(bytes) => Some(bytes),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(format!("Could not read {}: {e}", self.file.display())),
+        };
         std::fs::write(&self.file, (self.render)(plan))
             .map_err(|e| format!("Could not write {}: {e}", self.file.display()))?;
-        run_all(&self.start, &mut run).map(|_| ())
+        let started = run_all(&self.start, &mut run).map(|_| ());
+        if let Err(error) = started {
+            // The file keeps naming the data folder the service ran with, which uninstall checks.
+            let restored = match previous {
+                Some(bytes) => std::fs::write(&self.file, bytes),
+                None => match std::fs::remove_file(&self.file) {
+                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+                    _ => Ok(()),
+                },
+            };
+            return Err(match restored {
+                Ok(()) => {
+                    // Only required steps fail as Err, and none is required here.
+                    let reloads = run_all(&self.restore, &mut run).unwrap_or_default();
+                    reloads
+                        .iter()
+                        .fold(error, |message, failure| format!("{message}. {failure}"))
+                }
+                Err(e) => format!(
+                    "{error}. The previous service file could not be restored: {e} ({})",
+                    self.file.display()
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    /// The data folder the installed service keeps, from its file; `None` without a file.
+    pub fn recorded_home(&self) -> Result<Option<PathBuf>, String> {
+        match std::fs::read_to_string(&self.file) {
+            Ok(text) => Ok((self.home_of)(&text).map(PathBuf::from)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!("Could not read {}: {e}", self.file.display())),
+        }
     }
 
     /// Stops the service and removes its file; the data folder stays. Returns the failures of
@@ -269,6 +325,40 @@ fn systemd_value(value: &str) -> String {
     format!("\"{escaped}\"")
 }
 
+/// The data folder a launch agent names, read back from its environment.
+fn plist_home(text: &str) -> Option<String> {
+    let rest = text
+        .split_once("<key>META_HARNESS_HOME</key>\n    <string>")?
+        .1;
+    let value = rest.split_once("</string>")?.0;
+    Some(
+        value
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&"),
+    )
+}
+
+/// The data folder a systemd unit names, read back from its `Environment=` line, which
+/// `systemd_value` quoted and escaped.
+fn unit_home(text: &str) -> Option<String> {
+    let quoted = text
+        .lines()
+        .find_map(|line| line.strip_prefix("Environment=\"META_HARNESS_HOME="))?
+        .strip_suffix('"')?;
+    let mut value = String::new();
+    let mut chars = quoted.chars();
+    while let Some(c) = chars.next() {
+        // A backslash or a percent sign escapes the character after it.
+        if c == '\\' || c == '%' {
+            value.push(chars.next()?);
+        } else {
+            value.push(c);
+        }
+    }
+    Some(value)
+}
+
 /// The systemd user unit: it starts with the user's session and 5 seconds after
 /// `meta serve` ends; stopping it signals Meta-Harness first, which stops T3.
 fn unit_of(plan: &Plan) -> String {
@@ -359,6 +449,13 @@ mod tests {
         );
         let broken = Plan::new(dir.0.join("meta"), dir.0.join("da\nta"), |_| None);
         assert!(broken.is_err_and(|e| e.contains("control character")));
+        // A path that is not UTF-8 would be written as another path, so it is refused.
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let not_utf8 = PathBuf::from(std::ffi::OsStr::from_bytes(b"/data/\xff"));
+            assert!(Plan::new(dir.0.join("meta"), not_utf8, |_| None).is_err());
+        }
         // Without an absolute folder, PATH names the system folders, never none.
         let relative = Plan::new(dir.0.join("meta"), dir.0.join("data"), |name| {
             (name == "PATH").then(|| ".:bin".to_owned())
@@ -421,7 +518,8 @@ mod tests {
     fn a_systemd_user_unit_quotes_what_systemd_would_expand() {
         let dir = Dir::new();
         let manager = Manager::systemd(&dir.0.join("config"));
-        let (unit, ran) = installed(&manager, &plan(&dir.0));
+        let plan = plan(&dir.0);
+        let (unit, ran) = installed(&manager, &plan);
         let root = dir.0.display();
         assert!(unit.contains(&format!("ExecStart=\"{root}/A & B/bin/meta\" serve\n")));
         assert!(unit.contains("Environment=\"PATH=/usr/bin:/Users/p/.local/bin\"\n"));
@@ -440,6 +538,7 @@ mod tests {
                 "systemctl --user restart meta-harness.service",
             ]
         );
+        assert_eq!(manager.recorded_home(), Ok(Some(plan.home)));
     }
 
     #[test]
@@ -455,6 +554,52 @@ mod tests {
         // systemd expands `$` in ExecStart= only; a `$` in Environment= is literal.
         assert!(unit.contains(&format!("ExecStart=\"{root}/$$bin/meta\" serve\n")));
         assert!(unit.contains(&format!("Environment=\"META_HARNESS_HOME={root}/data$\"\n")));
+    }
+
+    #[test]
+    fn a_service_file_names_the_data_folder_it_was_written_with() {
+        let home = PathBuf::from("/data $ \"q\" \\ 100% & <x>");
+        let plan = Plan::new(PathBuf::from("/bin/meta"), home.clone(), |_| None).unwrap();
+        let home = home.to_string_lossy().into_owned();
+        assert_eq!(plist_home(&plist_of(&plan)), Some(home.clone()));
+        assert_eq!(unit_home(&unit_of(&plan)), Some(home));
+    }
+
+    #[test]
+    fn a_replacement_that_fails_keeps_the_data_folder_of_the_service_on_record() {
+        let dir = Dir::new();
+        let manager = Manager::systemd(&dir.0.join("config"));
+        let old = Plan::new(dir.0.join("bin/meta"), dir.0.join("lib/data"), |_| None).unwrap();
+        installed(&manager, &old);
+        let outside = Plan::new(dir.0.join("bin/meta"), dir.0.join("outside"), |_| None).unwrap();
+        let result = manager.install(&outside, |_| Err("daemon-reload failed".to_owned()));
+        assert!(result.is_err());
+        // Uninstall checks the folder this file names, so the old one must still be named.
+        assert_eq!(manager.recorded_home(), Ok(Some(old.home)));
+    }
+
+    #[test]
+    fn a_failed_restart_reloads_the_restored_unit() {
+        let dir = Dir::new();
+        let manager = Manager::systemd(&dir.0.join("config"));
+        installed(&manager, &plan(&dir.0));
+        let outside = Plan::new(dir.0.join("bin/meta"), dir.0.join("outside"), |_| None).unwrap();
+        let mut ran = Vec::new();
+        let result = manager.install(&outside, |step| {
+            ran.push(format!("{} {}", step.program, step.args.join(" ")));
+            if step.args.iter().any(|arg| arg == "restart") {
+                Err("restart failed".to_owned())
+            } else {
+                Ok(())
+            }
+        });
+        assert!(result.is_err());
+        // systemd keeps the definition it loaded until it reads the restored file again.
+        assert_eq!(
+            ran.last().map(String::as_str),
+            Some("systemctl --user daemon-reload"),
+            "{ran:?}"
+        );
     }
 
     #[test]

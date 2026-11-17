@@ -229,7 +229,7 @@ void main() {
 
       expect(
         find.text(
-          'Could not add the agent host; nothing changed. That pairing code is wrong, already used or expired.',
+          'Could not add the agent host; nothing changed in Liquid. That pairing code is wrong, already used or expired.',
         ),
         findsOneWidget,
       );
@@ -319,25 +319,31 @@ void main() {
     expect(checks(remote), 3);
   });
 
-  testWidgets('the Add dialog asks for a ws:// address before pairing', (
-    tester,
-  ) async {
-    await show(tester, controller());
-    await tester.tap(find.widgetWithText(GhostButton, 'Add agent host'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).at(0), '127.0.0.1:3774');
-    await tester.enterText(find.byType(TextField).at(1), 'AAAA-AAAA');
-    await tester.tap(find.widgetWithText(PrimaryButton, 'Add agent host'));
-    await tester.pumpAndSettle();
-
-    expect(
-      find.text(
+  testWidgets(
+    'the Add dialog shows the ws:// address refusal from the bridge',
+    (tester) async {
+      // The bridge pairs through the core, which refuses an address that is not ws:// before it connects.
+      bridge.pairError = AnyhowException(
         'Enter the address as ws://HOST:PORT, as meta invite prints it.',
-      ),
-      findsOneWidget,
-    );
-    expect(bridge.calls.where((call) => call.startsWith('pair')), isEmpty);
-  });
+      );
+      await show(tester, controller());
+      await tester.tap(find.widgetWithText(GhostButton, 'Add agent host'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).at(0), '127.0.0.1:3774');
+      await tester.enterText(find.byType(TextField).at(1), 'AAAA-AAAA');
+      await tester.tap(find.widgetWithText(PrimaryButton, 'Add agent host'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+          'Could not add the agent host; nothing changed in Liquid. Enter the address as ws://HOST:PORT, as meta invite prints it.',
+        ),
+        findsOneWidget,
+      );
+      expect(bridge.calls, contains('pair 127.0.0.1:3774 AAAA-AAAA'));
+      expect(saved, isEmpty);
+    },
+  );
 
   testWidgets('uses a host for sessions at once', (tester) async {
     await show(tester, controller(settings: AgentHostsSettings([mini])));
@@ -349,6 +355,38 @@ void main() {
     expect(saved.last.activeAddress, remote);
     expect(find.text('Used for sessions'), findsOneWidget);
     expect(find.textContaining('Restart'), findsNothing);
+  });
+
+  testWidgets('choosing a host for sessions keeps Settings open', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 1000));
+    final surface = ValueNotifier(
+      Launch.session(SessionState(FakeProject()), info),
+    );
+    final hosts = AgentHostsController(
+      settings: AgentHostsSettings([mini]),
+      bridge: bridge,
+      save: (next) async => saved.add(next),
+      switchTo: (address, _) async {
+        // The agent area now shows the chosen host's session, which replaces the one shown.
+        surface.value = Launch.session(SessionState(FakeProject()), info);
+        return null;
+      },
+    );
+    await tester.pumpWidget(LiquidApp(launch: surface, agentHosts: hosts));
+    await tester.pumpAndSettle();
+    await openAgentHosts(tester);
+
+    await chooseInRow(tester, remote, 'Use for sessions');
+
+    expect(
+      find.text('Add agent host'),
+      findsOneWidget,
+      reason:
+          'Settings stay open, as T3 Code keeps them when a host is switched',
+    );
+    expect(find.text('Used for sessions'), findsOneWidget);
   });
 
   testWidgets('a second choice waits while the agent area opens', (

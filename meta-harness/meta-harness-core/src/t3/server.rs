@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
+use futures_util::future::BoxFuture;
+
 /// The T3 Code release Meta-Harness runs, as `meta-harness/t3.lock` pins it.
 pub fn t3_version() -> &'static str {
     include_str!("../../../t3.lock")
@@ -73,9 +75,11 @@ impl Server {
 
     /// Issues owner bearer tokens with `t3 auth session issue`, which needs no person. A socket
     /// closes when its session expires, so each connection asks for a new token. Never logged.
-    pub fn issuer(&self) -> impl Fn() -> Result<String, String> + Send + Sync + 'static {
+    pub fn issuer(
+        &self,
+    ) -> impl Fn() -> BoxFuture<'static, Result<String, String>> + Send + Sync + 'static {
         let (binary, home) = (self.binary.clone(), self.home.clone());
-        move || issue(&binary, &home)
+        move || Box::pin(issue(binary.clone(), home.clone(), ISSUE_WAIT))
     }
 
     /// Stops the server as `stop_left_behind` does: TERM, then KILL if it has not exited after
@@ -101,9 +105,13 @@ impl Server {
 /// `DESKTOP_BOOTSTRAP_TTL_HOURS`).
 const OWNER_TTL: &str = "24h";
 
-/// Issues one owner token from the T3 server in `home`, run by `binary`.
-fn issue(binary: &Path, home: &Path) -> Result<String, String> {
-    let output = std::process::Command::new(binary)
+/// How long T3 may take to issue a token before its process is killed.
+const ISSUE_WAIT: Duration = Duration::from_secs(30);
+
+/// Issues one owner token from the T3 server in `home`, run by `binary`. Past `wait`, or when the
+/// future is dropped, the process is killed.
+async fn issue(binary: PathBuf, home: PathBuf, wait: Duration) -> Result<String, String> {
+    let child = tokio::process::Command::new(&binary)
         .args([
             "auth",
             "session",
@@ -114,10 +122,17 @@ fn issue(binary: &Path, home: &Path) -> Result<String, String> {
             OWNER_TTL,
             "--token-only",
         ])
-        .env("T3CODE_HOME", home)
+        .env("T3CODE_HOME", &home)
         .envs(QUIET_ENV)
         .stdin(Stdio::null())
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("Could not run T3: {e}"))?;
+    let output = tokio::time::timeout(wait, child.wait_with_output())
+        .await
+        .map_err(|_| format!("T3 issued no session within {wait:?}"))?
         .map_err(|e| format!("Could not run T3: {e}"))?;
     if !output.status.success() {
         return Err(format!(
@@ -254,6 +269,30 @@ mod tests {
         let starts = std::fs::read_to_string(dir.join("starts")).unwrap();
         assert_eq!(starts.lines().count(), 2, "started again once");
         server.stop().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A stand-in `t3` that never answers ends its token issue at the wait, and its process ends
+    /// with it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_token_issue_that_never_ends_is_killed_at_its_wait() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("t3-issue-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let binary = dir.join("t3");
+        std::fs::write(&binary, "#!/bin/sh\nexec sleep 60\n").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let started = std::time::Instant::now();
+        let result = issue(binary, dir.clone(), Duration::from_millis(200)).await;
+        assert!(result.is_err(), "{result:?}");
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            started.elapsed()
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

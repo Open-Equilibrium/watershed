@@ -63,3 +63,56 @@ async fn a_service_of_another_api_version_refuses_the_connection_with_the_versio
     );
     assert!(!connection_lost(&error), "a refusal is not retried");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_revoked_device_is_refused_with_its_pairing_named_and_not_retried() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}", listener.local_addr().unwrap());
+    // Refuses the handshake as a service does a token it no longer knows.
+    tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let (reader, mut writer) = socket.into_split();
+        let mut lines = BufReader::new(reader).lines();
+        while let Some(line) = lines.next_line().await.unwrap() {
+            if line.is_empty() {
+                break;
+            }
+        }
+        writer
+            .write_all(
+                b"HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+            )
+            .await
+            .unwrap();
+    });
+    let error = Host::connect_to(&url, "token", "test")
+        .await
+        .err()
+        .expect("the connection is refused");
+    assert_eq!(
+        error,
+        format!(
+            "Meta-Harness at {url} no longer accepts this device's pairing; pair this device again."
+        )
+    );
+    assert!(!connection_lost(&error), "a revoked pairing is not retried");
+}
+
+#[tokio::test]
+async fn pairing_refuses_an_address_that_is_not_ws_before_connecting() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = format!("http://{}", listener.local_addr().unwrap());
+    let error = crate::remote::pair(&address, "CODE", "test")
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error,
+        "Enter the address as ws://HOST:PORT, as meta invite prints it."
+    );
+    // No connection was attempted, so the listener accepts none.
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), listener.accept())
+            .await
+            .is_err()
+    );
+}

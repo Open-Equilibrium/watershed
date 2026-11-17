@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::Message;
 
-use super::fake_t3::{Fake, ok};
+use super::fake_t3::{Fake, fail, ok};
 use crate::git::{
     BranchChanges, BranchPullRequest, ChangedFile, Git, GitAction, GitActionRequest, GitProgress,
     GitStatus, LineCount, Ref, Refs, ResolvedPullRequest,
@@ -20,7 +20,7 @@ pub(super) async fn checkout_in(
     thread: Option<&str>,
 ) -> (Fake, Git) {
     let fake = Fake::start(answer).await;
-    let client = Client::connect(&fake.origin, || Ok("token".to_owned()))
+    let client = Client::connect(&fake.origin, || Box::pin(async { Ok("token".to_owned()) }))
         .await
         .unwrap();
     (
@@ -387,6 +387,34 @@ async fn a_stacked_action_that_fails_says_why_and_ends() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_stacked_action_that_t3_fails_is_reported_as_failed_with_its_reason() {
+    // T3 ends the action with its failure, sending no progress event.
+    let (_fake, git) = checkout(|_, _, id| {
+        vec![fail(
+            id,
+            json!({"_tag": "Fail", "error": "nothing to commit"}),
+        )]
+    })
+    .await;
+    let receiver = git
+        .run(GitActionRequest {
+            action: GitAction::Commit,
+            message: None,
+            files: None,
+            feature_branch: false,
+        })
+        .await
+        .unwrap();
+    let ended = tokio::time::timeout(std::time::Duration::from_secs(10), progress(receiver))
+        .await
+        .expect("the action ends");
+    assert!(
+        matches!(ended.as_slice(), [GitProgress::Failed(message)] if message.contains("nothing to commit")),
+        "{ended:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_pull_request_reference_resolves_and_checks_out_in_the_thread_or_locally() {
     let pull = json!({"pullRequest": {"number": 42, "title": "Add", "url": "https://example.test/pull/42",
         "baseBranch": "main", "headBranch": "feature", "state": "open"}});
@@ -401,7 +429,7 @@ async fn a_pull_request_reference_resolves_and_checks_out_in_the_thread_or_local
         vec![ok(id, reply)]
     })
     .await;
-    let client = Client::connect(&fake.origin, || Ok("token".to_owned()))
+    let client = Client::connect(&fake.origin, || Box::pin(async { Ok("token".to_owned()) }))
         .await
         .unwrap();
     let git = Git::new(client.clone(), CWD.to_owned(), Some("thread-1".to_owned()));
