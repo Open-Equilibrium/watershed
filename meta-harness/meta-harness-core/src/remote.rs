@@ -88,7 +88,7 @@ impl Endpoint {
                 let text = std::fs::read_to_string(path).map_err(|_| {
                     format!(
                         "Meta-Harness is not running: {} is missing. Install Meta-Harness. Start \
-                         it with `meta serve`, or `meta service install` for the login service; \
+                         it with \"meta serve\", or \"meta service install\" for the login service; \
                          its log is service.log in the data folder.",
                         path.display()
                     )
@@ -194,7 +194,7 @@ impl Host {
                 {
                     format!(
                         "Meta-Harness is not running: nothing answers at {url}. Start it with \
-                         `meta serve`, or `meta service install` for the login service; its log \
+                         \"meta serve\", or \"meta service install\" for the login service; its log \
                          is service.log in the data folder."
                     )
                 }

@@ -3,6 +3,8 @@
 
 use meta_harness_core::{Access, ClientKind, DEFAULT_REMOTE_PORT, remote};
 
+use crate::USAGE;
+
 /// `meta remote on [--port N] | off | status`.
 pub async fn remote(host: &remote::Host, args: &[&str]) -> Result<(), String> {
     match args {
@@ -26,7 +28,7 @@ pub async fn remote(host: &remote::Host, args: &[&str]) -> Result<(), String> {
             }
             Ok(())
         }
-        _ => Err("unknown remote command; see meta help".to_owned()),
+        _ => Err(format!("unknown remote command\n{USAGE}")),
     }
 }
 
@@ -82,9 +84,17 @@ pub async fn host(host: &remote::Host, args: &[&str]) -> Result<(), String> {
             println!("Revoked {name}.");
             Ok(())
         }
-        ["agents", "on"] => host.host_agents(true).await,
-        ["agents", "off"] => host.host_agents(false).await,
-        _ => Err("unknown host command; see meta help".to_owned()),
+        ["agents", "on"] => {
+            host.host_agents(true).await?;
+            println!("Agents from other hosts are on here.");
+            Ok(())
+        }
+        ["agents", "off"] => {
+            host.host_agents(false).await?;
+            println!("Agents from other hosts are off here.");
+            Ok(())
+        }
+        _ => Err(format!("unknown host command\n{USAGE}")),
     }
 }
 
@@ -94,7 +104,7 @@ pub(crate) fn port(args: &[&str]) -> Result<u16, String> {
         [] => Ok(DEFAULT_REMOTE_PORT),
         ["--port", text] => text
             .parse()
-            .map_err(|_| format!("{text:?} is no port number.")),
+            .map_err(|_| format!("{text:?} is not a number.")),
         _ => Err("meta remote on takes --port N".to_owned()),
     }
 }
@@ -122,7 +132,10 @@ mod tests {
     fn the_flags_take_their_defaults_and_refuse_what_they_do_not_name() {
         assert_eq!(port(&[]), Ok(3774));
         assert_eq!(port(&["--port", "4000"]), Ok(4000));
-        assert!(port(&["--port", "many"]).is_err());
+        assert_eq!(
+            port(&["--port", "many"]),
+            Err("\"many\" is not a number.".to_owned())
+        );
         assert!(port(&["--prot", "4000"]).is_err());
         assert_eq!(access("meta host add", &[]), Ok(None));
         assert_eq!(
