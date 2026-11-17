@@ -12,7 +12,7 @@ use tokio::task::JoinHandle;
 
 use super::{Access, ClientInfo};
 use crate::config::{Store, count, failed, now_ms, sql};
-use crate::util::lock;
+use crate::util::{hex, lock};
 use crate::{remote, t3, tunnel};
 
 /// How long after a link was made it is made again: T3 links last 30 days (ADR-0288).
@@ -126,6 +126,25 @@ fn insert_linked_host(db: &Connection, host: &LinkedHost) -> Result<(), String> 
     .map_err(failed)
 }
 
+/// The name of the host linked at `address`, if one is.
+fn linked_at(db: &Connection, address: &str) -> Result<Option<String>, String> {
+    db.query_row(
+        "SELECT name FROM peer WHERE address = ?1",
+        [address],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(failed)
+}
+
+/// The name this host pairs under at another host: its own name and four random hex digits, which
+/// tell this pairing apart from another of the same host, so `meta host revoke` names exactly it.
+fn pairing_name(host: &str) -> String {
+    let mut bytes = [0u8; 2];
+    getrandom::fill(&mut bytes).expect("the operating system provides random bytes");
+    format!("{host}-{}", hex(&bytes))
+}
+
 fn remove_linked_host(db: &Connection, name: &str) -> Result<(), String> {
     db.execute("DELETE FROM peer WHERE name = ?1", [name])
         .map(|_| ())
@@ -197,7 +216,13 @@ impl Links {
         code: &str,
         access: Option<Access>,
     ) -> Result<(String, Access), String> {
-        let paired = remote::pair(address, code, &self.name).await?;
+        if let Some(name) = linked_at(&store.db(), address)? {
+            return Err(format!(
+                "{address} is linked already, as {name}; \"meta host remove {name}\" unlinks it first."
+            ));
+        }
+        let client = pairing_name(&self.name);
+        let paired = remote::pair(address, code, &client).await?;
         let access = access.unwrap_or(paired.access);
         let name = paired.name;
         match self
@@ -207,8 +232,7 @@ impl Links {
             Ok(()) => Ok((name, access)),
             Err(error) => Err(format!(
                 "{error} The other host, {name}, may keep a paired entry for this host; \
-                 `meta host revoke {}` there removes it.",
-                self.name
+                 \"meta host revoke {client}\" there removes it."
             )),
         }
     }

@@ -1128,14 +1128,15 @@ async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_re
     assert_eq!(linked[0]["environmentId"], environment.trim());
     assert_eq!(linked[0]["status"], "reachable");
 
-    // The name is already linked, so the add fails after B has paired with A, and B keeps a pairing.
+    // The address is linked already, so the add is refused before B pairs with A.
     let again = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let clients = b.hosts().await.unwrap().clients.len();
     let error = a
         .host_add(&address, &again, Some(Access::Auto))
         .await
         .unwrap_err();
-    let me = a.environment_name().await.unwrap().to_lowercase();
-    assert!(error.contains(&format!("meta host revoke {me}")), "{error}");
+    assert!(error.contains("is linked already"), "{error}");
+    assert_eq!(b.hosts().await.unwrap().clients.len(), clients);
 
     let (tunnel, _) = peer_row(&home_a, &name);
     a.host_remove(&name).await.unwrap();
@@ -1197,6 +1198,71 @@ async fn a_host_invited_at_approval_required_cannot_link_at_auto_but_links_at_th
         .unwrap();
     assert_eq!(access, Access::ApprovalRequired);
     assert!(a.hosts().await.unwrap().hosts[0].reachable);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_pairs_under_a_tagged_name_that_its_revoke_message_quotes() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
+    let (_a, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let port_b = free_port();
+    a.remote_on(free_port()).await.unwrap();
+    b.remote_on(port_b).await.unwrap();
+    a.host_agents(true).await.unwrap();
+    b.host_agents(true).await.unwrap();
+    let url_b = format!("ws://127.0.0.1:{port_b}");
+    // The link fails after b paired with a, so the message tells b which pairing to revoke.
+    let code = b
+        .invite(ClientKind::Host, Access::ApprovalRequired)
+        .await
+        .unwrap();
+    let error = a
+        .host_add(&url_b, &code, Some(Access::Auto))
+        .await
+        .unwrap_err();
+    let me = a.environment_name().await.unwrap().to_lowercase();
+    let pairing = b
+        .hosts()
+        .await
+        .unwrap()
+        .clients
+        .into_iter()
+        .find(|client| client.kind == ClientKind::Host)
+        .expect("b paired with a")
+        .name;
+    let tag = pairing
+        .strip_prefix(&format!("{me}-"))
+        .expect("the host name, then a tag");
+    assert!(
+        tag.len() == 4 && tag.chars().all(|c| c.is_ascii_hexdigit()),
+        "{pairing}"
+    );
+    assert!(
+        error.contains(&format!("meta host revoke {pairing}")),
+        "{error}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_already_linked_at_an_address_is_not_paired_again() {
+    let (dir, _repo, _home) = fixture();
+    let link = linked(dir.path()).await;
+    let (_b, b) = &link.b;
+    let (_a, a) = &link.a;
+    let clients = b.hosts().await.unwrap().clients.len();
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let error = a
+        .host_add(&link.url_b, &code, Some(Access::Auto))
+        .await
+        .unwrap_err();
+    assert!(error.contains(&link.name), "{error}");
+    assert_eq!(
+        b.hosts().await.unwrap().clients.len(),
+        clients,
+        "no stray pairing"
+    );
+    assert_eq!(a.hosts().await.unwrap().hosts.len(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1469,7 +1535,7 @@ async fn a_pairing_code_from_a_host_token_redeems_only_orchestration_scopes() {
 async fn revoking_a_client_closes_the_connections_it_has_open() {
     let (dir, _repo, _home) = fixture();
     let link = linked(dir.path()).await;
-    let (_a, a) = &link.a;
+    let (_a, _) = &link.a;
     let (_b, b) = &link.b;
     let code = b.invite(ClientKind::Device, Access::Auto).await.unwrap();
     let token = remote::pair(&link.url_b, &code, "phone")
@@ -1493,9 +1559,16 @@ async fn revoking_a_client_closes_the_connections_it_has_open() {
     assert_eq!(&answer, b"HTTP/1.1 200");
 
     b.revoke_client("phone").await.unwrap();
-    b.revoke_client(&a.environment_name().await.unwrap().to_lowercase())
+    // The host pairs under its name and a tag, which the revocation names exactly.
+    let host = b
+        .hosts()
         .await
+        .unwrap()
+        .clients
+        .into_iter()
+        .find(|client| client.kind == ClientKind::Host)
         .unwrap();
+    b.revoke_client(&host.name).await.unwrap();
     assert!(
         device.status().await.is_err(),
         "the device's connection ended"
