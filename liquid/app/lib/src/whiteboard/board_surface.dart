@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import '../rust/api/whiteboard.dart';
 import '../theme/theme.dart';
+import '../theme/tokens.g.dart';
 import 'board.dart';
 import 'board_controller.dart';
 import 'board_painter.dart';
@@ -948,7 +949,10 @@ class BoardSurfaceState extends State<BoardSurface> {
                 child: IgnorePointer(
                   child: Text(
                     'Draw with the pen, or choose a tool below',
-                    style: TextStyle(fontSize: 12, color: ws.textFaint),
+                    style: TextStyle(
+                      fontSize: WsMetrics.fsSmall,
+                      color: ws.textFaint,
+                    ),
                   ),
                 ),
               ),
