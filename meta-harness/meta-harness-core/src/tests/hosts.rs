@@ -3,7 +3,7 @@
 
 use rusqlite::Connection;
 
-use crate::hosts::{self, ClientKind};
+use crate::hosts::{self, Access, ClientKind};
 
 const MINUTE: u64 = 60_000;
 
@@ -15,18 +15,18 @@ fn store() -> Connection {
 
 /// The kind of client that `token` belongs to, if one holds it.
 fn kind_of(db: &Connection, token: &str) -> Option<ClientKind> {
-    hosts::client(db, token).unwrap().map(|(kind, _)| kind)
+    hosts::client(db, token).unwrap().map(|(kind, _, _)| kind)
 }
 
 #[test]
 fn a_pairing_code_pairs_once_within_five_minutes_however_it_is_typed() {
     let db = store();
-    let code = hosts::invite(&db, ClientKind::Device, 0).unwrap();
+    let code = hosts::invite(&db, ClientKind::Device, Access::Auto, 0).unwrap();
     let typed = code.replace('-', "").to_lowercase();
     assert!(hosts::pair(&db, &typed, "phone", MINUTE).is_ok());
     assert!(hosts::pair(&db, &code, "phone", MINUTE).is_err(), "used");
 
-    let expired = hosts::invite(&db, ClientKind::Device, 10 * MINUTE).unwrap();
+    let expired = hosts::invite(&db, ClientKind::Device, Access::Auto, 10 * MINUTE).unwrap();
     assert!(
         hosts::pair(&db, &expired, "tablet", 15 * MINUTE).is_err(),
         "expired"
@@ -37,11 +37,11 @@ fn a_pairing_code_pairs_once_within_five_minutes_however_it_is_typed() {
 fn at_most_five_pairing_codes_are_live_at_once() {
     let db = store();
     for _ in 0..5 {
-        hosts::invite(&db, ClientKind::Host, 0).unwrap();
+        hosts::invite(&db, ClientKind::Host, Access::Auto, 0).unwrap();
     }
-    assert!(hosts::invite(&db, ClientKind::Host, 0).is_err());
+    assert!(hosts::invite(&db, ClientKind::Host, Access::Auto, 0).is_err());
     assert!(
-        hosts::invite(&db, ClientKind::Host, 5 * MINUTE).is_ok(),
+        hosts::invite(&db, ClientKind::Host, Access::Auto, 5 * MINUTE).is_ok(),
         "expired codes do not count"
     );
 }
@@ -49,10 +49,10 @@ fn at_most_five_pairing_codes_are_live_at_once() {
 #[test]
 fn a_token_admits_the_kind_of_client_that_paired_with_it_until_revoked() {
     let db = store();
-    let device = hosts::invite(&db, ClientKind::Device, 0).unwrap();
-    let host = hosts::invite(&db, ClientKind::Host, 0).unwrap();
-    let device_token = hosts::pair(&db, &device, "phone", 0).unwrap();
-    let host_token = hosts::pair(&db, &host, "other", 0).unwrap();
+    let device = hosts::invite(&db, ClientKind::Device, Access::Auto, 0).unwrap();
+    let host = hosts::invite(&db, ClientKind::Host, Access::Auto, 0).unwrap();
+    let device_token = hosts::pair(&db, &device, "phone", 0).unwrap().0;
+    let host_token = hosts::pair(&db, &host, "other", 0).unwrap().0;
     assert_eq!(device_token.len(), 64, "256 bits in hex");
     assert_eq!(kind_of(&db, &device_token), Some(ClientKind::Device));
     assert_eq!(kind_of(&db, &host_token), Some(ClientKind::Host));

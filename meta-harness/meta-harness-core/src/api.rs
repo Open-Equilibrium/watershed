@@ -30,14 +30,18 @@ pub const TUNNEL_HEADER: &str = "meta-harness-tunnel";
 /// The API version this build speaks: the calls, streams and frames below.
 pub const API_VERSION: u32 = 1;
 
-/// The frame a service answers a pairing with: its name and the token the client presents from now
-/// on (ADR-0299).
+/// The frame a service answers a pairing with: its name, the token the client presents from now on
+/// (ADR-0299) and the highest access level the client may ask a link for (ADR-0300). A service that
+/// names no level gives `auto`.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Pairing {
     /// The service's name for itself, which the client keeps as the host's name.
     pub name: String,
     /// The token the client presents from now on.
     pub token: String,
+    /// The access the client was paired at.
+    #[serde(default)]
+    pub access: Access,
 }
 
 /// A call with one answer.
@@ -49,7 +53,9 @@ pub(crate) enum Call {
     /// Remote access to this service; answered only on this computer (ADR-0299).
     Remote(RemoteCall),
     /// A pairing code for a new host or device; answered only on this computer (ADR-0299).
-    Invite(ClientKind),
+    /// A pairing code for a new device or host. A host's access is the highest level its agents
+    /// get here (ADR-0300); a device ignores it.
+    Invite { kind: ClientKind, access: Access },
     /// The other hosts this one links to and the clients paired with it (ADR-0285).
     Hosts(HostsCall),
     /// A project, by its folder.
@@ -116,7 +122,8 @@ pub(crate) enum HostsCall {
     Add {
         address: String,
         code: String,
-        access: Access,
+        /// The level asked for; `None` takes the level the other host allows.
+        access: Option<Access>,
     },
     /// The hosts this one links to and the clients paired with it.
     List,

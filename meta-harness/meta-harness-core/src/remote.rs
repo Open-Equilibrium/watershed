@@ -377,9 +377,10 @@ impl Host {
         self.call(Call::Remote(RemoteCall::Status)).await
     }
 
-    /// A pairing code for a new client of `kind`, valid for five minutes (`meta invite`).
-    pub async fn invite(&self, kind: ClientKind) -> Result<String, String> {
-        self.call(Call::Invite(kind)).await
+    /// A pairing code for a new client of `kind`, valid for five minutes, which gives a host
+    /// client `access` (`meta invite`).
+    pub async fn invite(&self, kind: ClientKind, access: Access) -> Result<String, String> {
+        self.call(Call::Invite { kind, access }).await
     }
 
     /// A pairing code from this host's T3 Code, which another host's link redeems (ADR-0288).
@@ -394,13 +395,14 @@ impl Host {
     }
 
     /// Links the host at `address` (`ws://…`) with `code` from its `meta invite --host`, at
-    /// `access`, and answers the linked host's name (`meta host add`).
+    /// `access` or the level the other host allows, and answers the linked host's name and level
+    /// (`meta host add`).
     pub async fn host_add(
         &self,
         address: &str,
         code: &str,
-        access: Access,
-    ) -> Result<String, String> {
+        access: Option<Access>,
+    ) -> Result<(String, Access), String> {
         self.call(Call::Hosts(HostsCall::Add {
             address: address.to_owned(),
             code: code.to_owned(),
@@ -445,9 +447,9 @@ pub(crate) fn handshake(url: &str, headers: &[(&'static str, &str)]) -> Result<R
 }
 
 /// Pairs this client with the remote listener at `address` (`ws://…`), using `code`, a pairing code
-/// that the other side issued. Answers the other side's name and the token this client uses from
-/// now on (ADR-0299).
-pub async fn pair(address: &str, code: &str, client: &str) -> Result<(String, String), String> {
+/// that the other side issued. Answers the other side's name, the token this client uses from now
+/// on and the access it was paired at (ADR-0299, ADR-0300).
+pub async fn pair(address: &str, code: &str, client: &str) -> Result<api::Pairing, String> {
     let request = handshake(
         address,
         &[(api::PAIRING_HEADER, code), (api::CLIENT_HEADER, client)],
@@ -471,9 +473,7 @@ pub async fn pair(address: &str, code: &str, client: &str) -> Result<(String, St
         }
     };
     let _ = socket.close(None).await;
-    let pairing: api::Pairing = serde_json::from_str(&answer)
-        .map_err(|e| format!("Meta-Harness answered unexpectedly: {e}"))?;
-    Ok((pairing.name, pairing.token))
+    serde_json::from_str(&answer).map_err(|e| format!("Meta-Harness answered unexpectedly: {e}"))
 }
 
 /// The reason a service gave for refusing a handshake, from its body.

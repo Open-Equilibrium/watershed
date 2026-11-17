@@ -27,18 +27,22 @@ pub async fn remote(host: &remote::Host, args: &[&str]) -> Result<(), String> {
     }
 }
 
-/// `meta invite --device | --host`: a pairing code, with the addresses to pair with.
+/// `meta invite --device | --host [--access LEVEL]`: a pairing code, with the addresses to pair
+/// with. A host's code gives its link the level, `auto` by default (ADR-0300).
 pub async fn invite(host: &remote::Host, args: &[&str]) -> Result<(), String> {
-    let kind = match args {
-        ["--device"] => ClientKind::Device,
-        ["--host"] => ClientKind::Host,
+    let (kind, access) = match args {
+        ["--device"] => (ClientKind::Device, Access::default()),
+        ["--host", rest @ ..] => (
+            ClientKind::Host,
+            access("meta invite", rest)?.unwrap_or_default(),
+        ),
         _ => return Err("meta invite needs --device or --host".to_owned()),
     };
     let status = host
         .remote_status()
         .await?
         .ok_or("Remote access is off; turn it on first with meta remote on.")?;
-    let code = host.invite(kind).await?;
+    let code = host.invite(kind, access).await?;
     println!("Pairing code {code}, valid for 5 minutes and for one use.");
     for address in &status.addresses {
         println!("  address {address}");
@@ -50,8 +54,9 @@ pub async fn invite(host: &remote::Host, args: &[&str]) -> Result<(), String> {
 pub async fn host(host: &remote::Host, args: &[&str]) -> Result<(), String> {
     match args {
         ["add", address, code, rest @ ..] => {
-            let access = access(rest)?;
-            let name = host.host_add(address, code, access).await?;
+            let (name, access) = host
+                .host_add(address, code, access("meta host add", rest)?)
+                .await?;
             println!("Linked {name} at {} access.", access.as_str());
             Ok(())
         }
@@ -88,17 +93,18 @@ pub(crate) fn port(args: &[&str]) -> Result<u16, String> {
     }
 }
 
-/// The access level that `--access` names in `args`, or the default, `auto`.
-pub(crate) fn access(args: &[&str]) -> Result<Access, String> {
+/// The access level that `--access` names in `args`, if it names one; `command` names the command
+/// in the error.
+pub(crate) fn access(command: &str, args: &[&str]) -> Result<Option<Access>, String> {
     match args {
-        [] => Ok(Access::default()),
-        ["--access", text] => Access::parse(text).ok_or_else(|| {
+        [] => Ok(None),
+        ["--access", text] => Access::parse(text).map(Some).ok_or_else(|| {
             format!(
                 "{text:?} is no access level: read-only, approval-required, auto-accept-edits, \
                  auto or full-access."
             )
         }),
-        _ => Err("meta host add takes --access LEVEL".to_owned()),
+        _ => Err(format!("{command} takes --access LEVEL")),
     }
 }
 
@@ -112,8 +118,11 @@ mod tests {
         assert_eq!(port(&["--port", "4000"]), Ok(4000));
         assert!(port(&["--port", "many"]).is_err());
         assert!(port(&["--prot", "4000"]).is_err());
-        assert_eq!(access(&[]), Ok(Access::Auto));
-        assert_eq!(access(&["--access", "read-only"]), Ok(Access::ReadOnly));
-        assert!(access(&["--access", "root"]).is_err());
+        assert_eq!(access("meta host add", &[]), Ok(None));
+        assert_eq!(
+            access("meta host add", &["--access", "read-only"]),
+            Ok(Some(Access::ReadOnly))
+        );
+        assert!(access("meta host add", &["--access", "root"]).is_err());
     }
 }

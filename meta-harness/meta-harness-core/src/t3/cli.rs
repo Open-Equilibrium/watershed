@@ -8,6 +8,24 @@ use std::process::Stdio;
 use serde_json::Value;
 
 use super::server::QUIET_ENV;
+use crate::hosts::Access;
+
+/// The orchestration scopes an agent sign-in at `access` needs, as T3's own `mcpClientScopes` gives
+/// them (ADR-0300): a pairing code carries exactly these, so T3 grants no more than the level.
+fn scopes(access: Access) -> &'static [&'static str] {
+    match access {
+        Access::ReadOnly => &["orchestration:read"],
+        Access::FullAccess => &[
+            "orchestration:read",
+            "orchestration:operate",
+            "settings:write",
+            "source-control:write",
+        ],
+        Access::ApprovalRequired | Access::AutoAcceptEdits | Access::Auto => {
+            &["orchestration:read", "orchestration:operate"]
+        }
+    }
+}
 
 /// Runs `binary` with `args` in T3's data folder `home`, and answers its standard output. `what`
 /// names the step in the error, since `args` may hold a pairing code.
@@ -36,31 +54,27 @@ async fn run(binary: &Path, home: &Path, what: &str, args: &[&str]) -> Result<St
     }
 }
 
-/// A single-use pairing code, valid for five minutes, that another host's T3 link redeems
-/// (ADR-0288).
-pub(crate) async fn pairing_code(binary: &Path, home: &Path) -> Result<String, String> {
-    let text = run(
-        binary,
-        home,
-        "issue a pairing code",
-        &[
-            "auth",
-            "pairing",
-            "create",
-            "--json",
-            "--ttl",
-            "5m",
-            "--label",
-            "meta-harness",
-            // A host's code opens T3's orchestration only, which is the scope set a link at the
-            // default access needs (ADR-0301).
-            "--scope",
-            "orchestration:read",
-            "--scope",
-            "orchestration:operate",
-        ],
-    )
-    .await?;
+/// A single-use pairing code, valid for five minutes, that another host's T3 link redeems at
+/// `access` (ADR-0288, ADR-0300).
+pub(crate) async fn pairing_code(
+    binary: &Path,
+    home: &Path,
+    access: Access,
+) -> Result<String, String> {
+    let mut args = vec![
+        "auth",
+        "pairing",
+        "create",
+        "--json",
+        "--ttl",
+        "5m",
+        "--label",
+        "meta-harness",
+    ];
+    for scope in scopes(access) {
+        args.extend(["--scope", scope]);
+    }
+    let text = run(binary, home, "issue a pairing code", &args).await?;
     serde_json::from_str::<Value>(&text)
         .ok()
         .and_then(|value| value["credential"].as_str().map(str::to_owned))

@@ -973,8 +973,11 @@ async fn a_device_pairs_once_and_keeps_its_access_across_a_restart_while_a_host_
     let url = format!("ws://127.0.0.1:{port}");
     assert_eq!(status.addresses, [url.as_str()]);
 
-    let code = local.invite(ClientKind::Device).await.unwrap();
-    let (_, token) = remote::pair(&url, &code, "phone").await.unwrap();
+    let code = local
+        .invite(ClientKind::Device, Access::Auto)
+        .await
+        .unwrap();
+    let token = remote::pair(&url, &code, "phone").await.unwrap().token;
     let used = remote::pair(&url, &code, "tablet").await.unwrap_err();
     assert_eq!(used, "That pairing code is wrong, already used or expired.");
     let wrong = remote::pair(&url, "AAAA-AAAA", "tablet").await.unwrap_err();
@@ -987,7 +990,12 @@ async fn a_device_pairs_once_and_keeps_its_access_across_a_restart_while_a_host_
     device.config().await.unwrap();
     // Remote access, invitations, the host list and host agents stay with this computer.
     assert!(device.remote_status().await.is_err());
-    assert!(device.invite(ClientKind::Device).await.is_err());
+    assert!(
+        device
+            .invite(ClientKind::Device, Access::Auto)
+            .await
+            .is_err()
+    );
     assert!(device.hosts().await.is_err());
     assert!(device.host_agents(true).await.is_err());
     assert!(!may_tunnel(&url, &token).await, "a device is no tunnel");
@@ -1002,8 +1010,9 @@ async fn a_device_pairs_once_and_keeps_its_access_across_a_restart_while_a_host_
     local.revoke_client("phone").await.unwrap();
     assert!(!connects(&url, &token, "phone").await);
 
-    let host_code = local.invite(ClientKind::Host).await.unwrap();
-    let (name, host_token) = remote::pair(&url, &host_code, "other").await.unwrap();
+    let host_code = local.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let paired = remote::pair(&url, &host_code, "other").await.unwrap();
+    let (name, host_token) = (paired.name, paired.token);
     assert_eq!(name, local.environment_name().await.unwrap().to_lowercase());
     let host = remote::Host::connect_to(&url, &host_token, "other")
         .await
@@ -1062,9 +1071,9 @@ async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_re
     a.remote_on(port_a).await.unwrap();
     b.remote_on(port_b).await.unwrap();
     let address = format!("ws://127.0.0.1:{port_b}");
-    let waiting = b.invite(ClientKind::Host).await.unwrap();
+    let waiting = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
     let refused = a
-        .host_add(&address, &waiting, Access::Auto)
+        .host_add(&address, &waiting, Some(Access::Auto))
         .await
         .unwrap_err();
     assert!(refused.contains("meta host agents on"), "{refused}");
@@ -1072,8 +1081,11 @@ async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_re
     b.host_agents(true).await.unwrap();
     assert!(linked_environments_setting(&home_a));
 
-    let code = b.invite(ClientKind::Host).await.unwrap();
-    let name = a.host_add(&address, &code, Access::Auto).await.unwrap();
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let (name, _) = a
+        .host_add(&address, &code, Some(Access::Auto))
+        .await
+        .unwrap();
     assert_eq!(name, b.environment_name().await.unwrap().to_lowercase());
     let listed = a.hosts().await.unwrap();
     assert_eq!(listed.hosts.len(), 1);
@@ -1087,9 +1099,9 @@ async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_re
     assert_eq!(linked[0]["status"], "reachable");
 
     // The name is already linked, so the add fails after B has paired with A, and B keeps a pairing.
-    let again = b.invite(ClientKind::Host).await.unwrap();
+    let again = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
     let error = a
-        .host_add(&address, &again, Access::Auto)
+        .host_add(&address, &again, Some(Access::Auto))
         .await
         .unwrap_err();
     let me = a.environment_name().await.unwrap().to_lowercase();
@@ -1105,6 +1117,49 @@ async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_re
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_link_without_an_access_level_takes_the_level_its_host_invited() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
+    let (_a, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let port_b = free_port();
+    a.remote_on(free_port()).await.unwrap();
+    b.remote_on(port_b).await.unwrap();
+    a.host_agents(true).await.unwrap();
+    b.host_agents(true).await.unwrap();
+    let url_b = format!("ws://127.0.0.1:{port_b}");
+    let code = b
+        .invite(ClientKind::Host, Access::FullAccess)
+        .await
+        .unwrap();
+    let (_, access) = a.host_add(&url_b, &code, None).await.unwrap();
+    assert_eq!(access, Access::FullAccess);
+    let listed = a.hosts().await.unwrap();
+    assert_eq!(listed.hosts[0].access, Access::FullAccess);
+    assert!(listed.hosts[0].reachable, "a full-access link answers");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_invited_read_only_gets_a_pairing_code_that_grants_orchestration_read_only() {
+    let (dir, _repo, _home) = fixture();
+    let home = dir.path().join("b");
+    let (_b, b) = start_service(&home).await;
+    let port = free_port();
+    b.remote_on(port).await.unwrap();
+    let url = format!("ws://127.0.0.1:{port}");
+    let code = b.invite(ClientKind::Host, Access::ReadOnly).await.unwrap();
+    let paired = remote::pair(&url, &code, "other").await.unwrap();
+    assert_eq!(paired.access, Access::ReadOnly);
+    let host = remote::Host::connect_to(&url, &paired.token, "other")
+        .await
+        .unwrap();
+    let credential = host.t3_pairing().await.unwrap();
+    let answer = exchange(&t3_address(&home), &credential, None);
+    assert_eq!(status_of(&answer), 200, "{answer}");
+    assert_eq!(body_json(&answer)["scope"], "orchestration:read");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_host_link_older_than_25_days_is_made_again_when_the_service_starts() {
     let (dir, _repo, _home) = fixture();
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
@@ -1114,9 +1169,13 @@ async fn a_host_link_older_than_25_days_is_made_again_when_the_service_starts() 
     b.remote_on(port_b).await.unwrap();
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
-    let code = b.invite(ClientKind::Host).await.unwrap();
-    let name = a
-        .host_add(&format!("ws://127.0.0.1:{port_b}"), &code, Access::ReadOnly)
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let (name, _) = a
+        .host_add(
+            &format!("ws://127.0.0.1:{port_b}"),
+            &code,
+            Some(Access::ReadOnly),
+        )
         .await
         .unwrap();
     drop(a);
@@ -1174,8 +1233,8 @@ async fn linked(dir: &Path) -> Linked {
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let url_b = format!("ws://127.0.0.1:{port_b}");
-    let code = b.invite(ClientKind::Host).await.unwrap();
-    let name = a.host_add(&url_b, &code, Access::Auto).await.unwrap();
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let (name, _) = a.host_add(&url_b, &code, Some(Access::Auto)).await.unwrap();
     Linked {
         a: (a_service, a),
         b: (b_service, b),
@@ -1325,8 +1384,8 @@ async fn a_pairing_code_from_a_host_token_redeems_only_orchestration_scopes() {
     let (_b, b) = start_service(&home_b).await;
     b.remote_on(port_b).await.unwrap();
     let url = format!("ws://127.0.0.1:{port_b}");
-    let code = b.invite(ClientKind::Host).await.unwrap();
-    let (_, token) = remote::pair(&url, &code, "other").await.unwrap();
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let token = remote::pair(&url, &code, "other").await.unwrap().token;
     let host = remote::Host::connect_to(&url, &token, "other")
         .await
         .unwrap();
@@ -1352,8 +1411,11 @@ async fn revoking_a_client_closes_the_connections_it_has_open() {
     let link = linked(dir.path()).await;
     let (_a, a) = &link.a;
     let (_b, b) = &link.b;
-    let code = b.invite(ClientKind::Device).await.unwrap();
-    let (_, token) = remote::pair(&link.url_b, &code, "phone").await.unwrap();
+    let code = b.invite(ClientKind::Device, Access::Auto).await.unwrap();
+    let token = remote::pair(&link.url_b, &code, "phone")
+        .await
+        .unwrap()
+        .token;
     let device = remote::Host::connect_to(&link.url_b, &token, "phone")
         .await
         .unwrap();
@@ -1398,8 +1460,11 @@ async fn a_linked_agents_mcp_request_reaches_t3_through_the_tunnel() {
     let redirect = "http://127.0.0.1/t3code-peer-link";
     // The sign-in a link makes, run over the tunnel: register, approve with a pairing code, then
     // exchange the code for a token that the linked agents' MCP requests carry.
-    let code = b.invite(ClientKind::Host).await.unwrap();
-    let (_, host_token) = remote::pair(&link.url_b, &code, "tester").await.unwrap();
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let host_token = remote::pair(&link.url_b, &code, "tester")
+        .await
+        .unwrap()
+        .token;
     let host = remote::Host::connect_to(&link.url_b, &host_token, "tester")
         .await
         .unwrap();

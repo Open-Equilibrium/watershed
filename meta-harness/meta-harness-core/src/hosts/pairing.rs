@@ -4,7 +4,7 @@
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
-use super::{ClientKind, digest, new_token, same};
+use super::{Access, ClientKind, digest, new_token, same};
 use crate::config::{count, failed, sql};
 
 /// How long a pairing code stays valid.
@@ -49,9 +49,15 @@ fn normal(code: &str) -> String {
         .collect()
 }
 
-/// Issues a pairing code for `kind` that is valid for five minutes from `now`. Expired codes are
-/// dropped first; no code is issued while [`MAX_CODES`] are live.
-pub(crate) fn invite(db: &Connection, kind: ClientKind, now: u64) -> Result<String, String> {
+/// Issues a pairing code for `kind` that is valid for five minutes from `now`, and gives the client
+/// that redeems it `access` (ADR-0300). Expired codes are dropped first; no code is issued while
+/// [`MAX_CODES`] are live.
+pub(crate) fn invite(
+    db: &Connection,
+    kind: ClientKind,
+    access: Access,
+    now: u64,
+) -> Result<String, String> {
     db.execute("DELETE FROM pairing WHERE expires_ms <= ?1", [sql(now)])
         .map_err(failed)?;
     let live: i64 = db
@@ -64,10 +70,11 @@ pub(crate) fn invite(db: &Connection, kind: ClientKind, now: u64) -> Result<Stri
     }
     let code = new_code();
     db.execute(
-        "INSERT INTO pairing (code_hash, kind, expires_ms) VALUES (?1, ?2, ?3)",
+        "INSERT INTO pairing (code_hash, kind, access, expires_ms) VALUES (?1, ?2, ?3, ?4)",
         params![
             digest(&normal(&code)),
             kind.as_str(),
+            access.as_str(),
             sql(now + CODE_TTL_MS)
         ],
     )
@@ -76,46 +83,67 @@ pub(crate) fn invite(db: &Connection, kind: ClientKind, now: u64) -> Result<Stri
 }
 
 /// Redeems `code` at `now` for a client named `name`: the code is spent, and the client gets a
-/// new token, which this returns. The code's kind decides what the token admits.
-pub(crate) fn pair(db: &Connection, code: &str, name: &str, now: u64) -> Result<String, String> {
+/// new token, which this returns with the access the code gave. The code's kind decides what the
+/// token admits.
+pub(crate) fn pair(
+    db: &Connection,
+    code: &str,
+    name: &str,
+    now: u64,
+) -> Result<(String, Access), String> {
     let tx = db.unchecked_transaction().map_err(failed)?;
     let wanted = digest(&normal(code));
-    let mut kind = None;
+    let mut found = None;
     {
         let mut statement = tx
-            .prepare("SELECT code_hash, kind FROM pairing WHERE expires_ms > ?1")
+            .prepare("SELECT code_hash, kind, access FROM pairing WHERE expires_ms > ?1")
             .map_err(failed)?;
         let rows = statement
             .query_map([sql(now)], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
             })
             .map_err(failed)?;
         // Every row is compared, so the time taken does not show where a match is.
         for row in rows {
-            let (hash, found) = row.map_err(failed)?;
+            let (hash, kind, access) = row.map_err(failed)?;
             if same(hash.as_bytes(), wanted.as_bytes()) {
-                kind = ClientKind::parse(&found);
+                found = ClientKind::parse(&kind).zip(Access::parse(&access));
             }
         }
     }
-    let kind = kind.ok_or(REFUSED_CODE)?;
+    let (kind, access) = found.ok_or(REFUSED_CODE)?;
     tx.execute("DELETE FROM pairing WHERE code_hash = ?1", [&wanted])
         .map_err(failed)?;
     let token = new_token();
     tx.execute(
-        "INSERT INTO client (token_hash, kind, name, created_ms) VALUES (?1, ?2, ?3, ?4)",
-        params![digest(&token), kind.as_str(), name, sql(now)],
+        "INSERT INTO client (token_hash, kind, access, name, created_ms) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            digest(&token),
+            kind.as_str(),
+            access.as_str(),
+            name,
+            sql(now)
+        ],
     )
     .map_err(failed)?;
     tx.commit().map_err(failed)?;
-    Ok(token)
+    Ok((token, access))
 }
 
-/// The kind of client that `token` belongs to and the name it paired with, if a client holds it.
-pub(crate) fn client(db: &Connection, token: &str) -> Result<Option<(ClientKind, String)>, String> {
+/// The kind of client that `token` belongs to, its access and the name it paired with, if a
+/// client holds it.
+pub(crate) fn client(
+    db: &Connection,
+    token: &str,
+) -> Result<Option<(ClientKind, Access, String)>, String> {
     let wanted = digest(token);
     let mut statement = db
-        .prepare("SELECT token_hash, kind, name FROM client")
+        .prepare("SELECT token_hash, kind, access, name FROM client")
         .map_err(failed)?;
     let rows = statement
         .query_map([], |row| {
@@ -123,14 +151,17 @@ pub(crate) fn client(db: &Connection, token: &str) -> Result<Option<(ClientKind,
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
             ))
         })
         .map_err(failed)?;
     let mut found = None;
     for row in rows {
-        let (hash, kind, name) = row.map_err(failed)?;
+        let (hash, kind, access, name) = row.map_err(failed)?;
         if same(hash.as_bytes(), wanted.as_bytes()) {
-            found = ClientKind::parse(&kind).map(|kind| (kind, name));
+            found = ClientKind::parse(&kind)
+                .zip(Access::parse(&access))
+                .map(|(kind, access)| (kind, access, name));
         }
     }
     Ok(found)

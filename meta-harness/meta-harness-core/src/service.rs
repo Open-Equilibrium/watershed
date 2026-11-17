@@ -314,7 +314,7 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream, listener: Listener) {
     };
     let (caller, owner) = match admission {
         Some(Admission::Session(caller, owner)) => (caller, owner),
-        Some(Admission::Tunnel(owner)) => {
+        Some(Admission::Tunnel(owner, _access)) => {
             let mut revocations = shared.revoked.subscribe();
             let mut stopping = shared.stopping.clone();
             tokio::select! {
@@ -324,10 +324,11 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream, listener: Listener) {
             }
             return;
         }
-        Some(Admission::Paired(token)) => {
+        Some(Admission::Paired(token, access)) => {
             let answer = serde_json::to_string(&api::Pairing {
                 name: shared.name.clone(),
                 token,
+                access,
             })
             .expect("pairings serialize");
             let _ = socket.send(Message::Text(answer.into())).await;
@@ -520,7 +521,12 @@ impl Session {
             Call::Git { checkout, call } => git_call(&self.git(&checkout).await?, call).await,
             Call::Config(call) => self.config_call(call),
             Call::Remote(call) => listener::call(&self.shared, call).await,
-            Call::Invite(kind) => to(hosts::invite(&self.shared.store.db(), kind, now_ms())?),
+            Call::Invite { kind, access } => to(hosts::invite(
+                &self.shared.store.db(),
+                kind,
+                access,
+                now_ms(),
+            )?),
             Call::Hosts(call) => self.hosts_call(call).await,
         }
     }
@@ -528,7 +534,7 @@ impl Session {
     async fn hosts_call(&self, call: HostsCall) -> Result<Value, String> {
         let shared = &self.shared;
         match call {
-            HostsCall::T3Pairing => to(shared.links.pairing_code().await?),
+            HostsCall::T3Pairing => to(shared.links.pairing_code(self.caller.access()).await?),
             HostsCall::Revoke(name) => {
                 hosts::revoke(&shared.store.db(), &name)?;
                 // The client's open connections end with its token (ADR-0299).

@@ -7,7 +7,7 @@ use tokio_tungstenite::tungstenite::http::StatusCode;
 use super::Shared;
 use crate::api::{self, Call, HostsCall};
 use crate::config::now_ms;
-use crate::hosts::{self, ClientKind};
+use crate::hosts::{self, Access, ClientKind};
 
 /// Which listener a connection came in on.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -18,12 +18,13 @@ pub(super) enum Listener {
     Remote,
 }
 
-/// Who a session serves (ADR-0299): this computer's own Meta-Harness, or a client that paired.
+/// Who a session serves (ADR-0299): this computer's own Meta-Harness, or a client that paired. A
+/// host's session carries the access it was paired at (ADR-0300).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Caller {
     Local,
     Device,
-    Host,
+    Host(Access),
 }
 
 impl Caller {
@@ -41,13 +42,21 @@ impl Caller {
                     | Call::Git { .. }
                     | Call::Config(_)
             ),
-            Self::Host => matches!(call, Call::Hosts(HostsCall::T3Pairing)),
+            Self::Host(_) => matches!(call, Call::Hosts(HostsCall::T3Pairing)),
         }
     }
 
     /// Whether this caller may open streams; a host opens none.
     pub(super) fn streams(self) -> bool {
-        self != Self::Host
+        !matches!(self, Self::Host(_))
+    }
+
+    /// The access a host's pairing code carries: the host's own, or the default for this computer.
+    pub(super) fn access(self) -> Access {
+        match self {
+            Self::Host(access) => access,
+            Self::Local | Self::Device => Access::default(),
+        }
     }
 }
 
@@ -55,10 +64,10 @@ impl Caller {
 pub(super) enum Admission {
     /// Calls and streams, as this caller, for the client named if it is one.
     Session(Caller, Option<String>),
-    /// A host's tunnel to its T3 server (ADR-0288), for the host named.
-    Tunnel(String),
-    /// A new client, which receives its token once before the connection closes.
-    Paired(String),
+    /// A host's tunnel to its T3 server (ADR-0288), for the host named at its access.
+    Tunnel(String, Access),
+    /// A new client, which receives its token and access once before the connection closes.
+    Paired(String, Access),
 }
 
 pub(super) fn refuse(status: StatusCode, reason: impl Into<String>) -> ErrorResponse {
@@ -115,9 +124,9 @@ pub(super) fn admit(
             let db = shared.store.db();
             if let Some(code) = header(request, api::PAIRING_HEADER) {
                 let name = header(request, api::CLIENT_HEADER).unwrap_or("unnamed");
-                let token = hosts::pair(&db, code, name, now_ms())
+                let (token, access) = hosts::pair(&db, code, name, now_ms())
                     .map_err(|reason| refuse(StatusCode::FORBIDDEN, reason))?;
-                return Ok(Admission::Paired(token));
+                return Ok(Admission::Paired(token, access));
             }
             let client = match bearer {
                 Some(token) => hosts::client(&db, token)
@@ -126,15 +135,19 @@ pub(super) fn admit(
             };
             let tunnel = header(request, api::TUNNEL_HEADER).is_some();
             match client {
-                Some((ClientKind::Device, _)) if tunnel => Err(refuse(
+                Some((ClientKind::Device, _, _)) if tunnel => Err(refuse(
                     StatusCode::FORBIDDEN,
                     "Only another host may tunnel to this computer's T3 Code.",
                 )),
-                Some((ClientKind::Host, name)) if tunnel => Ok(Admission::Tunnel(name)),
-                Some((ClientKind::Device, name)) => {
+                Some((ClientKind::Host, access, name)) if tunnel => {
+                    Ok(Admission::Tunnel(name, access))
+                }
+                Some((ClientKind::Device, _, name)) => {
                     Ok(Admission::Session(Caller::Device, Some(name)))
                 }
-                Some((ClientKind::Host, name)) => Ok(Admission::Session(Caller::Host, Some(name))),
+                Some((ClientKind::Host, access, name)) => {
+                    Ok(Admission::Session(Caller::Host(access), Some(name)))
+                }
                 None => Err(refuse(
                     StatusCode::UNAUTHORIZED,
                     "Meta-Harness needs a token of a paired client.",

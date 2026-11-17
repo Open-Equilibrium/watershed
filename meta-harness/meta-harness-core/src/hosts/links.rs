@@ -186,19 +186,25 @@ impl Links {
         Ok(())
     }
 
-    /// Links the host at `address` (`ws://…`), which `code` pairs with, at `access`: its tunnel
-    /// starts, and its T3 links this one. A link that fails leaves nothing behind here, but the
-    /// other host may keep the pairing, which its `meta host revoke` removes.
+    /// Links the host at `address` (`ws://…`), which `code` pairs with, at `access`, or at the
+    /// level the other host allows when none is asked for. Its tunnel starts, and its T3 links this
+    /// one. A link that fails leaves nothing behind here, but the other host may keep the pairing,
+    /// which its `meta host revoke` removes. Answers the host's name and the level it links at.
     pub(crate) async fn add(
         &self,
         store: &Store,
         address: &str,
         code: &str,
-        access: Access,
-    ) -> Result<String, String> {
-        let (name, token) = remote::pair(address, code, &self.name).await?;
-        match self.link_paired(store, address, &name, token, access).await {
-            Ok(()) => Ok(name),
+        access: Option<Access>,
+    ) -> Result<(String, Access), String> {
+        let paired = remote::pair(address, code, &self.name).await?;
+        let access = access.unwrap_or(paired.access);
+        let name = paired.name;
+        match self
+            .link_paired(store, address, &name, paired.token, access)
+            .await
+        {
+            Ok(()) => Ok((name, access)),
             Err(error) => Err(format!(
                 "{error} The other host, {name}, may keep a paired entry for this host; \
                  `meta host revoke {}` there removes it.",
@@ -309,9 +315,10 @@ impl Links {
         }
     }
 
-    /// A pairing code from this host's T3 Code, which another host's link redeems (ADR-0288).
-    pub(crate) async fn pairing_code(&self) -> Result<String, String> {
-        t3::pairing_code(&self.t3, &self.t3_home).await
+    /// A pairing code from this host's T3 Code, which another host's link redeems at `access`
+    /// (ADR-0288, ADR-0300).
+    pub(crate) async fn pairing_code(&self, access: Access) -> Result<String, String> {
+        t3::pairing_code(&self.t3, &self.t3_home, access).await
     }
 
     /// Asks the peer for a pairing code over its host token and has T3 link through the tunnel.

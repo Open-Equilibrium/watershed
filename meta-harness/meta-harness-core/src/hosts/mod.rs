@@ -24,9 +24,10 @@ pub const DEFAULT_REMOTE_PORT: u16 = 3774;
 /// The tables of hosts and devices, created with the configuration store's.
 pub(crate) const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS pairing (
-    code_hash TEXT PRIMARY KEY, kind TEXT NOT NULL, expires_ms INTEGER NOT NULL);
+    code_hash TEXT PRIMARY KEY, kind TEXT NOT NULL, access TEXT NOT NULL,
+    expires_ms INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS client (
-    token_hash TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
+    token_hash TEXT PRIMARY KEY, kind TEXT NOT NULL, access TEXT NOT NULL, name TEXT NOT NULL,
     created_ms INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS peer (
     name TEXT PRIMARY KEY, address TEXT NOT NULL, token TEXT NOT NULL, access TEXT NOT NULL,
