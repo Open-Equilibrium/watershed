@@ -248,7 +248,11 @@ async fn tailscale_output(args: &[&str]) -> Option<String> {
         let Ok(child) = crate::spawn(&mut command) else {
             continue;
         };
-        let Ok(output) = child.wait_with_output().await else {
+        // A Tailscale that hangs, such as one waiting for its daemon, counts as absent.
+        let Ok(Ok(output)) =
+            tokio::time::timeout(std::time::Duration::from_secs(30), child.wait_with_output())
+                .await
+        else {
             continue;
         };
         if output.status.success() {
