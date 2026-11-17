@@ -12,6 +12,21 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 
+/// How long a fake's wait may take before its test fails.
+const WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Waits until `done` holds; panics naming `expected` if it does not hold within `WAIT`.
+async fn until(expected: String, done: impl Fn() -> bool) {
+    let polls = async {
+        while !done() {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    };
+    if tokio::time::timeout(WAIT, polls).await.is_err() {
+        panic!("timed out after {WAIT:?} waiting for {expected}");
+    }
+}
+
 /// A text frame carrying `value`.
 pub fn frame(value: Value) -> Message {
     Message::Text(value.to_string().into())
@@ -173,16 +188,18 @@ impl Fake {
 
     /// Waits until the client sent `count` acknowledgements for request `id`.
     pub async fn acked(&self, id: &str, count: usize) {
-        while self.acks(id) < count {
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
+        until(format!("{count} acknowledgements of request {id}"), || {
+            self.acks(id) >= count
+        })
+        .await;
     }
 
     /// Waits until the client interrupted request `id`.
     pub async fn interrupted(&self, id: &str) {
-        while !self.interrupts.lock().unwrap().iter().any(|i| i == id) {
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
+        until(format!("an interrupt of request {id}"), || {
+            self.interrupts.lock().unwrap().iter().any(|i| i == id)
+        })
+        .await;
     }
 
     /// Drops the connection, as T3 does when a session expires; T3 accepts the next one.
@@ -202,16 +219,18 @@ impl Fake {
 
     /// Waits until T3 accepted `count` connections.
     pub async fn accepted(&self, count: usize) {
-        while self.connections() < count {
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
+        until(format!("{count} accepted connections"), || {
+            self.connections() >= count
+        })
+        .await;
     }
 
     /// Waits until T3 received `count` requests for `tag`, so chunks for them can follow.
     pub async fn received(&self, tag: &str, count: usize) {
-        while self.payloads(tag).len() < count {
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
+        until(format!("{count} requests for {tag}"), || {
+            self.payloads(tag).len() >= count
+        })
+        .await;
     }
 
     /// The payloads of the requests for `tag`, oldest first.
