@@ -35,6 +35,12 @@ cargo run -p meta-harness-cli -- status
 
 ## Remote access and host links
 
-`meta remote on` listens on this computer's Tailscale addresses, on port 3774 unless `--port N` names another, and `meta remote off` stops it. To link a host, turn agents from other hosts on with `meta host agents on` on both hosts; then run `meta invite --host` on the host to link to, and `meta host add ADDRESS CODE` on the host that links to it, with the address and code it prints. `meta host list` shows the links; `meta host remove` unlinks one. Trust limits: [SECURITY.md](../SECURITY.md#meta-harness-service-and-configuration).
+- `meta remote on [--port N]` listens on this computer's Tailscale addresses, on port 3774 by default, across restarts; `meta remote off` stops it; `meta remote status` shows it.
+- `meta invite --device` or `--host` prints a pairing code, valid for five minutes and one use, with the addresses to pair with.
+- `meta host agents on|off` accepts agents from other hosts here; it is off until turned on.
+- `meta host add ADDRESS CODE [--access LEVEL]` links the host at ADDRESS; `LEVEL` is `read-only`, `approval-required`, `auto-accept-edits`, `auto` (the default) or `full-access`.
+- `meta host list`, `meta host remove NAME` (unlinks a host and its T3 link) and `meta host revoke NAME` (refuses a paired client's token from its next connection on) manage them.
+
+A link needs `meta host agents on` on both hosts, then the code from `meta invite --host` on the host to link to, given to `meta host add` on the other. Trust limits: [SECURITY.md](../SECURITY.md#meta-harness-service-and-configuration); mechanism: [V-Spec](../docs/concept/V-Spec_MetaHarness.html#orchestration).
 
 Contract tests run against the pinned release with a scripted ACP agent, through the service: `META_HARNESS_T3=<pinned t3> cargo nextest run --config 'target."cfg(all())".runner = ["node", "<repository>/scripts/run-isolated-rust-test.mjs"]' -p meta-harness-core --test t3_contract`, through the isolation runner as every Rust test (TESTING.md).
