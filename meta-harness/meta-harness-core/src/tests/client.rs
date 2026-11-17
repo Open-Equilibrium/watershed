@@ -310,3 +310,21 @@ async fn a_dropped_call_forgets_its_waiter() {
     assert!(call.await.unwrap_err().is_cancelled());
     assert_eq!(client.waiting(), 0);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_t3_that_accepts_a_connection_and_never_answers_fails_the_connect() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    // Accepts every connection and answers none of them.
+    tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((socket, _)) = listener.accept().await {
+            held.push(socket);
+        }
+    });
+    let connect = Client::connect(&origin, || Box::pin(async { Ok("token".to_owned()) }));
+    let answer = tokio::time::timeout(Duration::from_secs(600), connect)
+        .await
+        .expect("the connect gives up");
+    assert!(answer.is_err());
+}

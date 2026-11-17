@@ -17,7 +17,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-use crate::util::lock;
+use crate::util::{TIMEOUT, lock};
 
 /// The orchestration protocol this client speaks; T3 answers 426 to any other.
 const ORCHESTRATION_PROTOCOL: u32 = 2;
@@ -412,8 +412,9 @@ async fn open(origin: &str, issue: &Issue) -> Result<Socket, String> {
             .parse()
             .map_err(|_| "token is no header value".to_owned())?,
     );
-    let (socket, _) = tokio_tungstenite::connect_async(request)
+    let (socket, _) = tokio::time::timeout(TIMEOUT, tokio_tungstenite::connect_async(request))
         .await
+        .map_err(|_| format!("connect {origin}/ws: it did not answer in time"))?
         .map_err(|e| format!("connect {origin}/ws: {e}"))?;
     Ok(socket)
 }
