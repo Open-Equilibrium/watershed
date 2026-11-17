@@ -43,10 +43,11 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Meta-Harness API version** — The number a client names in the `meta-harness-api` header of its handshake; the service admits only its own ([V-Spec](docs/concept/V-Spec_MetaHarness.html#surfaces)).
 - **Remote access** — The service's listener on this computer's Tailscale addresses, off until a person turns it on (ADR-0299).
 - **Pairing code** — The single-use code that `meta invite` issues so that one device or host can pair with this computer's remote access (ADR-0299).
+- **Access level** — The level at which a linked host's agents may act here, as T3 names them (`read-only` to `full-access`); the receiving host sets it when it invites the host, and a link may ask for less (ADR-0300).
 - **Device token** — The token a device keeps after pairing; what it may reach is in [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) (ADR-0299).
 - **Host token** — The token another host keeps after pairing; what it may reach is in [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) (ADR-0288, ADR-0299).
 - **Host link** — A link that lets one host's T3 Code reach another's; Meta-Harness pairs each direction separately, carries it through a host tunnel and renews it (ADR-0285, ADR-0288, ADR-0299).
-- **Host tunnel** — The byte-forwarding path of a host link: a loopback port on the linking host to the other host's remote access, which passes only the paths a link uses (ADR-0301).
+- **Host tunnel** — The request-passing path of a host link: a loopback port on the linking host to the other host's remote access, which passes only the requests a link makes and refuses a decision above the invited access level (ADR-0300, ADR-0301).
 - **Login service** — The per-user launchd agent or systemd user unit that keeps `meta serve` running (ADR-0286).
 - **BYOA** — "Bring Your Own Agent"; plugging an external agent in as the Meta-Agent.
 - **AgentPulse** — Meta-Harness subsystem measuring rework ratio, first-attempt success rate, and cost-per-productive-outcome. Meta-Harness computes/stores the metrics; Liquid only renders them.

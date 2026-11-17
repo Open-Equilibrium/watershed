@@ -35,12 +35,12 @@ cargo run -p meta-harness-cli -- status
 
 ## Remote access and host links
 
-- `meta remote on [--port N]` listens on this computer's Tailscale addresses, on port 3774 by default, across restarts; `meta remote off` stops it; `meta remote status` shows it.
-- `meta invite --device` or `--host` prints a pairing code, valid for five minutes and one use, with the addresses to pair with.
+- `meta remote on [--port N]` listens on this computer's Tailscale addresses, on port 3774 by default, across restarts; `meta remote off` stops it and ends its connections; `meta remote status` shows it, and says so while the port cannot be bound yet (it is tried every 30 seconds). Turn it on before `meta invite --host`.
+- `meta invite --device` or `meta invite --host [--access LEVEL]` prints a pairing code, valid for five minutes and one use, with the addresses to pair with. A host's `LEVEL` is the highest level its agents get here, `auto` by default.
 - `meta host agents on|off` accepts agents from other hosts here; it is off until turned on.
-- `meta host add ADDRESS CODE [--access LEVEL]` links the host at ADDRESS; `LEVEL` is `read-only`, `approval-required`, `auto-accept-edits`, `auto` (the default) or `full-access`.
-- `meta host list`, `meta host remove NAME` (unlinks a host and its T3 link) and `meta host revoke NAME` (refuses a paired client's token from its next connection on) manage them.
+- `meta host add ADDRESS CODE [--access LEVEL]` links the host at ADDRESS; `LEVEL` is `read-only`, `approval-required`, `auto-accept-edits`, `auto` or `full-access`, and defaults to the level the other host invited. The other host refuses a higher one.
+- `meta host list`, `meta host remove NAME` (unlinks a host and its T3 link; the other host keeps the pairing until `meta host revoke` there) and `meta host revoke NAME` (refuses a paired client's token from its next connection on) manage them. A host pairs under its name and four hex digits, as `meta host list` and the error that names it show, and `revoke` takes that exact name.
 
-A link needs `meta host agents on` on both hosts, then the code from `meta invite --host` on the host to link to, given to `meta host add` on the other. Trust limits: [SECURITY.md](../SECURITY.md#meta-harness-service-and-configuration); mechanism: [V-Spec](../docs/concept/V-Spec_MetaHarness.html#orchestration).
+A link needs `meta host agents on` on both hosts and `meta remote on` on the host to link to, then the code from `meta invite --host` there, given to `meta host add` on the other. Trust limits: [SECURITY.md](../SECURITY.md#meta-harness-service-and-configuration); mechanism: [V-Spec](../docs/concept/V-Spec_MetaHarness.html#orchestration).
 
 Contract tests run against the pinned release with a scripted ACP agent, through the service: `META_HARNESS_T3=<pinned t3> cargo nextest run --config 'target."cfg(all())".runner = ["node", "<repository>/scripts/run-isolated-rust-test.mjs"]' -p meta-harness-core --test t3_contract`, through the isolation runner as every Rust test (TESTING.md).
