@@ -991,9 +991,13 @@ async fn the_service_refuses_a_client_that_names_no_api_version_or_another() {
     service.stop().await;
 }
 
-/// Connects as a client that never reads its replies and sends malformed requests until the
-/// service disconnects it; answers how long that took, or `None` if it did not within `limit`.
-async fn disconnected_after_flood(service: &Service, limit: Duration) -> Option<Duration> {
+/// Connects as a client that never reads its replies and sends `text` until the service
+/// disconnects it; answers how long that took, or `None` if it did not within `limit`.
+async fn disconnected_after_flood(
+    service: &Service,
+    text: &str,
+    limit: Duration,
+) -> Option<Duration> {
     use futures_util::SinkExt;
     use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
     let mut request = service.url.as_str().into_client_request().unwrap();
@@ -1010,7 +1014,7 @@ async fn disconnected_after_flood(service: &Service, limit: Duration) -> Option<
     tokio::time::timeout(limit, async {
         loop {
             if socket
-                .send(Message::Text(r#"{"id":1,"bogus":true}"#.into()))
+                .send(Message::Text(text.to_owned().into()))
                 .await
                 .is_err()
             {
@@ -1028,9 +1032,13 @@ async fn a_client_that_stops_reading_its_replies_is_disconnected() {
     let (dir, _repo, _home) = fixture();
     let (service, _local) = start_service(&dir.path().join("meta")).await;
     assert!(
-        disconnected_after_flood(&service, Duration::from_secs(60))
-            .await
-            .is_some(),
+        disconnected_after_flood(
+            &service,
+            r#"{"id":1,"bogus":true}"#,
+            Duration::from_secs(60)
+        )
+        .await
+        .is_some(),
         "the service disconnects a client that never reads"
     );
     service.stop().await;
@@ -1043,7 +1051,7 @@ async fn a_malformed_request_while_a_reply_waits_for_room_disconnects_at_once() 
     // The first reply that finds the queue full waits up to 10 s, but the next malformed request
     // closes the connection rather than queueing behind it.
     assert!(
-        disconnected_after_flood(&service, Duration::from_secs(8))
+        disconnected_after_flood(&service, r#"{"id":1,"bogus":true}"#, Duration::from_secs(8))
             .await
             .is_some(),
         "a second malformed request closes the connection while one reply waits"
@@ -2370,4 +2378,55 @@ async fn revoking_a_host_ends_the_t3_sessions_its_link_made() {
         401,
         "T3 refuses the revoked session's token: {refused:?}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_that_stops_reading_while_it_sends_calls_is_disconnected() {
+    let (dir, _repo, _home) = fixture();
+    let (service, _local) = start_service(&dir.path().join("meta")).await;
+    // Each call is answered by the service at once, so the replies fill the queue and then the
+    // calls wait in tasks, which the service bounds per connection.
+    assert!(
+        disconnected_after_flood(
+            &service,
+            r#"{"id":1,"call":{"host":"status"}}"#,
+            Duration::from_secs(8)
+        )
+        .await
+        .is_some(),
+        "a client that never reads its replies is disconnected"
+    );
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_that_reads_each_reply_is_not_limited_by_the_calls_before_it() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
+    let (dir, _repo, _home) = fixture();
+    let (service, _local) = start_service(&dir.path().join("meta")).await;
+    let mut request = service.url.as_str().into_client_request().unwrap();
+    request.headers_mut().insert(
+        "authorization",
+        format!("Bearer {}", service.token).parse().unwrap(),
+    );
+    request
+        .headers_mut()
+        .insert("meta-harness-api", "1".parse().unwrap());
+    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    // Each call is answered before the next is sent, so none waits behind another.
+    for id in 1..=300u64 {
+        let call = serde_json::json!({"id": id, "call": {"host": "status"}});
+        socket
+            .send(Message::Text(call.to_string().into()))
+            .await
+            .unwrap();
+        let Message::Text(text) = socket.next().await.unwrap().unwrap() else {
+            panic!("a reply is text");
+        };
+        let reply: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(reply["id"], id);
+        assert!(reply.get("ok").is_some(), "{reply}");
+    }
+    service.stop().await;
 }

@@ -50,6 +50,10 @@ const HANDSHAKE: std::time::Duration = std::time::Duration::from_secs(10);
 /// How long a reply to a malformed request may wait for room in the outgoing queue.
 const REPLY_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// How many requests one connection may have in progress at once: a call, or a stream until it
+/// ends. A client that sends more is disconnected; no Liquid client issues anywhere near this many.
+const REQUESTS: usize = 256;
+
 /// The refusal of a call or stream that the caller's kind does not make (ADR-0299).
 const REFUSED_CALL: &str = "This client may not make that call.";
 
@@ -419,6 +423,8 @@ async fn serve(
     let (stalled, mut stalls) = mpsc::channel::<()>(1);
     // The one malformed request whose reply may wait for queue room.
     let replying = Arc::new(tokio::sync::Semaphore::new(1));
+    // Each request in progress holds one of these until its task ends.
+    let requests = Arc::new(tokio::sync::Semaphore::new(REQUESTS));
     let mut ping = crate::util::pings();
     let mut heard = tokio::time::Instant::now();
     loop {
@@ -428,6 +434,8 @@ async fn serve(
             _ = stopping.wait_for(|stopped| *stopped) => break,
             () = revoked(&mut revocations, owner.as_deref()) => break,
             _ = stalls.recv() => break,
+            // Finished tasks are reaped as they finish, so none is kept after its end.
+            Some(_) = tasks.join_next() => continue,
             _ = ping.tick() => None,
         };
         let Some(frame) = frame else {
@@ -472,12 +480,16 @@ async fn serve(
                 continue;
             }
         };
-        while tasks.try_join_next().is_some() {}
         streams.retain(|_, task| !task.is_finished());
         match request {
             api::Request::Call { id, call } => {
+                // A client past its requests in progress is disconnected, rather than queued.
+                let Ok(permit) = requests.clone().try_acquire_owned() else {
+                    break;
+                };
                 let (session, out) = (session.clone(), out.clone());
                 tasks.spawn(async move {
+                    let _permit = permit;
                     let reply = match session.call(call).await {
                         Ok(ok) => Reply::Ok { id, ok },
                         Err(error) => Reply::Error { id, error },
@@ -486,8 +498,12 @@ async fn serve(
                 });
             }
             api::Request::Stream { id, stream } => {
+                let Ok(permit) = requests.clone().try_acquire_owned() else {
+                    break;
+                };
                 let (session, out) = (session.clone(), out.clone());
                 let task = tasks.spawn(async move {
+                    let _permit = permit;
                     if let Err(error) = session.stream(id, stream, &out).await {
                         let _ = out.send(frame_of(&Reply::Error { id, error })).await;
                     }
