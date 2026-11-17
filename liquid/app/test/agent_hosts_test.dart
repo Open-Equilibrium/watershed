@@ -229,7 +229,7 @@ void main() {
 
       expect(
         find.text(
-          'Could not add the agent host; nothing changed. That pairing code is wrong, already used or expired.',
+          'Could not add the agent host; nothing changed in Liquid. That pairing code is wrong, already used or expired.',
         ),
         findsOneWidget,
       );
