@@ -312,6 +312,8 @@ async fn serve(
 ) {
     let mut client = String::new();
     let mut admission = None;
+    // Subscribed before the token is checked, so no revocation during the handshake is missed.
+    let mut revocations = shared.revoked.subscribe();
     let check = |request: &Request, response: Response| -> Result<Response, ErrorResponse> {
         admission = Some(admit(&shared, listener, request)?);
         client = header(request, api::CLIENT_HEADER)
@@ -333,7 +335,6 @@ async fn serve(
     let (caller, owner) = match admission {
         Some(Admission::Session(caller, owner)) => (caller, owner),
         Some(Admission::Tunnel(owner, access)) => {
-            let mut revocations = shared.revoked.subscribe();
             let mut ends = ends.clone();
             tokio::select! {
                 () = tunnel::serve(socket, shared.host.t3_address().to_owned(), access) => {}
@@ -365,7 +366,6 @@ async fn serve(
         }
     });
     let mut stopping = ends;
-    let mut revocations = shared.revoked.subscribe();
     let session = Arc::new(Session {
         shared,
         client,
