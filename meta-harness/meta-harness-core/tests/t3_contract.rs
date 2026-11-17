@@ -991,12 +991,11 @@ async fn the_service_refuses_a_client_that_names_no_api_version_or_another() {
     service.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_client_that_stops_reading_its_replies_is_disconnected() {
+/// Connects as a client that never reads its replies and sends malformed requests until the
+/// service disconnects it; answers how long that took, or `None` if it did not within `limit`.
+async fn disconnected_after_flood(service: &Service, limit: Duration) -> Option<Duration> {
     use futures_util::SinkExt;
     use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
-    let (dir, _repo, _home) = fixture();
-    let (service, _local) = start_service(&dir.path().join("meta")).await;
     let mut request = service.url.as_str().into_client_request().unwrap();
     request.headers_mut().insert(
         "authorization",
@@ -1006,8 +1005,9 @@ async fn a_client_that_stops_reading_its_replies_is_disconnected() {
         .headers_mut()
         .insert("meta-harness-api", "1".parse().unwrap());
     let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    let started = std::time::Instant::now();
     // Each malformed request is answered, and the answers are never read.
-    let disconnected = tokio::time::timeout(Duration::from_secs(60), async {
+    tokio::time::timeout(limit, async {
         loop {
             if socket
                 .send(Message::Text(r#"{"id":1,"bogus":true}"#.into()))
@@ -1018,10 +1018,35 @@ async fn a_client_that_stops_reading_its_replies_is_disconnected() {
             }
         }
     })
-    .await;
+    .await
+    .ok()
+    .map(|()| started.elapsed())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_that_stops_reading_its_replies_is_disconnected() {
+    let (dir, _repo, _home) = fixture();
+    let (service, _local) = start_service(&dir.path().join("meta")).await;
     assert!(
-        disconnected.is_ok(),
+        disconnected_after_flood(&service, Duration::from_secs(60))
+            .await
+            .is_some(),
         "the service disconnects a client that never reads"
+    );
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_malformed_request_while_a_reply_waits_for_room_disconnects_at_once() {
+    let (dir, _repo, _home) = fixture();
+    let (service, _local) = start_service(&dir.path().join("meta")).await;
+    // The first reply that finds the queue full waits up to 10 s, but the next malformed request
+    // closes the connection rather than queueing behind it.
+    assert!(
+        disconnected_after_flood(&service, Duration::from_secs(8))
+            .await
+            .is_some(),
+        "a second malformed request closes the connection while one reply waits"
     );
     service.stop().await;
 }

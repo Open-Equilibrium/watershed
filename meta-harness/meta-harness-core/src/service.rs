@@ -417,6 +417,8 @@ async fn serve(
     let mut streams: HashMap<u64, AbortHandle> = HashMap::new();
     // Signalled by a malformed request's reply that the queue did not take in time.
     let (stalled, mut stalls) = mpsc::channel::<()>(1);
+    // The one malformed request whose reply may wait for queue room.
+    let replying = Arc::new(tokio::sync::Semaphore::new(1));
     let mut ping = crate::util::pings();
     let mut heard = tokio::time::Instant::now();
     loop {
@@ -448,11 +450,16 @@ async fn serve(
                     .and_then(|v| v["id"].as_u64());
                 if let Some(id) = id {
                     let error = format!("Meta-Harness does not understand this request: {error}");
-                    // The reply waits on a task of its own, so the loop goes on noticing revocation
-                    // and shutdown. A queue full of stream items drains for a client that reads;
-                    // one that takes no reply within REPLY_WAIT is disconnected.
+                    // A second reply while one waits means a client that does not read: it is
+                    // disconnected. The reply waits on a task of its own, so the loop goes on
+                    // noticing revocation and shutdown; one that takes no reply within
+                    // REPLY_WAIT is disconnected too.
+                    let Ok(permit) = replying.clone().try_acquire_owned() else {
+                        break;
+                    };
                     let (out, stalled) = (out.clone(), stalled.clone());
                     tasks.spawn(async move {
+                        let _permit = permit;
                         let reply = frame_of(&Reply::Error { id, error });
                         if tokio::time::timeout(REPLY_WAIT, out.send(reply))
                             .await
