@@ -97,3 +97,22 @@ async fn a_revoked_device_is_refused_with_its_pairing_named_and_not_retried() {
     );
     assert!(!connection_lost(&error), "a revoked pairing is not retried");
 }
+
+#[tokio::test]
+async fn pairing_refuses_an_address_that_is_not_ws_before_connecting() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = format!("http://{}", listener.local_addr().unwrap());
+    let error = crate::remote::pair(&address, "CODE", "test")
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error,
+        "Enter the address as ws://HOST:PORT, as meta invite prints it."
+    );
+    // No connection was attempted, so the listener accepts none.
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), listener.accept())
+            .await
+            .is_err()
+    );
+}

@@ -462,10 +462,21 @@ pub(crate) fn handshake(url: &str, headers: &[(&'static str, &str)]) -> Result<R
     Ok(request)
 }
 
+/// Refuses an address that is not `ws://…`, the form `meta invite` prints. Every caller that links
+/// or pairs with a host checks it here, so each one gives the same refusal.
+pub fn check_address(address: &str) -> Result<(), String> {
+    if address.starts_with("ws://") {
+        Ok(())
+    } else {
+        Err("Enter the address as ws://HOST:PORT, as meta invite prints it.".to_owned())
+    }
+}
+
 /// Pairs this client with the remote listener at `address` (`ws://…`), using `code`, a pairing code
 /// that the other side issued. Answers the other side's name, the token this client uses from now
 /// on and the access it was paired at (ADR-0299, ADR-0300).
 pub async fn pair(address: &str, code: &str, client: &str) -> Result<api::Pairing, String> {
+    check_address(address)?;
     let request = handshake(
         address,
         &[(api::PAIRING_HEADER, code), (api::CLIENT_HEADER, client)],
