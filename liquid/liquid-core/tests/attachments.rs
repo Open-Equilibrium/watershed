@@ -261,3 +261,11 @@ fn a_media_block_takes_no_text_writes() {
     let code = Mutation::TurnIntoCode { page, block };
     assert_eq!(apply(&mut workspace, code), Err(Error::NotFound));
 }
+
+#[test]
+fn a_large_file_comes_back_whole() {
+    let (mut workspace, ..) = page();
+    let file = bytes(33 * PART + 5);
+    let attachment = add(&mut workspace, &file);
+    assert_eq!(read_back(&mut workspace, &attachment), file);
+}
