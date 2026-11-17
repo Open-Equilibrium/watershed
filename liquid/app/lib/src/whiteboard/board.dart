@@ -1,7 +1,7 @@
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:perfect_freehand/perfect_freehand.dart';
 
 import '../rust/api/whiteboard.dart';
@@ -152,9 +152,15 @@ Rect boundsOf(BridgeElement element) {
 class BoardCache {
   final _points = <String, List<InkPoint>>{};
   final _bounds = <String, Rect>{};
-  final _outlines = <String, Path>{};
-  final _shapes =
-      <(String, double, double, bool, int, BridgeShape, bool), Path>{};
+
+  /// One outline and one shape drawing per element, each with what it was drawn for, so
+  /// a shape resized through many sizes keeps only its last.
+  final _outlines = <String, (Object, Path)>{};
+  final _shapes = <String, (Object, Path)>{};
+
+  /// How many drawings the cache holds.
+  @visibleForTesting
+  int get entries => _outlines.length + _shapes.length;
 
   /// A stroke's points, decoded once; an element with no identity, as a draft, is not kept.
   List<InkPoint> points(BridgeElement element) => switch (element.id) {
@@ -176,40 +182,44 @@ class BoardCache {
     }
   }
 
-  /// A stroke's outline in its points' own place, before its frame moves it.
-  Path outline(BridgeElement element) {
-    Path draw() =>
-        inkOutline(points(element), penOptions(element.pen, element.width));
-    return switch (element.id) {
-      final id? => _outlines.putIfAbsent(
-        '$id ${element.pen.name} ${element.width}',
-        draw,
-      ),
-      null => draw(),
-    };
+  static Path _kept(
+    Map<String, (Object, Path)> drawings,
+    String? id,
+    Object key,
+    Path Function() draw,
+  ) {
+    if (id == null) return draw();
+    if (drawings[id] case (final drawn, final path) when drawn == key) {
+      return path;
+    }
+    final path = draw();
+    drawings[id] = (key, path);
+    return path;
   }
 
+  /// A stroke's outline in its points' own place, before its frame moves it.
+  Path outline(BridgeElement element) => _kept(_outlines, element.id, (
+    element.pen,
+    element.width,
+  ), () => inkOutline(points(element), penOptions(element.pen, element.width)));
+
   /// A shape's lines in a frame of its size at the origin, hand-drawn or clean.
-  Path shape(BridgeElement element, bool hand) => switch (element.id) {
-    final id? => _shapes.putIfAbsent((
-      id,
-      element.w,
-      element.h,
-      hand,
-      element.width,
-      element.shape,
-      element.arrowhead,
-    ), () => shapePath(element, hand)),
-    null => shapePath(element, hand),
-  };
+  Path shape(BridgeElement element, bool hand) => _kept(_shapes, element.id, (
+    element.w,
+    element.h,
+    hand,
+    element.width,
+    element.shape,
+    element.arrowhead,
+  ), () => shapePath(element, hand));
 
   /// Forgets the elements no longer on the board.
   void keepOnly(Iterable<String> ids) {
     final kept = ids.toSet();
     _points.removeWhere((id, _) => !kept.contains(id));
     _bounds.removeWhere((id, _) => !kept.contains(id));
-    _outlines.removeWhere((key, _) => !kept.contains(key.split(' ').first));
-    _shapes.removeWhere((key, _) => !kept.contains(key.$1));
+    _outlines.removeWhere((id, _) => !kept.contains(id));
+    _shapes.removeWhere((id, _) => !kept.contains(id));
   }
 }
 
