@@ -118,7 +118,7 @@ pub(crate) fn access(command: &str, args: &[&str]) -> Result<Option<Access>, Str
         [] => Ok(None),
         ["--access", text] => Access::parse(text).map(Some).ok_or_else(|| {
             format!(
-                "{text:?} is no access level: read-only, approval-required, auto-accept-edits, \
+                "{text:?} is not an access level: read-only, approval-required, auto-accept-edits, \
                  auto or full-access."
             )
         }),
@@ -144,6 +144,9 @@ mod tests {
             access("meta host add", &["--access", "read-only"]),
             Ok(Some(Access::ReadOnly))
         );
-        assert!(access("meta host add", &["--access", "root"]).is_err());
+        assert_eq!(
+            access("meta host add", &["--access", "root"]),
+            Err("\"root\" is not an access level: read-only, approval-required, auto-accept-edits, auto or full-access.".to_owned())
+        );
     }
 }

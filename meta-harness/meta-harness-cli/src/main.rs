@@ -27,13 +27,17 @@ usage: meta <command>
                             (port 3774 by default); it stays on across restarts
   remote off                stop listening there
   remote status             show whether remote access is on, and where
-  invite --device | --host  print a pairing code for another device or host, valid 5 minutes
+  invite --device | --host [--access LEVEL]
+                            print a pairing code for another device or host, valid 5 minutes; a
+                            host's LEVEL is the most its agents get here, auto by default
   host add ADDRESS CODE [--access LEVEL]
                             link the host at ADDRESS with its pairing code; LEVEL is read-only,
-                            approval-required, auto-accept-edits, auto (the default) or full-access
+                            approval-required, auto-accept-edits, auto or full-access, and asks
+                            for less than the host invited, which is the default
   host list                 print the linked hosts and the clients paired here as JSON
   host remove NAME          unlink a host, and end its T3 link
-  host revoke NAME          refuse a paired client's token from its next connection on
+  host revoke NAME          refuse a paired client's token from its next connection on, and
+                            end the T3 sessions of that host's link
   host agents on|off        accept agents from other hosts here (off until turned on)
   service install           start the login service, also after each login and crash
   service uninstall         stop and remove the login service
@@ -308,5 +312,17 @@ mod tests {
         ] {
             assert_eq!(removes_data(prefix, Path::new(home)), refused, "{home}");
         }
+    }
+
+    #[test]
+    fn the_usage_names_the_access_flags_and_what_revoke_ends() {
+        assert!(
+            USAGE.contains("invite --device | --host [--access LEVEL]"),
+            "{USAGE}"
+        );
+        assert!(
+            USAGE.contains("end the T3 sessions of that host's link"),
+            "{USAGE}"
+        );
     }
 }
