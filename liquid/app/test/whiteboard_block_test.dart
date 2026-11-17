@@ -9,6 +9,7 @@ import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/whiteboard/board.dart';
 import 'package:liquid/src/whiteboard/board_controller.dart';
 import 'package:liquid/src/whiteboard/ink_geometry.dart';
+import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'fake_workspace.dart';
 import 'page_kit.dart';
@@ -109,6 +110,71 @@ void main() {
       expect(boardTools.tool, BoardTool.pen);
     },
   );
+
+  testWidgets('a Whiteboard in a Section\'s first line starts that Section', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      const TextPart('Intro'),
+      const TextPart(''),
+      const TextPart('After'),
+    ]);
+    final line = kit.fake.views[kit.page]![1];
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.setSectionBoundary,
+        page: kit.page,
+        view: line.id,
+        boundary: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(block(1));
+    await tester.pump();
+    for (final text in ['/', '/wh']) {
+      tester.testTextInput.updateEditingValue(
+        TextEditingValue(
+          text: text,
+          selection: TextSelection.collapsed(offset: text.length),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+    await key(tester, LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(
+      [
+        for (final view in kit.fake.views[kit.page]!)
+          (view.kind, view.boundary),
+      ],
+      [
+        (BridgeBlockKind.text, false),
+        (BridgeBlockKind.whiteboard, true),
+        (BridgeBlockKind.text, false),
+      ],
+    );
+  });
+
+  testWidgets('esc in a full-screen text box ends the box, then full screen', (
+    tester,
+  ) async {
+    await kit.show(tester, [const WhiteboardPart()]);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: tester.getCenter(board()));
+    addTearDown(mouse.removePointer);
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('whiteboard full screen')));
+    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.keyT);
+    await tester.tapAt(screen(tester, const Offset(120, 120)));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('whiteboard text')), 'Porto');
+    await key(tester, LogicalKeyboardKey.escape);
+    expect(lastEdit().add.single.text, 'Porto');
+    expect(find.byKey(const Key('whiteboard full')), findsOneWidget);
+    await key(tester, LogicalKeyboardKey.escape);
+    expect(find.byKey(const Key('whiteboard full')), findsNothing);
+  });
 
   testWidgets('a first click only focuses; the pen then draws a stroke', (
     tester,

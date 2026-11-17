@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/media_block.dart';
+import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'page_kit.dart';
 
@@ -103,6 +104,41 @@ void main() {
       expect(find.text('48 KB · EML'), findsOneWidget);
     },
   );
+
+  testWidgets('media in a Section\'s first line starts that Section', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      const TextPart('Intro'),
+      const TextPart(''),
+      const TextPart('After'),
+    ]);
+    final line = kit.fake.views[kit.page]![1];
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.setSectionBoundary,
+        page: kit.page,
+        view: line.id,
+        boundary: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+    picked.add(file('/Users/me/notes.txt', 10));
+    await slash(tester, 1, '/media');
+    await key(tester, LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(
+      [
+        for (final view in kit.fake.views[kit.page]!)
+          (view.kind, view.boundary),
+      ],
+      [
+        (BridgeBlockKind.text, false),
+        (BridgeBlockKind.media, true),
+        (BridgeBlockKind.text, false),
+      ],
+    );
+  });
 
   testWidgets(
     'cancelling the dialog keeps the line; the last line stays below',

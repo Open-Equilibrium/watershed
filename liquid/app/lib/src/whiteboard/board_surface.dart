@@ -817,7 +817,17 @@ class BoardSurfaceState extends State<BoardSurface> {
 
   /// The board's keys while it is focused (approved Whiteboard Block mockups, section 9).
   KeyEventResult key(KeyEvent event) {
-    if (_text != null) return KeyEventResult.ignored;
+    // While a text box is written, its field takes the keys; esc ends it.
+    if (_text != null) {
+      if (event is KeyDownEvent &&
+          event.logicalKey == LogicalKeyboardKey.escape) {
+        _typing.unfocus();
+        // The board takes the keys again, so the next esc leaves it.
+        widget.onFocus();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
     if (event.logicalKey == LogicalKeyboardKey.space) {
       _spaceDown = event is! KeyUpEvent;
       return KeyEventResult.handled;

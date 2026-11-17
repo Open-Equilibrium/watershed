@@ -603,12 +603,35 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       }
       after = above?.id;
     }
-    await addMedia(
+    final first = await addMedia(
       views,
       added,
       after: after,
       replacing: empty && !last ? view : null,
     );
+    if (empty && first != null) await _handOverSection(first, last: last);
+  }
+
+  /// A Block that took this empty line's place starts the Section the line started; a
+  /// line that ends the Page stays below it and starts none (as a Table does).
+  Future<void> _handOverSection(String added, {required bool last}) async {
+    final view = widget.view;
+    if (!view.boundary) return;
+    Future<void> boundary(String at, bool starts) => widget.views.write(
+      mutation(
+        BridgeMutationKind.setSectionBoundary,
+        page: _page,
+        view: at,
+        boundary: starts,
+      ),
+      const [],
+    );
+    try {
+      await boundary(added, true);
+      if (last) await boundary(view.id, false);
+    } on Object {
+      // Shown on the Page.
+    }
   }
 
   /// Adds a focused Whiteboard in place of this empty line, or below the line; a line that
@@ -640,6 +663,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         const [],
       );
       views.focusBoard.value = added.view;
+      if (empty) await _handOverSection(added.view!, last: last);
       if (empty && !last) {
         await views.write(
           mutation(BridgeMutationKind.removeView, page: _page, view: view.id),

@@ -226,14 +226,16 @@ Future<void> saveCopy(WorkspaceState state, BridgeMedia file) async {
 
 /// Adds `sources` as Media Blocks after the View `after`, or first, in their order, each
 /// shown with its progress until it is in. A file over 5 GiB is refused before it is read.
-/// The empty line `replacing` goes once the first is in, unless it ends the Page.
-Future<void> addMedia(
+/// The empty line `replacing` goes once the first is in, unless it ends the Page. Answers
+/// the first new View, if any went in.
+Future<String?> addMedia(
   PageViews views,
   List<MediaSource> sources, {
   required String? after,
   BridgeView? replacing,
 }) async {
   final state = views.state;
+  String? first;
   var follows = after;
   for (final source in sources) {
     if (!await _fits(state, source)) continue;
@@ -257,6 +259,7 @@ Future<void> addMedia(
         const [],
       );
       follows = added.view;
+      first ??= added.view;
     } on Object catch (error) {
       state.report('Liquid did not add “${source.name}”: $error');
       continue;
@@ -282,6 +285,7 @@ Future<void> addMedia(
       }
     }
   }
+  return first;
 }
 
 /// A file going in: its name, and how much of it is in (ADR-0305).

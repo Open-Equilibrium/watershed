@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
@@ -276,15 +275,9 @@ class _WhiteboardFullScreenState extends State<WhiteboardFullScreen> {
     final ws = context.ws;
     return Focus(
       focusNode: _focus,
-      onKeyEvent: (_, event) {
-        if (event is KeyDownEvent &&
-            event.logicalKey == LogicalKeyboardKey.escape &&
-            _board.selected.isEmpty) {
-          _done();
-          return KeyEventResult.handled;
-        }
-        return _surface.currentState?.key(event) ?? KeyEventResult.ignored;
-      },
+      // esc ends a text box, then clears the selection, then leaves full screen.
+      onKeyEvent: (_, event) =>
+          _surface.currentState?.key(event) ?? KeyEventResult.ignored,
       child: ColoredBox(
         key: const Key('whiteboard full'),
         color: ws.canvas,
