@@ -1397,9 +1397,9 @@ async fn a_host_pairs_under_a_tagged_name_that_its_revoke_message_quotes() {
         .find(|client| client.kind == ClientKind::Host)
         .expect("b paired with a")
         .name;
-    let tag = pairing
-        .strip_prefix(&format!("{me}-"))
-        .expect("the host name, then a tag");
+    // A long host name is cut so that the whole name fits what T3 keeps.
+    let (host, tag) = pairing.rsplit_once('-').expect("the host name, then a tag");
+    assert!(!host.is_empty() && me.trim().starts_with(host), "{pairing}");
     assert!(
         tag.len() == 4 && tag.chars().all(|c| c.is_ascii_hexdigit()),
         "{pairing}"
