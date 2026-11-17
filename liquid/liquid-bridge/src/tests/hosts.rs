@@ -96,9 +96,14 @@ fn free_port() -> u16 {
 }
 
 #[test]
-fn an_agent_host_pairs_connects_reaches_and_is_forgotten_here_only() {
+fn agent_hosts_pair_connect_reach_and_are_forgotten_here_only() {
     let home = Home::new();
     let service = start(home.path());
+    let folder = Some(home.path().display().to_string());
+    assert_eq!(
+        reach_local_agent_host(folder.clone()),
+        Ok(BridgeReach::Connected)
+    );
     let local = RUNTIME
         .block_on(remote::Host::connect(home.path(), "test"))
         .expect("a local client connects");
@@ -177,6 +182,7 @@ fn an_agent_host_pairs_connects_reaches_and_is_forgotten_here_only() {
             .is_err()
     );
     stop(service);
+    assert_eq!(reach_local_agent_host(folder), Ok(BridgeReach::Offline));
 }
 
 #[test]
@@ -204,32 +210,17 @@ fn a_device_pairs_under_liquid_the_computer_name_and_its_own_tag() {
     );
 }
 
-#[test]
-fn this_computers_agent_host_is_reached_while_meta_harness_runs() {
-    let home = Home::new();
-    let service = start(home.path());
-    let folder = Some(home.path().display().to_string());
-    assert_eq!(
-        reach_local_agent_host(folder.clone()),
-        Ok(BridgeReach::Connected)
-    );
-    stop(service);
-    assert_eq!(reach_local_agent_host(folder), Ok(BridgeReach::Offline));
-}
-
 /// Needs the operating system's keychain, which CI hosts lack; run it by hand with
 /// `cargo test -p liquid_bridge -- --ignored keychain`.
 #[test]
 #[ignore = "needs the operating system's keychain"]
 fn the_keychain_keeps_a_device_token_under_its_address() {
     let address = "ws://liquid-bridge-test.invalid:3774";
-    DeviceTokens {}.delete(address).unwrap();
-    assert_eq!(DeviceTokens {}.read(address).unwrap(), None);
-    DeviceTokens {}.write(address, "token").unwrap();
-    assert_eq!(
-        DeviceTokens {}.read(address).unwrap(),
-        Some("token".to_owned())
-    );
-    DeviceTokens {}.delete(address).unwrap();
-    assert_eq!(DeviceTokens {}.read(address).unwrap(), None);
+    let keys = DeviceTokens {};
+    keys.delete(address).unwrap();
+    assert_eq!(keys.read(address).unwrap(), None);
+    keys.write(address, "token").unwrap();
+    assert_eq!(keys.read(address).unwrap(), Some("token".to_owned()));
+    keys.delete(address).unwrap();
+    assert_eq!(keys.read(address).unwrap(), None);
 }

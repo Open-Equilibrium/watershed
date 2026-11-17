@@ -3,7 +3,7 @@
 
 use rusqlite::Connection;
 
-use crate::hosts::{self, Kind, same};
+use crate::hosts::{self, Kind};
 
 const MINUTE: u64 = 60_000;
 
@@ -11,6 +11,11 @@ fn store() -> Connection {
     let db = Connection::open_in_memory().unwrap();
     db.execute_batch(hosts::SCHEMA).unwrap();
     db
+}
+
+/// The kind of client that `token` belongs to, if one holds it.
+fn kind_of(db: &Connection, token: &str) -> Option<Kind> {
+    hosts::client(db, token).unwrap().map(|(kind, _)| kind)
 }
 
 #[test]
@@ -49,41 +54,14 @@ fn a_token_admits_the_kind_of_client_that_paired_with_it_until_revoked() {
     let device_token = hosts::pair(&db, &device, "phone", 0).unwrap();
     let host_token = hosts::pair(&db, &host, "other", 0).unwrap();
     assert_eq!(device_token.len(), 64, "256 bits in hex");
-    assert_eq!(
-        hosts::client(&db, &device_token)
-            .unwrap()
-            .map(|(kind, _)| kind),
-        Some(Kind::Device)
-    );
-    assert_eq!(
-        hosts::client(&db, &host_token)
-            .unwrap()
-            .map(|(kind, _)| kind),
-        Some(Kind::Host)
-    );
-    assert_eq!(
-        hosts::client(&db, &device_token[..63])
-            .unwrap()
-            .map(|(kind, _)| kind),
-        None
-    );
+    assert_eq!(kind_of(&db, &device_token), Some(Kind::Device));
+    assert_eq!(kind_of(&db, &host_token), Some(Kind::Host));
+    assert_eq!(kind_of(&db, &device_token[..63]), None);
 
     hosts::revoke(&db, "phone").unwrap();
-    assert_eq!(
-        hosts::client(&db, &device_token)
-            .unwrap()
-            .map(|(kind, _)| kind),
-        None
-    );
+    assert_eq!(kind_of(&db, &device_token), None);
     assert!(
         hosts::revoke(&db, "phone").is_err(),
         "nothing left to revoke"
     );
-}
-
-#[test]
-fn comparison_accepts_only_equal_values() {
-    assert!(same(b"abc", b"abc"));
-    assert!(!same(b"abc", b"abd"));
-    assert!(!same(b"abc", b"ab"));
 }

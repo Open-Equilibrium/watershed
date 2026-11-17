@@ -24,6 +24,11 @@ import 'fake_workspace.dart';
 const remote = 'ws://studio.local:3774';
 const client = 'liquid-studio-s-mac';
 const info = SessionInfo(project: 'acme-api');
+const mini = SavedAgentHost(
+  name: 'Studio mini',
+  address: remote,
+  client: client,
+);
 
 /// The bridge's agent hosts in memory: checks answer from `reaches`, and an unlisted host is offline.
 class FakeAgentHosts implements AgentHostBridge {
@@ -143,28 +148,16 @@ void main() {
           client: client,
         ),
       ]);
+      final lab = settings.withActive('ws://lab:3774');
       expect(
         AgentHostsSettings.fromJson(settings.toJson()).activeAddress,
         remote,
       );
-      expect(
-        settings.withActive('ws://lab:3774').activeAddress,
-        'ws://lab:3774',
-      );
-      expect(
-        settings.withActive('ws://lab:3774').hosts.where((host) => host.active),
-        hasLength(1),
-      );
-      expect(
-        settings.withActive(null).activeAddress,
-        isNull,
-        reason: 'This Mac',
-      );
-      expect(
-        settings.without(remote).activeAddress,
-        isNull,
-        reason: 'This Mac',
-      );
+      expect(lab.activeAddress, 'ws://lab:3774');
+      expect(lab.hosts.where((host) => host.active), hasLength(1));
+      // This Mac is used when no host is active.
+      expect(settings.withActive(null).activeAddress, isNull);
+      expect(settings.without(remote).activeAddress, isNull);
       expect(
         AgentHostsSettings.fromJson({
           'hosts': [
@@ -251,14 +244,7 @@ void main() {
   );
 
   testWidgets('uses a host for sessions at once', (tester) async {
-    await show(
-      tester,
-      controller(
-        settings: const AgentHostsSettings([
-          SavedAgentHost(name: 'Studio mini', address: remote, client: client),
-        ]),
-      ),
-    );
+    await show(tester, controller(settings: AgentHostsSettings([mini])));
     expect(find.text('Used for sessions'), findsOneWidget);
 
     await chooseInRow(tester, remote, 'Use for sessions');
@@ -275,13 +261,7 @@ void main() {
       await show(
         tester,
         controller(
-          settings: const AgentHostsSettings([
-            SavedAgentHost(
-              name: 'Studio mini',
-              address: remote,
-              client: client,
-            ),
-          ]),
+          settings: AgentHostsSettings([mini]),
           switchFailure:
               'Liquid could not connect to the agent host $remote: no answer.',
         ),
@@ -352,18 +332,7 @@ void main() {
   testWidgets(
     'removes a host from this device after confirmation, and forgets its token',
     (tester) async {
-      await show(
-        tester,
-        controller(
-          settings: const AgentHostsSettings([
-            SavedAgentHost(
-              name: 'Studio mini',
-              address: remote,
-              client: client,
-            ),
-          ]),
-        ),
-      );
+      await show(tester, controller(settings: AgentHostsSettings([mini])));
 
       await chooseInRow(tester, remote, 'Remove from this device…');
       expect(find.text('Remove Studio mini from this device?'), findsOneWidget);
