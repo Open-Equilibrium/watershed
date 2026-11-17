@@ -15,6 +15,7 @@ import 'page_editor.dart';
 import 'stored_name.dart';
 import 'table_block.dart';
 import 'text_block.dart';
+import 'whiteboard_block.dart';
 import 'workspace_state.dart';
 
 /// An open Page: its breadcrumb, then its title and its Blocks in the reading column, as the
@@ -200,6 +201,26 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     _first.clear();
   }
 
+  /// The Page, with a Whiteboard full screen over it while one is (approved Whiteboard
+  /// Block mockups, section 6).
+  Widget _withFullBoard(Widget page) => ValueListenableBuilder(
+    valueListenable: _views.fullBoard,
+    builder: (context, board, _) => Stack(
+      children: [
+        // Hidden but kept, so the Page keeps its place and state.
+        Offstage(offstage: board != null, child: page),
+        if (board != null)
+          Positioned.fill(
+            child: WhiteboardFullScreen(
+              key: ValueKey('full ${board.id}'),
+              views: _views,
+              view: board,
+            ),
+          ),
+      ],
+    ),
+  );
+
   /// The reading column's width, centred.
   Widget _column(Widget child) => Center(
     child: ConstrainedBox(
@@ -278,105 +299,79 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                 ),
         ),
         Expanded(
-          child: ListenableBuilder(
-            listenable: Listenable.merge([
-              _views,
-              _views.editor.lingering,
-              _views.ready,
-            ]),
-            builder: (context, _) => CustomScrollView(
-              slivers: [
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(
-                    WsMetrics.space7,
-                    28,
-                    WsMetrics.space7,
-                    WsMetrics.space4,
-                  ),
-                  sliver: SliverToBoxAdapter(
-                    child: _column(
-                      TextField(
-                        key: const Key('page-title'),
-                        controller: _title.take(),
-                        focusNode: _titleFocus,
-                        // The title wraps but stays one line, as in Notion.
-                        maxLines: null,
-                        keyboardType: TextInputType.text,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.deny(
-                            RegExp(r'[\n\r]'),
-                            replacementString: ' ',
+          child: _withFullBoard(
+            ListenableBuilder(
+              listenable: Listenable.merge([
+                _views,
+                _views.editor.lingering,
+                _views.ready,
+              ]),
+              builder: (context, _) => CustomScrollView(
+                slivers: [
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(
+                      WsMetrics.space7,
+                      28,
+                      WsMetrics.space7,
+                      WsMetrics.space4,
+                    ),
+                    sliver: SliverToBoxAdapter(
+                      child: _column(
+                        TextField(
+                          key: const Key('page-title'),
+                          controller: _title.take(),
+                          focusNode: _titleFocus,
+                          // The title wraps but stays one line, as in Notion.
+                          maxLines: null,
+                          keyboardType: TextInputType.text,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.deny(
+                              RegExp(r'[\n\r]'),
+                              replacementString: ' ',
+                            ),
+                          ],
+                          style: TextStyle(
+                            fontSize: WsMetrics.fsDisplay,
+                            height: WsMetrics.lhDisplay / WsMetrics.fsDisplay,
+                            fontWeight: WsMetrics.fwBold,
+                            color: ws.text,
                           ),
-                        ],
-                        style: TextStyle(
-                          fontSize: WsMetrics.fsDisplay,
-                          height: WsMetrics.lhDisplay / WsMetrics.fsDisplay,
-                          fontWeight: WsMetrics.fwBold,
-                          color: ws.text,
-                        ),
-                        decoration: InputDecoration.collapsed(
-                          hintText: untitled,
-                          hintStyle: TextStyle(color: ws.textFaint),
+                          decoration: InputDecoration.collapsed(
+                            hintText: untitled,
+                            hintStyle: TextStyle(color: ws.textFaint),
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(
-                    WsMetrics.space7,
-                    0,
-                    WsMetrics.space7,
-                    WsMetrics.space8,
-                  ),
-                  // The first line stays, out of sight, until its Text Block took the
-                  // caret, so typing meanwhile still reaches it.
-                  sliver: SliverMainAxisGroup(
-                    slivers: [
-                      if (_views.count == 0 || _handing)
-                        SliverToBoxAdapter(
-                          key: const ValueKey('first line'),
-                          child: Offstage(
-                            offstage: _views.count != 0,
-                            child: _column(firstLine),
-                          ),
-                        ),
-                      // The Text Block a change started from stays, out of sight, after
-                      // its View is gone, until the change is done.
-                      if (_views.editor.lingering.value
-                          case (final view, final index)
-                          when _views.indexOf(view.id) == null)
-                        SliverToBoxAdapter(
-                          key: const ValueKey('lingering'),
-                          child: Offstage(
-                            child: _column(
-                              TextBlock(
-                                key: _views.keyFor(view.id),
-                                views: _views,
-                                view: view,
-                                index: index,
-                              ),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(
+                      WsMetrics.space7,
+                      0,
+                      WsMetrics.space7,
+                      WsMetrics.space8,
+                    ),
+                    // The first line stays, out of sight, until its Text Block took the
+                    // caret, so typing meanwhile still reaches it.
+                    sliver: SliverMainAxisGroup(
+                      slivers: [
+                        if (_views.count == 0 || _handing)
+                          SliverToBoxAdapter(
+                            key: const ValueKey('first line'),
+                            child: Offstage(
+                              offstage: _views.count != 0,
+                              child: _column(firstLine),
                             ),
                           ),
-                        ),
-                      SliverList.builder(
-                        key: const ValueKey('Blocks'),
-                        itemCount: _views.count ?? 0,
-                        // A Block keeps its state, focus included, when Views above
-                        // it come or go.
-                        findChildIndexCallback: (key) =>
-                            _views.indexOf((key as ValueKey<String>).value),
-                        itemBuilder: (context, index) {
-                          final view = _views.at(index);
-                          if (view == null) {
-                            return const SizedBox(height: WsMetrics.lhProse);
-                          }
-                          if (view.kind == BridgeBlockKind.text) {
-                            return KeyedSubtree(
-                              key: ValueKey(view.id),
-                              child: _withUploads(
-                                view,
-                                index,
+                        // The Text Block a change started from stays, out of sight, after
+                        // its View is gone, until the change is done.
+                        if (_views.editor.lingering.value
+                            case (final view, final index)
+                            when _views.indexOf(view.id) == null)
+                          SliverToBoxAdapter(
+                            key: const ValueKey('lingering'),
+                            child: Offstage(
+                              child: _column(
                                 TextBlock(
                                   key: _views.keyFor(view.id),
                                   views: _views,
@@ -384,44 +379,78 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                                   index: index,
                                 ),
                               ),
-                            );
-                          }
-                          return KeyedSubtree(
-                            key: ValueKey(view.id),
-                            child: _withUploads(
-                              view,
-                              index,
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  if (view.boundary && index > 0)
-                                    const SectionDivider(),
-                                  switch (view.kind) {
-                                    BridgeBlockKind.database => TableBlock(
-                                      views: _views,
-                                      view: view,
-                                    ),
-                                    BridgeBlockKind.code => CodeBlock(
-                                      views: _views,
-                                      view: view,
-                                      index: index,
-                                    ),
-                                    BridgeBlockKind.media => MediaBlock(
-                                      views: _views,
-                                      view: view,
-                                    ),
-                                    _ => const _Placeholder(),
-                                  },
-                                ],
-                              ),
                             ),
-                          );
-                        },
-                      ),
-                    ],
+                          ),
+                        SliverList.builder(
+                          key: const ValueKey('Blocks'),
+                          itemCount: _views.count ?? 0,
+                          // A Block keeps its state, focus included, when Views above
+                          // it come or go.
+                          findChildIndexCallback: (key) =>
+                              _views.indexOf((key as ValueKey<String>).value),
+                          itemBuilder: (context, index) {
+                            final view = _views.at(index);
+                            if (view == null) {
+                              return const SizedBox(height: WsMetrics.lhProse);
+                            }
+                            if (view.kind == BridgeBlockKind.text) {
+                              return KeyedSubtree(
+                                key: ValueKey(view.id),
+                                child: _withUploads(
+                                  view,
+                                  index,
+                                  TextBlock(
+                                    key: _views.keyFor(view.id),
+                                    views: _views,
+                                    view: view,
+                                    index: index,
+                                  ),
+                                ),
+                              );
+                            }
+                            return KeyedSubtree(
+                              key: ValueKey(view.id),
+                              child: _withUploads(
+                                view,
+                                index,
+                                Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    if (view.boundary && index > 0)
+                                      const SectionDivider(),
+                                    switch (view.kind) {
+                                      BridgeBlockKind.database => TableBlock(
+                                        views: _views,
+                                        view: view,
+                                      ),
+                                      BridgeBlockKind.code => CodeBlock(
+                                        views: _views,
+                                        view: view,
+                                        index: index,
+                                      ),
+                                      BridgeBlockKind.media => MediaBlock(
+                                        views: _views,
+                                        view: view,
+                                      ),
+                                      BridgeBlockKind.whiteboard =>
+                                        WhiteboardBlock(
+                                          views: _views,
+                                          view: view,
+                                        ),
+                                      _ => const _Placeholder(),
+                                    },
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

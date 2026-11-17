@@ -90,6 +90,12 @@ const slashCommands = [
     block: BridgeBlockKind.database,
     description: 'Fields and rows',
   ),
+  SlashCommand(
+    'Whiteboard',
+    LucideIcons.presentation,
+    block: BridgeBlockKind.whiteboard,
+    description: 'Draw, and place shapes and text',
+  ),
 ];
 
 /// The choices whose label holds `query`, ignoring case.

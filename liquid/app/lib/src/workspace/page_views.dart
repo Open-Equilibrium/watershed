@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 
 import '../rust/api/workspace.dart';
+import '../whiteboard/board_controller.dart';
 import 'follow.dart';
 import 'media_block.dart';
 import 'page_editor.dart';
@@ -80,6 +81,18 @@ class PageViews extends ChangeNotifier {
   /// What a line that a Table took the place of holds, by the Table's View: its name,
   /// read when the Table takes the caret, and whether it was written already.
   final naming = <String, (String, bool) Function()>{};
+
+  /// Each Whiteboard's board, shared by the Block and its full-screen view.
+  final _boards = <String, BoardController>{};
+
+  BoardController boardFor(BridgeView view) =>
+      _boards.putIfAbsent(view.id, () => BoardController(this, view));
+
+  /// The Whiteboard shown full screen over the Page, if any.
+  final fullBoard = ValueNotifier<BridgeView?>(null);
+
+  /// The View of a new Whiteboard, which takes the focus once built.
+  final focusBoard = ValueNotifier<String?>(null);
 
   /// The Blocks that take dropped files into a cell, by their View, as a Table's file
   /// cells do.
@@ -259,6 +272,11 @@ class PageViews extends ChangeNotifier {
     caret.dispose();
     styles.dispose();
     uploads.dispose();
+    for (final board in _boards.values) {
+      board.dispose();
+    }
+    fullBoard.dispose();
+    focusBoard.dispose();
     editor.lingering.dispose();
     ready.dispose();
     unawaited(_settled.close());

@@ -6,6 +6,7 @@ import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/app.dart';
 import 'package:liquid/src/launch.dart';
 import 'package:liquid/src/rust/api/database.dart';
+import 'package:liquid/src/rust/api/whiteboard.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/shortcuts/shortcut_store.dart';
@@ -44,6 +45,11 @@ class MediaPart extends Part {
   const MediaPart(this.name, this.bytes);
   final String name;
   final List<int> bytes;
+}
+
+class WhiteboardPart extends Part {
+  const WhiteboardPart([this.elements = const []]);
+  final List<BridgeElement> elements;
 }
 
 class UnknownPart extends Part {
@@ -260,6 +266,22 @@ class PageKit {
             ),
           );
           after = added.view;
+        case WhiteboardPart(:final elements):
+          final added = await workspace.apply(
+            mutation(
+              BridgeMutationKind.addWhiteboardBlock,
+              page: page,
+              after: after,
+            ),
+          );
+          after = added.view;
+          fake.whiteboards[added.block!] = BridgeWhiteboard(
+            style: BridgeWhiteboardStyle.handDrawn,
+            elements: [
+              for (final (index, element) in elements.indexed)
+                withId(element, 'element $index'),
+            ],
+          );
         case UnknownPart(:final boundary):
           final views = fake.views[page] ??= [];
           final at = after == null

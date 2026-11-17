@@ -211,6 +211,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
     if (choice.block == BridgeBlockKind.code) return _turnIntoCode();
     if (choice.block == BridgeBlockKind.media) return _addMedia(_pickFiles);
+    if (choice.block == BridgeBlockKind.whiteboard) return _addWhiteboard();
     final views = widget.views;
     final view = widget.view;
     final last = widget.index == (views.count ?? 0) - 1;
@@ -608,6 +609,46 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       after: after,
       replacing: empty && !last ? view : null,
     );
+  }
+
+  /// Adds a focused Whiteboard in place of this empty line, or below the line; a line that
+  /// ends the Page stays below it, so the Page goes on.
+  Future<void> _addWhiteboard() async {
+    final views = widget.views;
+    final view = widget.view;
+    final index = widget.index;
+    final empty = _text.text.isEmpty;
+    final last = index == (views.count ?? 0) - 1;
+    String? after = view.id;
+    if (empty && last) {
+      final above = index > 0 ? await views.viewAt(index - 1) : null;
+      if (index > 0 && above == null) {
+        _state.report(
+          'Liquid did not add the Whiteboard, as the Page changed; choose Whiteboard again.',
+        );
+        return;
+      }
+      after = above?.id;
+    }
+    try {
+      final added = await views.write(
+        mutation(
+          BridgeMutationKind.addWhiteboardBlock,
+          page: _page,
+          after: after,
+        ),
+        const [],
+      );
+      views.focusBoard.value = added.view;
+      if (empty && !last) {
+        await views.write(
+          mutation(BridgeMutationKind.removeView, page: _page, view: view.id),
+          [view.block],
+        );
+      }
+    } on Object {
+      // The problem shows on the Page.
+    }
   }
 
   /// Pastes what the clipboard holds: copied files and images as Media Blocks, code an
