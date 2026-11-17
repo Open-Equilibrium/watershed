@@ -6,8 +6,8 @@ use automerge::AutoCommit;
 
 use crate::history::Header;
 use crate::{
-    Action, ActionId, Actor, Commit, Created, Document, Error, MemoryStore, Mutation, Origin,
-    PersonId, Request, Store, Workspace,
+    Action, ActionId, Actor, AttachmentId, Commit, Created, Document, Error, MemoryStore, Mutation,
+    Origin, PersonId, Request, Store, Workspace,
 };
 
 fn changes(doc: &mut AutoCommit) -> Vec<(automerge::ChangeHash, Option<Header>)> {
@@ -125,6 +125,31 @@ impl Store for Flaky {
 
     fn history(&mut self, before: Option<&ActionId>, limit: usize) -> Result<Vec<Action>, Error> {
         self.inner.history(before, limit)
+    }
+
+    fn put_part(&mut self, upload: &str, index: u64, bytes: &[u8]) -> Result<(), Error> {
+        self.inner.put_part(upload, index, bytes)
+    }
+
+    fn finish_upload(
+        &mut self,
+        upload: &str,
+        attachment: &AttachmentId,
+        size: u64,
+    ) -> Result<(), Error> {
+        self.inner.finish_upload(upload, attachment, size)
+    }
+
+    fn discard_upload(&mut self, upload: &str) -> Result<(), Error> {
+        self.inner.discard_upload(upload)
+    }
+
+    fn attachment_size(&mut self, attachment: &AttachmentId) -> Result<Option<u64>, Error> {
+        self.inner.attachment_size(attachment)
+    }
+
+    fn part(&mut self, attachment: &AttachmentId, index: u64) -> Result<Option<Vec<u8>>, Error> {
+        self.inner.part(attachment, index)
     }
 }
 

@@ -4,6 +4,7 @@
 //! Workspace document  { owner, areas: { <area>: { name, sort, deleted } } }
 //! area document       { pages: { <page>: { title, parent?, sort, deleted } } }
 //! Page document       { blocks: { <block>: { kind, text, style?, language?, deleted } },
+//!                       (a Media Block's entry: { kind, name, type, attachment, size, deleted })
 //!                       (a Database Block's entry is in `database.rs`)
 //!                       views: { <view>: { block, sort, boundary, deleted } } }
 //! ```
@@ -16,7 +17,7 @@ use automerge::{
     TextEncoding, Value, ValueRef,
 };
 
-use crate::{AreaId, BlockId, Error, PageId, Place, TextStyle, ViewId};
+use crate::{AreaId, AttachmentId, BlockId, Error, Media, PageId, Place, TextStyle, ViewId};
 
 pub(crate) const OWNER: &str = "owner";
 pub(crate) const AREAS: &str = "areas";
@@ -34,6 +35,9 @@ pub(crate) const BLOCK: &str = "block";
 pub(crate) const STYLE: &str = "style";
 pub(crate) const BOUNDARY: &str = "boundary";
 pub(crate) const LANGUAGE: &str = "language";
+pub(crate) const TYPE: &str = "type";
+pub(crate) const ATTACHMENT: &str = "attachment";
+pub(crate) const SIZE: &str = "size";
 
 /// An area as the Explorer lists it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -77,6 +81,8 @@ pub enum BlockKind {
     Database,
     /// A Code Block.
     Code,
+    /// A Media Block, which shows an attachment (ADR-0305).
+    Media,
     /// A Block of a kind a later version adds, which shows as a placeholder (ADR-0245).
     Unknown,
 }
@@ -88,6 +94,7 @@ impl BlockKind {
             Some("text") => Self::Text,
             Some("database") => Self::Database,
             Some("code") => Self::Code,
+            Some("media") => Self::Media,
             _ => Self::Unknown,
         }
     }
@@ -310,6 +317,24 @@ pub(crate) fn code(doc: &AutoCommit, block: &str) -> Option<Code> {
     Some(Code {
         text: doc.text(&child(doc, &entry, TEXT)?).ok()?,
         language: string(doc, &entry, LANGUAGE).unwrap_or_default(),
+    })
+}
+
+/// A live Media Block's file and attachment; none for a Block of another kind.
+pub(crate) fn media(doc: &AutoCommit, block: &str) -> Option<Media> {
+    let entry = of_kind(doc, block, BlockKind::Media)?;
+    let size = match doc.get(&entry, SIZE).ok()? {
+        Some((Value::Scalar(value), _)) => match value.as_ref() {
+            ScalarValue::Uint(size) => *size,
+            _ => return None,
+        },
+        _ => return None,
+    };
+    Some(Media {
+        name: string(doc, &entry, NAME)?,
+        media_type: string(doc, &entry, TYPE).unwrap_or_default(),
+        attachment: AttachmentId::parse(&string(doc, &entry, ATTACHMENT)?)?,
+        size,
     })
 }
 

@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use crate::{Action, ActionId, Document, Error};
+use crate::{Action, ActionId, AttachmentId, Document, Error};
 
 /// One Action's durable writes, which a store applies all together or not at all.
 pub struct Commit<'a> {
@@ -44,6 +44,22 @@ pub trait Store {
     fn commit(&mut self, commit: &Commit<'_>) -> Result<(), Error>;
     /// Up to `limit` recorded Actions, newest first, starting before `before`.
     fn history(&mut self, before: Option<&ActionId>, limit: usize) -> Result<Vec<Action>, Error>;
+    /// Keeps part `index` of the unfinished upload `upload`.
+    fn put_part(&mut self, upload: &str, index: u64, bytes: &[u8]) -> Result<(), Error>;
+    /// Names `upload`'s parts `attachment`, durably; if that attachment is kept already,
+    /// drops them instead.
+    fn finish_upload(
+        &mut self,
+        upload: &str,
+        attachment: &AttachmentId,
+        size: u64,
+    ) -> Result<(), Error>;
+    /// Drops an unfinished upload's parts.
+    fn discard_upload(&mut self, upload: &str) -> Result<(), Error>;
+    /// A finished attachment's size; none if it is not kept.
+    fn attachment_size(&mut self, attachment: &AttachmentId) -> Result<Option<u64>, Error>;
+    /// Part `index` of a finished attachment; none past its last part.
+    fn part(&mut self, attachment: &AttachmentId, index: u64) -> Result<Option<Vec<u8>>, Error>;
 }
 
 /// A store in memory, which loses everything when dropped.
@@ -51,6 +67,8 @@ pub trait Store {
 pub struct MemoryStore {
     chunks: HashMap<Document, Vec<Vec<u8>>>,
     actions: Vec<Action>,
+    uploads: HashMap<String, Vec<Vec<u8>>>,
+    attachments: HashMap<AttachmentId, (u64, Vec<Vec<u8>>)>,
 }
 
 impl Store for MemoryStore {
@@ -91,5 +109,43 @@ impl Store for MemoryStore {
             .take(limit)
             .cloned()
             .collect())
+    }
+
+    fn put_part(&mut self, upload: &str, index: u64, bytes: &[u8]) -> Result<(), Error> {
+        let parts = self.uploads.entry(upload.to_string()).or_default();
+        if index != parts.len() as u64 {
+            return Err(Error::Storage(format!("part {index} out of order")));
+        }
+        parts.push(bytes.to_vec());
+        Ok(())
+    }
+
+    fn finish_upload(
+        &mut self,
+        upload: &str,
+        attachment: &AttachmentId,
+        size: u64,
+    ) -> Result<(), Error> {
+        let parts = self.uploads.remove(upload).unwrap_or_default();
+        self.attachments
+            .entry(attachment.clone())
+            .or_insert((size, parts));
+        Ok(())
+    }
+
+    fn discard_upload(&mut self, upload: &str) -> Result<(), Error> {
+        self.uploads.remove(upload);
+        Ok(())
+    }
+
+    fn attachment_size(&mut self, attachment: &AttachmentId) -> Result<Option<u64>, Error> {
+        Ok(self.attachments.get(attachment).map(|(size, _)| *size))
+    }
+
+    fn part(&mut self, attachment: &AttachmentId, index: u64) -> Result<Option<Vec<u8>>, Error> {
+        Ok(self
+            .attachments
+            .get(attachment)
+            .and_then(|(_, parts)| parts.get(usize::try_from(index).ok()?).cloned()))
     }
 }

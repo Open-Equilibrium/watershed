@@ -18,6 +18,7 @@
 
 #![deny(missing_docs)]
 
+mod attachment;
 mod database;
 mod history;
 mod id;
@@ -28,6 +29,7 @@ mod sort_key;
 mod store;
 mod workspace;
 
+pub use attachment::{Attachment, AttachmentId, MAX_ATTACHMENT, Media, PART, Upload};
 pub use database::{
     Database, Field, Filter, MAX_FIELDS, MAX_OPTIONS, Match, Row, RowQuery, Rows, SelectOption,
     Sort,

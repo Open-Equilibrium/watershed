@@ -3,7 +3,9 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::{ActionId, AreaId, BlockId, FieldId, OptionId, PageId, PersonId, RowId, ViewId};
+use crate::{
+    ActionId, AreaId, AttachmentId, BlockId, FieldId, OptionId, PageId, PersonId, RowId, ViewId,
+};
 
 /// Who makes a request.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -255,6 +257,20 @@ pub enum Mutation {
         /// Its name, as Markdown names it after ```; empty for plain text.
         language: String,
     },
+    /// Adds a Media Block showing the finished attachment `attachment`, with a View on
+    /// `page`, at its start or after the View `after` (ADR-0305).
+    AddMediaBlock {
+        /// The Page.
+        page: PageId,
+        /// The View it follows.
+        after: Option<ViewId>,
+        /// The file's name.
+        name: String,
+        /// The file's media type, such as `image/png`; empty if unknown.
+        media_type: String,
+        /// The attachment.
+        attachment: AttachmentId,
+    },
     /// Adds a Database Block with one text field, "Name", and a View on `page`, at its
     /// start or after the View `after`.
     AddDatabaseBlock {
@@ -435,6 +451,8 @@ pub enum Error {
     /// too many objects were placed at one spot, or one before a neighbor with no usable key;
     /// moving that neighbor frees the spot.
     TooLong,
+    /// An attachment is larger than [`crate::MAX_ATTACHMENT`] or than its declared size.
+    TooLarge,
     /// The system's random source failed, so no new identity could be made.
     Random,
     /// The CRDT library failed; the message is its own.
