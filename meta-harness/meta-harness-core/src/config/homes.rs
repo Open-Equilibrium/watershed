@@ -225,16 +225,31 @@ fn real_folder(path: &Path) -> Result<(), String> {
 }
 
 /// Writes `text` to `path` through a hidden temporary file beside it, so a harness never reads
-/// half of it. Skill paths have no hidden parts, so the name clashes with none.
+/// half of it. The temporary file is created new under a random name, so no link or file planted
+/// at a predictable name is ever written through. Skill paths have no hidden parts, so the name
+/// clashes with none.
 fn write(path: &Path, text: &str) -> Result<(), String> {
+    use std::io::Write;
     let parent = path.parent().expect("a home file has a folder");
     std::fs::create_dir_all(parent).map_err(|e| failed(parent, &e))?;
     let name = path
         .file_name()
         .expect("a home file has a name")
         .to_string_lossy();
-    let temporary = parent.join(format!(".{name}.meta-harness-tmp"));
-    std::fs::write(&temporary, text).map_err(|e| failed(&temporary, &e))?;
+    let mut bytes = [0u8; 8];
+    getrandom::fill(&mut bytes).expect("the operating system provides random bytes");
+    let temporary = parent.join(format!(
+        ".{name}.{}.meta-harness-tmp",
+        crate::util::hex(&bytes)
+    ));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .map_err(|e| failed(&temporary, &e))?;
+    file.write_all(text.as_bytes())
+        .map_err(|e| failed(&temporary, &e))?;
+    drop(file);
     std::fs::rename(&temporary, path).map_err(|e| failed(path, &e))
 }
 
