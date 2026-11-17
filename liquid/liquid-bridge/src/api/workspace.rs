@@ -20,6 +20,7 @@ use super::database::{
     BridgeCell, BridgeDatabase, BridgeFieldKind, BridgeFilter, BridgeRow, BridgeSort,
 };
 use super::media::BridgeMedia;
+use super::whiteboard::{BridgeWhiteboard, BridgeWhiteboardEdit, BridgeWhiteboardStyle};
 
 /// The most items one query answers, so no answer carries an unbounded list.
 pub const MAX_WINDOW: i64 = 500;
@@ -59,6 +60,13 @@ pub enum BridgeMutationKind {
     /// Adds a Media Block for the file `text` of `media_type`, kept as the finished
     /// `attachment`, to `page`, after the View `after` or first.
     AddMediaBlock,
+    /// Adds an empty, hand-drawn Whiteboard Block to `page`, after the View `after` or first.
+    AddWhiteboardBlock,
+    /// Sets the Whiteboard `block`'s `whiteboard_style` on its home `page`.
+    SetWhiteboardStyle,
+    /// Removes, changes and adds the Whiteboard `block`'s elements on its home `page` as
+    /// `whiteboard` says, in one Action.
+    EditWhiteboard,
     /// Adds a Database Block named `text`, with a text field "Name", to `page`, after the
     /// View `after` or first.
     AddDatabaseBlock,
@@ -180,6 +188,10 @@ pub struct BridgeMutation {
     pub media_type: Option<String>,
     /// A finished attachment's name.
     pub attachment: Option<String>,
+    /// A Whiteboard's new style.
+    pub whiteboard_style: Option<BridgeWhiteboardStyle>,
+    /// A Whiteboard's elements removed, changed and added.
+    pub whiteboard: Option<BridgeWhiteboardEdit>,
 }
 
 /// What an applied write recorded and created.
@@ -201,6 +213,8 @@ pub struct BridgeApplied {
     pub row: Option<String>,
     /// A new option of a select field.
     pub option: Option<String>,
+    /// A Whiteboard's new elements, in the order they were asked for.
+    pub elements: Vec<String>,
 }
 
 /// What a [`BridgeQuery`] reads; each kind names the parts it uses and fills.
@@ -221,6 +235,9 @@ pub enum BridgeQueryKind {
     /// The Media `block`'s file and attachment on its home `page` into `media`; none once
     /// the Block is removed or if it is no Media Block.
     Media,
+    /// The Whiteboard `block`'s style and elements on its home `page` into `whiteboard`;
+    /// none once the Block is removed or if it is no Whiteboard.
+    Whiteboard,
     /// The Database `block`'s name and fields on its home `page` into `database`; none
     /// once the Block is removed or if it is no Database.
     Database,
@@ -281,6 +298,8 @@ pub enum BridgeBlockKind {
     Code,
     /// A Media Block.
     Media,
+    /// A Whiteboard Block.
+    Whiteboard,
     /// A Block of a kind a later version adds, which shows as a placeholder (ADR-0245).
     Unknown,
 }
@@ -317,6 +336,8 @@ pub struct BridgeAnswer {
     pub language: Option<String>,
     /// A Media Block's file and attachment.
     pub media: Option<BridgeMedia>,
+    /// A Whiteboard's style and elements.
+    pub whiteboard: Option<BridgeWhiteboard>,
     /// A Database's name and fields.
     pub database: Option<BridgeDatabase>,
     /// A Database's rows.
@@ -366,8 +387,8 @@ pub(crate) fn message(error: Error) -> String {
         Error::OutOfRange => "text position out of range".into(),
         Error::NoChange => "the write changes nothing".into(),
         Error::SectionBoundary => "the Text Block starts a Section".into(),
-        Error::WrongKind => "the value is not of its field's kind".into(),
-        Error::TooMany => "the Database holds the most fields or options it may".into(),
+        Error::WrongKind => "the value is not of its kind or not valid".into(),
+        Error::TooMany => "it holds the most it may".into(),
         Error::TooLong => "no more fit at this spot; move one of its neighbors first".into(),
         Error::TooLarge => "a file can be at most 5 GiB".into(),
         Error::Changed => "the file changed while it was added; add it again".into(),
@@ -489,6 +510,32 @@ impl BridgeMutation {
                 media_type: self.media_type.clone().unwrap_or_default(),
                 attachment: id(&self.attachment, AttachmentId::parse, "attachment")?,
             },
+            BridgeMutationKind::AddWhiteboardBlock => Mutation::AddWhiteboardBlock {
+                page: page()?,
+                after: optional_id(&self.after, ViewId::parse, "after")?,
+            },
+            BridgeMutationKind::SetWhiteboardStyle => Mutation::SetWhiteboardStyle {
+                page: page()?,
+                block: block()?,
+                style: self
+                    .whiteboard_style
+                    .ok_or("whiteboard_style is missing")?
+                    .to_core(),
+            },
+            BridgeMutationKind::EditWhiteboard => {
+                let (add, change, remove) = self
+                    .whiteboard
+                    .as_ref()
+                    .ok_or("whiteboard is missing")?
+                    .to_core()?;
+                Mutation::EditWhiteboard {
+                    page: page()?,
+                    block: block()?,
+                    add,
+                    change,
+                    remove,
+                }
+            }
             BridgeMutationKind::AddDatabaseBlock => Mutation::AddDatabaseBlock {
                 page: page()?,
                 after: optional_id(&self.after, ViewId::parse, "after")?,

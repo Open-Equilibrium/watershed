@@ -83,6 +83,11 @@ void main() {
         'Text Block ⌘V: pasted text, a person\'s own change, which stays undoable.',
       ),
       (
+        'lib/src/whiteboard/board_surface.dart',
+        '_typed.text = element.text;',
+        'A Whiteboard text box\'s editor, filled as it opens; it is built only while open.',
+      ),
+      (
         'lib/src/workspace/code_block.dart',
         '_search.clear();',
         'The language search, emptied as its picker opens; the field is built only while open.',

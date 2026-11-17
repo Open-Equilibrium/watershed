@@ -6,13 +6,16 @@ import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/app.dart';
 import 'package:liquid/src/launch.dart';
 import 'package:liquid/src/rust/api/database.dart';
+import 'package:liquid/src/rust/api/whiteboard.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/shortcuts/shortcut_store.dart';
 import 'package:liquid/src/theme/theme.dart';
+import 'package:liquid/src/whiteboard/board_controller.dart';
 import 'package:liquid/src/workspace/media_block.dart';
 import 'package:liquid/src/workspace/table_block.dart';
 import 'package:liquid/src/workspace/text_block.dart';
+import 'package:liquid/src/workspace/whiteboard_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'fake_workspace.dart';
@@ -46,6 +49,11 @@ class MediaPart extends Part {
   final List<int> bytes;
 }
 
+class WhiteboardPart extends Part {
+  const WhiteboardPart([this.elements = const []]);
+  final List<BridgeElement> elements;
+}
+
 class UnknownPart extends Part {
   const UnknownPart({this.boundary = false});
   final bool boundary;
@@ -56,7 +64,13 @@ BridgeCell cell(
   String? text,
   double number = 0,
   bool checked = false,
-}) => BridgeCell(kind: kind, text: text, number: number, checked: checked);
+}) => BridgeCell(
+  kind: kind,
+  text: text,
+  number: number,
+  checked: checked,
+  files: const [],
+);
 
 const expenseFields = [
   BridgeField(
@@ -254,6 +268,22 @@ class PageKit {
             ),
           );
           after = added.view;
+        case WhiteboardPart(:final elements):
+          final added = await workspace.apply(
+            mutation(
+              BridgeMutationKind.addWhiteboardBlock,
+              page: page,
+              after: after,
+            ),
+          );
+          after = added.view;
+          fake.whiteboards[added.block!] = BridgeWhiteboard(
+            style: BridgeWhiteboardStyle.handDrawn,
+            elements: [
+              for (final (index, element) in elements.indexed)
+                withId(element, 'element $index'),
+            ],
+          );
         case UnknownPart(:final boundary):
           final views = fake.views[page] ??= [];
           final at = after == null
@@ -275,6 +305,15 @@ class PageKit {
 
   Finder inTable(Finder finder) =>
       find.descendant(of: find.byType(TableBlock), matching: finder);
+
+  /// The board of the Page's only Whiteboard.
+  BoardController boardOf(WidgetTester tester) {
+    final block = tester.widget<WhiteboardBlock>(find.byType(WhiteboardBlock));
+    // The Block holds the board; this look adds no user of its own.
+    final board = block.views.boardFor(block.view);
+    block.views.releaseBoard(block.view);
+    return board;
+  }
 
   Iterable<BridgeMutation> applied(BridgeMutationKind kind) =>
       fake.applied.where((applied) => applied.kind == kind);

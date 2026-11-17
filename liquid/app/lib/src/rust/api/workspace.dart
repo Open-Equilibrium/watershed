@@ -9,6 +9,8 @@ import 'media.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+import 'whiteboard.dart';
+
 // These functions are ignored because they are not marked as `pub`: `id`, `message`, `normalized`, `of`, `of`, `optional_id`, `page`, `place`, `to_core`, `to_core`, `units`, `window`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
 
@@ -38,6 +40,9 @@ class BridgeAnswer {
   /// A Media Block's file and attachment.
   final BridgeMedia? media;
 
+  /// A Whiteboard's style and elements.
+  final BridgeWhiteboard? whiteboard;
+
   /// A Database's name and fields.
   final BridgeDatabase? database;
 
@@ -53,6 +58,7 @@ class BridgeAnswer {
     this.style,
     this.language,
     this.media,
+    this.whiteboard,
     this.database,
     required this.rows,
   });
@@ -67,6 +73,7 @@ class BridgeAnswer {
       style.hashCode ^
       language.hashCode ^
       media.hashCode ^
+      whiteboard.hashCode ^
       database.hashCode ^
       rows.hashCode;
 
@@ -83,6 +90,7 @@ class BridgeAnswer {
           style == other.style &&
           language == other.language &&
           media == other.media &&
+          whiteboard == other.whiteboard &&
           database == other.database &&
           rows == other.rows;
 }
@@ -113,6 +121,9 @@ class BridgeApplied {
   /// A new option of a select field.
   final String? option;
 
+  /// A Whiteboard's new elements, in the order they were asked for.
+  final List<String> elements;
+
   const BridgeApplied({
     required this.action,
     this.area,
@@ -122,6 +133,7 @@ class BridgeApplied {
     this.field,
     this.row,
     this.option,
+    required this.elements,
   });
 
   @override
@@ -133,7 +145,8 @@ class BridgeApplied {
       view.hashCode ^
       field.hashCode ^
       row.hashCode ^
-      option.hashCode;
+      option.hashCode ^
+      elements.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -147,7 +160,8 @@ class BridgeApplied {
           view == other.view &&
           field == other.field &&
           row == other.row &&
-          option == other.option;
+          option == other.option &&
+          elements == other.elements;
 }
 
 /// An area in the Explorer.
@@ -185,6 +199,9 @@ enum BridgeBlockKind {
 
   /// A Media Block.
   media,
+
+  /// A Whiteboard Block.
+  whiteboard,
 
   /// A Block of a kind a later version adds, which shows as a placeholder (ADR-0245).
   unknown,
@@ -276,6 +293,12 @@ class BridgeMutation {
   /// A finished attachment's name.
   final String? attachment;
 
+  /// A Whiteboard's new style.
+  final BridgeWhiteboardStyle? whiteboardStyle;
+
+  /// A Whiteboard's elements removed, changed and added.
+  final BridgeWhiteboardEdit? whiteboard;
+
   const BridgeMutation({
     required this.kind,
     this.area,
@@ -297,6 +320,8 @@ class BridgeMutation {
     this.cell,
     this.mediaType,
     this.attachment,
+    this.whiteboardStyle,
+    this.whiteboard,
   });
 
   @override
@@ -320,7 +345,9 @@ class BridgeMutation {
       color.hashCode ^
       cell.hashCode ^
       mediaType.hashCode ^
-      attachment.hashCode;
+      attachment.hashCode ^
+      whiteboardStyle.hashCode ^
+      whiteboard.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -346,7 +373,9 @@ class BridgeMutation {
           color == other.color &&
           cell == other.cell &&
           mediaType == other.mediaType &&
-          attachment == other.attachment;
+          attachment == other.attachment &&
+          whiteboardStyle == other.whiteboardStyle &&
+          whiteboard == other.whiteboard;
 }
 
 /// What a [`BridgeMutation`] does; each kind names the parts it fills.
@@ -396,6 +425,16 @@ enum BridgeMutationKind {
   /// Adds a Media Block for the file `text` of `media_type`, kept as the finished
   /// `attachment`, to `page`, after the View `after` or first.
   addMediaBlock,
+
+  /// Adds an empty, hand-drawn Whiteboard Block to `page`, after the View `after` or first.
+  addWhiteboardBlock,
+
+  /// Sets the Whiteboard `block`'s `whiteboard_style` on its home `page`.
+  setWhiteboardStyle,
+
+  /// Removes, changes and adds the Whiteboard `block`'s elements on its home `page` as
+  /// `whiteboard` says, in one Action.
+  editWhiteboard,
 
   /// Adds a Database Block named `text`, with a text field "Name", to `page`, after the
   /// View `after` or first.
@@ -540,6 +579,10 @@ enum BridgeQueryKind {
   /// The Media `block`'s file and attachment on its home `page` into `media`; none once
   /// the Block is removed or if it is no Media Block.
   media,
+
+  /// The Whiteboard `block`'s style and elements on its home `page` into `whiteboard`;
+  /// none once the Block is removed or if it is no Whiteboard.
+  whiteboard,
 
   /// The Database `block`'s name and fields on its home `page` into `database`; none
   /// once the Block is removed or if it is no Database.

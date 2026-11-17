@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -5,10 +6,14 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../rust/api/database.dart';
+import '../rust/api/media.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'anchored_menu.dart';
 import 'cell_pickers.dart';
+import 'file_cells.dart';
+import 'media_block.dart';
+import 'paste.dart';
 import 'table_cells.dart';
 
 /// A Table's selected cell and its edit, as in a spreadsheet and in Notion (approved Table
@@ -24,6 +29,8 @@ class CellSelection extends ChangeNotifier {
     required this.leave,
     required this.report,
     required this.addOption,
+    required this.attach,
+    required this.save,
   }) {
     // Leaving the cell editor keeps what was typed, as a spreadsheet does.
     editFocus.addListener(() {
@@ -53,6 +60,12 @@ class CellSelection extends ChangeNotifier {
   /// Adds an option named so, of that color, to a select field, and answers its identity.
   final Future<String> Function(BridgeField field, String name, int color)
   addOption;
+
+  /// Adds files as attachments and answers those that went in.
+  final Future<List<BridgeMedia>> Function(List<MediaSource> sources) attach;
+
+  /// Saves a copy of a file where the person chooses.
+  final Future<void> Function(BridgeMedia file) save;
 
   /// The selected cell, as row and field positions, and whether it is edited.
   (int, int)? selected;
@@ -148,9 +161,172 @@ class CellSelection extends ChangeNotifier {
   }
 
   static bool _picks(BridgeFieldKind kind) =>
-      kind == BridgeFieldKind.select || kind == BridgeFieldKind.date;
+      kind == BridgeFieldKind.select ||
+      kind == BridgeFieldKind.date ||
+      kind == BridgeFieldKind.file;
 
-  /// The selected select or date cell's field while its picker is open.
+  /// The selected file cell's files.
+  List<BridgeMedia> get pickedFiles => switch (_target) {
+    (_, _, final cell?) when cell.kind == BridgeCellKind.files => cell.files,
+    _ => const [],
+  };
+
+  /// Adds `sources` to the file cell at `row` and `field`, after its files, once they are
+  /// in; files another write added meanwhile stay.
+  Future<void> addFiles(int row, int field, List<MediaSource> sources) {
+    // The row and field as they are now, by identity, as the add may wait its turn.
+    final all = fields();
+    final rowId = rowAt(row)?.id;
+    if (rowId == null || field >= all.length) return Future.value();
+    return _queue(rowId, all[field].id, sources);
+  }
+
+  Future<void> _queue(String row, String field, List<MediaSource> sources) {
+    // One add at a time, so each starts from the files the one before wrote.
+    final done = _adding.then((_) => _addFiles(row, field, sources));
+    _adding = done.then<void>((_) {}, onError: (Object _) {});
+    return done;
+  }
+
+  Future<void> _adding = Future.value();
+
+  /// The files last written to each cell, by row and field, until a read shows them.
+  final _written = <(String, String), List<BridgeMedia>>{};
+
+  /// The row `id` as read now, wherever it is; none once it went.
+  BridgeRow? _rowById(String id) {
+    for (var at = 0; at < rowCount(); at++) {
+      if (rowAt(at) case final found? when found.id == id) return found;
+    }
+    return null;
+  }
+
+  Future<void> _addFiles(
+    String rowId,
+    String fieldId,
+    List<MediaSource> sources,
+  ) async {
+    final column = fields().where((field) => field.id == fieldId).firstOrNull;
+    final read = _rowById(rowId);
+    if (read == null ||
+        column == null ||
+        column.kind != BridgeFieldKind.file ||
+        sources.isEmpty) {
+      return;
+    }
+    final key = (read.id, column.id);
+    List<BridgeMedia> filesOf(BridgeRow row) {
+      final shown = [
+        ...?row.cells
+            .where((cell) => cell.field == column.id)
+            .firstOrNull
+            ?.value
+            .files,
+      ];
+      // A write not yet read back is what the cell holds.
+      final written = _written[key];
+      if (written == null) return shown;
+      if (_sameFiles(shown, written)) _written.remove(key);
+      return written;
+    }
+
+    String full() => 'A cell holds at most $maxCellFiles files.';
+    if (filesOf(read).length + sources.length > maxCellFiles) {
+      report(full());
+      return;
+    }
+    final added = await attach(sources);
+    if (added.isEmpty || _disposed) return;
+    // The row as read now, wherever it went meanwhile; gone, it takes nothing.
+    final now = _rowById(read.id);
+    if (now == null) {
+      report(
+        'Liquid did not add the files, as their row went; add them again.',
+      );
+      return;
+    }
+    final files = [...filesOf(now), ...added];
+    if (files.length > maxCellFiles) {
+      report(full());
+      return;
+    }
+    _written[key] = files;
+    try {
+      await write(
+        read,
+        column,
+        BridgeCell(
+          kind: BridgeCellKind.files,
+          number: 0,
+          checked: false,
+          files: files,
+        ),
+      );
+    } on Object {
+      // Refused: the Page shows why, and the cell holds what is stored.
+      _written.remove(key);
+    }
+  }
+
+  static bool _sameFiles(List<BridgeMedia> a, List<BridgeMedia> b) =>
+      a.length == b.length &&
+      [
+        for (var at = 0; at < a.length; at++)
+          a[at].attachment == b[at].attachment,
+      ].every((same) => same);
+
+  /// Opens the file dialog and adds the chosen files to the selected file cell.
+  Future<void> addPickedFiles() async {
+    // The cell as it is now, by identity, as the dialog may stay open a while.
+    final target = _target;
+    closePick();
+    if (target == null) return;
+    final (row, field, _) = target;
+    final sources = await MediaPlatform.pickFiles();
+    await _queue(row.id, field.id, sources);
+  }
+
+  /// Removes the selected file cell's file at `index`; the last one empties it.
+  void removeFile(int index) {
+    if (_target case (final row, final field, final cell?)
+        when cell.kind == BridgeCellKind.files && index < cell.files.length) {
+      // From the files an add wrote, if a read does not show them yet.
+      final held = _written[(row.id, field.id)] ?? cell.files;
+      if (index >= held.length) return;
+      final files = [...held]..removeAt(index);
+      _write(
+        row,
+        field,
+        files.isEmpty
+            ? _cell(BridgeCellKind.empty)
+            : BridgeCell(
+                kind: BridgeCellKind.files,
+                number: 0,
+                checked: false,
+                files: files,
+              ),
+      );
+    }
+  }
+
+  /// ⌘V on a selected file cell adds copied files, or a copied image.
+  Future<void> _pasteFiles(String row, String field) async {
+    final Pasted pasted;
+    try {
+      pasted = await readClipboard();
+    } on Object catch (error) {
+      report('Liquid could not read the clipboard: $error');
+      return;
+    }
+    final sources = [
+      ...await sourcesOfPaths(pasted.files, report),
+      if (pasted.files.isEmpty && pasted.image != null)
+        MediaSource.bytes('Pasted image.png', pasted.image!),
+    ];
+    await _queue(row, field, sources);
+  }
+
+  /// The selected select, date or file cell's field while its picker is open.
   BridgeField? get picked => picking ? _target?.$2 : null;
 
   /// Opens the selected cell's picker with what is typed; a date cell's starts with its
@@ -417,7 +593,13 @@ class CellSelection extends ChangeNotifier {
     String? text,
     double number = 0,
     bool checked = false,
-  }) => BridgeCell(kind: kind, text: text, number: number, checked: checked);
+  }) => BridgeCell(
+    kind: kind,
+    text: text,
+    number: number,
+    checked: checked,
+    files: const [],
+  );
 
   void _toggle(BridgeRow row, BridgeField field, BridgeCell? cell) {
     final at = (row.id, field.id);
@@ -432,18 +614,29 @@ class CellSelection extends ChangeNotifier {
     );
   }
 
-  void _write(BridgeRow row, BridgeField field, BridgeCell cell) =>
-      write(row, field, cell).then<void>((_) {}, onError: (Object _) {});
+  /// Writes a cell; any other write to a file cell supersedes the list an add wrote.
+  void _write(BridgeRow row, BridgeField field, BridgeCell cell) {
+    _written.remove((row.id, field.id));
+    write(row, field, cell).then<void>((_) {}, onError: (Object _) {});
+  }
 
-  /// Forgets the ticks a read now shows, looking only at the rows read.
-  void read(int? Function(String row) rowIndex) =>
-      _ticks.removeWhere((at, checked) {
-        final index = rowIndex(at.$1);
-        final row = index == null ? null : rowAt(index);
-        if (row == null) return false;
-        final cell = row.cells.where((cell) => cell.field == at.$2).firstOrNull;
-        return (cell?.value.checked ?? false) == checked;
-      });
+  /// Forgets the ticks and file lists a read now shows, looking only at the rows read.
+  void read(int? Function(String row) rowIndex) {
+    BridgeCell? shown((String, String) at) {
+      final index = rowIndex(at.$1);
+      final row = index == null ? null : rowAt(index);
+      return row?.cells.where((cell) => cell.field == at.$2).firstOrNull?.value;
+    }
+
+    _ticks.removeWhere((at, checked) {
+      final index = rowIndex(at.$1);
+      if (index == null || rowAt(index) == null) return false;
+      return (shown(at)?.checked ?? false) == checked;
+    });
+    _written.removeWhere(
+      (at, files) => _sameFiles(shown(at)?.files ?? const [], files),
+    );
+  }
 
   /// ⏎ keeps the edit and selects the cell, ⇥ keeps it and selects the next one, esc
   /// undoes it; the rest is typing.
@@ -524,6 +717,10 @@ class CellSelection extends ChangeNotifier {
       case LogicalKeyboardKey.space when field.kind == BridgeFieldKind.checkbox:
         // A held Space ticks once.
         if (event is! KeyRepeatEvent) _toggle(row, field, cell);
+      case LogicalKeyboardKey.keyV
+          when field.kind == BridgeFieldKind.file && isPaste(event):
+        // A held ⌘V pastes once.
+        if (event is! KeyRepeatEvent) unawaited(_pasteFiles(row.id, field.id));
       case LogicalKeyboardKey.backspace || LogicalKeyboardKey.delete:
         if (cell != null && cell.kind != BridgeCellKind.empty) {
           _write(row, field, _cell(BridgeCellKind.empty));
@@ -648,6 +845,23 @@ class _PickedCellState extends State<PickedCell> {
     final field = cells.picked;
     if (field == null) return widget.child;
     final date = field.kind == BridgeFieldKind.date;
+    if (field.kind == BridgeFieldKind.file) {
+      final files = cells.pickedFiles;
+      return AnchoredMenu(
+        height: FilesPicker.heightFor(files.length),
+        onTapOutside: (_) => cells.leavePick(),
+        menu: (context) => FilesPicker(
+          files: cells.pickedFiles,
+          onSave: (file) => unawaited(cells.save(file)),
+          onRemove: cells.removeFile,
+          onAdd: () => unawaited(cells.addPickedFiles()),
+          onClose: cells.closePick,
+          onTab: cells.tabFromPick,
+          onKeys: (keys) => cells.pickKeys = keys,
+        ),
+        child: widget.child,
+      );
+    }
     return AnchoredMenu(
       height: date
           ? DatePicker.height

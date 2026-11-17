@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../rust/api/database.dart';
 import '../rust/api/replica.dart';
+import '../rust/api/whiteboard.dart';
 import '../rust/api/workspace.dart';
 import 'follow.dart';
 
@@ -32,6 +33,8 @@ BridgeMutation mutation(
   BridgeCell? cell,
   String? mediaType,
   String? attachment,
+  BridgeWhiteboardStyle? whiteboardStyle,
+  BridgeWhiteboardEdit? whiteboard,
 }) => BridgeMutation(
   kind: kind,
   area: area,
@@ -53,6 +56,8 @@ BridgeMutation mutation(
   cell: cell,
   mediaType: mediaType,
   attachment: attachment,
+  whiteboardStyle: whiteboardStyle,
+  whiteboard: whiteboard,
 );
 
 /// A query with the parts its kind does not use left out.

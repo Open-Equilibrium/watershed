@@ -7,12 +7,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{ActorId, AutoCommit, ObjType, ROOT, ReadDoc};
 
-use crate::database;
 use crate::history::Header;
 use crate::id::random_bytes;
 use crate::model::{
-    self, AREAS, ATTACHMENT, BLOCK, BLOCKS, BOUNDARY, KIND, LANGUAGE, NAME, OWNER, PAGES, PARENT,
-    SIZE, SORT, STYLE, TEXT, TITLE, TYPE, VIEWS,
+    self, AREAS, BLOCK, BLOCKS, BOUNDARY, KIND, LANGUAGE, NAME, OWNER, PAGES, PARENT, SORT, STYLE,
+    TEXT, TITLE, VIEWS,
 };
 use crate::order::Order;
 use crate::store::{Commit, Store, Write};
@@ -22,6 +21,7 @@ use crate::{
     Origin, PageEntry, PageId, Permission, PersonId, Place, Request, RowId, TextStyle, View,
     ViewId,
 };
+use crate::{database, whiteboard};
 
 /// A document is stored again as one snapshot once it has this many chunks, so loading it
 /// never replays more changes than that.
@@ -212,6 +212,16 @@ impl<S: Store> Workspace<S> {
         ))
     }
 
+    /// A live Whiteboard's style and elements, bottom to top, from the document of its home
+    /// `page`; none if `block` is no live Whiteboard.
+    pub fn whiteboard(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+    ) -> Result<Option<whiteboard::Whiteboard>, Error> {
+        whiteboard::read(self.doc(&Document::Page(page.clone()))?, block)
+    }
+
     /// A live Database Block's name and fields, from the document of its home `page`; none
     /// if `block` is no live Database Block.
     pub fn database(
@@ -362,6 +372,26 @@ impl<S: Store> Workspace<S> {
                 media_type,
                 attachment,
             } => self.write_add_media_block(page, after.as_ref(), name, media_type, attachment),
+            Mutation::AddWhiteboardBlock { page, after } => {
+                self.write_add_whiteboard_block(page, after.as_ref())
+            }
+            Mutation::SetWhiteboardStyle { page, block, style } => {
+                let doc = self.doc(&Document::Page(page.clone()))?;
+                whiteboard::set_style(doc, block, *style)?;
+                Ok(block_changed(page, block, None))
+            }
+            Mutation::EditWhiteboard {
+                page,
+                block,
+                add,
+                change,
+                remove,
+            } => {
+                let doc = self.doc(&Document::Page(page.clone()))?;
+                let ids = whiteboard::edit(doc, block, add, change, remove)?;
+                let created = (!ids.is_empty()).then_some(Created::Elements(ids));
+                Ok(block_changed(page, block, created))
+            }
             Mutation::AddDatabaseBlock { page, after, name } => {
                 self.write_add_database_block(page, after.as_ref(), name)
             }
@@ -673,20 +703,31 @@ impl<S: Store> Workspace<S> {
             .ok_or(Error::NotFound)?;
         let (doc, order) = self.page(page)?;
         let block = BlockId::new()?;
-        let entry = model::insert(
-            doc,
-            BLOCKS,
-            block.as_str(),
-            &[
-                (KIND, "media"),
-                (NAME, name),
-                (TYPE, media_type),
-                (ATTACHMENT, attachment.as_str()),
-            ],
-        )?;
-        doc.put(&entry, SIZE, size)?;
+        let entry = model::insert(doc, BLOCKS, block.as_str(), &[(KIND, "media")])?;
+        let file = Media {
+            name: name.into(),
+            media_type: media_type.into(),
+            attachment: attachment.clone(),
+            size,
+        };
+        model::put_file(doc, &entry, &file)?;
         let sort = order.key_after(after)?;
         let view = add_view(doc, order, sort, &block, BlockKind::Media)?;
+        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+        written.created = Some(Created::Block { block, view });
+        Ok(written)
+    }
+
+    fn write_add_whiteboard_block(
+        &mut self,
+        page: &PageId,
+        after: Option<&ViewId>,
+    ) -> Result<Written, Error> {
+        let (doc, order) = self.page(page)?;
+        let block = BlockId::new()?;
+        whiteboard::create(doc, &block)?;
+        let sort = order.key_after(after)?;
+        let view = add_view(doc, order, sort, &block, BlockKind::Whiteboard)?;
         let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
         written.created = Some(Created::Block { block, view });
         Ok(written)
@@ -715,7 +756,7 @@ impl<S: Store> Workspace<S> {
         name: &str,
     ) -> Result<Written, Error> {
         database::rename(self.doc(&Document::Page(page.clone()))?, block, name)?;
-        Ok(database_changed(page, block, None))
+        Ok(block_changed(page, block, None))
     }
 
     fn write_add_field(
@@ -728,7 +769,7 @@ impl<S: Store> Workspace<S> {
     ) -> Result<Written, Error> {
         let doc = self.doc(&Document::Page(page.clone()))?;
         let field = database::add_field(doc, block, place.as_ref(), name, kind)?;
-        Ok(database_changed(page, block, Some(Created::Field(field))))
+        Ok(block_changed(page, block, Some(Created::Field(field))))
     }
 
     fn write_rename_field(
@@ -739,7 +780,7 @@ impl<S: Store> Workspace<S> {
         name: &str,
     ) -> Result<Written, Error> {
         database::rename_field(self.doc(&Document::Page(page.clone()))?, block, field, name)?;
-        Ok(database_changed(page, block, None))
+        Ok(block_changed(page, block, None))
     }
 
     fn write_remove_field(
@@ -749,7 +790,7 @@ impl<S: Store> Workspace<S> {
         field: &FieldId,
     ) -> Result<Written, Error> {
         database::remove_field(self.doc(&Document::Page(page.clone()))?, block, field)?;
-        Ok(database_changed(page, block, None))
+        Ok(block_changed(page, block, None))
     }
 
     fn write_add_option(
@@ -762,7 +803,7 @@ impl<S: Store> Workspace<S> {
     ) -> Result<Written, Error> {
         let doc = self.doc(&Document::Page(page.clone()))?;
         let option = database::add_option(doc, block, field, name, color)?;
-        Ok(database_changed(page, block, Some(Created::Option(option))))
+        Ok(block_changed(page, block, Some(Created::Option(option))))
     }
 
     fn write_add_row(
@@ -773,7 +814,7 @@ impl<S: Store> Workspace<S> {
     ) -> Result<Written, Error> {
         let (doc, index) = self.database_index(page, block)?;
         let row = database::add_row(doc, index, block, place.as_ref())?;
-        Ok(database_changed(page, block, Some(Created::Row(row))))
+        Ok(block_changed(page, block, Some(Created::Row(row))))
     }
 
     fn write_remove_row(
@@ -784,7 +825,7 @@ impl<S: Store> Workspace<S> {
     ) -> Result<Written, Error> {
         let (doc, index) = self.database_index(page, block)?;
         database::remove_row(doc, index, block, row)?;
-        Ok(database_changed(page, block, None))
+        Ok(block_changed(page, block, None))
     }
 
     fn write_set_cell(
@@ -795,9 +836,29 @@ impl<S: Store> Workspace<S> {
         field: &FieldId,
         value: &Cell,
     ) -> Result<Written, Error> {
+        // A file names a finished attachment, whose size the store, not the request, tells.
+        let sized;
+        let value = match value {
+            Cell::Files(files) => {
+                let mut checked = Vec::with_capacity(files.len().min(crate::MAX_FILES + 1));
+                for file in files.iter().take(crate::MAX_FILES + 1) {
+                    let size = self
+                        .store
+                        .attachment_size(&file.attachment)?
+                        .ok_or(Error::NotFound)?;
+                    checked.push(Media {
+                        size,
+                        ..file.clone()
+                    });
+                }
+                sized = Cell::Files(checked);
+                &sized
+            }
+            value => value,
+        };
         let (doc, index) = self.database_index(page, block)?;
         database::set_cell(doc, index, block, row, field, value)?;
-        Ok(database_changed(page, block, None))
+        Ok(block_changed(page, block, None))
     }
 
     fn write_remove_view(&mut self, page: &PageId, view: &ViewId) -> Result<Written, Error> {
@@ -904,8 +965,8 @@ fn add_text_block(
     Ok((block, view))
 }
 
-/// What a write to a Database Block changed: only that Block.
-fn database_changed(page: &PageId, block: &BlockId, created: Option<Created>) -> Written {
+/// What a write inside one Block, such as a Database or a Whiteboard, changed: only that Block.
+fn block_changed(page: &PageId, block: &BlockId, created: Option<Created>) -> Written {
     let mut written = Written::new(
         Document::Page(page.clone()),
         Changed::Block(page.clone(), block.clone()),

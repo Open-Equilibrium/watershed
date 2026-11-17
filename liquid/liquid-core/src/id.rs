@@ -70,6 +70,8 @@ ids! {
     RowId,
     /// One option of a select field.
     OptionId,
+    /// One stroke, shape or text of a Whiteboard Block.
+    ElementId,
 }
 
 /// A person, as the account that signs in names them.

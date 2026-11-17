@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -212,6 +211,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
     if (choice.block == BridgeBlockKind.code) return _turnIntoCode();
     if (choice.block == BridgeBlockKind.media) return _addMedia(_pickFiles);
+    if (choice.block == BridgeBlockKind.whiteboard) return _addWhiteboard();
     final views = widget.views;
     final view = widget.view;
     final last = widget.index == (views.count ?? 0) - 1;
@@ -603,12 +603,76 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       }
       after = above?.id;
     }
-    await addMedia(
+    final first = await addMedia(
       views,
       added,
       after: after,
       replacing: empty && !last ? view : null,
     );
+    if (empty && first != null) await _handOverSection(first, last: last);
+  }
+
+  /// A Block that took this empty line's place starts the Section the line started; a
+  /// line that ends the Page stays below it and starts none (as a Table does).
+  Future<void> _handOverSection(String added, {required bool last}) async {
+    final view = widget.view;
+    if (!view.boundary) return;
+    Future<void> boundary(String at, bool starts) => widget.views.write(
+      mutation(
+        BridgeMutationKind.setSectionBoundary,
+        page: _page,
+        view: at,
+        boundary: starts,
+      ),
+      const [],
+    );
+    try {
+      await boundary(added, true);
+      if (last) await boundary(view.id, false);
+    } on Object {
+      // Shown on the Page.
+    }
+  }
+
+  /// Adds a focused Whiteboard in place of this empty line, or below the line; a line that
+  /// ends the Page stays below it, so the Page goes on.
+  Future<void> _addWhiteboard() async {
+    final views = widget.views;
+    final view = widget.view;
+    final index = widget.index;
+    final empty = _text.text.isEmpty;
+    final last = index == (views.count ?? 0) - 1;
+    String? after = view.id;
+    if (empty && last) {
+      final above = index > 0 ? await views.viewAt(index - 1) : null;
+      if (index > 0 && above == null) {
+        _state.report(
+          'Liquid did not add the Whiteboard, as the Page changed; choose Whiteboard again.',
+        );
+        return;
+      }
+      after = above?.id;
+    }
+    try {
+      final added = await views.write(
+        mutation(
+          BridgeMutationKind.addWhiteboardBlock,
+          page: _page,
+          after: after,
+        ),
+        const [],
+      );
+      views.focusBoard.value = added.view;
+      if (empty) await _handOverSection(added.view!, last: last);
+      if (empty && !last) {
+        await views.write(
+          mutation(BridgeMutationKind.removeView, page: _page, view: view.id),
+          [view.block],
+        );
+      }
+    } on Object {
+      // The problem shows on the Page.
+    }
   }
 
   /// Pastes what the clipboard holds: copied files and images as Media Blocks, code an
@@ -624,23 +688,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
     if (!mounted) return;
     if (pasted.files.isNotEmpty) {
-      return _addMedia(() async {
-        final sources = <MediaSource>[];
-        for (final path in pasted.files) {
-          try {
-            sources.add(
-              MediaSource.file(
-                path.split(Platform.pathSeparator).last,
-                path,
-                await MediaPlatform.fileSize(path),
-              ),
-            );
-          } on Object catch (error) {
-            _state.report('Liquid could not read “$path”: $error');
-          }
-        }
-        return sources;
-      });
+      return _addMedia(() => sourcesAt(_state, pasted.files));
     }
     if (pasted.image case final image?) {
       return _addMedia(
@@ -744,16 +792,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     );
   }
 
-  /// Whether `event` is ⌘V, which Liquid's own paste takes (ADR-0305).
-  bool _pastes(KeyEvent event) {
-    final keys = HardwareKeyboard.instance;
-    return event.logicalKey == LogicalKeyboardKey.keyV &&
-        keys.isMetaPressed &&
-        !keys.isShiftPressed &&
-        !keys.isControlPressed &&
-        !keys.isAltPressed;
-  }
-
   KeyEventResult _key(KeyEvent event) {
     if (event is KeyUpEvent || _composing || _stored == null) {
       return KeyEventResult.ignored;
@@ -768,7 +806,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         !keys.isControlPressed &&
         !keys.isAltPressed &&
         !keys.logicalKeysPressed.contains(liquidKey);
-    if (_pastes(event) &&
+    if (isPaste(event) &&
         !_editor.isSource(this) &&
         !_adding &&
         !_menu.isShowing) {

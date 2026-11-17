@@ -14,6 +14,7 @@ use liquid_storage::Sqlite;
 
 use super::database::{BridgeDatabase, BridgeRow, row_query};
 use super::media::BridgeMedia;
+use super::whiteboard::BridgeWhiteboard;
 use super::workspace::{
     BridgeAnswer, BridgeApplied, BridgeArea, BridgeBlockKind, BridgeChange, BridgeMutation,
     BridgePage, BridgeQuery, BridgeQueryKind, BridgeResource, BridgeTextStyle, BridgeView, id,
@@ -163,6 +164,9 @@ impl LiquidWorkspace {
             | Mutation::TurnIntoText { page, .. }
             | Mutation::SetCodeLanguage { page, .. }
             | Mutation::AddMediaBlock { page, .. }
+            | Mutation::AddWhiteboardBlock { page, .. }
+            | Mutation::SetWhiteboardStyle { page, .. }
+            | Mutation::EditWhiteboard { page, .. }
             | Mutation::AddDatabaseBlock { page, .. }
             | Mutation::RenameDatabase { page, .. }
             | Mutation::AddField { page, .. }
@@ -208,6 +212,7 @@ impl LiquidWorkspace {
             field: None,
             row: None,
             option: None,
+            elements: Vec::new(),
         };
         match applied.created {
             Some(Created::Area(area)) => answer.area = Some(area.to_string()),
@@ -219,6 +224,9 @@ impl LiquidWorkspace {
             Some(Created::Field(field)) => answer.field = Some(field.to_string()),
             Some(Created::Row(row)) => answer.row = Some(row.to_string()),
             Some(Created::Option(option)) => answer.option = Some(option.to_string()),
+            Some(Created::Elements(elements)) => {
+                answer.elements = elements.iter().map(ToString::to_string).collect();
+            }
             None => {}
         }
         Ok(answer)
@@ -252,6 +260,7 @@ impl LiquidWorkspace {
             style: None,
             language: None,
             media: None,
+            whiteboard: None,
             database: None,
             rows: Vec::new(),
         };
@@ -302,6 +311,7 @@ impl LiquidWorkspace {
                             BlockKind::Database => BridgeBlockKind::Database,
                             BlockKind::Code => BridgeBlockKind::Code,
                             BlockKind::Media => BridgeBlockKind::Media,
+                            BlockKind::Whiteboard => BridgeBlockKind::Whiteboard,
                             BlockKind::Unknown => BridgeBlockKind::Unknown,
                         },
                     })
@@ -334,6 +344,15 @@ impl LiquidWorkspace {
                     .media(&page, &block)
                     .map_err(message)?
                     .map(BridgeMedia::of);
+            }
+            BridgeQueryKind::Whiteboard => {
+                let page = id(&query.page, PageId::parse, "page")?;
+                *read = Some(page.clone());
+                let block = id(&query.block, BlockId::parse, "block")?;
+                answer.whiteboard = workspace
+                    .whiteboard(&page, &block)
+                    .map_err(message)?
+                    .map(BridgeWhiteboard::of);
             }
             BridgeQueryKind::Database => {
                 let page = id(&query.page, PageId::parse, "page")?;

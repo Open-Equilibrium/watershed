@@ -20,6 +20,7 @@ fn cell(kind: BridgeCellKind) -> BridgeCell {
         text: None,
         number: 0.0,
         checked: false,
+        files: Vec::new(),
     }
 }
 
@@ -366,7 +367,10 @@ fn a_database_write_reaches_its_block_s_subscribers_and_then_leaves_memory() {
     expenses.set(&rent, &expenses.name, text("Flat")).unwrap();
     assert!(!expenses.workspace.is_loaded(&page), "after a write");
     let refused = expenses.set(&rent, &expenses.name, number(1.0));
-    assert_eq!(refused.unwrap_err(), "the value is not of its field's kind");
+    assert_eq!(
+        refused.unwrap_err(),
+        "the value is not of its kind or not valid"
+    );
     assert!(
         !expenses.workspace.is_loaded(&page),
         "after a refused write"

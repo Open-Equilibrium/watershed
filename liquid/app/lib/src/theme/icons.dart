@@ -82,4 +82,19 @@ abstract final class LucideIcons {
   static const copy = IconData(0xe09e, fontFamily: _family);
   static const image = IconData(0xe0f6, fontFamily: _family);
   static const download = IconData(0xe0b2, fontFamily: _family);
+  static const paperclip = IconData(0xe12d, fontFamily: _family);
+  static const lasso = IconData(0xe1ce, fontFamily: _family);
+  static const pen = IconData(0xe12f, fontFamily: _family);
+  static const eraser = IconData(0xe28f, fontFamily: _family);
+  static const shapes = IconData(0xe4b3, fontFamily: _family);
+  static const type = IconData(0xe198, fontFamily: _family);
+  static const maximize2 = IconData(0xe113, fontFamily: _family);
+  static const minimize2 = IconData(0xe11b, fontFamily: _family);
+  static const minus = IconData(0xe11c, fontFamily: _family);
+  static const circle = IconData(0xe076, fontFamily: _family);
+  static const slash = IconData(0xe51d, fontFamily: _family);
+  static const moveUpRight = IconData(0xe493, fontFamily: _family);
+  static const triangle = IconData(0xe192, fontFamily: _family);
+  static const lineSquiggle = IconData(0xe67a, fontFamily: _family);
+  static const presentation = IconData(0xe4ae, fontFamily: _family);
 }

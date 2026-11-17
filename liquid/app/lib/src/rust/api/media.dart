@@ -7,10 +7,10 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `add_file_with`, `attachment`, `begin`, `bytes`, `discard`, `each_part`, `fill`, `of`, `size`
+// These functions are ignored because they are not marked as `pub`: `add_file_with`, `attachment`, `begin`, `bytes`, `discard`, `each_part`, `fill`, `of`, `size`, `to_core`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`
 
-/// A Media Block's file and attachment.
+/// A named file: a Media Block's, or one of a file cell's.
 class BridgeMedia {
   /// The file's name.
   final String name;

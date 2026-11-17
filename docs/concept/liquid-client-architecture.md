@@ -36,7 +36,7 @@ flowchart TD
 5. Pages build only Views that intersect the viewport plus a bounded cache extent; Arrange mode virtualizes grid rows the same way. Measured View heights persist in a device-local cache outside synced layout and History, so scroll position stays stable when off-screen Views rebuild; that cache is not yet built.
 6. Each Block View subscribes only to its own Block's stream and is its own repaint boundary. Editing Block A never rebuilds the Page or the Explorer and never repaints another Block; the Page subscribes only to View order and layout.
 7. Text input, selection and IME composition live in the focused Block's controller and render in the next frame without awaiting the bridge; the resulting mutation crosses the pipeline asynchronously. Input that arrives while ⏎, ⌫ or the first character on an empty Page changes the Page's structure goes into one ordered queue per Page and replays into the Text Block holding the caret once the core answered, so no key is lost; quitting waits for that queue. While a Block chosen with a slash command takes a line's place, the line keeps what is typed as that Block's name and ignores ⏎, the arrows and ⌫ at its start until the Block takes the caret (ADR-0240). A Table's written cell values show once read back, within milliseconds (ADR-0248). Edit controls are enabled only where the effective permission already allows the write, and a later pipeline rejection reverts the local edit visibly.
-8. Whiteboard, wide Database and complex App Views use their own tile or viewport slicing.
+8. Whiteboard, wide Database and complex App Views use their own tile or viewport slicing; a Whiteboard draws only the elements in view and outlines each stroke once (ADR-0306).
 
 ### Durability and sync
 

@@ -42,6 +42,16 @@ Future<Pasted> Function() readClipboard = () async {
   return Pasted(text: (await Clipboard.getData(Clipboard.kTextPlain))?.text);
 };
 
+/// Whether `event` is ⌘V, which Liquid's own paste takes (ADR-0305).
+bool isPaste(KeyEvent event) {
+  final keys = HardwareKeyboard.instance;
+  return event.logicalKey == LogicalKeyboardKey.keyV &&
+      keys.isMetaPressed &&
+      !keys.isShiftPressed &&
+      !keys.isControlPressed &&
+      !keys.isAltPressed;
+}
+
 /// What the native reader's answer holds: `files`, `image` (PNG), `vscode` (the editor data
 /// VS Code and its forks put beside copied code), `html` and `text`.
 Pasted pastedFrom(Map<String, Object?> read) {

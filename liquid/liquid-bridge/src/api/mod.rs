@@ -10,4 +10,5 @@ pub(crate) mod record;
 pub mod replica;
 pub mod session;
 pub mod thread;
+pub mod whiteboard;
 pub mod workspace;

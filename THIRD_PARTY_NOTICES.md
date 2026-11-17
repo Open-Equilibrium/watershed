@@ -18,6 +18,21 @@ Watershed-authored files remain licensed under `AGPL-3.0-only` unless otherwise 
 - Copyright notice: `Copyright (c) 2026 Lucide Icons and Contributors`; `Copyright (c) 2013-present Cole Bemis`.
 - Upstream/source: `lucide-icons/lucide`.
 
+## Excalifont
+
+- Purpose: the hand-drawn typeface of Liquid's Whiteboard Blocks (ADR-0306); the 2024 release's `Excalifont-Regular.woff2`, converted to TrueType unchanged.
+- License: SIL Open Font License 1.1, with no Reserved Font Name.
+- License text is bundled with the vendored material in `liquid/app/assets/fonts/LICENSE-excalifont` and shipped as an app asset.
+- Copyright notice: `Copyright (c) 2024 by Excalidraw`.
+- Upstream/source: `plus.excalidraw.com/excalifont`.
+
+## rough.js
+
+- Purpose: the hand-drawn lines of Liquid's Whiteboard Blocks, ported to Dart in `liquid/app/lib/src/whiteboard/rough.dart` (ADR-0306).
+- License: MIT; the notice is kept at the top of the ported file.
+- Copyright notice: `Copyright (c) 2019 Preet Shihn`.
+- Upstream/source: `rough-stuff/rough` 4.6.6.
+
 ## T3 Code
 
 - Purpose: the pinned agent server that the Meta-Harness bundle carries and its service runs (ADR-0281, ADR-0296); its release archive is shipped unchanged.

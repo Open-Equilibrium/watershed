@@ -117,6 +117,8 @@ pub(super) fn mutation(kind: BridgeMutationKind) -> BridgeMutation {
         cell: None,
         media_type: None,
         attachment: None,
+        whiteboard_style: None,
+        whiteboard: None,
     }
 }
 

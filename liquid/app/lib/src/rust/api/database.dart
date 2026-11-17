@@ -4,6 +4,7 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../frb_generated.dart';
+import 'media.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
@@ -24,16 +25,24 @@ class BridgeCell {
   /// Whether a checkbox is ticked.
   final bool checked;
 
+  /// Files in their order; the core reads each one's size from its attachment.
+  final List<BridgeMedia> files;
+
   const BridgeCell({
     required this.kind,
     this.text,
     required this.number,
     required this.checked,
+    required this.files,
   });
 
   @override
   int get hashCode =>
-      kind.hashCode ^ text.hashCode ^ number.hashCode ^ checked.hashCode;
+      kind.hashCode ^
+      text.hashCode ^
+      number.hashCode ^
+      checked.hashCode ^
+      files.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -43,7 +52,8 @@ class BridgeCell {
           kind == other.kind &&
           text == other.text &&
           number == other.number &&
-          checked == other.checked;
+          checked == other.checked &&
+          files == other.files;
 }
 
 /// What a [`BridgeCell`] holds; each kind names the part it fills.
@@ -65,6 +75,9 @@ enum BridgeCellKind {
 
   /// `checked`.
   checkbox,
+
+  /// `files`.
+  files,
 }
 
 /// A Database Block's name and fields.
@@ -163,6 +176,9 @@ enum BridgeFieldKind {
 
   /// Ticked or not.
   checkbox,
+
+  /// Files, each a finished attachment.
+  file,
 }
 
 /// Keeping a row window's rows whose cell of `field` matches.

@@ -197,9 +197,11 @@ impl Store for Sqlite {
     }
 
     fn put_part(&mut self, upload: &str, index: u64, bytes: &[u8]) -> Result<(), Error> {
+        // SQLite keeps i64; a larger index would wrap into a negative one.
+        let index = i64::try_from(index).map_err(failed)?;
         self.connection
             .prepare_cached("INSERT INTO parts (upload, idx, bytes) VALUES (?1, ?2, ?3)")
-            .and_then(|mut insert| insert.execute(params![upload, index as i64, bytes]))
+            .and_then(|mut insert| insert.execute(params![upload, index, bytes]))
             .map_err(failed)?;
         Ok(())
     }
@@ -213,14 +215,17 @@ impl Store for Sqlite {
     ) -> Result<(), Error> {
         let size = i64::try_from(size).map_err(failed)?;
         let transaction = self.connection.transaction().map_err(failed)?;
-        let kept: i64 = transaction
+        // Parts run from 0 without a gap: the lowest index 0 and the highest one less
+        // than their count.
+        let (kept, first, last): (i64, Option<i64>, Option<i64>) = transaction
             .query_row(
-                "SELECT count(*) FROM parts WHERE upload = ?1",
+                "SELECT count(*), min(idx), max(idx) FROM parts WHERE upload = ?1",
                 [upload],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .map_err(failed)?;
-        if kept as u64 != parts {
+        let gapless = kept == 0 || (first == Some(0) && last == Some(kept - 1));
+        if kept as u64 != parts || !gapless {
             return Err(Error::Storage(format!(
                 "the upload has {kept} of its {parts} parts"
             )));
@@ -246,7 +251,12 @@ impl Store for Sqlite {
 
     fn discard_upload(&mut self, upload: &str) -> Result<(), Error> {
         self.connection
-            .execute("DELETE FROM parts WHERE upload = ?1", [upload])
+            .execute(
+                // A finished attachment's parts stay whatever is asked.
+                "DELETE FROM parts WHERE upload = ?1 \
+                 AND NOT EXISTS (SELECT 1 FROM attachments WHERE upload = ?1)",
+                [upload],
+            )
             .map_err(failed)?;
         Ok(())
     }
@@ -329,6 +339,18 @@ mod tests {
         assert_eq!(parts(&store), 2, "the second copy's parts are dropped");
         store.finish_upload("first", &id, 6, 2).unwrap();
         assert_eq!(parts(&store), 2, "finishing again keeps the kept parts");
+        store.discard_upload("first").unwrap();
+        assert_eq!(parts(&store), 2, "a finished attachment's parts stay");
+        store.put_part("gap", 0, b"a").unwrap();
+        store.put_part("gap", 2, b"c").unwrap();
+        let other = AttachmentId::parse(&"b".repeat(64)).unwrap();
+        assert!(
+            store.finish_upload("gap", &other, 2, 2).is_err(),
+            "parts must run from 0 without a gap"
+        );
+        store.discard_upload("gap").unwrap();
+        // An index past i64 is refused, so it never wraps into a negative one.
+        assert!(store.put_part("wrap", u64::MAX, b"z").is_err());
         store.put_part("unfinished", 0, b"castle").unwrap();
         store.put_part("discarded", 0, b"river").unwrap();
         store.discard_upload("discarded").unwrap();

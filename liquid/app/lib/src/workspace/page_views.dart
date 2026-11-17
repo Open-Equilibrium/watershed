@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 
 import '../rust/api/workspace.dart';
+import '../whiteboard/board_controller.dart';
 import 'follow.dart';
 import 'media_block.dart';
 import 'page_editor.dart';
@@ -80,6 +81,38 @@ class PageViews extends ChangeNotifier {
   /// What a line that a Table took the place of holds, by the Table's View: its name,
   /// read when the Table takes the caret, and whether it was written already.
   final naming = <String, (String, bool) Function()>{};
+
+  /// Each Whiteboard's board, shared by the Block and its full-screen view, with how many
+  /// of them use it; the last to go releases it, its subscription and caches with it.
+  final _boards = <String, (BoardController, int)>{};
+
+  BoardController boardFor(BridgeView view) {
+    final (board, users) = _boards[view.id] ?? (BoardController(this, view), 0);
+    _boards[view.id] = (board, users + 1);
+    return board;
+  }
+
+  void releaseBoard(BridgeView view) {
+    final held = _boards[view.id];
+    if (held == null) return;
+    final (board, users) = held;
+    if (users > 1) {
+      _boards[view.id] = (board, users - 1);
+    } else {
+      _boards.remove(view.id);
+      board.dispose();
+    }
+  }
+
+  /// The Whiteboard shown full screen over the Page, if any.
+  final fullBoard = ValueNotifier<BridgeView?>(null);
+
+  /// The View of a new Whiteboard, which takes the focus once built.
+  final focusBoard = ValueNotifier<String?>(null);
+
+  /// The Blocks that take dropped files into a cell, by their View, as a Table's file
+  /// cells do.
+  final cellDrops = <String, CellDrop>{};
 
   /// Files going in, each shown after the View it follows until its Media Block is in.
   final uploads = ValueNotifier<List<PendingUpload>>(const []);
@@ -255,9 +288,23 @@ class PageViews extends ChangeNotifier {
     caret.dispose();
     styles.dispose();
     uploads.dispose();
+    for (final (board, _) in _boards.values) {
+      board.dispose();
+    }
+    fullBoard.dispose();
+    focusBoard.dispose();
     editor.lingering.dispose();
     ready.dispose();
     unawaited(_settled.close());
     super.dispose();
   }
+}
+
+/// A Block's cells that take dropped files, as a Table's file cells do: [hover] says
+/// whether one lies under the pointer, marking it, [leave] unmarks it, and [drop] adds the
+/// files to the cell there.
+abstract interface class CellDrop {
+  bool hover(Offset global);
+  void leave();
+  Future<void> drop(List<MediaSource> sources, Offset global);
 }

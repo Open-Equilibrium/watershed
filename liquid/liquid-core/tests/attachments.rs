@@ -4,8 +4,9 @@
 #![allow(clippy::unwrap_used)]
 
 use liquid_core::{
-    Actor, AreaId, BlockId, BlockKind, Created, Error, MAX_ATTACHMENT, Media, MemoryStore,
-    Mutation, Operation, Origin, PART, PageId, PersonId, Request, ViewId,
+    Actor, AreaId, BlockId, BlockKind, Cell, Created, Error, FieldKind, MAX_ATTACHMENT, MAX_FILES,
+    Match, Media, MemoryStore, Mutation, Operation, Origin, PART, PageId, PersonId, Place, Request,
+    RowQuery, ViewId,
 };
 
 type Workspace = liquid_core::Workspace<MemoryStore>;
@@ -292,4 +293,124 @@ fn an_attachment_is_named_by_its_sha_256_and_different_files_by_different_names(
     assert_ne!(a.id, b.id);
     assert_eq!(read_back(&mut workspace, &a), first);
     assert_eq!(read_back(&mut workspace, &b), second);
+}
+
+/// A file of a file cell, as the app names it before the core reads its size.
+fn file(name: &str, attachment: &liquid_core::Attachment) -> Media {
+    Media {
+        name: name.into(),
+        media_type: String::new(),
+        attachment: attachment.id.clone(),
+        size: 0,
+    }
+}
+
+#[test]
+fn a_file_cell_holds_files_of_finished_attachments() {
+    let (mut workspace, page, intro) = page();
+    let Some(Created::Block { block, .. }) = apply(
+        &mut workspace,
+        Mutation::AddDatabaseBlock {
+            page: page.clone(),
+            after: Some(intro),
+            name: "Bookings".into(),
+        },
+    )
+    .unwrap() else {
+        panic!("a Database Block")
+    };
+    let Some(Created::Field(files)) = apply(
+        &mut workspace,
+        Mutation::AddField {
+            page: page.clone(),
+            block: block.clone(),
+            place: Place::Last,
+            name: "Files".into(),
+            kind: FieldKind::File,
+        },
+    )
+    .unwrap() else {
+        panic!("a field")
+    };
+    let Some(Created::Row(row)) = apply(
+        &mut workspace,
+        Mutation::AddRow {
+            page: page.clone(),
+            block: block.clone(),
+            place: Place::Last,
+        },
+    )
+    .unwrap() else {
+        panic!("a row")
+    };
+    let set = |value: Cell| Mutation::SetCell {
+        page: page.clone(),
+        block: block.clone(),
+        row: row.clone(),
+        field: files.clone(),
+        value,
+    };
+    let booking = add(&mut workspace, b"booking");
+    let invoice = add(&mut workspace, &bytes(PART + 1));
+    let both = vec![
+        file("Hotel booking.eml", &booking),
+        file("Invoice.pdf", &invoice),
+    ];
+    apply(&mut workspace, set(Cell::Files(both))).unwrap();
+    workspace.close_page(&page);
+    let all = RowQuery {
+        sort: None,
+        filter: Some(liquid_core::Filter {
+            field: files.clone(),
+            matches: Match::NotEmpty,
+        }),
+        start: 0,
+        limit: 10,
+    };
+    let rows = workspace.rows(&page, &block, &all).unwrap().rows;
+    let Some(Cell::Files(read)) = rows[0].cell(&files) else {
+        panic!("files, stored")
+    };
+    assert_eq!(
+        read.iter()
+            .map(|file| (file.name.as_str(), &file.attachment, file.size))
+            .collect::<Vec<_>>(),
+        [
+            ("Hotel booking.eml", &booking.id, 7),
+            ("Invoice.pdf", &invoice.id, PART as u64 + 1)
+        ],
+        "in their order, each its attachment with the size the store keeps"
+    );
+
+    let mut missing = file("Lost.pdf", &booking);
+    missing.attachment = liquid_core::AttachmentId::parse(&"0".repeat(64)).unwrap();
+    assert_eq!(
+        apply(&mut workspace, set(Cell::Files(vec![missing]))),
+        Err(Error::NotFound),
+        "only finished attachments"
+    );
+    let many = vec![file("Same.eml", &booking); MAX_FILES + 1];
+    assert_eq!(
+        apply(&mut workspace, set(Cell::Files(many))),
+        Err(Error::TooMany)
+    );
+    assert_eq!(
+        apply(&mut workspace, set(Cell::Text("Invoice.pdf".into()))),
+        Err(Error::WrongKind)
+    );
+    apply(&mut workspace, set(Cell::Files(Vec::new()))).unwrap();
+    let rows = workspace.rows(&page, &block, &all).unwrap();
+    assert_eq!(rows.count, 0, "no files is an empty cell");
+    let no_files = RowQuery {
+        filter: Some(liquid_core::Filter {
+            field: files.clone(),
+            matches: Match::Is(Cell::Files(Vec::new())),
+        }),
+        ..all
+    };
+    assert_eq!(
+        workspace.rows(&page, &block, &no_files).unwrap().count,
+        1,
+        "and so it is as a filter's value"
+    );
 }

@@ -17,7 +17,7 @@ use crate::keys::random_hex;
 /// as a file.
 pub const MAX_SHOWN: i64 = 100 << 20;
 
-/// A Media Block's file and attachment.
+/// A named file: a Media Block's, or one of a file cell's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeMedia {
     /// The file's name.
@@ -31,6 +31,15 @@ pub struct BridgeMedia {
 }
 
 impl BridgeMedia {
+    pub(crate) fn to_core(&self) -> Result<Media, String> {
+        Ok(Media {
+            name: self.name.clone(),
+            media_type: self.media_type.clone(),
+            attachment: attachment(&self.attachment)?,
+            size: u64::try_from(self.size).unwrap_or(0),
+        })
+    }
+
     pub(crate) fn of(media: Media) -> Self {
         Self {
             name: media.name,

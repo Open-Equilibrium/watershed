@@ -27,21 +27,28 @@ mod mutation;
 mod order;
 mod sort_key;
 mod store;
+mod whiteboard;
 mod workspace;
 
 pub use attachment::{Attachment, AttachmentId, MAX_ATTACHMENT, Media, PART, Upload};
 pub use database::{
-    Database, Field, Filter, MAX_FIELDS, MAX_OPTIONS, Match, Row, RowQuery, Rows, SelectOption,
-    Sort,
+    Database, Field, Filter, MAX_FIELDS, MAX_FILES, MAX_OPTIONS, Match, Row, RowQuery, Rows,
+    SelectOption, Sort,
 };
 pub use history::{Action, Document, Operation, Permission};
-pub use id::{ActionId, AreaId, BlockId, FieldId, OptionId, PageId, PersonId, RowId, ViewId};
+pub use id::{
+    ActionId, AreaId, BlockId, ElementId, FieldId, OptionId, PageId, PersonId, RowId, ViewId,
+};
 pub use model::{Area, BlockKind, Code, PageEntry, View};
 pub use mutation::{
     Actor, Applied, Cell, Changed, Created, Error, FieldKind, Mutation, Origin, Place, Request,
     TextStyle,
 };
 pub use store::{Commit, MemoryStore, Store, Write};
+pub use whiteboard::{
+    Content, Element, ElementChange, Frame, InkColor, MAX_BOARD_POINTS, MAX_ELEMENT_TEXT,
+    MAX_ELEMENTS, MAX_POINTS, Pen, Shape, Whiteboard, WhiteboardStyle,
+};
 pub use workspace::Workspace;
 
 #[cfg(test)]

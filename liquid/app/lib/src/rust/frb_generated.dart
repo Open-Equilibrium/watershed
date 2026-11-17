@@ -12,6 +12,7 @@ import 'api/media.dart';
 import 'api/replica.dart';
 import 'api/session.dart';
 import 'api/thread.dart';
+import 'api/whiteboard.dart';
 import 'api/workspace.dart';
 
 import 'dart:async';
@@ -76,7 +77,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -1997105688;
+  int get rustContentHash => 521453942;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -506,6 +507,8 @@ abstract class RustLibApi extends BaseApi {
   });
 
   Future<BridgeUsage> crateApiEventsBridgeUsageDefault();
+
+  Future<BridgeWhiteboardEdit> crateApiWhiteboardBridgeWhiteboardEditDefault();
 
   Future<void> crateApiHostsForgetAgentHost({required String address});
 
@@ -3889,6 +3892,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "bridge_usage_default", argNames: []);
 
   @override
+  Future<BridgeWhiteboardEdit> crateApiWhiteboardBridgeWhiteboardEditDefault() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 89,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bridge_whiteboard_edit,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiWhiteboardBridgeWhiteboardEditDefaultConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiWhiteboardBridgeWhiteboardEditDefaultConstMeta =>
+      const TaskConstMeta(
+        debugName: "bridge_whiteboard_edit_default",
+        argNames: [],
+      );
+
+  @override
   Future<void> crateApiHostsForgetAgentHost({required String address}) {
     return handler.executeNormal(
       NormalTask(
@@ -3898,7 +3931,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 89,
+            funcId: 90,
             port: port_,
           );
         },
@@ -3933,7 +3966,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 90,
+            funcId: 91,
             port: port_,
           );
         },
@@ -3963,7 +3996,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 91,
+            funcId: 92,
             port: port_,
           );
         },
@@ -3996,7 +4029,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 92,
+            funcId: 93,
             port: port_,
           );
         },
@@ -4272,6 +4305,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  bool dco_decode_box_autoadd_bool(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as bool;
+  }
+
+  @protected
   BridgeApproval dco_decode_box_autoadd_bridge_approval(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_bridge_approval(raw);
@@ -4388,6 +4427,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeWhiteboard dco_decode_box_autoadd_bridge_whiteboard(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_whiteboard(raw);
+  }
+
+  @protected
+  BridgeWhiteboardEdit dco_decode_box_autoadd_bridge_whiteboard_edit(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_whiteboard_edit(raw);
+  }
+
+  @protected
+  BridgeWhiteboardStyle dco_decode_box_autoadd_bridge_whiteboard_style(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_whiteboard_style(raw);
+  }
+
+  @protected
   PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_i_64(raw);
@@ -4397,8 +4458,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeAnswer dco_decode_bridge_answer(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 10)
-      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
     return BridgeAnswer(
       areas: dco_decode_list_bridge_area(arr[0]),
       pages: dco_decode_list_bridge_page(arr[1]),
@@ -4408,8 +4469,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       style: dco_decode_opt_box_autoadd_bridge_text_style(arr[5]),
       language: dco_decode_opt_String(arr[6]),
       media: dco_decode_opt_box_autoadd_bridge_media(arr[7]),
-      database: dco_decode_opt_box_autoadd_bridge_database(arr[8]),
-      rows: dco_decode_list_bridge_row(arr[9]),
+      whiteboard: dco_decode_opt_box_autoadd_bridge_whiteboard(arr[8]),
+      database: dco_decode_opt_box_autoadd_bridge_database(arr[9]),
+      rows: dco_decode_list_bridge_row(arr[10]),
     );
   }
 
@@ -4417,8 +4479,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeApplied dco_decode_bridge_applied(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return BridgeApplied(
       action: dco_decode_String(arr[0]),
       area: dco_decode_opt_String(arr[1]),
@@ -4428,6 +4490,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       field: dco_decode_opt_String(arr[5]),
       row: dco_decode_opt_String(arr[6]),
       option: dco_decode_opt_String(arr[7]),
+      elements: dco_decode_list_String(arr[8]),
     );
   }
 
@@ -4513,13 +4576,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeCell dco_decode_bridge_cell(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return BridgeCell(
       kind: dco_decode_bridge_cell_kind(arr[0]),
       text: dco_decode_opt_String(arr[1]),
       number: dco_decode_f_64(arr[2]),
       checked: dco_decode_bool(arr[3]),
+      files: dco_decode_list_bridge_media(arr[4]),
     );
   }
 
@@ -4582,6 +4646,58 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       name: dco_decode_String(arr[0]),
       fields: dco_decode_list_bridge_field(arr[1]),
     );
+  }
+
+  @protected
+  BridgeElement dco_decode_bridge_element(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 16)
+      throw Exception('unexpected arr length: expect 16 but see ${arr.length}');
+    return BridgeElement(
+      id: dco_decode_opt_String(arr[0]),
+      kind: dco_decode_bridge_element_kind(arr[1]),
+      x: dco_decode_f_64(arr[2]),
+      y: dco_decode_f_64(arr[3]),
+      w: dco_decode_f_64(arr[4]),
+      h: dco_decode_f_64(arr[5]),
+      rotation: dco_decode_f_64(arr[6]),
+      color: dco_decode_bridge_ink_color(arr[7]),
+      width: dco_decode_i_64(arr[8]),
+      pen: dco_decode_bridge_pen(arr[9]),
+      points: dco_decode_list_prim_u_8_strict(arr[10]),
+      shape: dco_decode_bridge_shape(arr[11]),
+      seed: dco_decode_i_64(arr[12]),
+      arrowhead: dco_decode_bool(arr[13]),
+      corners: dco_decode_list_prim_f_64_strict(arr[14]),
+      text: dco_decode_String(arr[15]),
+    );
+  }
+
+  @protected
+  BridgeElementChange dco_decode_bridge_element_change(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
+    return BridgeElementChange(
+      id: dco_decode_String(arr[0]),
+      x: dco_decode_f_64(arr[1]),
+      y: dco_decode_f_64(arr[2]),
+      w: dco_decode_f_64(arr[3]),
+      h: dco_decode_f_64(arr[4]),
+      rotation: dco_decode_f_64(arr[5]),
+      color: dco_decode_bridge_ink_color(arr[6]),
+      width: dco_decode_i_64(arr[7]),
+      text: dco_decode_opt_String(arr[8]),
+      arrowhead: dco_decode_opt_box_autoadd_bool(arr[9]),
+    );
+  }
+
+  @protected
+  BridgeElementKind dco_decode_bridge_element_kind(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return BridgeElementKind.values[raw as int];
   }
 
   @protected
@@ -4720,6 +4836,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         arr[15],
       ),
     );
+  }
+
+  @protected
+  BridgeInkColor dco_decode_bridge_ink_color(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return BridgeInkColor.values[raw as int];
   }
 
   @protected
@@ -4890,8 +5012,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeMutation dco_decode_bridge_mutation(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 20)
-      throw Exception('unexpected arr length: expect 20 but see ${arr.length}');
+    if (arr.length != 22)
+      throw Exception('unexpected arr length: expect 22 but see ${arr.length}');
     return BridgeMutation(
       kind: dco_decode_bridge_mutation_kind(arr[0]),
       area: dco_decode_opt_String(arr[1]),
@@ -4913,6 +5035,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       cell: dco_decode_opt_box_autoadd_bridge_cell(arr[17]),
       mediaType: dco_decode_opt_String(arr[18]),
       attachment: dco_decode_opt_String(arr[19]),
+      whiteboardStyle: dco_decode_opt_box_autoadd_bridge_whiteboard_style(
+        arr[20],
+      ),
+      whiteboard: dco_decode_opt_box_autoadd_bridge_whiteboard_edit(arr[21]),
     );
   }
 
@@ -4964,6 +5090,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       host: dco_decode_String(arr[0]),
       client: dco_decode_String(arr[1]),
     );
+  }
+
+  @protected
+  BridgePen dco_decode_bridge_pen(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return BridgePen.values[raw as int];
   }
 
   @protected
@@ -5209,6 +5341,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeShape dco_decode_bridge_shape(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return BridgeShape.values[raw as int];
+  }
+
+  @protected
   BridgeSnapshot dco_decode_bridge_snapshot(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -5424,6 +5562,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeWhiteboard dco_decode_bridge_whiteboard(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return BridgeWhiteboard(
+      style: dco_decode_bridge_whiteboard_style(arr[0]),
+      elements: dco_decode_list_bridge_element(arr[1]),
+    );
+  }
+
+  @protected
+  BridgeWhiteboardEdit dco_decode_bridge_whiteboard_edit(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return BridgeWhiteboardEdit(
+      add: dco_decode_list_bridge_element(arr[0]),
+      change: dco_decode_list_bridge_element_change(arr[1]),
+      remove: dco_decode_list_String(arr[2]),
+    );
+  }
+
+  @protected
+  BridgeWhiteboardStyle dco_decode_bridge_whiteboard_style(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return BridgeWhiteboardStyle.values[raw as int];
+  }
+
+  @protected
   double dco_decode_f_64(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as double;
@@ -5470,6 +5639,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<BridgeElement> dco_decode_list_bridge_element(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_bridge_element).toList();
+  }
+
+  @protected
+  List<BridgeElementChange> dco_decode_list_bridge_element_change(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_bridge_element_change)
+        .toList();
+  }
+
+  @protected
   List<BridgeField> dco_decode_list_bridge_field(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_bridge_field).toList();
@@ -5497,6 +5680,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<BridgeLocalServer> dco_decode_list_bridge_local_server(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_bridge_local_server).toList();
+  }
+
+  @protected
+  List<BridgeMedia> dco_decode_list_bridge_media(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_bridge_media).toList();
   }
 
   @protected
@@ -5632,6 +5821,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  Float64List dco_decode_list_prim_f_64_strict(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as Float64List;
+  }
+
+  @protected
   Int64List dco_decode_list_prim_i_64_strict(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dcoDecodeInt64List(raw);
@@ -5653,6 +5848,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   String? dco_decode_opt_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_String(raw);
+  }
+
+  @protected
+  bool? dco_decode_opt_box_autoadd_bool(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_bool(raw);
   }
 
   @protected
@@ -5756,6 +5957,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_bridge_usage_limits(raw);
+  }
+
+  @protected
+  BridgeWhiteboard? dco_decode_opt_box_autoadd_bridge_whiteboard(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_bridge_whiteboard(raw);
+  }
+
+  @protected
+  BridgeWhiteboardEdit? dco_decode_opt_box_autoadd_bridge_whiteboard_edit(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null
+        ? null
+        : dco_decode_box_autoadd_bridge_whiteboard_edit(raw);
+  }
+
+  @protected
+  BridgeWhiteboardStyle? dco_decode_opt_box_autoadd_bridge_whiteboard_style(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null
+        ? null
+        : dco_decode_box_autoadd_bridge_whiteboard_style(raw);
   }
 
   @protected
@@ -6054,6 +6281,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  bool sse_decode_box_autoadd_bool(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bool(deserializer));
+  }
+
+  @protected
   BridgeApproval sse_decode_box_autoadd_bridge_approval(
     SseDeserializer deserializer,
   ) {
@@ -6198,6 +6431,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeWhiteboard sse_decode_box_autoadd_bridge_whiteboard(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_whiteboard(deserializer));
+  }
+
+  @protected
+  BridgeWhiteboardEdit sse_decode_box_autoadd_bridge_whiteboard_edit(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_whiteboard_edit(deserializer));
+  }
+
+  @protected
+  BridgeWhiteboardStyle sse_decode_box_autoadd_bridge_whiteboard_style(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_whiteboard_style(deserializer));
+  }
+
+  @protected
   PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_i_64(deserializer));
@@ -6214,6 +6471,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_style = sse_decode_opt_box_autoadd_bridge_text_style(deserializer);
     var var_language = sse_decode_opt_String(deserializer);
     var var_media = sse_decode_opt_box_autoadd_bridge_media(deserializer);
+    var var_whiteboard = sse_decode_opt_box_autoadd_bridge_whiteboard(
+      deserializer,
+    );
     var var_database = sse_decode_opt_box_autoadd_bridge_database(deserializer);
     var var_rows = sse_decode_list_bridge_row(deserializer);
     return BridgeAnswer(
@@ -6225,6 +6485,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       style: var_style,
       language: var_language,
       media: var_media,
+      whiteboard: var_whiteboard,
       database: var_database,
       rows: var_rows,
     );
@@ -6241,6 +6502,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_field = sse_decode_opt_String(deserializer);
     var var_row = sse_decode_opt_String(deserializer);
     var var_option = sse_decode_opt_String(deserializer);
+    var var_elements = sse_decode_list_String(deserializer);
     return BridgeApplied(
       action: var_action,
       area: var_area,
@@ -6250,6 +6512,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       field: var_field,
       row: var_row,
       option: var_option,
+      elements: var_elements,
     );
   }
 
@@ -6347,11 +6610,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_text = sse_decode_opt_String(deserializer);
     var var_number = sse_decode_f_64(deserializer);
     var var_checked = sse_decode_bool(deserializer);
+    var var_files = sse_decode_list_bridge_media(deserializer);
     return BridgeCell(
       kind: var_kind,
       text: var_text,
       number: var_number,
       checked: var_checked,
+      files: var_files,
     );
   }
 
@@ -6406,6 +6671,83 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_name = sse_decode_String(deserializer);
     var var_fields = sse_decode_list_bridge_field(deserializer);
     return BridgeDatabase(name: var_name, fields: var_fields);
+  }
+
+  @protected
+  BridgeElement sse_decode_bridge_element(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_opt_String(deserializer);
+    var var_kind = sse_decode_bridge_element_kind(deserializer);
+    var var_x = sse_decode_f_64(deserializer);
+    var var_y = sse_decode_f_64(deserializer);
+    var var_w = sse_decode_f_64(deserializer);
+    var var_h = sse_decode_f_64(deserializer);
+    var var_rotation = sse_decode_f_64(deserializer);
+    var var_color = sse_decode_bridge_ink_color(deserializer);
+    var var_width = sse_decode_i_64(deserializer);
+    var var_pen = sse_decode_bridge_pen(deserializer);
+    var var_points = sse_decode_list_prim_u_8_strict(deserializer);
+    var var_shape = sse_decode_bridge_shape(deserializer);
+    var var_seed = sse_decode_i_64(deserializer);
+    var var_arrowhead = sse_decode_bool(deserializer);
+    var var_corners = sse_decode_list_prim_f_64_strict(deserializer);
+    var var_text = sse_decode_String(deserializer);
+    return BridgeElement(
+      id: var_id,
+      kind: var_kind,
+      x: var_x,
+      y: var_y,
+      w: var_w,
+      h: var_h,
+      rotation: var_rotation,
+      color: var_color,
+      width: var_width,
+      pen: var_pen,
+      points: var_points,
+      shape: var_shape,
+      seed: var_seed,
+      arrowhead: var_arrowhead,
+      corners: var_corners,
+      text: var_text,
+    );
+  }
+
+  @protected
+  BridgeElementChange sse_decode_bridge_element_change(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_x = sse_decode_f_64(deserializer);
+    var var_y = sse_decode_f_64(deserializer);
+    var var_w = sse_decode_f_64(deserializer);
+    var var_h = sse_decode_f_64(deserializer);
+    var var_rotation = sse_decode_f_64(deserializer);
+    var var_color = sse_decode_bridge_ink_color(deserializer);
+    var var_width = sse_decode_i_64(deserializer);
+    var var_text = sse_decode_opt_String(deserializer);
+    var var_arrowhead = sse_decode_opt_box_autoadd_bool(deserializer);
+    return BridgeElementChange(
+      id: var_id,
+      x: var_x,
+      y: var_y,
+      w: var_w,
+      h: var_h,
+      rotation: var_rotation,
+      color: var_color,
+      width: var_width,
+      text: var_text,
+      arrowhead: var_arrowhead,
+    );
+  }
+
+  @protected
+  BridgeElementKind sse_decode_bridge_element_kind(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return BridgeElementKind.values[inner];
   }
 
   @protected
@@ -6570,6 +6912,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       aheadOfDefault: var_aheadOfDefault,
       pullRequest: var_pullRequest,
     );
+  }
+
+  @protected
+  BridgeInkColor sse_decode_bridge_ink_color(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return BridgeInkColor.values[inner];
   }
 
   @protected
@@ -6794,6 +7143,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_cell = sse_decode_opt_box_autoadd_bridge_cell(deserializer);
     var var_mediaType = sse_decode_opt_String(deserializer);
     var var_attachment = sse_decode_opt_String(deserializer);
+    var var_whiteboardStyle =
+        sse_decode_opt_box_autoadd_bridge_whiteboard_style(deserializer);
+    var var_whiteboard = sse_decode_opt_box_autoadd_bridge_whiteboard_edit(
+      deserializer,
+    );
     return BridgeMutation(
       kind: var_kind,
       area: var_area,
@@ -6815,6 +7169,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       cell: var_cell,
       mediaType: var_mediaType,
       attachment: var_attachment,
+      whiteboardStyle: var_whiteboardStyle,
+      whiteboard: var_whiteboard,
     );
   }
 
@@ -6858,6 +7214,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_host = sse_decode_String(deserializer);
     var var_client = sse_decode_String(deserializer);
     return BridgePairing(host: var_host, client: var_client);
+  }
+
+  @protected
+  BridgePen sse_decode_bridge_pen(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return BridgePen.values[inner];
   }
 
   @protected
@@ -7149,6 +7512,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeShape sse_decode_bridge_shape(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return BridgeShape.values[inner];
+  }
+
+  @protected
   BridgeSnapshot sse_decode_bridge_snapshot(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_sequence = sse_decode_i_64(deserializer);
@@ -7386,6 +7756,38 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeWhiteboard sse_decode_bridge_whiteboard(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_style = sse_decode_bridge_whiteboard_style(deserializer);
+    var var_elements = sse_decode_list_bridge_element(deserializer);
+    return BridgeWhiteboard(style: var_style, elements: var_elements);
+  }
+
+  @protected
+  BridgeWhiteboardEdit sse_decode_bridge_whiteboard_edit(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_add = sse_decode_list_bridge_element(deserializer);
+    var var_change = sse_decode_list_bridge_element_change(deserializer);
+    var var_remove = sse_decode_list_String(deserializer);
+    return BridgeWhiteboardEdit(
+      add: var_add,
+      change: var_change,
+      remove: var_remove,
+    );
+  }
+
+  @protected
+  BridgeWhiteboardStyle sse_decode_bridge_whiteboard_style(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return BridgeWhiteboardStyle.values[inner];
+  }
+
+  @protected
   double sse_decode_f_64(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getFloat64();
@@ -7456,6 +7858,34 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<BridgeElement> sse_decode_list_bridge_element(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeElement>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_element(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<BridgeElementChange> sse_decode_list_bridge_element_change(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeElementChange>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_element_change(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<BridgeField> sse_decode_list_bridge_field(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -7519,6 +7949,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <BridgeLocalServer>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_bridge_local_server(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<BridgeMedia> sse_decode_list_bridge_media(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeMedia>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_media(deserializer));
     }
     return ans_;
   }
@@ -7778,6 +8220,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  Float64List sse_decode_list_prim_f_64_strict(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var len_ = sse_decode_i_32(deserializer);
+    return deserializer.buffer.getFloat64List(len_);
+  }
+
+  @protected
   Int64List sse_decode_list_prim_i_64_strict(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var len_ = sse_decode_i_32(deserializer);
@@ -7804,6 +8253,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_String(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  bool? sse_decode_opt_box_autoadd_bool(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_bool(deserializer));
     } else {
       return null;
     }
@@ -8013,6 +8473,45 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_box_autoadd_bridge_usage_limits(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  BridgeWhiteboard? sse_decode_opt_box_autoadd_bridge_whiteboard(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_bridge_whiteboard(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  BridgeWhiteboardEdit? sse_decode_opt_box_autoadd_bridge_whiteboard_edit(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_bridge_whiteboard_edit(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  BridgeWhiteboardStyle? sse_decode_opt_box_autoadd_bridge_whiteboard_style(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_bridge_whiteboard_style(deserializer));
     } else {
       return null;
     }
@@ -8410,6 +8909,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_bridge_approval(
     BridgeApproval self,
     SseSerializer serializer,
@@ -8581,6 +9086,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_bridge_whiteboard(
+    BridgeWhiteboard self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_whiteboard(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_bridge_whiteboard_edit(
+    BridgeWhiteboardEdit self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_whiteboard_edit(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_bridge_whiteboard_style(
+    BridgeWhiteboardStyle self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_whiteboard_style(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_i_64(
     PlatformInt64 self,
     SseSerializer serializer,
@@ -8600,6 +9132,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_bridge_text_style(self.style, serializer);
     sse_encode_opt_String(self.language, serializer);
     sse_encode_opt_box_autoadd_bridge_media(self.media, serializer);
+    sse_encode_opt_box_autoadd_bridge_whiteboard(self.whiteboard, serializer);
     sse_encode_opt_box_autoadd_bridge_database(self.database, serializer);
     sse_encode_list_bridge_row(self.rows, serializer);
   }
@@ -8615,6 +9148,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.field, serializer);
     sse_encode_opt_String(self.row, serializer);
     sse_encode_opt_String(self.option, serializer);
+    sse_encode_list_String(self.elements, serializer);
   }
 
   @protected
@@ -8692,6 +9226,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.text, serializer);
     sse_encode_f_64(self.number, serializer);
     sse_encode_bool(self.checked, serializer);
+    sse_encode_list_bridge_media(self.files, serializer);
   }
 
   @protected
@@ -8745,6 +9280,54 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.name, serializer);
     sse_encode_list_bridge_field(self.fields, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_element(BridgeElement self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_String(self.id, serializer);
+    sse_encode_bridge_element_kind(self.kind, serializer);
+    sse_encode_f_64(self.x, serializer);
+    sse_encode_f_64(self.y, serializer);
+    sse_encode_f_64(self.w, serializer);
+    sse_encode_f_64(self.h, serializer);
+    sse_encode_f_64(self.rotation, serializer);
+    sse_encode_bridge_ink_color(self.color, serializer);
+    sse_encode_i_64(self.width, serializer);
+    sse_encode_bridge_pen(self.pen, serializer);
+    sse_encode_list_prim_u_8_strict(self.points, serializer);
+    sse_encode_bridge_shape(self.shape, serializer);
+    sse_encode_i_64(self.seed, serializer);
+    sse_encode_bool(self.arrowhead, serializer);
+    sse_encode_list_prim_f_64_strict(self.corners, serializer);
+    sse_encode_String(self.text, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_element_change(
+    BridgeElementChange self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_f_64(self.x, serializer);
+    sse_encode_f_64(self.y, serializer);
+    sse_encode_f_64(self.w, serializer);
+    sse_encode_f_64(self.h, serializer);
+    sse_encode_f_64(self.rotation, serializer);
+    sse_encode_bridge_ink_color(self.color, serializer);
+    sse_encode_i_64(self.width, serializer);
+    sse_encode_opt_String(self.text, serializer);
+    sse_encode_opt_box_autoadd_bool(self.arrowhead, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_element_kind(
+    BridgeElementKind self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
   }
 
   @protected
@@ -8873,6 +9456,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       self.pullRequest,
       serializer,
     );
+  }
+
+  @protected
+  void sse_encode_bridge_ink_color(
+    BridgeInkColor self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
   }
 
   @protected
@@ -9044,6 +9636,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_bridge_cell(self.cell, serializer);
     sse_encode_opt_String(self.mediaType, serializer);
     sse_encode_opt_String(self.attachment, serializer);
+    sse_encode_opt_box_autoadd_bridge_whiteboard_style(
+      self.whiteboardStyle,
+      serializer,
+    );
+    sse_encode_opt_box_autoadd_bridge_whiteboard_edit(
+      self.whiteboard,
+      serializer,
+    );
   }
 
   @protected
@@ -9082,6 +9682,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.host, serializer);
     sse_encode_String(self.client, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_pen(BridgePen self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
   }
 
   @protected
@@ -9299,6 +9905,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bridge_shape(BridgeShape self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
   void sse_encode_bridge_snapshot(
     BridgeSnapshot self,
     SseSerializer serializer,
@@ -9477,6 +10089,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bridge_whiteboard(
+    BridgeWhiteboard self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_whiteboard_style(self.style, serializer);
+    sse_encode_list_bridge_element(self.elements, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_whiteboard_edit(
+    BridgeWhiteboardEdit self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_bridge_element(self.add, serializer);
+    sse_encode_list_bridge_element_change(self.change, serializer);
+    sse_encode_list_String(self.remove, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_whiteboard_style(
+    BridgeWhiteboardStyle self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
   void sse_encode_f_64(double self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putFloat64(self);
@@ -9540,6 +10182,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_bridge_element(
+    List<BridgeElement> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_bridge_element(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_bridge_element_change(
+    List<BridgeElementChange> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_bridge_element_change(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_bridge_field(
     List<BridgeField> self,
     SseSerializer serializer,
@@ -9596,6 +10262,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_bridge_local_server(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_bridge_media(
+    List<BridgeMedia> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_bridge_media(item, serializer);
     }
   }
 
@@ -9828,6 +10506,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_prim_f_64_strict(
+    Float64List self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    serializer.buffer.putFloat64List(self);
+  }
+
+  @protected
   void sse_encode_list_prim_i_64_strict(
     Int64List self,
     SseSerializer serializer,
@@ -9866,6 +10554,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_String(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_bool(bool? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_bool(self, serializer);
     }
   }
 
@@ -10074,6 +10772,45 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_box_autoadd_bridge_usage_limits(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_whiteboard(
+    BridgeWhiteboard? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_bridge_whiteboard(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_whiteboard_edit(
+    BridgeWhiteboardEdit? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_bridge_whiteboard_edit(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_whiteboard_style(
+    BridgeWhiteboardStyle? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_bridge_whiteboard_style(self, serializer);
     }
   }
 
