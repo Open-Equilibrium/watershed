@@ -48,7 +48,8 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Device token** — The token a device keeps after pairing; what it may reach is in [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) (ADR-0299).
 - **Host token** — The token another host keeps after pairing; what it may reach is in [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) (ADR-0288, ADR-0299).
 - **Host link** — A link that lets one host's T3 Code reach another's; Meta-Harness pairs each direction separately, carries it through a host tunnel and renews it (ADR-0285, ADR-0288, ADR-0299).
-- **Host tunnel** — The request-passing path of a host link: a loopback port on the linking host to the other host's remote access, which passes only the requests a link makes and refuses a decision above the invited access level (ADR-0300, ADR-0301).
+- **Host tunnel** — The request-passing path of a host link: a loopback port on the linking host to the other host's remote access, which passes only the requests a link makes; what it refuses is in [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) (ADR-0300, ADR-0301).
+- **Peer link** — T3 Code's own link from one T3 server to another's `/mcp`, which a host link carries (ADR-0288).
 - **Login service** — The per-user launchd agent or systemd user unit that keeps `meta serve` running (ADR-0286).
 - **BYOA** — "Bring Your Own Agent"; plugging an external agent in as the Meta-Agent.
 - **AgentPulse** — Meta-Harness subsystem measuring rework ratio, first-attempt success rate, and cost-per-productive-outcome. Meta-Harness computes/stores the metrics; Liquid only renders them.

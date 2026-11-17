@@ -3,7 +3,8 @@
 //! host serves HTTP on the WebSocket: a request for a path a link uses goes to its T3 with the Host
 //! header and the body unchanged, and its answer streams back; any other path is refused with 403,
 //! without T3 contact. A decision that approves a link at a level above the one its host was invited
-//! at is refused the same way (ADR-0300, ADR-0301).
+//! at, or a decision or token exchange whose client_id names another pairing, is refused the same
+//! way (ADR-0300, ADR-0301).
 
 use std::convert::Infallible;
 use std::sync::Arc;

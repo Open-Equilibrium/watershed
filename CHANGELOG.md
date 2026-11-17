@@ -14,6 +14,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 - Liquid's Git integration for the agent's project on macOS, run by T3 Code with its behavior as shipped: commit with an optional written message, push, pull, pull requests, publishing, the ref picker with Checkout pull request, and worktrees per session.
 - Liquid's local Workspace on macOS: the `liquid-core` mutation pipeline over Automerge, an encrypted SQLite replica with its key in the keychain, and Pages with Text Blocks, Sections and Tables whose rows, fields and cells can be edited (ADR-0237, ADR-0238).
 - Meta-Harness on macOS and Linux, not yet released: the `meta` command, a login service that keeps its service running, an installer bundle that carries the pinned T3 Code release, and central configuration for Claude Code and Codex whose changes take effect only once approved, with an append-only log.
+- Meta-Harness remote access and host links over Tailscale, not yet released: `meta remote`, `meta invite` and `meta host` pair devices and hosts with single-use codes; linked T3 Code servers reach each other through a host tunnel at the access level the receiving host invites, and `meta host revoke` refuses a pairing and ends its sessions. Liquid's Settings → Agent hosts pairs with an agent host and runs its sessions there (ADR-0295, ADR-0299–ADR-0301).
 
 ### Changed
 

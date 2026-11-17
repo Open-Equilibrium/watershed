@@ -4,7 +4,7 @@ M2 in progress; product and runtime shape: [Meta-Harness V-Spec](../docs/concept
 
 ## Layout
 
-- `meta-harness-core/` — the Rust core: the service and its API (`service.rs`, `api.rs`), the client Liquid and `meta` use (`remote.rs`), remote access and pairing (`service/remote.rs`), host links (`hosts.rs`, `tunnel.rs`), the central configuration (`config.rs`, `config/homes.rs`), the pinned T3 Code server and its client protocol (`t3/`, ADR-0281, ADR-0292), and the host, thread and Git model T3 runs (`host.rs`, `thread.rs`, `git.rs`).
+- `meta-harness-core/` — the Rust core: the service and its API (`service.rs`, `api.rs`), the client Liquid and `meta` use (`remote.rs`), remote access (`service/listener.rs`, `service/admit.rs`), pairing and host links (`hosts/`, `tunnel.rs`), the central configuration (`config.rs`, `config/homes.rs`), the pinned T3 Code server and its client protocol (`t3/`, ADR-0281, ADR-0292), and the host, thread and Git model T3 runs (`host.rs`, `thread.rs`, `git.rs`).
 - `meta-harness-cli/` — `meta`: the service, the configuration commands, remote access and host links (`hosts.rs`), and the login service (`login.rs`).
 - `install.sh` — the bundle's installer.
 - `t3.lock` — the pinned T3 release and each archive's SHA-256; `scripts/install-t3.mjs` installs it.
@@ -39,7 +39,7 @@ cargo run -p meta-harness-cli -- status
 - `meta invite --device` or `meta invite --host [--access LEVEL]` prints a pairing code, valid for five minutes and one use, with the addresses to pair with. A host's `LEVEL` is the highest level its agents get here, `auto` by default.
 - `meta host agents on|off` accepts agents from other hosts here; it is off until turned on.
 - `meta host add ADDRESS CODE [--access LEVEL]` links the host at ADDRESS; `LEVEL` is `read-only`, `approval-required`, `auto-accept-edits`, `auto` or `full-access`, and defaults to the level the other host invited. The other host refuses a higher one.
-- `meta host list`, `meta host remove NAME` (unlinks a host and its T3 link; the other host keeps the pairing until `meta host revoke` there) and `meta host revoke NAME` (refuses a paired client's token from its next connection on, and ends the T3 sessions of that host's link) manage them. A host pairs under its name and four hex digits, as `meta host list` and the error that names it show, and `revoke` takes that exact name.
+- `meta host list`, `meta host remove NAME` (unlinks a host and its peer link; the other host keeps the pairing until `meta host revoke` there) and `meta host revoke NAME` (refuses a paired client's token from its next connection on, and ends the T3 sessions of that host's peer link) manage them. A host pairs under its name and four hex digits, as `meta host list` and the error that names it show, and `revoke` takes that exact name.
 
 A link needs `meta host agents on` on both hosts and `meta remote on` on the host to link to, then the code from `meta invite --host` there, given to `meta host add` on the other. Trust limits: [SECURITY.md](../SECURITY.md#meta-harness-service-and-configuration); mechanism: [V-Spec](../docs/concept/V-Spec_MetaHarness.html#orchestration).
 

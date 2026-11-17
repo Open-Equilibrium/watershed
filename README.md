@@ -7,7 +7,7 @@ Watershed is an **AGPL/free-software AI-native work platform** for reusable, mea
 Nothing is released yet; status is canonical in [PLAN.md](PLAN.md).
 
 - **Flow Agent:** [trusted Tools with Flow-owned write protection](SECURITY.md#flow-agent-security-contract) are implemented on Linux x86_64 and macOS ARM64; native acceptance, installation and closeout remain ([M1.2](PLAN.md#m12--flow-owned-write-protection)).
-- **Meta-Harness:** the `meta` command, its service on a pinned T3 Code server and the central configuration for Claude Code and Codex run on macOS and Linux; host links and the rest of [M2](PLAN.md#m2--meta-harness-mvp) remain.
+- **Meta-Harness:** the `meta` command, its service on a pinned T3 Code server and the central configuration for Claude Code and Codex run on macOS and Linux, with remote access and host links over Tailscale (ADR-0299); host links through the Liquid account and the rest of [M2](PLAN.md#m2--meta-harness-mvp) remain.
 - **Liquid:** a macOS app in development with the agent surface on T3 Code through Meta-Harness, its Git integration and the local Workspace with Pages and Tables ([M3a](PLAN.md#m3a--local-workspace-foundation)).
 
 [PLATFORMS.md](PLATFORMS.md) defines each product's native release targets, current capabilities and required verification; compilation alone is not a support claim.
@@ -122,6 +122,7 @@ Each topic's canonical home; other files link there.
 | Harness configurations | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#config) |
 | Meta-Harness service, its API and `meta` | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#surfaces); trust: [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) |
 | Installing Meta-Harness | [meta-harness/README.md](meta-harness/README.md#install) |
+| Remote access, pairing and host links | commands: [meta-harness/README.md](meta-harness/README.md#remote-access-and-host-links); mechanism: [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration); trust: [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) |
 | Orchestration of agents | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration) |
 | Durability | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#durability) |
 | Session record export | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#boundary) |
