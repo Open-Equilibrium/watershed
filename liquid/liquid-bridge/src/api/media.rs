@@ -162,14 +162,29 @@ impl LiquidWorkspace {
     }
 
     /// Writes an attachment's bytes to `path`, which the person chose in the save dialog,
-    /// replacing what is there.
+    /// replacing what is there only once the whole copy is written: it goes to a hidden file
+    /// beside `path` first, so a save that fails leaves `path` as it was.
     pub fn save_attachment(&self, attachment: String, path: String) -> Result<(), String> {
         let id = self::attachment(&attachment)?;
         self.size(&id)?;
         let failed = |error: std::io::Error| format!("{path}: {error}");
-        let mut file = File::create(&path).map_err(failed)?;
-        self.each_part(&id, |part| file.write_all(&part).map_err(failed))?;
-        file.sync_all().map_err(failed)
+        let target = std::path::Path::new(&path);
+        let name = target
+            .file_name()
+            .ok_or_else(|| format!("{path}: no file name"))?;
+        let mut hidden = std::ffi::OsString::from(".");
+        hidden.push(name);
+        hidden.push(".liquid-saving");
+        let partial = target.with_file_name(hidden);
+        let written = File::create(&partial).map_err(failed).and_then(|mut file| {
+            self.each_part(&id, |part| file.write_all(&part).map_err(failed))?;
+            file.sync_all().map_err(failed)
+        });
+        let renamed = written.and_then(|()| std::fs::rename(&partial, target).map_err(failed));
+        if renamed.is_err() {
+            let _ = std::fs::remove_file(&partial);
+        }
+        renamed
     }
 
     fn begin(&self, size: u64) -> Result<Upload, String> {

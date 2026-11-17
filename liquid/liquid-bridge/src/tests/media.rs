@@ -84,6 +84,16 @@ fn a_file_goes_in_from_its_path_shows_in_a_media_block_and_saves_out_unchanged()
         .save_attachment(attachment.clone(), saved.to_string_lossy().into())
         .unwrap();
     assert_eq!(std::fs::read(&saved).unwrap(), file);
+    let names: Vec<_> = std::fs::read_dir(&folder.0)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert!(
+        names
+            .iter()
+            .all(|name| !name.to_string_lossy().ends_with(".liquid-saving")),
+        "no partial copy stays beside it: {names:?}"
+    );
     assert_eq!(workspace.read_attachment(attachment).unwrap(), file);
 }
 
