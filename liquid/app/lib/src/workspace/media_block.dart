@@ -127,6 +127,103 @@ class PendingUpload {
   final written = ValueNotifier<int>(0);
 }
 
+/// The files at `paths` as sources to add; one Liquid cannot read is reported and left out.
+Future<List<MediaSource>> sourcesAt(
+  WorkspaceState state,
+  Iterable<String> paths,
+) => sourcesOfPaths(paths, state.report);
+
+/// The files at `paths` as sources to add; one Liquid cannot read goes to `report`.
+Future<List<MediaSource>> sourcesOfPaths(
+  Iterable<String> paths, [
+  void Function(String problem)? report,
+]) async {
+  final sources = <MediaSource>[];
+  for (final path in paths) {
+    try {
+      sources.add(
+        MediaSource.file(
+          path.split(Platform.pathSeparator).last,
+          path,
+          await MediaPlatform.fileSize(path),
+        ),
+      );
+    } on Object catch (error) {
+      report?.call('Liquid could not read “$path”: $error');
+    }
+  }
+  return sources;
+}
+
+/// Whether `source` fits an attachment; one over 5 GiB is reported, once the writes
+/// before it settled, as their success would take the problem away.
+Future<bool> _fits(WorkspaceState state, MediaSource source) async {
+  if (source.size <= maxAttachment) return true;
+  await state.settled;
+  state.report(
+    '“${source.name}” is ${sizeLabel(source.size)}; a file can be at most 5 GiB.',
+  );
+  return false;
+}
+
+/// Adds `source` as an attachment and answers its name, telling `progress` how many
+/// bytes are in so far.
+Future<String> attach(
+  WorkspaceState state,
+  MediaSource source, [
+  void Function(int written)? progress,
+]) async {
+  if (source.bytes case final bytes?) {
+    return state.workspace.addBytes(bytes: bytes);
+  }
+  String? named;
+  await for (final step in state.workspace.addFile(path: source.path!)) {
+    progress?.call(step.written);
+    named = step.attachment ?? named;
+  }
+  return named!;
+}
+
+/// Adds `sources` as attachments, as a file cell takes them, and answers the files that
+/// went in; a refused one is reported and left out.
+Future<List<BridgeMedia>> attachAll(
+  WorkspaceState state,
+  List<MediaSource> sources,
+) async {
+  final files = <BridgeMedia>[];
+  for (final source in sources) {
+    if (!await _fits(state, source)) continue;
+    try {
+      files.add(
+        BridgeMedia(
+          name: source.name,
+          mediaType: mediaTypeOf(source.name),
+          attachment: await attach(state, source),
+          size: source.size,
+        ),
+      );
+    } on Object catch (error) {
+      state.report('Liquid did not add “${source.name}”: $error');
+    }
+  }
+  return files;
+}
+
+/// Writes a copy of `file` where the person chooses in the save dialog; the only way an
+/// attachment leaves the Workspace (ADR-0305).
+Future<void> saveCopy(WorkspaceState state, BridgeMedia file) async {
+  final path = await MediaPlatform.saveLocation(file.name);
+  if (path == null) return;
+  try {
+    await state.workspace.saveAttachment(
+      attachment: file.attachment,
+      path: path,
+    );
+  } on Object catch (error) {
+    state.report('Liquid did not save “${file.name}”: $error');
+  }
+}
+
 /// Adds `sources` as Media Blocks after the View `after`, or first, in their order, each
 /// shown with its progress until it is in. A file over 5 GiB is refused before it is read.
 /// The empty line `replacing` goes once the first is in, unless it ends the Page.
@@ -139,28 +236,15 @@ Future<void> addMedia(
   final state = views.state;
   var follows = after;
   for (final source in sources) {
-    if (source.size > maxAttachment) {
-      // After the writes before it, whose success would take the problem away.
-      await state.settled;
-      state.report(
-        '“${source.name}” is ${sizeLabel(source.size)}; a file can be at most 5 GiB.',
-      );
-      continue;
-    }
+    if (!await _fits(state, source)) continue;
     final pending = PendingUpload(source.name, source.size, follows);
     views.addUpload(pending);
     try {
-      final String attachment;
-      if (source.bytes case final bytes?) {
-        attachment = await state.workspace.addBytes(bytes: bytes);
-      } else {
-        String? named;
-        await for (final step in state.workspace.addFile(path: source.path!)) {
-          pending.written.value = step.written;
-          named = step.attachment ?? named;
-        }
-        attachment = named!;
-      }
+      final attachment = await attach(
+        state,
+        source,
+        (written) => pending.written.value = written,
+      );
       final added = await views.write(
         mutation(
           BridgeMutationKind.addMediaBlock,
@@ -382,18 +466,7 @@ class _MediaBlockState extends State<MediaBlock> {
 
   Future<void> _saveAs() async {
     _more.hide();
-    final media = _media;
-    if (media == null) return;
-    final path = await MediaPlatform.saveLocation(media.name);
-    if (path == null) return;
-    try {
-      await _state.workspace.saveAttachment(
-        attachment: media.attachment,
-        path: path,
-      );
-    } on Object catch (error) {
-      _state.report('Liquid did not save “${media.name}”: $error');
-    }
+    if (_media case final media?) await saveCopy(_state, media);
   }
 
   void _delete() {
@@ -631,17 +704,32 @@ class _MediaDropZoneState extends State<MediaDropZone> {
 
   bool _isAbove(Offset at) => at.dy < (context.size?.height ?? 0) / 2;
 
-  void _at(Offset at) {
-    final above = _isAbove(at);
+  /// The Block's own cell drop, as a Table's file cells take files.
+  CellDrop? get _cell => widget.views.cellDrops[widget.view.id];
+
+  void _at(Offset at, Offset global) {
+    // A file cell under the pointer takes the files instead of the Page.
+    final bool? above = (_cell?.hover(global) ?? false) ? null : _isAbove(at);
     if (above != _above) setState(() => _above = above);
+  }
+
+  void _leave() {
+    _cell?.leave();
+    setState(() => _above = null);
   }
 
   /// Adds the dropped files above or below the Block, as the drop's own position says:
   /// the line is gone by then, as the drop first ends the drag.
   Future<void> _drop(DropDoneDetails details) async {
     final above = _isAbove(details.localPosition);
+    final cell = _cell;
+    final inCell = cell?.hover(details.globalPosition) ?? false;
+    cell?.leave();
     setState(() => _above = null);
     final views = widget.views;
+    if (inCell) {
+      return cell!.drop(await _sources(details), details.globalPosition);
+    }
     final index = widget.index;
     String? after = widget.view.id;
     if (above) {
@@ -654,25 +742,18 @@ class _MediaDropZoneState extends State<MediaDropZone> {
       }
       after = previous?.id;
     }
-    final sources = <MediaSource>[];
-    for (final item in details.files) {
-      if (item is DropItemDirectory) {
-        views.state.report('Liquid adds files, not folders: “${item.name}”.');
-        continue;
-      }
-      try {
-        sources.add(
-          MediaSource.file(
-            item.name,
-            item.path,
-            await MediaPlatform.fileSize(item.path),
-          ),
-        );
-      } on Object catch (error) {
-        views.state.report('Liquid could not read “${item.name}”: $error');
-      }
+    await addMedia(views, await _sources(details), after: after);
+  }
+
+  Future<List<MediaSource>> _sources(DropDoneDetails details) {
+    final state = widget.views.state;
+    for (final item in details.files.whereType<DropItemDirectory>()) {
+      state.report('Liquid adds files, not folders: “${item.name}”.');
     }
-    await addMedia(views, sources, after: after);
+    return sourcesAt(state, [
+      for (final item in details.files)
+        if (item is! DropItemDirectory) item.path,
+    ]);
   }
 
   @override
@@ -680,9 +761,11 @@ class _MediaDropZoneState extends State<MediaDropZone> {
     final ws = context.ws;
     final above = _above;
     return DropTarget(
-      onDragEntered: (details) => _at(details.localPosition),
-      onDragUpdated: (details) => _at(details.localPosition),
-      onDragExited: (_) => setState(() => _above = null),
+      onDragEntered: (details) =>
+          _at(details.localPosition, details.globalPosition),
+      onDragUpdated: (details) =>
+          _at(details.localPosition, details.globalPosition),
+      onDragExited: (_) => _leave(),
       onDragDone: (details) => unawaited(_drop(details)),
       child: Stack(
         clipBehavior: Clip.none,

@@ -81,6 +81,10 @@ class PageViews extends ChangeNotifier {
   /// read when the Table takes the caret, and whether it was written already.
   final naming = <String, (String, bool) Function()>{};
 
+  /// The Blocks that take dropped files into a cell, by their View, as a Table's file
+  /// cells do.
+  final cellDrops = <String, CellDrop>{};
+
   /// Files going in, each shown after the View it follows until its Media Block is in.
   final uploads = ValueNotifier<List<PendingUpload>>(const []);
 
@@ -260,4 +264,13 @@ class PageViews extends ChangeNotifier {
     unawaited(_settled.close());
     super.dispose();
   }
+}
+
+/// A Block's cells that take dropped files, as a Table's file cells do: [hover] says
+/// whether one lies under the pointer, marking it, [leave] unmarks it, and [drop] adds the
+/// files to the cell there.
+abstract interface class CellDrop {
+  bool hover(Offset global);
+  void leave();
+  Future<void> drop(List<MediaSource> sources, Offset global);
 }

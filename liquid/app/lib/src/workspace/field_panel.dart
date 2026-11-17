@@ -15,6 +15,7 @@ String fieldKindName(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.select => 'Select',
   BridgeFieldKind.date => 'Date',
   BridgeFieldKind.checkbox => 'Checkbox',
+  BridgeFieldKind.file => 'File',
 };
 
 /// A field kind's icon, in the header and the field panel.
@@ -24,6 +25,7 @@ IconData fieldKindIcon(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.select => LucideIcons.circleChevronDown,
   BridgeFieldKind.date => LucideIcons.calendar,
   BridgeFieldKind.checkbox => LucideIcons.squareCheck,
+  BridgeFieldKind.file => LucideIcons.paperclip,
 };
 
 /// The panel + in a Table's header opens (approved Table View mockups, section 3): the

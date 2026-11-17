@@ -56,7 +56,13 @@ BridgeCell cell(
   String? text,
   double number = 0,
   bool checked = false,
-}) => BridgeCell(kind: kind, text: text, number: number, checked: checked);
+}) => BridgeCell(
+  kind: kind,
+  text: text,
+  number: number,
+  checked: checked,
+  files: const [],
+);
 
 const expenseFields = [
   BridgeField(

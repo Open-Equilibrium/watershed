@@ -5,6 +5,7 @@ import '../rust/api/database.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'file_cells.dart';
 
 /// `number` with every digit Dart's shortest form keeps, written out in `format`'s digits,
 /// separators and grouping; rounding comes with field formats (ADR-0242). intl itself
@@ -102,6 +103,7 @@ class CellView extends StatelessWidget {
         null => cell.text ?? '',
       }),
       BridgeCellKind.checkbox => CellCheckbox(checked: cell!.checked),
+      BridgeCellKind.files => FileChips(cell!.files),
     };
   }
 }

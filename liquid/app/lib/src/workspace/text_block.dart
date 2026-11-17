@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -624,23 +623,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
     if (!mounted) return;
     if (pasted.files.isNotEmpty) {
-      return _addMedia(() async {
-        final sources = <MediaSource>[];
-        for (final path in pasted.files) {
-          try {
-            sources.add(
-              MediaSource.file(
-                path.split(Platform.pathSeparator).last,
-                path,
-                await MediaPlatform.fileSize(path),
-              ),
-            );
-          } on Object catch (error) {
-            _state.report('Liquid could not read “$path”: $error');
-          }
-        }
-        return sources;
-      });
+      return _addMedia(() => sourcesAt(_state, pasted.files));
     }
     if (pasted.image case final image?) {
       return _addMedia(
@@ -744,16 +727,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     );
   }
 
-  /// Whether `event` is ⌘V, which Liquid's own paste takes (ADR-0305).
-  bool _pastes(KeyEvent event) {
-    final keys = HardwareKeyboard.instance;
-    return event.logicalKey == LogicalKeyboardKey.keyV &&
-        keys.isMetaPressed &&
-        !keys.isShiftPressed &&
-        !keys.isControlPressed &&
-        !keys.isAltPressed;
-  }
-
   KeyEventResult _key(KeyEvent event) {
     if (event is KeyUpEvent || _composing || _stored == null) {
       return KeyEventResult.ignored;
@@ -768,7 +741,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         !keys.isControlPressed &&
         !keys.isAltPressed &&
         !keys.logicalKeysPressed.contains(liquidKey);
-    if (_pastes(event) &&
+    if (isPaste(event) &&
         !_editor.isSource(this) &&
         !_adding &&
         !_menu.isShowing) {

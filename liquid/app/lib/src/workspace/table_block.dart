@@ -14,6 +14,7 @@ import 'cell_pickers.dart';
 import 'explorer.dart' show untitled;
 import 'field_menu.dart';
 import 'field_panel.dart';
+import 'media_block.dart';
 import 'row_menu.dart';
 import 'stored_name.dart';
 import 'table_cells.dart';
@@ -40,6 +41,7 @@ double _width(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.select => 128,
   BridgeFieldKind.date => 120,
   BridgeFieldKind.checkbox => 72,
+  BridgeFieldKind.file => 180,
 };
 
 /// A Table on its Page, as the approved Table View mockups show it: its name, a header of
@@ -56,7 +58,7 @@ class TableBlock extends StatefulWidget {
   State<TableBlock> createState() => _TableBlockState();
 }
 
-class _TableBlockState extends State<TableBlock> {
+class _TableBlockState extends State<TableBlock> implements CellDrop {
   BridgeDatabase? _database;
   late final _rows = WindowedList<BridgeRow>(
     (start, limit) async {
@@ -104,7 +106,55 @@ class _TableBlockState extends State<TableBlock> {
     // Also from dispose, so after the frame, when the Page may show it.
     report: (problem) => scheduleMicrotask(() => _state.report(problem)),
     addOption: _addOption,
+    attach: (sources) => attachAll(_state, sources),
+    save: (file) => saveCopy(_state, file),
   )..addListener(_changed);
+
+  /// The rows' box, to find the file cell under dropped files.
+  final _rowsKey = GlobalKey(debugLabel: 'Table rows');
+
+  /// The file cell files are dragged over, as row and field positions.
+  (int, int)? _dropAt;
+
+  /// The file cell at a point on screen, if one is there.
+  (int, int)? _fileCellAt(Offset global) {
+    final box = _rowsKey.currentContext?.findRenderObject();
+    final fields = _database?.fields ?? const <BridgeField>[];
+    if (box is! RenderBox || !box.hasSize) return null;
+    final local = box.globalToLocal(global);
+    if (!(Offset.zero & box.size).contains(local)) return null;
+    final row = ((local.dy + _down.offset) / WsMetrics.rowTable).floor();
+    if (row < 0 || row >= (_rows.count ?? 0)) return null;
+    // The first field stays in view while the others scroll sideways.
+    final offset = _sideways.hasClients ? _sideways.offset : 0.0;
+    var field = 0;
+    if (local.dx - offset >= _first) {
+      field = _starts.lastIndexWhere((start) => start <= local.dx);
+    }
+    if (field < 0 || field >= fields.length) return null;
+    return fields[field].kind == BridgeFieldKind.file ? (row, field) : null;
+  }
+
+  @override
+  bool hover(Offset global) {
+    final at = _fileCellAt(global);
+    if (at != _dropAt) setState(() => _dropAt = at);
+    return at != null;
+  }
+
+  @override
+  void leave() {
+    if (_dropAt != null) setState(() => _dropAt = null);
+  }
+
+  @override
+  Future<void> drop(List<MediaSource> sources, Offset global) async {
+    final at = _fileCellAt(global);
+    leave();
+    if (at case (final row, final field)) {
+      await _cells.addFiles(row, field, sources);
+    }
+  }
 
   /// The grid's geometry as last built, to reveal a cell.
   List<double> _starts = const [0];
@@ -156,6 +206,7 @@ class _TableBlockState extends State<TableBlock> {
   void initState() {
     super.initState();
     _rows.addListener(_changed);
+    widget.views.cellDrops[widget.view.id] = this;
     // A sideways scroll moves + away from the field panel, which closes.
     _sideways
       ..addListener(_closePanel)
@@ -215,6 +266,9 @@ class _TableBlockState extends State<TableBlock> {
 
   @override
   void dispose() {
+    if (widget.views.cellDrops[widget.view.id] == this) {
+      widget.views.cellDrops.remove(widget.view.id);
+    }
     _pageScroll?.removeListener(_moved);
     _state.finishing.remove(_name.typed);
     unawaited(_followed?.cancel());
@@ -899,6 +953,7 @@ class _TableBlockState extends State<TableBlock> {
             ),
             SizedBox(
               height: math.min(count, _shownRows) * WsMetrics.rowTable,
+              key: _rowsKey,
               child: ListView.builder(
                 key: const Key('table rows'),
                 controller: _down,
@@ -933,7 +988,12 @@ class _TableBlockState extends State<TableBlock> {
                                 _cells.tap(rowIndex, index);
                               }
                             },
-                      mark: (index) => _cells.mark(context, rowIndex, index),
+                      mark: (index) => _dropAt == (rowIndex, index)
+                          ? BoxDecoration(
+                              color: ws.accent.withValues(alpha: 0.06),
+                              border: Border.all(color: ws.accent, width: 2),
+                            )
+                          : _cells.mark(context, rowIndex, index),
                       picking: (index) =>
                           _cells.picking &&
                           _cells.selected == (rowIndex, index),

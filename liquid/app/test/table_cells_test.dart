@@ -30,12 +30,14 @@ void main() {
     kind: BridgeCellKind.empty,
     number: 0,
     checked: false,
+    files: const [],
   );
   BridgeCell text(String text) => BridgeCell(
     kind: BridgeCellKind.text,
     text: text,
     number: 0,
     checked: false,
+    files: const [],
   );
 
   Finder editor() => kit.inTable(

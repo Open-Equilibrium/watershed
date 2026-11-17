@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -5,10 +6,14 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../rust/api/database.dart';
+import '../rust/api/media.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'anchored_menu.dart';
 import 'cell_pickers.dart';
+import 'file_cells.dart';
+import 'media_block.dart';
+import 'paste.dart';
 import 'table_cells.dart';
 
 /// A Table's selected cell and its edit, as in a spreadsheet and in Notion (approved Table
@@ -24,6 +29,8 @@ class CellSelection extends ChangeNotifier {
     required this.leave,
     required this.report,
     required this.addOption,
+    required this.attach,
+    required this.save,
   }) {
     // Leaving the cell editor keeps what was typed, as a spreadsheet does.
     editFocus.addListener(() {
@@ -53,6 +60,12 @@ class CellSelection extends ChangeNotifier {
   /// Adds an option named so, of that color, to a select field, and answers its identity.
   final Future<String> Function(BridgeField field, String name, int color)
   addOption;
+
+  /// Adds files as attachments and answers those that went in.
+  final Future<List<BridgeMedia>> Function(List<MediaSource> sources) attach;
+
+  /// Saves a copy of a file where the person chooses.
+  final Future<void> Function(BridgeMedia file) save;
 
   /// The selected cell, as row and field positions, and whether it is edited.
   (int, int)? selected;
@@ -148,9 +161,99 @@ class CellSelection extends ChangeNotifier {
   }
 
   static bool _picks(BridgeFieldKind kind) =>
-      kind == BridgeFieldKind.select || kind == BridgeFieldKind.date;
+      kind == BridgeFieldKind.select ||
+      kind == BridgeFieldKind.date ||
+      kind == BridgeFieldKind.file;
 
-  /// The selected select or date cell's field while its picker is open.
+  /// The selected file cell's files.
+  List<BridgeMedia> get pickedFiles => switch (_target) {
+    (_, _, final cell?) when cell.kind == BridgeCellKind.files => cell.files,
+    _ => const [],
+  };
+
+  /// Adds `sources` to the file cell at `row` and `field`, after its files, once they are
+  /// in; files another write added meanwhile stay.
+  Future<void> addFiles(int row, int field, List<MediaSource> sources) async {
+    final all = fields();
+    final read = rowAt(row);
+    if (read == null || field >= all.length) return;
+    final column = all[field];
+    if (column.kind != BridgeFieldKind.file || sources.isEmpty) return;
+    List<BridgeMedia> filesOf(BridgeRow row) => [
+      ...?row.cells
+          .where((cell) => cell.field == column.id)
+          .firstOrNull
+          ?.value
+          .files,
+    ];
+    if (filesOf(read).length + sources.length > maxCellFiles) {
+      report('A cell holds at most $maxCellFiles files.');
+      return;
+    }
+    final added = await attach(sources);
+    if (added.isEmpty || _disposed) return;
+    // The row as read now, if it is still where it was.
+    final now = rowAt(row);
+    final current = now?.id == read.id ? filesOf(now!) : filesOf(read);
+    _write(
+      read,
+      column,
+      BridgeCell(
+        kind: BridgeCellKind.files,
+        number: 0,
+        checked: false,
+        files: [...current, ...added],
+      ),
+    );
+  }
+
+  /// Opens the file dialog and adds the chosen files to the selected file cell.
+  Future<void> addPickedFiles() async {
+    final at = selected;
+    closePick();
+    if (at == null) return;
+    final sources = await MediaPlatform.pickFiles();
+    await addFiles(at.$1, at.$2, sources);
+  }
+
+  /// Removes the selected file cell's file at `index`; the last one empties it.
+  void removeFile(int index) {
+    if (_target case (final row, final field, final cell?)
+        when cell.kind == BridgeCellKind.files && index < cell.files.length) {
+      final files = [...cell.files]..removeAt(index);
+      _write(
+        row,
+        field,
+        files.isEmpty
+            ? _cell(BridgeCellKind.empty)
+            : BridgeCell(
+                kind: BridgeCellKind.files,
+                number: 0,
+                checked: false,
+                files: files,
+              ),
+      );
+    }
+  }
+
+  /// ⌘V on a selected file cell adds copied files, or a copied image.
+  Future<void> _pasteFiles(int row, int field) async {
+    final Pasted pasted;
+    try {
+      pasted = await readClipboard();
+    } on Object catch (error) {
+      report('Liquid could not read the clipboard: $error');
+      return;
+    }
+    final sources = [
+      ...await sourcesOfPaths(pasted.files, report),
+      if (pasted.files.isEmpty && pasted.image != null)
+        MediaSource.bytes('Pasted image.png', pasted.image!),
+    ];
+    await addFiles(row, field, sources);
+  }
+
+  /// The selected select, date or file cell's field while its picker is open.
   BridgeField? get picked => picking ? _target?.$2 : null;
 
   /// Opens the selected cell's picker with what is typed; a date cell's starts with its
@@ -417,7 +520,13 @@ class CellSelection extends ChangeNotifier {
     String? text,
     double number = 0,
     bool checked = false,
-  }) => BridgeCell(kind: kind, text: text, number: number, checked: checked);
+  }) => BridgeCell(
+    kind: kind,
+    text: text,
+    number: number,
+    checked: checked,
+    files: const [],
+  );
 
   void _toggle(BridgeRow row, BridgeField field, BridgeCell? cell) {
     final at = (row.id, field.id);
@@ -524,6 +633,10 @@ class CellSelection extends ChangeNotifier {
       case LogicalKeyboardKey.space when field.kind == BridgeFieldKind.checkbox:
         // A held Space ticks once.
         if (event is! KeyRepeatEvent) _toggle(row, field, cell);
+      case LogicalKeyboardKey.keyV
+          when field.kind == BridgeFieldKind.file && isPaste(event):
+        final (at, column) = selected!;
+        unawaited(_pasteFiles(at, column));
       case LogicalKeyboardKey.backspace || LogicalKeyboardKey.delete:
         if (cell != null && cell.kind != BridgeCellKind.empty) {
           _write(row, field, _cell(BridgeCellKind.empty));
@@ -648,6 +761,23 @@ class _PickedCellState extends State<PickedCell> {
     final field = cells.picked;
     if (field == null) return widget.child;
     final date = field.kind == BridgeFieldKind.date;
+    if (field.kind == BridgeFieldKind.file) {
+      final files = cells.pickedFiles;
+      return AnchoredMenu(
+        height: FilesPicker.heightFor(files.length),
+        onTapOutside: (_) => cells.leavePick(),
+        menu: (context) => FilesPicker(
+          files: cells.pickedFiles,
+          onSave: (file) => unawaited(cells.save(file)),
+          onRemove: cells.removeFile,
+          onAdd: () => unawaited(cells.addPickedFiles()),
+          onClose: cells.closePick,
+          onTab: cells.tabFromPick,
+          onKeys: (keys) => cells.pickKeys = keys,
+        ),
+        child: widget.child,
+      );
+    }
     return AnchoredMenu(
       height: date
           ? DatePicker.height
