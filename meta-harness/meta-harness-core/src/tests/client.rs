@@ -7,7 +7,7 @@ use serde_json::json;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::fake_t3::{Fake, fail, frame, ok};
-use crate::t3::Client;
+use crate::t3::{Client, Failure};
 
 const WAIT: Duration = Duration::from_secs(10);
 
@@ -327,4 +327,20 @@ async fn a_t3_that_accepts_a_connection_and_never_answers_fails_the_connect() {
         .await
         .expect("the connect gives up");
     assert!(answer.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_action_that_loses_its_connection_records_why_it_ended() {
+    let fake = Fake::start(|_, _, _| Vec::new()).await;
+    let client = connect(&fake).await;
+    let mut action = client.action("subscribe", json!({})).await.unwrap();
+    fake.received("subscribe", 1).await;
+    fake.push("subscribe", vec![json!("one")]);
+    assert_eq!(action.recv().await, Some(json!("one")));
+    fake.drop_connection();
+    let ended = tokio::time::timeout(WAIT, action.recv())
+        .await
+        .expect("the action ends with its connection");
+    assert_eq!(ended, None);
+    assert_eq!(action.failure(), Some(Failure::ConnectionLost));
 }

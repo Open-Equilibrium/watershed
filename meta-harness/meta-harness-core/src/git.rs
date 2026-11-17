@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-use crate::t3::{Client, fresh_id};
+use crate::t3::{Client, Failure, fresh_id};
 
 mod pull_request;
 
@@ -390,10 +390,12 @@ impl Git {
             // T3 failed the action, or the connection ended before it did; T3 may have done part of
             // it.
             let message = match stream.failure() {
-                Some(cause) => format!("T3 failed the action: {cause}"),
-                None => "T3 closed the connection before the action finished. Check the branch \
-                         before running it again."
-                    .to_owned(),
+                Some(Failure::Refused(cause)) => format!("T3 failed the action: {cause}"),
+                Some(Failure::ConnectionLost) | None => {
+                    "T3 closed the connection before the action \
+                         finished. Check the branch before running it again."
+                        .to_owned()
+                }
             };
             let _ = sender.send(GitProgress::Failed(message)).await;
         });

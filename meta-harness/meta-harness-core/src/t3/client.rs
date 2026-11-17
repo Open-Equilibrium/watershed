@@ -39,8 +39,17 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 /// Issues an owner token, as `t3 auth session issue` does.
 type Issue = Arc<dyn Fn() -> BoxFuture<'static, Result<String, String>> + Send + Sync>;
 
-/// Why T3 failed a stream's request, shared by its waiter and its subscription.
-type Failure = Arc<Mutex<Option<String>>>;
+/// Why a request ended on a failure rather than an ordinary end.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Failure {
+    /// T3 ended the request with this failure cause, as JSON text.
+    Refused(String),
+    /// The connection to T3 was lost before the request ended, so it was not sent again.
+    ConnectionLost,
+}
+
+/// A request's failure, shared by its waiter and its subscription.
+type Slot = Arc<Mutex<Option<Failure>>>;
 
 enum Waiter {
     Call(oneshot::Sender<Result<Value, String>>),
@@ -50,7 +59,7 @@ enum Waiter {
     Stream {
         items: mpsc::UnboundedSender<Item>,
         frame: Option<Value>,
-        failure: Failure,
+        failure: Slot,
     },
 }
 
@@ -102,13 +111,13 @@ pub(crate) struct Subscription {
     items: mpsc::UnboundedReceiver<Item>,
     id: String,
     link: Link,
-    failure: Failure,
+    failure: Slot,
 }
 
 impl Subscription {
-    /// Why T3 failed the request, once `recv` returned `None` on T3's failure; `None` after an
-    /// ordinary end or while the request runs.
-    pub fn failure(&self) -> Option<String> {
+    /// Why the request ended on a failure, once `recv` returned `None`; `None` after an ordinary
+    /// end or while the request runs.
+    pub fn failure(&self) -> Option<Failure> {
         lock(&self.failure).clone()
     }
 
@@ -210,7 +219,7 @@ impl Client {
         let id = self.next_id();
         let (items, receiver) = mpsc::unbounded_channel();
         let frame = request_frame(&id, tag, payload);
-        let failure = Failure::default();
+        let failure = Slot::default();
         self.request(
             &id,
             &frame,
@@ -294,7 +303,13 @@ fn lose_connection(state: &mut State) {
                 let _ = reply.send(Err(LOST_CALL.to_owned()));
             }
             // An action's stream ends here: dropping its sender ends its items.
-            Waiter::Stream { frame: None, .. } => {}
+            Waiter::Stream {
+                frame: None,
+                failure,
+                ..
+            } => {
+                *lock(&failure) = Some(Failure::ConnectionLost);
+            }
             stream => {
                 state.waiters.insert(id, stream);
             }
@@ -306,7 +321,12 @@ fn lose_connection(state: &mut State) {
 fn close_for_good(state: &mut State) {
     state.closed = true;
     state.out = None;
-    state.waiters.clear();
+    // Each open stream ends here, and keeps why.
+    for waiter in std::mem::take(&mut state.waiters).into_values() {
+        if let Waiter::Stream { failure, .. } = waiter {
+            *lock(&failure) = Some(Failure::ConnectionLost);
+        }
+    }
 }
 
 /// Writes what the client sends and reads what T3 sends, until either side ends.
@@ -388,7 +408,7 @@ fn dispatch(link: &Link, ack: &mpsc::UnboundedSender<Message>, frame: Value) {
                 }
                 Some(Waiter::Stream { failure, .. }) => {
                     if let Err(cause) = result {
-                        *lock(&failure) = Some(cause);
+                        *lock(&failure) = Some(Failure::Refused(cause));
                     }
                 }
                 None => {}
