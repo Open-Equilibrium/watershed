@@ -473,6 +473,42 @@ fn closing_the_credit_ends_a_resubscription_that_is_still_pending() {
 }
 
 #[test]
+fn what_waits_goes_out_while_a_resubscription_is_pending() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let (events, receiver) = tokio::sync::mpsc::channel(4096);
+        let (delivered, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
+        // The subscription closes, and the resubscription that replaces it never answers.
+        let forwarding = tokio::spawn(forward(
+            receiver,
+            std::future::pending::<Option<tokio::sync::mpsc::Receiver<ThreadEvent>>>,
+            credit.clone(),
+            move |event| delivered.send(event).is_ok(),
+        ));
+        for item in 1..=WINDOW as u64 + 1 {
+            events.send(started(item)).await.expect("sent");
+        }
+        drop(events);
+        settle().await;
+        assert_eq!(taken(&mut deliveries).len(), WINDOW);
+        // Liquid confirms the window while the resubscription still waits; the event past the
+        // window goes out at once rather than when the resubscription answers.
+        credit.confirm(WINDOW as u64);
+        settle().await;
+        assert_eq!(
+            taken(&mut deliveries).len(),
+            1,
+            "what waits is sent while the resubscription is pending"
+        );
+        credit.close();
+        tokio::time::timeout(Duration::from_secs(1), forwarding)
+            .await
+            .expect("forward returns once the session closed")
+            .expect("forward completes");
+    });
+}
+
+#[test]
 fn falling_behind_keeps_finished_items_and_sends_one_fell_behind_event() {
     paused_runtime().block_on(async {
         let credit = Arc::new(Credit::default());

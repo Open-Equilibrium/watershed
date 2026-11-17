@@ -354,11 +354,18 @@ pub(crate) async fn forward<Next: Future<Output = Option<mpsc::Receiver<ThreadEv
                 }
             }
             Some(None) => {
-                let next = tokio::select! {
-                    next = resubscribe() => next,
-                    // Only the session's drop ends the wait; an ordinary confirmation leaves the
-                    // attempt pending.
-                    () = credit.wait_closed() => return,
+                // Only the session's drop ends the wait; an ordinary confirmation leaves the attempt
+                // pending, but what waits goes out as each one reopens room.
+                let mut attempt = Box::pin(resubscribe());
+                let next = loop {
+                    tokio::select! {
+                        next = &mut attempt => break next,
+                        () = credit.wait() => {
+                            if credit.is_closed() || !outbox.send(&credit, &mut deliver) {
+                                return;
+                            }
+                        }
+                    }
                 };
                 let Some(next) = next else {
                     // T3 ended the thread for good: no event comes, but what waits still goes.
