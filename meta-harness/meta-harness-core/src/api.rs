@@ -332,6 +332,9 @@ pub struct Status {
     pub pid: u32,
     /// The current configuration revision.
     pub revision: u64,
+    /// Whether the harness homes hold that revision; false after a failed write that is not yet
+    /// repaired by a write that succeeds.
+    pub reconciled: bool,
 }
 
 /// Where the remote listener answers, while it is on.

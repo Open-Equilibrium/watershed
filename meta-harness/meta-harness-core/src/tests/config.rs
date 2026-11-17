@@ -403,3 +403,56 @@ fn a_failed_rollback_is_reported_with_the_failure_that_caused_it() {
         "{error}"
     );
 }
+
+#[test]
+fn a_failed_rollback_refuses_approvals_until_the_current_revision_is_written() {
+    let fixture = Fixture::new();
+    let store = &fixture.store;
+    let first = propose(store, vec![instruction("rules", "x")]);
+    let second = propose(store, vec![instruction("more", "y")]);
+    let before = store.current().unwrap();
+    let raw = rusqlite::Connection::open(fixture.dir.join("meta-harness.sqlite")).unwrap();
+    raw.execute_batch(
+        "CREATE TRIGGER refuse BEFORE INSERT ON revision BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+    )
+    .unwrap();
+    // The approved revision reaches the homes, then the commit and the restore both fail.
+    let calls = std::cell::Cell::new(0);
+    let failed = store.approve("cli", first, |_| {
+        calls.set(calls.get() + 1);
+        if calls.get() == 1 {
+            Ok(())
+        } else {
+            Err("the homes refuse writes".to_owned())
+        }
+    });
+    assert!(failed.is_err());
+    assert!(!store.reconciled());
+
+    raw.execute_batch("DROP TRIGGER refuse").unwrap();
+    // While the homes refuse writes, the next approval is refused and says what to do.
+    let refused = store
+        .approve("cli", second, |_| Err("the homes refuse writes".to_owned()))
+        .unwrap_err();
+    assert!(
+        refused.starts_with("The harness homes could not be brought back")
+            && refused.contains("the homes refuse writes")
+            && refused.ends_with("Fix that, then approve again."),
+        "{refused}"
+    );
+    assert!(!store.reconciled());
+
+    // A write of the current revision comes first; once it succeeds, the approval goes on.
+    let written = std::cell::RefCell::new(Vec::new());
+    store
+        .approve("cli", second, |blocks| {
+            written.borrow_mut().push(blocks.clone());
+            Ok(())
+        })
+        .unwrap();
+    let written = written.into_inner();
+    assert_eq!(written.len(), 2);
+    assert_eq!(written[0], before.blocks);
+    assert!(store.reconciled());
+    assert_eq!(store.current().unwrap().revision, 1);
+}

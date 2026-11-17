@@ -7,7 +7,7 @@ mod login;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use meta_harness_core::{Change, Service, ServiceConfig, default_home, remote, t3_version};
+use meta_harness_core::{Change, Service, ServiceConfig, api, default_home, remote, t3_version};
 
 const USAGE: &str = "\
 usage: meta <command>
@@ -74,10 +74,7 @@ async fn run(args: &[&str]) -> Result<(), String> {
         ["serve"] => serve(home).await,
         ["status"] => {
             let status = connect(&home).await?.status().await?;
-            println!(
-                "Meta-Harness runs T3 Code {} as process {}, configuration revision {}.",
-                status.t3_version, status.pid, status.revision
-            );
+            println!("{}", status_text(&status));
             Ok(())
         }
         ["config", rest @ ..] => config(&connect(&home).await?, rest).await,
@@ -89,6 +86,22 @@ async fn run(args: &[&str]) -> Result<(), String> {
         ["uninstall"] => uninstall(),
         _ => Err(format!("unknown command \"{}\"\n{USAGE}", args.join(" "))),
     }
+}
+
+/// What `meta status` says of the service and its harness homes.
+fn status_text(status: &api::Status) -> String {
+    let mut text = format!(
+        "Meta-Harness runs T3 Code {} as process {}, configuration revision {}.",
+        status.t3_version, status.pid, status.revision
+    );
+    if !status.reconciled {
+        text.push_str(&format!(
+            "\nThe harness homes are not reconciled with revision {}: approving a change writes \
+             them again first, and is refused while that fails.",
+            status.revision
+        ));
+    }
+    text
 }
 
 async fn connect(home: &Path) -> Result<remote::Host, String> {
@@ -326,6 +339,21 @@ mod tests {
         ] {
             assert_eq!(removes_data(prefix, Path::new(home)), refused, "{home}");
         }
+    }
+
+    #[test]
+    fn status_says_when_the_harness_homes_are_not_reconciled() {
+        let status = |reconciled| api::Status {
+            t3_version: "0.1.9".to_owned(),
+            pid: 7,
+            revision: 3,
+            reconciled,
+        };
+        assert!(!status_text(&status(true)).contains("not reconciled"));
+        assert!(
+            status_text(&status(false))
+                .contains("The harness homes are not reconciled with revision 3")
+        );
     }
 
     #[test]

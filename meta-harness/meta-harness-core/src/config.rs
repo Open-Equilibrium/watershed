@@ -6,6 +6,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -158,6 +159,8 @@ const TABLES: [&str; 3] = ["revision", "proposal", "log"];
 /// Meta-Harness's configuration store, one SQLite file.
 pub(crate) struct Store {
     db: Mutex<Connection>,
+    /// Whether the harness homes hold the current revision; see [`Store::reconciled`].
+    reconciled: AtomicBool,
 }
 
 impl Store {
@@ -175,7 +178,21 @@ impl Store {
         }
         db.execute_batch(&format!("BEGIN; {schema} {} COMMIT;", crate::hosts::SCHEMA))
             .map_err(failed)?;
-        Ok(Self { db: Mutex::new(db) })
+        Ok(Self {
+            db: Mutex::new(db),
+            reconciled: AtomicBool::new(true),
+        })
+    }
+
+    /// Whether the harness homes hold the current revision. A failed write that its restore could
+    /// not undo leaves them not reconciled, until a write of the current revision succeeds.
+    pub fn reconciled(&self) -> bool {
+        self.reconciled.load(Ordering::SeqCst)
+    }
+
+    /// Records whether the last write of the current revision into the harness homes succeeded.
+    pub fn set_reconciled(&self, reconciled: bool) {
+        self.reconciled.store(reconciled, Ordering::SeqCst);
     }
 
     /// The connection to the store, which the hosts' tables share.
@@ -254,7 +271,9 @@ impl Store {
     /// Approves proposal `number` for `client`: its changes apply to the current revision, which
     /// makes a new one once `write` put its blocks into the harness homes. While `write` runs, no
     /// other approval does, so the homes always end on the current revision; if it fails, nothing
-    /// is approved and `write` puts the current revision back.
+    /// is approved and `write` puts the current revision back. If that restore fails too, the homes
+    /// are not reconciled: each approval then first writes the current revision, and is refused
+    /// while that fails.
     pub fn approve(
         &self,
         client: &str,
@@ -265,6 +284,15 @@ impl Store {
         let tx = db.transaction().map_err(failed)?;
         let proposed: Proposed = parse(&undecided(&tx, number)?)?;
         let base = current(&tx)?;
+        if !self.reconciled() {
+            write(&base.blocks).map_err(|error| {
+                format!(
+                    "The harness homes could not be brought back to the current configuration, so \
+                     no change is approved. {error}. Fix that, then approve again."
+                )
+            })?;
+            self.set_reconciled(true);
+        }
         let blocks = match proposed {
             Proposed::Changes(changes) => {
                 let mut blocks = base.blocks.clone();
@@ -300,6 +328,7 @@ impl Store {
             return Err(match write(&base.blocks) {
                 Ok(()) => error,
                 Err(restore) => {
+                    self.set_reconciled(false);
                     format!("{error}. The harness homes could not be restored: {restore}")
                 }
             });

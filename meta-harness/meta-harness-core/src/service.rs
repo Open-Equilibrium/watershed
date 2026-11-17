@@ -155,9 +155,11 @@ impl Service {
             .or_else(|| std::env::home_dir().map(|h| h.join(".codex")))
             .ok_or("The home folder is unknown.")?;
         // A revision the homes cannot take must not keep the service from serving its revert.
-        if let Err(error) = homes.write(&store.current()?.blocks, &person_codex) {
+        let written = homes.write(&store.current()?.blocks, &person_codex);
+        if let Err(error) = &written {
             eprintln!("meta: {error}");
         }
+        store.set_reconciled(written.is_ok());
         let t3_home = config.home.join("t3");
         let (links_t3, links_home) = (config.t3.clone(), t3_home.clone());
         let host = Arc::new(
@@ -662,6 +664,7 @@ impl Session {
                 t3_version: crate::t3_version().to_owned(),
                 pid: std::process::id(),
                 revision: self.shared.store.current()?.revision,
+                reconciled: self.shared.store.reconciled(),
             }),
             HostCall::Providers => to(host.providers().await?),
             HostCall::EnvironmentName => to(host.environment_name().await?),
