@@ -174,11 +174,31 @@ class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
   final Future<void> Function(AgentHostsSettings settings) save;
 
   /// Shows the host at an address (null: This Mac) as the agent area; returns why it cannot be shown,
-  /// or null once it is.
-  final Future<String?> Function(String? address) switchTo;
+  /// or null once it is. `isCurrent` tells whether the choice is still the latest, so a host chosen
+  /// meanwhile is not shown.
+  final Future<String?> Function(String? address, bool Function() isCurrent)
+  switchTo;
 
-  /// Counts the requests of [use], so that only the latest one's result is kept.
-  int _requests = 0;
+  /// Counts the choices of the agent area, so that only the latest one is shown and its result kept.
+  int _choices = 0;
+
+  /// The changes running. The rows wait for them; the controller outlives Settings, so a reopened
+  /// pane keeps waiting for a change in progress.
+  int _changes = 0;
+
+  /// Whether a change runs now.
+  bool get changing => _changes > 0;
+
+  Future<T> _change<T>(Future<T> Function() change) async {
+    _changes++;
+    notifyListeners();
+    try {
+      return await change();
+    } finally {
+      _changes--;
+      notifyListeners();
+    }
+  }
 
   Future<T> _step<T>(String failed, Future<T> Function() step) async {
     try {
@@ -223,32 +243,38 @@ class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
   }
 
   /// Forgets the token of `host` on this Mac, then drops it from the saved list. A host in use gives
-  /// way to This Mac first, as [use] does, so the agent area never stays on a forgotten host.
-  Future<void> remove(SavedAgentHost host) async {
-    if (host.active) await use(null);
+  /// way to This Mac only after both, so a failure of either is said by Settings that asked, and
+  /// This Mac is not shown for a list that did not save.
+  Future<void> remove(SavedAgentHost host) => _change(() async {
     await _step(
-      host.active
-          ? 'Could not remove ${host.name}; This Mac is used for sessions now.'
-          : 'Could not remove ${host.name}; nothing changed.',
+      'Could not remove ${host.name}; nothing changed.',
       () => bridge.forget(host.address),
     );
     await _step(
       'Could not remove ${host.name} from the list; its token here is forgotten, so remove it again to finish.',
       () => _write(value.without(host.address)),
     );
-  }
+    if (!host.active) return;
+    final choice = ++_choices;
+    final failure = await switchTo(null, () => choice == _choices);
+    if (failure != null && choice == _choices) {
+      throw AgentHostsError(
+        'Removed ${host.name} from this device, but This Mac could not be shown for sessions, so the agent area still shows ${host.name} until Liquid restarts. $failure',
+      );
+    }
+  });
 
   /// Makes the host at `address` the one sessions run on, or This Mac for null. The choice is saved
   /// first and shown at once; when the host cannot be shown, the saved choice goes back, unless a
   /// later choice was asked for meanwhile.
-  Future<void> use(String? address) async {
-    final request = ++_requests;
+  Future<void> use(String? address) => _change(() async {
+    final choice = ++_choices;
     final previous = value;
     final failed =
         'Could not use ${_nameOf(address, previous)} for sessions; nothing changed.';
     await _step(failed, () => _write(previous.withActive(address)));
-    final failure = await switchTo(address);
-    if (failure == null || request != _requests) return;
+    final failure = await switchTo(address, () => choice == _choices);
+    if (failure == null || choice != _choices) return;
     try {
       await _write(previous);
     } on Object catch (error) {
@@ -257,7 +283,7 @@ class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
       );
     }
     throw AgentHostsError('$failed $failure');
-  }
+  });
 
   /// Whether the host at `address` answers now; null is This Mac.
   Future<BridgeReach> reach(String? address) => bridge.reach(address);

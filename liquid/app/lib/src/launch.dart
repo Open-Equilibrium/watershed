@@ -84,13 +84,19 @@ Future<Launch> launchFromEnvironment(
 
 /// Shows the agent host at `address` (null: This Mac) as Liquid's agent area at once, and releases the
 /// session it replaces. `connect` returns why the host cannot be shown, and then the area stays as it
-/// was; the answer is null once it is shown.
+/// was; the answer is null once it is shown. A host whose choice `isCurrent` no longer finds is not
+/// shown, since a later choice is, and its session is released.
 Future<String?> showAgentHost(
   ValueNotifier<Launch> surface,
   Future<Launch> Function(String? address) connect,
-  String? address,
-) async {
+  String? address, {
+  required bool Function() isCurrent,
+}) async {
   final next = await connect(address);
+  if (!isCurrent()) {
+    await next.state?.dispose();
+    return 'Another agent host was chosen meanwhile.';
+  }
   if (next.state == null) {
     return next.problem ?? 'Liquid could not start sessions on it.';
   }

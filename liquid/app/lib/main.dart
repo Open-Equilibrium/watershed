@@ -74,13 +74,14 @@ Future<void> main() async {
           home: Platform.environment['META_HARNESS_HOME'],
         ),
         save: (next) => agentHostsFile.save(next.toJson()),
-        switchTo: (address) => showAgentHost(
+        switchTo: (address, isCurrent) => showAgentHost(
           surface,
           (address) => launchFromEnvironment(
             Platform.environment,
             activeAddress: address,
           ),
           address,
+          isCurrent: isCurrent,
         ),
       ),
     ),

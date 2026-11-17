@@ -70,7 +70,7 @@ void main() {
     settings: settings,
     bridge: bridge,
     save: (next) async => saved.add(next),
-    switchTo: (address) async {
+    switchTo: (address, _) async {
       switched.add(address);
       return switchFailure;
     },
@@ -337,7 +337,7 @@ void main() {
       settings: AgentHostsSettings([mini]),
       bridge: bridge,
       save: (next) async => saved.add(next),
-      switchTo: (address) async {
+      switchTo: (address, _) async {
         switched.add(address);
         return opening.future;
       },
@@ -351,6 +351,35 @@ void main() {
     opening.complete(null);
     await tester.pumpAndSettle();
     expect(find.text('Used for sessions'), findsOneWidget);
+  });
+
+  testWidgets('the rows keep waiting for a choice when Settings reopen', (
+    tester,
+  ) async {
+    final opening = Completer<String?>();
+    await tester.binding.setSurfaceSize(const Size(1600, 1000));
+    final hosts = AgentHostsController(
+      settings: AgentHostsSettings([mini]),
+      bridge: bridge,
+      save: (next) async => saved.add(next),
+      switchTo: (address, _) async {
+        switched.add(address);
+        return opening.future;
+      },
+    );
+    await show(tester, hosts);
+    await chooseInRow(tester, remote, 'Use for sessions');
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    await openAgentHosts(tester);
+    await chooseInRow(tester, null, 'Use for sessions');
+
+    expect(switched, [
+      remote,
+    ], reason: 'the choice in progress still holds the rows');
+    opening.complete(null);
+    await tester.pumpAndSettle();
   });
 
   testWidgets(
@@ -529,13 +558,55 @@ void main() {
     );
   });
 
+  testWidgets(
+    'removing the host in use saves the list before This Mac is shown',
+    (tester) async {
+      await show(
+        tester,
+        AgentHostsController(
+          settings: const AgentHostsSettings([
+            SavedAgentHost(
+              name: 'Studio mini',
+              address: remote,
+              client: client,
+              active: true,
+            ),
+          ]),
+          bridge: bridge,
+          save: (next) async {
+            if (next.hosts.isEmpty) {
+              throw const FileSystemException('disk full');
+            }
+            saved.add(next);
+          },
+          switchTo: (address, _) async {
+            switched.add(address);
+            return null;
+          },
+        ),
+      );
+
+      await chooseInRow(tester, remote, 'Remove from this device…');
+      await tester.tap(find.widgetWithText(DangerButton, 'Remove'));
+      await tester.pumpAndSettle();
+
+      expect(switched, isEmpty, reason: 'the list is saved first');
+      expect(
+        find.text(
+          'Could not remove Studio mini from the list; its token here is forgotten, so remove it again to finish. disk full.',
+        ),
+        findsOneWidget,
+      );
+    },
+  );
+
   test('a result of a choice that a later one superseded is dropped', () async {
     final opening = Completer<String?>();
     final hosts = AgentHostsController(
       settings: AgentHostsSettings([mini]),
       bridge: bridge,
       save: (next) async => saved.add(next),
-      switchTo: (address) =>
+      switchTo: (address, _) =>
           address == remote ? opening.future : Future.value(null),
     );
 
@@ -548,12 +619,60 @@ void main() {
     expect(saved.last.activeAddress, isNull);
   });
 
+  test(
+    'a host chosen first that connects last does not replace the later choice',
+    () async {
+      const info = SessionInfo(project: 'acme-api');
+      final thisMac = SessionState(FakeProject());
+      final studioProject = FakeProject();
+      final studio = SessionState(studioProject);
+      final connecting = Completer<Launch>();
+      final surface = ValueNotifier(
+        Launch.session(SessionState(FakeProject()), info),
+      );
+      final hosts = AgentHostsController(
+        settings: AgentHostsSettings([mini]),
+        bridge: bridge,
+        save: (next) async => saved.add(next),
+        switchTo: (address, isCurrent) => showAgentHost(
+          surface,
+          (address) async {
+            if (address == null) return Launch.session(thisMac, info);
+            return connecting.future;
+          },
+          address,
+          isCurrent: isCurrent,
+        ),
+      );
+
+      final slow = hosts.use(remote);
+      await hosts.use(null);
+      expect(surface.value.state, same(thisMac));
+
+      connecting.complete(Launch.session(studio, info));
+      await slow;
+      await pumpEventQueue();
+
+      expect(
+        surface.value.state,
+        same(thisMac),
+        reason: 'the later choice stays shown',
+      );
+      expect(hosts.value.activeAddress, isNull);
+      expect(
+        studioProject.closed,
+        isTrue,
+        reason: 'the host that was not shown is released',
+      );
+    },
+  );
+
   test('a host whose list cannot be saved is forgotten again, and a failed forget is said', () async {
     final hosts = AgentHostsController(
       settings: const AgentHostsSettings(),
       bridge: bridge,
       save: (_) async => throw const FileSystemException('disk full'),
-      switchTo: (_) async => null,
+      switchTo: (_, _) async => null,
     );
 
     await expectLater(

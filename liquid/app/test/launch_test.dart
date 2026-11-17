@@ -86,19 +86,29 @@ void main() {
     final surface = ValueNotifier(shown);
     final asked = <String?>[];
 
-    final failure = await showAgentHost(surface, (address) async {
-      asked.add(address);
-      return const Launch.problem('no answer');
-    }, 'ws://studio.local:3774');
+    final failure = await showAgentHost(
+      surface,
+      (address) async {
+        asked.add(address);
+        return const Launch.problem('no answer');
+      },
+      'ws://studio.local:3774',
+      isCurrent: () => true,
+    );
     expect(failure, 'no answer');
     expect(surface.value, same(shown));
 
     final next = Launch.session(SessionState(FakeProject()), info);
     expect(
-      await showAgentHost(surface, (address) async {
-        asked.add(address);
-        return next;
-      }, null),
+      await showAgentHost(
+        surface,
+        (address) async {
+          asked.add(address);
+          return next;
+        },
+        null,
+        isCurrent: () => true,
+      ),
       isNull,
     );
     expect(surface.value, same(next));

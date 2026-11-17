@@ -41,9 +41,6 @@ class _AgentHostsPaneState extends State<AgentHostsPane> {
   /// The hosts whose check runs now, so checks do not pile up behind a slow host.
   final _checking = <String?>{};
 
-  /// Whether a change runs; the rows wait for it.
-  bool _changing = false;
-
   late final Timer _recheck;
   late final AppLifecycleListener _lifecycle;
 
@@ -94,21 +91,19 @@ class _AgentHostsPaneState extends State<AgentHostsPane> {
     unawaited(_check(added.address));
   }
 
-  /// Runs a change of the hosts: its rows wait for it, and its failure shows at the top of Settings.
-  Future<void> _change(Future<void> Function() change) async {
-    setState(() => _changing = true);
+  /// Shows the outcome of a change of the hosts at the top of Settings: its failure, or the clearing
+  /// of an earlier one.
+  Future<void> _report(Future<void> Function() change) async {
     try {
       await change();
       if (mounted) widget.saveOutcome(null);
     } on AgentHostsError catch (error) {
       if (mounted) widget.saveOutcome(error.message);
-    } finally {
-      if (mounted) setState(() => _changing = false);
     }
   }
 
   Future<void> _use(String? address) =>
-      _change(() => widget.hosts.use(address));
+      _report(() => widget.hosts.use(address));
 
   Future<void> _remove(SavedAgentHost host) async {
     final confirmed = await showDialog<bool>(
@@ -125,7 +120,7 @@ class _AgentHostsPaneState extends State<AgentHostsPane> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    await _change(() => widget.hosts.remove(host));
+    await _report(() => widget.hosts.remove(host));
   }
 
   /// The status word of a host; it is text, so no color carries it alone.
@@ -152,7 +147,7 @@ class _AgentHostsPaneState extends State<AgentHostsPane> {
         RowAction(
           'Use for sessions',
           () => unawaited(_use(address)),
-          enabled: !active && !_changing,
+          enabled: !active && !widget.hosts.changing,
         ),
         if (host case final host?) ...[
           null,
@@ -160,7 +155,7 @@ class _AgentHostsPaneState extends State<AgentHostsPane> {
             'Remove from this device…',
             () => unawaited(_remove(host)),
             danger: true,
-            enabled: !_changing,
+            enabled: !widget.hosts.changing,
           ),
         ],
       ],
