@@ -82,11 +82,27 @@ class PageViews extends ChangeNotifier {
   /// read when the Table takes the caret, and whether it was written already.
   final naming = <String, (String, bool) Function()>{};
 
-  /// Each Whiteboard's board, shared by the Block and its full-screen view.
-  final _boards = <String, BoardController>{};
+  /// Each Whiteboard's board, shared by the Block and its full-screen view, with how many
+  /// of them use it; the last to go releases it, its subscription and caches with it.
+  final _boards = <String, (BoardController, int)>{};
 
-  BoardController boardFor(BridgeView view) =>
-      _boards.putIfAbsent(view.id, () => BoardController(this, view));
+  BoardController boardFor(BridgeView view) {
+    final (board, users) = _boards[view.id] ?? (BoardController(this, view), 0);
+    _boards[view.id] = (board, users + 1);
+    return board;
+  }
+
+  void releaseBoard(BridgeView view) {
+    final held = _boards[view.id];
+    if (held == null) return;
+    final (board, users) = held;
+    if (users > 1) {
+      _boards[view.id] = (board, users - 1);
+    } else {
+      _boards.remove(view.id);
+      board.dispose();
+    }
+  }
 
   /// The Whiteboard shown full screen over the Page, if any.
   final fullBoard = ValueNotifier<BridgeView?>(null);
@@ -272,7 +288,7 @@ class PageViews extends ChangeNotifier {
     caret.dispose();
     styles.dispose();
     uploads.dispose();
-    for (final board in _boards.values) {
+    for (final (board, _) in _boards.values) {
       board.dispose();
     }
     fullBoard.dispose();

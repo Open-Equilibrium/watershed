@@ -309,7 +309,10 @@ class PageKit {
   /// The board of the Page's only Whiteboard.
   BoardController boardOf(WidgetTester tester) {
     final block = tester.widget<WhiteboardBlock>(find.byType(WhiteboardBlock));
-    return block.views.boardFor(block.view);
+    // The Block holds the board; this look adds no user of its own.
+    final board = block.views.boardFor(block.view);
+    block.views.releaseBoard(block.view);
+    return board;
   }
 
   Iterable<BridgeMutation> applied(BridgeMutationKind kind) =>

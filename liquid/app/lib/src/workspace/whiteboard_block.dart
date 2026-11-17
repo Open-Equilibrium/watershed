@@ -62,6 +62,7 @@ class _WhiteboardBlockState extends State<WhiteboardBlock> {
   @override
   void dispose() {
     widget.views.focusBoard.removeListener(_takeFocus);
+    widget.views.releaseBoard(widget.view);
     _focus.dispose();
     super.dispose();
   }
@@ -261,6 +262,7 @@ class _WhiteboardFullScreenState extends State<WhiteboardFullScreen> {
 
   @override
   void dispose() {
+    widget.views.releaseBoard(widget.view);
     _focus.dispose();
     super.dispose();
   }

@@ -442,5 +442,14 @@ void main() {
       [for (final view in kit.fake.views[kit.page]!) view.kind],
       [BridgeBlockKind.text, BridgeBlockKind.text],
     );
+    expect(
+      kit.fake.followed.where(
+        (resource) =>
+            resource.kind == BridgeResourceKind.block &&
+            kit.fake.whiteboards.containsKey(resource.block),
+      ),
+      isEmpty,
+      reason: 'the board no longer follows its Block',
+    );
   });
 }
