@@ -177,7 +177,7 @@ class _AgentShellState extends State<AgentShell> {
   }
 
   /// Shows a failed save at the top of Settings, or clears the notice once the same settings save.
-  void _saveOutcome(SavedSettings<Object?> settings, String? failure) {
+  void _saveOutcome(Object settings, String? failure) {
     if (failure != null) {
       _saveFailure.value = (settings: settings, text: failure);
     } else if (_saveFailure.value?.settings == settings) {
@@ -482,7 +482,13 @@ class _AgentShellState extends State<AgentShell> {
                                 : WriterModelPane(project: project),
                             agentHosts: widget.agentHosts == null
                                 ? null
-                                : AgentHostsPane(hosts: widget.agentHosts!),
+                                : AgentHostsPane(
+                                    hosts: widget.agentHosts!,
+                                    saveOutcome: (failure) => _saveOutcome(
+                                      widget.agentHosts!,
+                                      failure,
+                                    ),
+                                  ),
                           );
                         }
                         final open = widget.workspace?.open.value;

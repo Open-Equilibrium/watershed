@@ -20,13 +20,24 @@ class AddAgentHostDialog extends StatefulWidget {
 
 class _AddAgentHostDialogState extends State<AddAgentHostDialog> {
   final _address = TextEditingController();
+  final _addressFocus = FocusNode(debugLabel: 'agent host address');
   final _code = TextEditingController();
   String? _problem;
   bool _adding = false;
 
   @override
+  void initState() {
+    super.initState();
+    // The dialog's own autofocus takes the keys after the field's, so the Host field asks once shown.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _addressFocus.requestFocus();
+    });
+  }
+
+  @override
   void dispose() {
     _address.dispose();
+    _addressFocus.dispose();
     _code.dispose();
     super.dispose();
   }
@@ -67,22 +78,33 @@ class _AddAgentHostDialogState extends State<AddAgentHostDialog> {
     }
   }
 
+  /// A labeled field: the label is what the field is named by, for assistive technology, and it
+  /// shows above the field as T3 Code's does.
   Widget _field(
     BuildContext context,
     String label,
     TextEditingController controller,
-    String hint,
-  ) => Column(
+    String hint, {
+    FocusNode? focus,
+    VoidCallback? onSubmitted,
+  }) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     spacing: WsMetrics.space2,
     children: [
-      Text(label, style: DangerDialog.text(context)),
-      TextField(
-        controller: controller,
-        enabled: !_adding,
-        autocorrect: false,
-        enableSuggestions: false,
-        decoration: InputDecoration(isDense: true, hintText: hint),
+      ExcludeSemantics(child: Text(label, style: DangerDialog.text(context))),
+      MergeSemantics(
+        child: Semantics(
+          label: label,
+          child: TextField(
+            controller: controller,
+            focusNode: focus,
+            enabled: !_adding,
+            autocorrect: false,
+            enableSuggestions: false,
+            onSubmitted: onSubmitted == null ? null : (_) => onSubmitted(),
+            decoration: InputDecoration(isDense: true, hintText: hint),
+          ),
+        ),
       ),
     ],
   );
@@ -102,8 +124,14 @@ class _AddAgentHostDialogState extends State<AddAgentHostDialog> {
         'On the other host, run meta remote on, then meta invite --device. Enter the address and pairing code it shows.',
         style: DangerDialog.text(context),
       ),
-      _field(context, 'Host', _address, 'ws://host:3774'),
-      _field(context, 'Pairing code', _code, 'XXXX-XXXX'),
+      _field(context, 'Host', _address, 'ws://host:3774', focus: _addressFocus),
+      _field(
+        context,
+        'Pairing code',
+        _code,
+        'XXXX-XXXX',
+        onSubmitted: () => unawaited(_add()),
+      ),
       if (_problem case final problem?) WarningNotice(problem, danger: true),
     ],
   );

@@ -15,11 +15,19 @@ import 'agent_hosts.dart';
 typedef _Check = ({BridgeReach? reach, String? error});
 
 /// Settings → Agent hosts (ADR-0295): This Mac and the saved hosts, each with its status and the one
-/// Liquid's sessions use. Opening the section checks every host.
+/// Liquid's sessions use. Opening the section checks every host, again every 10 s and when Liquid
+/// comes back to the front; a failed change shows at the top of Settings.
 class AgentHostsPane extends StatefulWidget {
-  const AgentHostsPane({super.key, required this.hosts});
+  const AgentHostsPane({
+    super.key,
+    required this.hosts,
+    required this.saveOutcome,
+  });
 
   final AgentHostsController hosts;
+
+  /// Receives the message of a failed change, or null once a change went through.
+  final void Function(String? failure) saveOutcome;
 
   @override
   State<AgentHostsPane> createState() => _AgentHostsPaneState();
@@ -30,12 +38,31 @@ class _AgentHostsPaneState extends State<AgentHostsPane> {
   /// being checked.
   final _checks = <String?, _Check>{};
 
-  /// What the last change failed with, until the next change.
-  String? _problem;
+  /// The hosts whose check runs now, so checks do not pile up behind a slow host.
+  final _checking = <String?>{};
+
+  /// Whether a change runs; the rows wait for it.
+  bool _changing = false;
+
+  late final Timer _recheck;
+  late final AppLifecycleListener _lifecycle;
 
   @override
   void initState() {
     super.initState();
+    _recheck = Timer.periodic(const Duration(seconds: 10), (_) => _checkAll());
+    _lifecycle = AppLifecycleListener(onResume: _checkAll);
+    _checkAll();
+  }
+
+  @override
+  void dispose() {
+    _recheck.cancel();
+    _lifecycle.dispose();
+    super.dispose();
+  }
+
+  void _checkAll() {
     for (final address in <String?>[
       null,
       for (final host in widget.hosts.value.hosts) host.address,
@@ -45,22 +72,15 @@ class _AgentHostsPaneState extends State<AgentHostsPane> {
   }
 
   Future<void> _check(String? address) async {
+    if (!_checking.add(address)) return;
     final check = await widget.hosts
         .reach(address)
         .then<_Check>(
           (reach) => (reach: reach, error: null),
           onError: (Object error) => (reach: null, error: messageOf(error)),
         );
+    _checking.remove(address);
     if (mounted) setState(() => _checks[address] = check);
-  }
-
-  /// A host changed: its check runs again, and the last failure goes.
-  void _changed(String? address) {
-    setState(() {
-      _problem = null;
-      _checks.remove(address);
-    });
-    unawaited(_check(address));
   }
 
   Future<void> _add() async {
@@ -68,17 +88,27 @@ class _AgentHostsPaneState extends State<AgentHostsPane> {
       context: context,
       builder: (_) => AddAgentHostDialog(hosts: widget.hosts),
     );
-    if (added != null && mounted) _changed(added.address);
+    if (added == null || !mounted) return;
+    widget.saveOutcome(null);
+    setState(() => _checks.remove(added.address));
+    unawaited(_check(added.address));
   }
 
-  Future<void> _use(String? address) async {
-    setState(() => _problem = null);
+  /// Runs a change of the hosts: its rows wait for it, and its failure shows at the top of Settings.
+  Future<void> _change(Future<void> Function() change) async {
+    setState(() => _changing = true);
     try {
-      await widget.hosts.use(address);
+      await change();
+      if (mounted) widget.saveOutcome(null);
     } on AgentHostsError catch (error) {
-      if (mounted) setState(() => _problem = error.message);
+      if (mounted) widget.saveOutcome(error.message);
+    } finally {
+      if (mounted) setState(() => _changing = false);
     }
   }
+
+  Future<void> _use(String? address) =>
+      _change(() => widget.hosts.use(address));
 
   Future<void> _remove(SavedAgentHost host) async {
     final confirmed = await showDialog<bool>(
@@ -95,12 +125,7 @@ class _AgentHostsPaneState extends State<AgentHostsPane> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    setState(() => _problem = null);
-    try {
-      await widget.hosts.remove(host);
-    } on AgentHostsError catch (error) {
-      if (mounted) setState(() => _problem = error.message);
-    }
+    await _change(() => widget.hosts.remove(host));
   }
 
   /// The status word of a host; it is text, so no color carries it alone.
@@ -127,7 +152,7 @@ class _AgentHostsPaneState extends State<AgentHostsPane> {
         RowAction(
           'Use for sessions',
           () => unawaited(_use(address)),
-          enabled: !active,
+          enabled: !active && !_changing,
         ),
         if (host case final host?) ...[
           null,
@@ -135,6 +160,7 @@ class _AgentHostsPaneState extends State<AgentHostsPane> {
             'Remove from this device…',
             () => unawaited(_remove(host)),
             danger: true,
+            enabled: !_changing,
           ),
         ],
       ],
@@ -240,8 +266,6 @@ class _AgentHostsPaneState extends State<AgentHostsPane> {
                 icon: LucideIcons.server,
                 host: host,
               ),
-            if (_problem case final problem?)
-              WarningNotice(problem, danger: true),
           ],
         ),
       );

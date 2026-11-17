@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -83,6 +84,19 @@ void main() {
     switched = [];
   });
 
+  /// Opens Settings → Agent hosts with ⌘, and the section.
+  Future<void> openAgentHosts(WidgetTester tester) async {
+    await tester.sendKeyDownEvent(
+      LogicalKeyboardKey.metaLeft,
+      platform: 'macos',
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.comma, platform: 'macos');
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft, platform: 'macos');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Agent hosts').first);
+    await tester.pumpAndSettle();
+  }
+
   /// Opens Settings → Agent hosts over the agent surface, as ⌘, and the section do.
   Future<void> show(WidgetTester tester, AgentHostsController hosts) async {
     await tester.binding.setSurfaceSize(const Size(1600, 1000));
@@ -104,21 +118,13 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyDownEvent(
-      LogicalKeyboardKey.metaLeft,
-      platform: 'macos',
-    );
-    await tester.sendKeyEvent(LogicalKeyboardKey.comma, platform: 'macos');
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft, platform: 'macos');
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Agent hosts').first);
-    await tester.pumpAndSettle();
+    await openAgentHosts(tester);
   }
 
-  /// Opens the row menu of the host at `address` and chooses `item`.
+  /// Opens the row menu of the host at `address` (null: This Mac) and chooses `item`.
   Future<void> chooseInRow(
     WidgetTester tester,
-    String address,
+    String? address,
     String item,
   ) async {
     await tester.tap(
@@ -243,6 +249,73 @@ void main() {
     },
   );
 
+  testWidgets(
+    'names the add dialog fields, focuses Host, and adds on Enter in the code',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      await show(tester, controller());
+      await tester.tap(find.widgetWithText(GhostButton, 'Add agent host'));
+      await tester.pumpAndSettle();
+
+      // Each field is named by its label, which its hint follows while the field is empty; the Host
+      // field has the keys first.
+      expect(
+        tester.getSemantics(find.bySemanticsLabel(RegExp('^Host'))),
+        matchesSemantics(
+          isTextField: true,
+          isFocused: true,
+          isFocusable: true,
+          hasEnabledState: true,
+          isEnabled: true,
+          hasFocusAction: true,
+          hasTapAction: true,
+          hasSetTextAction: true,
+          hasSetSelectionAction: true,
+        ),
+      );
+      expect(
+        tester.getSemantics(find.bySemanticsLabel(RegExp('^Pairing code'))),
+        matchesSemantics(
+          isTextField: true,
+          isFocusable: true,
+          hasEnabledState: true,
+          isEnabled: true,
+          hasFocusAction: true,
+          hasTapAction: true,
+        ),
+      );
+
+      await tester.enterText(find.byType(TextField).at(0), remote);
+      await tester.enterText(find.byType(TextField).at(1), 'AAAA-AAAA');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(bridge.calls, contains('pair $remote AAAA-AAAA'));
+      expect(find.text('Add Agent Host'), findsNothing);
+      semantics.dispose();
+    },
+  );
+
+  testWidgets('checks the hosts again every 10 s and when the app comes back', (
+    tester,
+  ) async {
+    await show(tester, controller(settings: AgentHostsSettings([mini])));
+    int checks(String? address) => bridge.calls
+        .where((call) => call == 'reach ${address ?? 'local'}')
+        .length;
+    expect(checks(null), 1);
+
+    await tester.pump(const Duration(seconds: 10));
+    expect(checks(null), 2);
+    expect(checks(remote), 2);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(checks(null), 3);
+    expect(checks(remote), 3);
+  });
+
   testWidgets('uses a host for sessions at once', (tester) async {
     await show(tester, controller(settings: AgentHostsSettings([mini])));
     expect(find.text('Used for sessions'), findsOneWidget);
@@ -253,6 +326,31 @@ void main() {
     expect(saved.last.activeAddress, remote);
     expect(find.text('Used for sessions'), findsOneWidget);
     expect(find.textContaining('Restart'), findsNothing);
+  });
+
+  testWidgets('a second choice waits while the agent area opens', (
+    tester,
+  ) async {
+    final opening = Completer<String?>();
+    await tester.binding.setSurfaceSize(const Size(1600, 1000));
+    final hosts = AgentHostsController(
+      settings: AgentHostsSettings([mini]),
+      bridge: bridge,
+      save: (next) async => saved.add(next),
+      switchTo: (address) async {
+        switched.add(address);
+        return opening.future;
+      },
+    );
+    await show(tester, hosts);
+
+    await chooseInRow(tester, remote, 'Use for sessions');
+    await chooseInRow(tester, null, 'Use for sessions');
+
+    expect(switched, [remote], reason: 'the rows wait for the switch');
+    opening.complete(null);
+    await tester.pumpAndSettle();
+    expect(find.text('Used for sessions'), findsOneWidget);
   });
 
   testWidgets(
@@ -302,6 +400,50 @@ void main() {
     expect(find.text('New host session'), findsOneWidget);
     expect(find.text('Old host session'), findsNothing);
   });
+
+  testWidgets(
+    'a failing agent host at start leaves Settings to choose This Mac',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1600, 1000));
+      final shortcuts = await ShortcutController.load(
+        MemoryStore(ShortcutSettings.standard()),
+        FakeHost(),
+      );
+      await tester.pumpWidget(
+        LiquidApp(
+          launch: ValueNotifier(
+            const Launch.problem(
+              'Liquid could not connect to the agent host ws://studio.local:3774: no answer.',
+            ),
+          ),
+          shortcuts: shortcuts,
+          agentHosts: controller(
+            settings: const AgentHostsSettings([
+              SavedAgentHost(
+                name: 'Studio mini',
+                address: remote,
+                client: client,
+                active: true,
+              ),
+            ]),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await openAgentHosts(tester);
+      await chooseInRow(tester, null, 'Use for sessions');
+
+      expect(switched, [null]);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey<String?>(null)),
+          matching: find.text('Used for sessions'),
+        ),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets('says why no agent host is in use while the Workspace opens', (
     tester,
@@ -354,6 +496,58 @@ void main() {
     },
   );
 
+  testWidgets('removing the host in use shows This Mac at once', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      controller(
+        settings: const AgentHostsSettings([
+          SavedAgentHost(
+            name: 'Studio mini',
+            address: remote,
+            client: client,
+            active: true,
+          ),
+        ]),
+      ),
+    );
+
+    await chooseInRow(tester, remote, 'Remove from this device…');
+    await tester.tap(find.widgetWithText(DangerButton, 'Remove'));
+    await tester.pumpAndSettle();
+
+    expect(switched, [null]);
+    expect(saved.last.activeAddress, isNull);
+    expect(find.text('Studio mini'), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey<String?>(null)),
+        matching: find.text('Used for sessions'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  test('a result of a choice that a later one superseded is dropped', () async {
+    final opening = Completer<String?>();
+    final hosts = AgentHostsController(
+      settings: AgentHostsSettings([mini]),
+      bridge: bridge,
+      save: (next) async => saved.add(next),
+      switchTo: (address) =>
+          address == remote ? opening.future : Future.value(null),
+    );
+
+    final first = hosts.use(remote);
+    await hosts.use(null);
+    opening.complete('no answer');
+    await first;
+
+    expect(hosts.value.activeAddress, isNull);
+    expect(saved.last.activeAddress, isNull);
+  });
+
   test('a host whose list cannot be saved is forgotten again, and a failed forget is said', () async {
     final hosts = AgentHostsController(
       settings: const AgentHostsSettings(),
@@ -368,7 +562,7 @@ void main() {
         isA<AgentHostsError>().having(
           (error) => error.message,
           'message',
-          'Could not add the agent host; nothing changed. disk full',
+          'Could not add the agent host. Studio mini keeps this device paired as liquid-studio-s-mac; run meta host revoke liquid-studio-s-mac there to remove it. disk full.',
         ),
       ),
     );
@@ -383,7 +577,7 @@ void main() {
           (error) => error.message,
           'message',
           startsWith(
-            'Could not add the agent host; its device token could not be forgotten',
+            'Could not add the agent host. Studio mini keeps this device paired as liquid-studio-s-mac; run meta host revoke liquid-studio-s-mac there to remove it. Its device token could not be forgotten',
           ),
         ),
       ),

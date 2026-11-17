@@ -146,12 +146,16 @@ class AgentHostsError implements Exception {
   String toString() => message;
 }
 
-/// The message of `error` as Liquid shows it: a bridge error's or a file's own text.
-String messageOf(Object error) => switch (error) {
-  AnyhowException() => error.message,
-  FileSystemException() => error.message,
-  _ => '$error',
-};
+/// The message of `error` as Liquid shows it: a bridge error's or a file's own text, ended by one
+/// period.
+String messageOf(Object error) {
+  final text = switch (error) {
+    AnyhowException() => error.message,
+    FileSystemException() => error.message,
+    _ => '$error',
+  };
+  return text.endsWith('.') ? text : '$text.';
+}
 
 /// Settings → Agent hosts: the saved hosts in use, saved at each change. Each change runs its bridge
 /// step first, so a failed step leaves the saved list as it was, and a failed save never leaves a
@@ -172,6 +176,9 @@ class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
   /// Shows the host at an address (null: This Mac) as the agent area; returns why it cannot be shown,
   /// or null once it is.
   final Future<String?> Function(String? address) switchTo;
+
+  /// Counts the requests of [use], so that only the latest one's result is kept.
+  int _requests = 0;
 
   Future<T> _step<T>(String failed, Future<T> Function() step) async {
     try {
@@ -198,22 +205,31 @@ class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
     try {
       await _write(value.added(host));
     } on Object catch (error) {
+      // The host keeps this device paired from here on, so its own revoke has to follow.
+      final kept =
+          '${paired.host} keeps this device paired as ${paired.client}; run meta host revoke ${paired.client} there to remove it.';
       try {
         await bridge.forget(address);
       } on Object catch (forgetting) {
         throw AgentHostsError(
-          'Could not add the agent host; its device token could not be forgotten, so the keychain still holds it. ${messageOf(forgetting)}',
+          'Could not add the agent host. $kept Its device token could not be forgotten, so the keychain still holds it. ${messageOf(forgetting)}',
         );
       }
-      throw AgentHostsError('$failed ${messageOf(error)}');
+      throw AgentHostsError(
+        'Could not add the agent host. $kept ${messageOf(error)}',
+      );
     }
     return host;
   }
 
-  /// Forgets the token of `host` on this Mac, then drops it from the saved list.
+  /// Forgets the token of `host` on this Mac, then drops it from the saved list. A host in use gives
+  /// way to This Mac first, as [use] does, so the agent area never stays on a forgotten host.
   Future<void> remove(SavedAgentHost host) async {
+    if (host.active) await use(null);
     await _step(
-      'Could not remove ${host.name}; nothing changed.',
+      host.active
+          ? 'Could not remove ${host.name}; This Mac is used for sessions now.'
+          : 'Could not remove ${host.name}; nothing changed.',
       () => bridge.forget(host.address),
     );
     await _step(
@@ -223,14 +239,16 @@ class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
   }
 
   /// Makes the host at `address` the one sessions run on, or This Mac for null. The choice is saved
-  /// first and shown at once; when the host cannot be shown, the saved choice goes back.
+  /// first and shown at once; when the host cannot be shown, the saved choice goes back, unless a
+  /// later choice was asked for meanwhile.
   Future<void> use(String? address) async {
+    final request = ++_requests;
     final previous = value;
     final failed =
         'Could not use ${_nameOf(address, previous)} for sessions; nothing changed.';
     await _step(failed, () => _write(previous.withActive(address)));
     final failure = await switchTo(address);
-    if (failure == null) return;
+    if (failure == null || request != _requests) return;
     try {
       await _write(previous);
     } on Object catch (error) {

@@ -48,8 +48,9 @@ class SettingsFile {
   static var _saves = 0;
 }
 
-/// A failed save of `settings` and the message that says so, as Settings show it.
-typedef SaveFailure = ({SavedSettings<Object?> settings, String text});
+/// A failed save of `settings`, the object that saved (a [SavedSettings] or the agent hosts), and the
+/// message that says so, as Settings show it.
+typedef SaveFailure = ({Object settings, String text});
 
 /// Settings in use that a [SettingsFile] keeps: each change applies at once and is saved after
 /// the saves before it, so the last change is the one kept. A failed save goes to [report].

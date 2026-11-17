@@ -74,7 +74,7 @@ Future<Launch> launchFromEnvironment(
   } on Object catch (error) {
     if (activeAddress != null) {
       return Launch.problem(
-        'Liquid could not connect to the agent host $activeAddress: ${messageOf(error)}.',
+        'Liquid could not connect to the agent host $activeAddress: ${messageOf(error)}',
       );
     }
     // The bridge's error says that Meta-Harness is not running and where Liquid looked.

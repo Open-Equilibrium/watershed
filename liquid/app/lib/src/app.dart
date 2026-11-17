@@ -77,31 +77,21 @@ class LiquidApp extends StatelessWidget {
               const Locale('en'),
           builder: (context, child) =>
               UiScale(scale: chosen.textSize.scale, child: child!),
-          home: current.state != null || workspace != null
-              ? AgentShell(
-                  key: ObjectKey(current),
-                  state: current.state,
-                  info: current.info,
-                  workspace: workspace,
-                  workspaceProblem: workspaceProblem,
-                  agentProblem: current.problem,
-                  shortcuts: shortcuts,
-                  diffSettings: diffSettings,
-                  cardSettings: cardSettings,
-                  appearance: appearance,
-                  agentHosts: agentHosts,
-                )
-              : Scaffold(
-                  body: Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(32),
-                      child: Text(
-                        [?workspaceProblem, ?current.problem].join('\n\n'),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ),
-                ),
+          // The shell is always built, so Settings, and with them Agent hosts, stay reachable when no
+          // session starts, such as when the active agent host does not answer.
+          home: AgentShell(
+            key: ObjectKey(current),
+            state: current.state,
+            info: current.info,
+            workspace: workspace,
+            workspaceProblem: workspaceProblem,
+            agentProblem: current.problem,
+            shortcuts: shortcuts,
+            diffSettings: diffSettings,
+            cardSettings: cardSettings,
+            appearance: appearance,
+            agentHosts: agentHosts,
+          ),
         ),
       ),
     );
