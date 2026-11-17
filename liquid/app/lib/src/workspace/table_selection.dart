@@ -174,6 +174,14 @@ class CellSelection extends ChangeNotifier {
   /// Adds `sources` to the file cell at `row` and `field`, after its files, once they are
   /// in; files another write added meanwhile stay.
   Future<void> addFiles(int row, int field, List<MediaSource> sources) {
+    // The row and field as they are now, by identity, as the add may wait its turn.
+    final all = fields();
+    final rowId = rowAt(row)?.id;
+    if (rowId == null || field >= all.length) return Future.value();
+    return _queue(rowId, all[field].id, sources);
+  }
+
+  Future<void> _queue(String row, String field, List<MediaSource> sources) {
     // One add at a time, so each starts from the files the one before wrote.
     final done = _adding.then((_) => _addFiles(row, field, sources));
     _adding = done.then<void>((_) {}, onError: (Object _) {});
@@ -185,12 +193,27 @@ class CellSelection extends ChangeNotifier {
   /// The files last written to each cell, by row and field, until a read shows them.
   final _written = <(String, String), List<BridgeMedia>>{};
 
-  Future<void> _addFiles(int row, int field, List<MediaSource> sources) async {
-    final all = fields();
-    final read = rowAt(row);
-    if (read == null || field >= all.length) return;
-    final column = all[field];
-    if (column.kind != BridgeFieldKind.file || sources.isEmpty) return;
+  /// The row `id` as read now, wherever it is; none once it went.
+  BridgeRow? _rowById(String id) {
+    for (var at = 0; at < rowCount(); at++) {
+      if (rowAt(at) case final found? when found.id == id) return found;
+    }
+    return null;
+  }
+
+  Future<void> _addFiles(
+    String rowId,
+    String fieldId,
+    List<MediaSource> sources,
+  ) async {
+    final column = fields().where((field) => field.id == fieldId).firstOrNull;
+    final read = _rowById(rowId);
+    if (read == null ||
+        column == null ||
+        column.kind != BridgeFieldKind.file ||
+        sources.isEmpty) {
+      return;
+    }
     final key = (read.id, column.id);
     List<BridgeMedia> filesOf(BridgeRow row) {
       final shown = [
@@ -215,10 +238,7 @@ class CellSelection extends ChangeNotifier {
     final added = await attach(sources);
     if (added.isEmpty || _disposed) return;
     // The row as read now, wherever it went meanwhile; gone, it takes nothing.
-    BridgeRow? now;
-    for (var at = 0; at < rowCount() && now == null; at++) {
-      if (rowAt(at) case final found? when found.id == read.id) now = found;
-    }
+    final now = _rowById(read.id);
     if (now == null) {
       report(
         'Liquid did not add the files, as their row went; add them again.',
@@ -257,11 +277,13 @@ class CellSelection extends ChangeNotifier {
 
   /// Opens the file dialog and adds the chosen files to the selected file cell.
   Future<void> addPickedFiles() async {
-    final at = selected;
+    // The cell as it is now, by identity, as the dialog may stay open a while.
+    final target = _target;
     closePick();
-    if (at == null) return;
+    if (target == null) return;
+    final (row, field, _) = target;
     final sources = await MediaPlatform.pickFiles();
-    await addFiles(at.$1, at.$2, sources);
+    await _queue(row.id, field.id, sources);
   }
 
   /// Removes the selected file cell's file at `index`; the last one empties it.
@@ -288,7 +310,7 @@ class CellSelection extends ChangeNotifier {
   }
 
   /// ⌘V on a selected file cell adds copied files, or a copied image.
-  Future<void> _pasteFiles(int row, int field) async {
+  Future<void> _pasteFiles(String row, String field) async {
     final Pasted pasted;
     try {
       pasted = await readClipboard();
@@ -301,7 +323,7 @@ class CellSelection extends ChangeNotifier {
       if (pasted.files.isEmpty && pasted.image != null)
         MediaSource.bytes('Pasted image.png', pasted.image!),
     ];
-    await addFiles(row, field, sources);
+    await _queue(row, field, sources);
   }
 
   /// The selected select, date or file cell's field while its picker is open.
@@ -698,10 +720,7 @@ class CellSelection extends ChangeNotifier {
       case LogicalKeyboardKey.keyV
           when field.kind == BridgeFieldKind.file && isPaste(event):
         // A held ⌘V pastes once.
-        if (event is! KeyRepeatEvent) {
-          final (at, column) = selected!;
-          unawaited(_pasteFiles(at, column));
-        }
+        if (event is! KeyRepeatEvent) unawaited(_pasteFiles(row.id, field.id));
       case LogicalKeyboardKey.backspace || LogicalKeyboardKey.delete:
         if (cell != null && cell.kind != BridgeCellKind.empty) {
           _write(row, field, _cell(BridgeCellKind.empty));

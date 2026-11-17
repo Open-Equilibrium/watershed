@@ -303,6 +303,43 @@ void main() {
     expect(lastWrite(), 'r2: B.pdf');
   });
 
+  testWidgets(
+    'a queued add goes to the row it was made in, wherever it moved',
+    (tester) async {
+      await bookings(tester, () async => const []);
+      for (final name in ['A.pdf', 'B.pdf']) {
+        kit.fake.files['/Users/me/$name'] = Uint8List(3);
+      }
+      kit.fake.uploadGate = Completer<void>();
+      Future<void> paste(String name) async {
+        readClipboard = () async => Pasted(files: ['/Users/me/$name']);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+        await tester.pump();
+      }
+
+      await tester.tap(fileCell('r1'));
+      await tester.pumpAndSettle();
+      await paste('A.pdf');
+      await paste('B.pdf');
+      // While A goes in, a row lands above: r1 is now second.
+      final block = kit.fake.rows.keys.single;
+      kit.fake.putRows(kit.page, block, [
+        row('r0', 'Flight', const []),
+        ...kit.fake.rows[block]!,
+      ]);
+      await tester.pump();
+      kit.fake.uploadGate!.complete();
+      await tester.pumpAndSettle();
+      final rows = {
+        for (final set in kit.applied(BridgeMutationKind.setCell)) set.row,
+      };
+      expect(rows, {'r1'});
+      expect(lastWrite(), 'r1: A.pdf, B.pdf');
+    },
+  );
+
   testWidgets('a cell takes at most 100 files', (tester) async {
     await bookings(tester, () async => [await stored('Hotel.eml', 1)]);
     kit.fake.files['/Users/me/a.pdf'] = Uint8List(1);
