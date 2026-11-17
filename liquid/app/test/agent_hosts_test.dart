@@ -351,6 +351,38 @@ void main() {
     expect(find.textContaining('Restart'), findsNothing);
   });
 
+  testWidgets('choosing a host for sessions keeps Settings open', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 1000));
+    final surface = ValueNotifier(
+      Launch.session(SessionState(FakeProject()), info),
+    );
+    final hosts = AgentHostsController(
+      settings: AgentHostsSettings([mini]),
+      bridge: bridge,
+      save: (next) async => saved.add(next),
+      switchTo: (address, _) async {
+        // The agent area now shows the chosen host's session, which replaces the one shown.
+        surface.value = Launch.session(SessionState(FakeProject()), info);
+        return null;
+      },
+    );
+    await tester.pumpWidget(LiquidApp(launch: surface, agentHosts: hosts));
+    await tester.pumpAndSettle();
+    await openAgentHosts(tester);
+
+    await chooseInRow(tester, remote, 'Use for sessions');
+
+    expect(
+      find.text('Add agent host'),
+      findsOneWidget,
+      reason:
+          'Settings stay open, as T3 Code keeps them when a host is switched',
+    );
+    expect(find.text('Used for sessions'), findsOneWidget);
+  });
+
   testWidgets('a second choice waits while the agent area opens', (
     tester,
   ) async {

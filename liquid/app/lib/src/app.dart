@@ -8,6 +8,7 @@ import 'agent_hosts/agent_hosts.dart';
 import 'appearance.dart';
 import 'diff/diff_settings.dart';
 import 'launch.dart';
+import 'settings_page.dart';
 import 'shortcuts/shortcut_store.dart';
 import 'theme/theme.dart';
 import 'workspace/workspace_state.dart';
@@ -20,7 +21,7 @@ final _languages = kMaterialSupportedLanguages.intersection(
 
 /// The Liquid app. It holds no native state itself, so widget tests can build it without the
 /// Rust library.
-class LiquidApp extends StatelessWidget {
+class LiquidApp extends StatefulWidget {
   const LiquidApp({
     super.key,
     required this.launch,
@@ -50,12 +51,28 @@ class LiquidApp extends StatelessWidget {
   final AgentHostsController? agentHosts;
 
   @override
+  State<LiquidApp> createState() => _LiquidAppState();
+}
+
+class _LiquidAppState extends State<LiquidApp> {
+  /// Where Settings are, open or closed and at which section. It outlives each agent session shown,
+  /// so choosing an agent host leaves Settings open where they were, as T3 Code keeps its Settings
+  /// when an environment is switched.
+  final _settings = ValueNotifier<SettingsSection?>(null);
+
+  @override
+  void dispose() {
+    _settings.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final appearance = this.appearance ?? AppearanceController();
+    final appearance = widget.appearance ?? AppearanceController();
     return ValueListenableBuilder(
       valueListenable: appearance,
       builder: (context, chosen, _) => ValueListenableBuilder(
-        valueListenable: launch,
+        valueListenable: widget.launch,
         builder: (context, current, _) => MaterialApp(
           title: 'Liquid',
           debugShowCheckedModeBanner: false,
@@ -83,14 +100,15 @@ class LiquidApp extends StatelessWidget {
             key: ObjectKey(current),
             state: current.state,
             info: current.info,
-            workspace: workspace,
-            workspaceProblem: workspaceProblem,
+            workspace: widget.workspace,
+            workspaceProblem: widget.workspaceProblem,
             agentProblem: current.problem,
-            shortcuts: shortcuts,
-            diffSettings: diffSettings,
-            cardSettings: cardSettings,
+            shortcuts: widget.shortcuts,
+            diffSettings: widget.diffSettings,
+            cardSettings: widget.cardSettings,
             appearance: appearance,
-            agentHosts: agentHosts,
+            agentHosts: widget.agentHosts,
+            settings: _settings,
           ),
         ),
       ),
