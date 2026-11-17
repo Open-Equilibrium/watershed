@@ -2,26 +2,34 @@
 //! one durable commit per keystroke, builds a long Page and prints the replica's path; a second
 //! run, a new process as when Liquid starts again, reopens that Page and removes the replica.
 //! A run with `--attachment` adds one file as an attachment in its own replica and reads it
-//! back (ADR-0305). It prints a summary and never compares with a threshold. Run from the
-//! repository root:
+//! back (ADR-0305); one with `--whiteboard` draws strokes on a Whiteboard one by one and reads
+//! the board back, then fills one to its point cap (ADR-0306). It prints a summary and never
+//! compares with a threshold. Run from the repository root:
 //!
 //! ```sh
 //! cargo build --release -p liquid-storage --example replica_observe
 //! /usr/bin/time -l target/release/examples/replica_observe
 //! /usr/bin/time -l target/release/examples/replica_observe <printed path>
 //! /usr/bin/time -l target/release/examples/replica_observe --attachment
+//! /usr/bin/time -l target/release/examples/replica_observe --whiteboard
 //! ```
 
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use liquid_core::{Actor, Created, Mutation, Origin, PageId, PersonId, Request, Workspace};
+use liquid_core::{
+    Actor, BlockId, Content, Created, Element, Frame, InkColor, MAX_BOARD_POINTS, MAX_POINTS,
+    Mutation, Origin, PageId, Pen, PersonId, Request, Workspace,
+};
 use liquid_storage::Sqlite;
 
 const KEYSTROKES: usize = 2_000;
 /// The attachment workload's file: 256 MiB, as a short video is.
 const ATTACHMENT: usize = 256 << 20;
 const BLOCKS: usize = 1_000;
+/// The Whiteboard workload: strokes drawn one by one, of points each, as handwriting has.
+const STROKES: usize = 2_000;
+const STROKE_POINTS: usize = 150;
 const KEY: [u8; 32] = [7; 32];
 
 fn request(mutation: Mutation) -> Request {
@@ -75,6 +83,8 @@ fn main() {
     if let Some(argument) = std::env::args().nth(1) {
         if argument == "--attachment" {
             attachment();
+        } else if argument == "--whiteboard" {
+            whiteboard();
         } else {
             reopen(Path::new(&argument));
         }
@@ -241,6 +251,110 @@ fn attachment() {
         "reading it back part by part: {:.2} s, {:.0} MiB/s",
         read.as_secs_f64(),
         256.0 / read.as_secs_f64()
+    );
+    drop(workspace);
+    std::fs::remove_dir_all(&dir).expect("the replica is removed");
+}
+
+/// A stroke of `points` points, drawn left to right at `row`.
+fn stroke(row: usize, points: usize) -> Element {
+    let y = (row % 400) as f32 * 3.0;
+    let bytes: Vec<u8> = (0..points)
+        .flat_map(|at| [at as f32 * 0.5, y + (at % 7) as f32, 0.5])
+        .flat_map(f32::to_le_bytes)
+        .collect();
+    Element {
+        frame: Frame {
+            x: 0.0,
+            y: f64::from(y),
+            width: points as f64 * 0.5,
+            height: 6.0,
+            rotation: 0.0,
+        },
+        color: InkColor::Text,
+        width: 1,
+        content: Content::Stroke {
+            pen: Pen::Fountain,
+            points: bytes,
+        },
+    }
+}
+
+fn draw(workspace: &mut Workspace<Sqlite>, page: &PageId, block: &BlockId, add: Vec<Element>) {
+    workspace
+        .apply(request(Mutation::EditWhiteboard {
+            page: page.clone(),
+            block: block.clone(),
+            add,
+            change: Vec::new(),
+            remove: Vec::new(),
+        }))
+        .expect("the board takes the strokes");
+}
+
+/// Draws strokes on a Whiteboard one durable edit each, as a person writes, reads the whole
+/// board back after the Page loads again, then fills a second board to its point cap and
+/// reads that one, the most a board ever crosses to Dart.
+fn whiteboard() {
+    let dir =
+        std::env::temp_dir().join(format!("liquid-whiteboard-observe-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("the temporary directory can be created");
+    let path = dir.join("replica.db");
+    let mut workspace = Workspace::create(
+        PersonId::new("observer"),
+        Sqlite::open(&path, &KEY).expect("a new replica opens"),
+    )
+    .expect("the replica accepts a new Workspace");
+    let page = page(&mut workspace);
+    let add = |workspace: &mut Workspace<Sqlite>| {
+        let added = Mutation::AddWhiteboardBlock {
+            page: page.clone(),
+            after: None,
+        };
+        match created(workspace, added) {
+            Created::Block { block, .. } => block,
+            _ => panic!("a Whiteboard"),
+        }
+    };
+    let block = add(&mut workspace);
+    let mut times = Vec::new();
+    for row in 0..STROKES {
+        let started = Instant::now();
+        draw(
+            &mut workspace,
+            &page,
+            &block,
+            vec![stroke(row, STROKE_POINTS)],
+        );
+        times.push(started.elapsed());
+    }
+    summary(
+        &format!("drawing {STROKES} strokes of {STROKE_POINTS} points, per stroke"),
+        times,
+    );
+    let read = |workspace: &mut Workspace<Sqlite>, block: &BlockId| {
+        workspace.close_page(&page);
+        let start = Instant::now();
+        let board = workspace
+            .whiteboard(&page, block)
+            .expect("the board reads")
+            .expect("a live board");
+        (start.elapsed(), board.elements.len())
+    };
+    let (took, elements) = read(&mut workspace, &block);
+    println!(
+        "loading the Page and reading its {elements} strokes: {:.1} ms",
+        took.as_secs_f64() * 1e3
+    );
+    let full = add(&mut workspace);
+    let longest = MAX_BOARD_POINTS / MAX_POINTS;
+    for row in 0..longest {
+        draw(&mut workspace, &page, &full, vec![stroke(row, MAX_POINTS)]);
+    }
+    let (took, elements) = read(&mut workspace, &full);
+    println!(
+        "loading the Page and reading a board at its cap, {elements} strokes of {MAX_POINTS} points: {:.1} ms",
+        took.as_secs_f64() * 1e3
     );
     drop(workspace);
     std::fs::remove_dir_all(&dir).expect("the replica is removed");
