@@ -217,7 +217,13 @@ fn a_change_moves_and_restyles_an_element_but_never_redraws_its_ink() {
     apply(&mut workspace, edit(&page, &block, vec![], changes, vec![])).unwrap();
     let read = elements(&mut workspace, &page, &block);
     for ((_, element), original) in read.iter().zip(&originals) {
-        assert_eq!(element.frame.rotation, 0.5);
+        assert_eq!(
+            element.frame,
+            Frame {
+                rotation: 0.5,
+                ..frame(5.0, 6.0, 7.0, 8.0)
+            }
+        );
         assert_eq!(element.color, InkColor::Data2);
         assert_eq!(element.width, 2);
         if let Content::Stroke { points, .. } = &original.content {

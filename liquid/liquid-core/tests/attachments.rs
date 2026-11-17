@@ -373,10 +373,13 @@ fn a_file_cell_holds_files_of_finished_attachments() {
     };
     assert_eq!(
         read.iter()
-            .map(|file| (file.name.as_str(), file.size))
+            .map(|file| (file.name.as_str(), &file.attachment, file.size))
             .collect::<Vec<_>>(),
-        [("Hotel booking.eml", 7), ("Invoice.pdf", PART as u64 + 1)],
-        "in their order, each with its attachment's size as the store keeps it"
+        [
+            ("Hotel booking.eml", &booking.id, 7),
+            ("Invoice.pdf", &invoice.id, PART as u64 + 1)
+        ],
+        "in their order, each its attachment with the size the store keeps"
     );
 
     let mut missing = file("Lost.pdf", &booking);
@@ -398,4 +401,16 @@ fn a_file_cell_holds_files_of_finished_attachments() {
     apply(&mut workspace, set(Cell::Files(Vec::new()))).unwrap();
     let rows = workspace.rows(&page, &block, &all).unwrap();
     assert_eq!(rows.count, 0, "no files is an empty cell");
+    let no_files = RowQuery {
+        filter: Some(liquid_core::Filter {
+            field: files.clone(),
+            matches: Match::Is(Cell::Files(Vec::new())),
+        }),
+        ..all
+    };
+    assert_eq!(
+        workspace.rows(&page, &block, &no_files).unwrap().count,
+        1,
+        "and so it is as a filter's value"
+    );
 }

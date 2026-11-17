@@ -213,14 +213,15 @@ impl Store for Sqlite {
     ) -> Result<(), Error> {
         let size = i64::try_from(size).map_err(failed)?;
         let transaction = self.connection.transaction().map_err(failed)?;
-        let kept: i64 = transaction
+        // Parts run from 0 without a gap: as many as their highest index says.
+        let (kept, last): (i64, Option<i64>) = transaction
             .query_row(
-                "SELECT count(*) FROM parts WHERE upload = ?1",
+                "SELECT count(*), max(idx) FROM parts WHERE upload = ?1",
                 [upload],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .map_err(failed)?;
-        if kept as u64 != parts {
+        if kept as u64 != parts || last.map_or(0, |last| last + 1) != kept {
             return Err(Error::Storage(format!(
                 "the upload has {kept} of its {parts} parts"
             )));
@@ -246,7 +247,12 @@ impl Store for Sqlite {
 
     fn discard_upload(&mut self, upload: &str) -> Result<(), Error> {
         self.connection
-            .execute("DELETE FROM parts WHERE upload = ?1", [upload])
+            .execute(
+                // A finished attachment's parts stay whatever is asked.
+                "DELETE FROM parts WHERE upload = ?1 \
+                 AND NOT EXISTS (SELECT 1 FROM attachments WHERE upload = ?1)",
+                [upload],
+            )
             .map_err(failed)?;
         Ok(())
     }
@@ -329,6 +335,16 @@ mod tests {
         assert_eq!(parts(&store), 2, "the second copy's parts are dropped");
         store.finish_upload("first", &id, 6, 2).unwrap();
         assert_eq!(parts(&store), 2, "finishing again keeps the kept parts");
+        store.discard_upload("first").unwrap();
+        assert_eq!(parts(&store), 2, "a finished attachment's parts stay");
+        store.put_part("gap", 0, b"a").unwrap();
+        store.put_part("gap", 2, b"c").unwrap();
+        let other = AttachmentId::parse(&"b".repeat(64)).unwrap();
+        assert!(
+            store.finish_upload("gap", &other, 2, 2).is_err(),
+            "parts must run from 0 without a gap"
+        );
+        store.discard_upload("gap").unwrap();
         store.put_part("unfinished", 0, b"castle").unwrap();
         store.put_part("discarded", 0, b"river").unwrap();
         store.discard_upload("discarded").unwrap();

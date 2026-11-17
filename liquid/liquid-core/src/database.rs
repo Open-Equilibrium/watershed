@@ -655,6 +655,7 @@ fn matches(cell: Option<&Cell>, matches: &Match) -> bool {
     match (matches, cell) {
         // A value that is no cell matches the same rows as Empty: the index keeps no empty cell.
         (Match::Empty | Match::Is(Cell::Empty), cell) => cell.is_none(),
+        (Match::Is(Cell::Files(files)), cell) if files.is_empty() => cell.is_none(),
         (Match::NotEmpty, cell) => cell.is_some(),
         // Numbers by value, so either zero finds a stored zero.
         (Match::Is(Cell::Number(value)), Some(Cell::Number(stored))) => value == stored,
