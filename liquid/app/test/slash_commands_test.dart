@@ -57,6 +57,7 @@ void main() {
         'To-do list',
         'Quote',
         'Table',
+        'Code',
       ]) {
         expect(item(label), findsOneWidget, reason: label);
       }

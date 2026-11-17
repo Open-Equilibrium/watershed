@@ -1,7 +1,7 @@
 //! How streams cross to Dart: how the event forwarder batches them and how far ahead of Liquid it
 //! sends (ADR-0272), and when the follows of a session or checkout end (`until_ended`).
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use meta_harness_core::remote::connection_lost;
@@ -12,9 +12,11 @@ use crate::api::events::{BridgeEvent, BridgeEventKind};
 
 /// Adds `event` to `batch`. A content delta joins the one before it when both belong to the same
 /// item, taking its sequence, so a batch holds one event per run of text however fast it
-/// streams.
-pub(crate) fn push(batch: &mut Vec<BridgeEvent>, event: BridgeEvent) {
+/// streams. It does not join across `merge_point`, the sequence of a recovery snapshot (see
+/// [`Credit::merge_point`]), and does not join at all while `merge_point` is `None`.
+pub(crate) fn push(batch: &mut Vec<BridgeEvent>, event: BridgeEvent, merge_point: Option<i64>) {
     if let Some(last) = batch.last_mut()
+        && merge_point.is_some_and(|point| last.sequence > point || event.sequence <= point)
         && last.kind == event.kind
         && event.kind == BridgeEventKind::ContentDelta
         && last.item.as_ref().map(|item| item.id) == event.item.as_ref().map(|item| item.id)
@@ -39,13 +41,29 @@ pub(crate) const WINDOW: usize = 256;
 /// goes and Liquid falls behind; other events are never dropped (ADR-0272).
 pub(crate) const PENDING_LIMIT: usize = 256;
 
-/// How many of the stream's events Liquid applied, as `AgentSession::confirm_applied` reports,
-/// and whether the session that owns the stream was dropped and no confirmation will come.
-#[derive(Default)]
+/// The session's confirmations (ADR-0272): how many events Liquid applied, as
+/// `AgentSession::confirm_applied` reports, and whether the session was dropped and no
+/// confirmation will come. It also marks the recovery snapshots that merging must respect.
 pub(crate) struct Credit {
     applied: AtomicU64,
-    closed: AtomicBool,
+    /// Recovery snapshots being taken, and the sequence of the last one that returned.
+    snapshots_taken: AtomicU64,
+    snapshot_sequence: AtomicI64,
+    /// Set once the session was dropped, which every waiter sees, including a later one.
+    closed: watch::Sender<bool>,
     notify: Notify,
+}
+
+impl Default for Credit {
+    fn default() -> Self {
+        Self {
+            applied: AtomicU64::default(),
+            snapshots_taken: AtomicU64::default(),
+            snapshot_sequence: AtomicI64::default(),
+            closed: watch::channel(false).0,
+            notify: Notify::default(),
+        }
+    }
 }
 
 impl Credit {
@@ -57,8 +75,7 @@ impl Credit {
 
     /// Records that the session was dropped, which ends the stream's wait for Liquid.
     pub(crate) fn close(&self) {
-        self.closed.store(true, Ordering::Release);
-        self.notify.notify_one();
+        self.closed.send_replace(true);
     }
 
     /// How many events Liquid applied so far.
@@ -66,19 +83,53 @@ impl Credit {
         self.applied.load(Ordering::Acquire)
     }
 
+    /// Marks a recovery snapshot as being taken, until [`Credit::end_snapshot`].
+    pub(crate) fn begin_snapshot(&self) {
+        self.snapshots_taken.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// Ends the snapshot that [`Credit::begin_snapshot`] marked; `sequence` is what it returned,
+    /// if it returned.
+    pub(crate) fn end_snapshot(&self, sequence: Option<i64>) {
+        if let Some(sequence) = sequence {
+            self.snapshot_sequence.store(sequence, Ordering::Release);
+        }
+        self.snapshots_taken.fetch_sub(1, Ordering::AcqRel);
+    }
+
+    /// Where deltas may merge. Nowhere while a snapshot is being taken, since its sequence is not
+    /// known yet; elsewhere, but never across the sequence the last snapshot returned. Liquid
+    /// skips the events a snapshot holds (ADR-0290), so a merged delta that straddles that
+    /// sequence would replay text the snapshot already holds.
+    fn merge_point(&self) -> Option<i64> {
+        if self.snapshots_taken.load(Ordering::Acquire) > 0 {
+            None
+        } else {
+            Some(self.snapshot_sequence.load(Ordering::Acquire))
+        }
+    }
+
     /// Whether the session was dropped.
     fn is_closed(&self) -> bool {
-        self.closed.load(Ordering::Acquire)
+        *self.closed.borrow()
+    }
+
+    /// Waits until the session was dropped.
+    async fn wait_closed(&self) {
+        let _ = self.closed.subscribe().wait_for(|closed| *closed).await;
     }
 
     /// Waits until a confirmation may have reopened the window, or the session was dropped.
     async fn wait(&self) {
-        self.notify.notified().await;
+        tokio::select! {
+            () = self.notify.notified() => {}
+            () = self.wait_closed() => {}
+        }
     }
 }
 
-/// What the forwarder holds for Liquid: merged events waiting for room in the window, and how
-/// many events it sent.
+/// What the forwarder holds for Liquid: merged events waiting for room in the window, and how many
+/// events it sent.
 #[derive(Default)]
 pub(crate) struct Outbox {
     /// Events waiting for room, merged where they can be.
@@ -93,8 +144,8 @@ pub(crate) struct Outbox {
 impl Outbox {
     /// Queues `event` for Dart. Past the bound, the partial output waiting goes, since the reload
     /// replaces it, and one fell-behind event follows it; no other event is ever dropped.
-    pub(crate) fn admit(&mut self, event: BridgeEvent) {
-        push(&mut self.pending, event);
+    pub(crate) fn admit(&mut self, event: BridgeEvent, credit: &Credit) {
+        push(&mut self.pending, event, credit.merge_point());
         if self.pending.len() > PENDING_LIMIT {
             let waiting = self.pending.len();
             self.pending.retain(|event| !is_partial(event));
@@ -120,10 +171,10 @@ impl Outbox {
         self.pending.len() <= PENDING_LIMIT
     }
 
-    /// Hands pending events to `deliver` in order, as far as the window has room. Returns
-    /// `false` once `deliver` refused one.
-    fn send(&mut self, applied: u64, deliver: &mut impl FnMut(BridgeEvent) -> bool) -> bool {
-        let unconfirmed = self.sent.saturating_sub(applied);
+    /// Hands pending events to `deliver` in order, as far as the window has room. Returns `false`
+    /// once `deliver` refused one.
+    fn send(&mut self, credit: &Credit, deliver: &mut impl FnMut(BridgeEvent) -> bool) -> bool {
+        let unconfirmed = self.sent.saturating_sub(credit.applied());
         let room = (WINDOW as u64).saturating_sub(unconfirmed);
         let count = room.min(self.pending.len() as u64) as usize;
         for event in self.pending.drain(..count) {
@@ -276,7 +327,7 @@ pub(crate) async fn forward<Next: Future<Output = Option<mpsc::Receiver<ThreadEv
             // The session was dropped, so no confirmation comes; what waits is released with it.
             return;
         }
-        if !outbox.send(credit.applied(), &mut deliver) {
+        if !outbox.send(&credit, &mut deliver) {
             // Dart closed the stream.
             return;
         }
@@ -290,19 +341,26 @@ pub(crate) async fn forward<Next: Future<Output = Option<mpsc::Receiver<ThreadEv
         let idle = outbox.pending.is_empty();
         match next_or_wake(&credit, &mut receiver).await {
             Some(Some(event)) => {
-                outbox.admit(BridgeEvent::from(event));
+                outbox.admit(BridgeEvent::from(event), &credit);
                 if idle {
                     // Bounded by the window, so a busy agent never holds delivery back.
                     gather(
                         &mut outbox,
                         &mut receiver,
+                        &credit,
                         tokio::time::sleep(STREAM_WINDOW),
                     )
                     .await;
                 }
             }
             Some(None) => {
-                let Some(next) = resubscribe().await else {
+                let next = tokio::select! {
+                    next = resubscribe() => next,
+                    // Only the session's drop ends the wait; an ordinary confirmation leaves the
+                    // attempt pending.
+                    () = credit.wait_closed() => return,
+                };
+                let Some(next) = next else {
                     // T3 ended the thread for good: no event comes, but what waits still goes.
                     return send_waiting(&mut outbox, &credit, &mut deliver).await;
                 };
@@ -323,10 +381,7 @@ async fn send_waiting(
     credit: &Credit,
     deliver: &mut impl FnMut(BridgeEvent) -> bool,
 ) {
-    while !credit.is_closed()
-        && outbox.send(credit.applied(), deliver)
-        && !outbox.pending.is_empty()
-    {
+    while !credit.is_closed() && outbox.send(credit, deliver) && !outbox.pending.is_empty() {
         credit.wait().await;
     }
 }
@@ -337,6 +392,7 @@ async fn send_waiting(
 pub(crate) async fn gather(
     outbox: &mut Outbox,
     receiver: &mut mpsc::Receiver<ThreadEvent>,
+    credit: &Credit,
     window: impl Future<Output = ()>,
 ) {
     // Boxed, as `pin!` expands to `super let`, which flutter_rust_bridge's parser rejects.
@@ -350,7 +406,7 @@ pub(crate) async fn gather(
         })
         .await;
         match next {
-            Some(Some(event)) => outbox.admit(BridgeEvent::from(event)),
+            Some(Some(event)) => outbox.admit(BridgeEvent::from(event), credit),
             _ => break,
         }
     }

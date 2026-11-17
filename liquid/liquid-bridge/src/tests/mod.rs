@@ -4,5 +4,6 @@ mod database;
 mod details;
 mod hosts;
 mod record;
+mod session;
 mod stream;
 mod workspace;

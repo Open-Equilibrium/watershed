@@ -1,4 +1,4 @@
-//! A client of the Meta-Harness service (ADR-0215, ADR-0297): the same host, projects, threads
+//! A client of the Meta-Harness service (ADR-0215, ADR-0304): the same host, projects, threads
 //! and Git as the core offers, reached over the service's WebSocket. A lost connection fails the
 //! calls it left unanswered, which are never sent again, ends its streams, and the next call
 //! connects anew, reading the connection file again when the client was made from it.

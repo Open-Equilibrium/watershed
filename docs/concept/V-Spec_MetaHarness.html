@@ -172,7 +172,7 @@ meta host agents on|off
 meta service install
 meta service uninstall
 meta uninstall</code></pre>
-          <p class="muted">Implemented (ADR-0296, ADR-0299); <code>meta help</code> describes each command and the config commands print JSON. Target, not yet built: <code>meta sessions</code>, <code>attach</code>, <code>run</code>, <code>schedule</code>, <code>metrics</code>.</p></div>
+          <p class="muted">Implemented (ADR-0303, ADR-0299); <code>meta help</code> describes each command and the config commands print JSON. Target, not yet built: <code>meta sessions</code>, <code>attach</code>, <code>run</code>, <code>schedule</code>, <code>metrics</code>.</p></div>
         <div class="card"><h3>API / protocol surface</h3><ul>
           <li>session registry;</li>
           <li>live event stream;</li>
@@ -188,7 +188,7 @@ meta uninstall</code></pre>
       </div>
       <p id="remote-control">Accepted target (ADR-0185): an agent executor controls only whole CLI agent processes created or adopted on its own host under an explicit local identity and rejects cross-host process claims. Exposing the API to another device requires authenticated, integrity-protected transport and does not expand agent-executor authority. Liquid must route live commands to the instance that owns the addressed session/configuration and must not treat cached state as controllable while that instance is unreachable.</p>
       <h3>Service / daemon surface</h3>
-      <p>Implemented on macOS and Linux (ADR-0215, ADR-0286, ADR-0297). <code>meta serve</code> runs the service in its own process; the login service starts it at login and again after it ends. It owns its data folder, <code>META_HARNESS_HOME</code> or else <code>~/.meta-harness</code>: the configuration store <code>meta-harness.sqlite</code>, T3's data in <code>t3/</code>, the harness homes in <code>harness/</code> and <code>service.log</code>; a second service on the same folder refuses to start. It serves one WebSocket on 127.0.0.1 at a free port, as T3 Code serves its clients, and admits only connections with the bearer token it writes, with its address, into <code>connection.json</code> (<a href="../../SECURITY.md#meta-harness-service-and-configuration">trust limits</a>). With remote access on (ADR-0299), it serves the same WebSocket on this computer's Tailscale addresses at the chosen port, and admits only paired clients' tokens there.</p>
+      <p>Implemented on macOS and Linux (ADR-0215, ADR-0286, ADR-0304). <code>meta serve</code> runs the service in its own process; the login service starts it at login and again after it ends. It owns its data folder, <code>META_HARNESS_HOME</code> or else <code>~/.meta-harness</code>: the configuration store <code>meta-harness.sqlite</code>, T3's data in <code>t3/</code>, the harness homes in <code>harness/</code> and <code>service.log</code>; a second service on the same folder refuses to start. It serves one WebSocket on 127.0.0.1 at a free port, as T3 Code serves its clients, and admits only connections with the bearer token it writes, with its address, into <code>connection.json</code> (<a href="../../SECURITY.md#meta-harness-service-and-configuration">trust limits</a>). With remote access on (ADR-0299), it serves the same WebSocket on this computer's Tailscale addresses at the chosen port, and admits only paired clients' tokens there.</p>
       <ul>
         <li><strong>Messages:</strong> JSON text frames, defined in <code>meta-harness-core/src/api.rs</code>: a call gets one answer; a stream gets a first value, such as a thread's snapshot (ADR-0290), then items until it ends or the client cancels it. Every thread call names its project and thread, so a client that reconnects goes on without opening anything again. Each connection names its API version in the <code>meta-harness-api</code> header; the service refuses any other or missing version with HTTP 426. The message set stays internal until the BYOA deliverable in <a href="../../PLAN.md">PLAN.md</a>.</li>
         <li><strong>Clients:</strong> <code>meta</code> and Liquid's agent surface, which keeps nothing of the core or T3 running in its process and leaves the service and its agents running when it quits. A lost connection fails the calls it left unanswered, which are never sent again, and ends its streams; Liquid retries only a lost or missing connection, and any other error ends that follow; a reader that falls 4,096 items behind loses its stream and restores from a snapshot.</li>
@@ -216,7 +216,7 @@ meta uninstall</code></pre>
           <div class="pd-b pd-h">Harnesses<small>Codex, Claude Code, Flow Agent through ACP, …</small></div>
         </div>
         <div>
-          <div class="pd-cap">Start and packaging (ADR-0286, ADR-0296)</div>
+          <div class="pd-cap">Start and packaging (ADR-0286, ADR-0303)</div>
           <div class="pd-b pd-ws">One archive per platform with <code>SHA256SUMS</code><small><code>meta</code>, the pinned T3 release and <code>install.sh</code>, downloaded like Flow Agent's</small></div>
           <div class="pd-a"><code>install.sh</code> into <code>~/.local/meta-harness</code>, then <code>meta service install</code></div>
           <div class="pd-b pd-ws">Login service, no administrator rights<small>a launch agent or a systemd user unit; a Windows per-user autostart with ADR-0291</small></div>

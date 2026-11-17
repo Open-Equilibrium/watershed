@@ -357,12 +357,17 @@ pub(crate) fn model_choice(choice: &ModelChoice) -> BridgeModelChoice {
     }
 }
 
-pub(crate) fn to_model_choice(choice: BridgeModelChoice) -> ModelChoice {
-    ModelChoice {
+/// The core's choice; a choice whose option ids and values differ in number is refused, since
+/// pairing them would drop the extra ones and run the model on other settings.
+pub(crate) fn to_model_choice(choice: BridgeModelChoice) -> Result<ModelChoice, String> {
+    if choice.option_ids.len() != choice.values.len() {
+        return Err("The model's options do not match their values.".to_owned());
+    }
+    Ok(ModelChoice {
         instance: choice.instance,
         model: choice.model,
         options: choice.option_ids.into_iter().zip(choice.values).collect(),
-    }
+    })
 }
 
 pub(crate) fn thread_summary(thread: ThreadSummary) -> BridgeThreadSummary {
@@ -616,11 +621,15 @@ pub(crate) fn usage_limits(limits: UsageLimits) -> BridgeUsageLimits {
     }
 }
 
-/// The changed file's path: a rename's new name, else the second half of `a/<path> b/<path>`,
-/// which also holds for a path with ` b/` in it. Git C-quotes a half it cannot write raw, such as
-/// one with a non-ASCII byte, so a quoted half is decoded first.
+/// The changed file's path: a rename's or copy's new name, else the second half of
+/// `a/<path> b/<path>`, which also holds for a path with ` b/` in it. Git C-quotes a half it cannot
+/// write raw, such as one with a non-ASCII byte, so a quoted half is decoded first.
 fn path_of(header: &str, section: &str) -> String {
-    if let Some(to) = section.lines().find_map(|l| l.strip_prefix("rename to ")) {
+    let moved = section.lines().find_map(|l| {
+        l.strip_prefix("rename to ")
+            .or_else(|| l.strip_prefix("copy to "))
+    });
+    if let Some(to) = moved {
         return unquote(to).map_or_else(|| to.to_owned(), |(path, _)| path);
     }
     // A quoted first half is followed by a space and the second half. A raw first half cannot

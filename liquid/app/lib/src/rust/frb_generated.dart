@@ -4202,8 +4202,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeAnswer dco_decode_bridge_answer(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return BridgeAnswer(
       areas: dco_decode_list_bridge_area(arr[0]),
       pages: dco_decode_list_bridge_page(arr[1]),
@@ -4211,8 +4211,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       count: dco_decode_i_64(arr[3]),
       text: dco_decode_opt_String(arr[4]),
       style: dco_decode_opt_box_autoadd_bridge_text_style(arr[5]),
-      database: dco_decode_opt_box_autoadd_bridge_database(arr[6]),
-      rows: dco_decode_list_bridge_row(arr[7]),
+      language: dco_decode_opt_String(arr[6]),
+      database: dco_decode_opt_box_autoadd_bridge_database(arr[7]),
+      rows: dco_decode_list_bridge_row(arr[8]),
     );
   }
 
@@ -5957,6 +5958,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_count = sse_decode_i_64(deserializer);
     var var_text = sse_decode_opt_String(deserializer);
     var var_style = sse_decode_opt_box_autoadd_bridge_text_style(deserializer);
+    var var_language = sse_decode_opt_String(deserializer);
     var var_database = sse_decode_opt_box_autoadd_bridge_database(deserializer);
     var var_rows = sse_decode_list_bridge_row(deserializer);
     return BridgeAnswer(
@@ -5966,6 +5968,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       count: var_count,
       text: var_text,
       style: var_style,
+      language: var_language,
       database: var_database,
       rows: var_rows,
     );
@@ -8256,6 +8259,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_64(self.count, serializer);
     sse_encode_opt_String(self.text, serializer);
     sse_encode_opt_box_autoadd_bridge_text_style(self.style, serializer);
+    sse_encode_opt_String(self.language, serializer);
     sse_encode_opt_box_autoadd_bridge_database(self.database, serializer);
     sse_encode_list_bridge_row(self.rows, serializer);
   }
@@ -10055,7 +10059,8 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
         permissions: permissions,
       );
 
-  /// The session now, to restore the Chat after falling behind (ADR-0290).
+  /// The session now, to restore the Chat after falling behind (ADR-0290). Deltas do not merge
+  /// across its sequence, so the restored Chat never replays text it holds.
   Future<BridgeSnapshot> snapshot() =>
       RustLib.instance.api.crateApiSessionAgentSessionSnapshot(that: this);
 

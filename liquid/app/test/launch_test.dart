@@ -42,6 +42,18 @@ void main() {
       ),
     );
   });
+  test(
+    'refuses a relative Meta-Harness home, which Liquid cannot resolve',
+    () async {
+      expect(
+        await problemOf({
+          'LIQUID_PROJECT': project,
+          'META_HARNESS_HOME': 'meta-data',
+        }),
+        'META_HARNESS_HOME must be an absolute path: meta-data',
+      );
+    },
+  );
 
   test(
     'a remote agent host needs the project folder as an absolute path on it',

@@ -4769,6 +4769,7 @@ impl SseDecode for crate::api::workspace::BridgeAnswer {
         let mut var_text = <Option<String>>::sse_decode(deserializer);
         let mut var_style =
             <Option<crate::api::workspace::BridgeTextStyle>>::sse_decode(deserializer);
+        let mut var_language = <Option<String>>::sse_decode(deserializer);
         let mut var_database =
             <Option<crate::api::database::BridgeDatabase>>::sse_decode(deserializer);
         let mut var_rows = <Vec<crate::api::database::BridgeRow>>::sse_decode(deserializer);
@@ -4779,6 +4780,7 @@ impl SseDecode for crate::api::workspace::BridgeAnswer {
             count: var_count,
             text: var_text,
             style: var_style,
+            language: var_language,
             database: var_database,
             rows: var_rows,
         };
@@ -4881,7 +4883,8 @@ impl SseDecode for crate::api::workspace::BridgeBlockKind {
         return match inner {
             0 => crate::api::workspace::BridgeBlockKind::Text,
             1 => crate::api::workspace::BridgeBlockKind::Database,
-            2 => crate::api::workspace::BridgeBlockKind::Unknown,
+            2 => crate::api::workspace::BridgeBlockKind::Code,
+            3 => crate::api::workspace::BridgeBlockKind::Unknown,
             _ => unreachable!("Invalid variant for BridgeBlockKind: {}", inner),
         };
     }
@@ -5490,15 +5493,18 @@ impl SseDecode for crate::api::workspace::BridgeMutationKind {
             7 => crate::api::workspace::BridgeMutationKind::JoinTextBlock,
             8 => crate::api::workspace::BridgeMutationKind::SetTextStyle,
             9 => crate::api::workspace::BridgeMutationKind::SetSectionBoundary,
-            10 => crate::api::workspace::BridgeMutationKind::AddDatabaseBlock,
-            11 => crate::api::workspace::BridgeMutationKind::RenameDatabase,
-            12 => crate::api::workspace::BridgeMutationKind::AddField,
-            13 => crate::api::workspace::BridgeMutationKind::RenameField,
-            14 => crate::api::workspace::BridgeMutationKind::RemoveField,
-            15 => crate::api::workspace::BridgeMutationKind::AddOption,
-            16 => crate::api::workspace::BridgeMutationKind::AddRow,
-            17 => crate::api::workspace::BridgeMutationKind::RemoveRow,
-            18 => crate::api::workspace::BridgeMutationKind::SetCell,
+            10 => crate::api::workspace::BridgeMutationKind::TurnIntoCode,
+            11 => crate::api::workspace::BridgeMutationKind::TurnIntoText,
+            12 => crate::api::workspace::BridgeMutationKind::SetCodeLanguage,
+            13 => crate::api::workspace::BridgeMutationKind::AddDatabaseBlock,
+            14 => crate::api::workspace::BridgeMutationKind::RenameDatabase,
+            15 => crate::api::workspace::BridgeMutationKind::AddField,
+            16 => crate::api::workspace::BridgeMutationKind::RenameField,
+            17 => crate::api::workspace::BridgeMutationKind::RemoveField,
+            18 => crate::api::workspace::BridgeMutationKind::AddOption,
+            19 => crate::api::workspace::BridgeMutationKind::AddRow,
+            20 => crate::api::workspace::BridgeMutationKind::RemoveRow,
+            21 => crate::api::workspace::BridgeMutationKind::SetCell,
             _ => unreachable!("Invalid variant for BridgeMutationKind: {}", inner),
         };
     }
@@ -5681,8 +5687,9 @@ impl SseDecode for crate::api::workspace::BridgeQueryKind {
             1 => crate::api::workspace::BridgeQueryKind::Pages,
             2 => crate::api::workspace::BridgeQueryKind::Views,
             3 => crate::api::workspace::BridgeQueryKind::Text,
-            4 => crate::api::workspace::BridgeQueryKind::Database,
-            5 => crate::api::workspace::BridgeQueryKind::Rows,
+            4 => crate::api::workspace::BridgeQueryKind::Code,
+            5 => crate::api::workspace::BridgeQueryKind::Database,
+            6 => crate::api::workspace::BridgeQueryKind::Rows,
             _ => unreachable!("Invalid variant for BridgeQueryKind: {}", inner),
         };
     }
@@ -7264,6 +7271,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeAnswer {
             self.count.into_into_dart().into_dart(),
             self.text.into_into_dart().into_dart(),
             self.style.into_into_dart().into_dart(),
+            self.language.into_into_dart().into_dart(),
             self.database.into_into_dart().into_dart(),
             self.rows.into_into_dart().into_dart(),
         ]
@@ -7406,7 +7414,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeBlockKind {
         match self {
             Self::Text => 0.into_dart(),
             Self::Database => 1.into_dart(),
-            Self::Unknown => 2.into_dart(),
+            Self::Code => 2.into_dart(),
+            Self::Unknown => 3.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -8227,15 +8236,18 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeMutationKind
             Self::JoinTextBlock => 7.into_dart(),
             Self::SetTextStyle => 8.into_dart(),
             Self::SetSectionBoundary => 9.into_dart(),
-            Self::AddDatabaseBlock => 10.into_dart(),
-            Self::RenameDatabase => 11.into_dart(),
-            Self::AddField => 12.into_dart(),
-            Self::RenameField => 13.into_dart(),
-            Self::RemoveField => 14.into_dart(),
-            Self::AddOption => 15.into_dart(),
-            Self::AddRow => 16.into_dart(),
-            Self::RemoveRow => 17.into_dart(),
-            Self::SetCell => 18.into_dart(),
+            Self::TurnIntoCode => 10.into_dart(),
+            Self::TurnIntoText => 11.into_dart(),
+            Self::SetCodeLanguage => 12.into_dart(),
+            Self::AddDatabaseBlock => 13.into_dart(),
+            Self::RenameDatabase => 14.into_dart(),
+            Self::AddField => 15.into_dart(),
+            Self::RenameField => 16.into_dart(),
+            Self::RemoveField => 17.into_dart(),
+            Self::AddOption => 18.into_dart(),
+            Self::AddRow => 19.into_dart(),
+            Self::RemoveRow => 20.into_dart(),
+            Self::SetCell => 21.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -8479,8 +8491,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeQueryKind {
             Self::Pages => 1.into_dart(),
             Self::Views => 2.into_dart(),
             Self::Text => 3.into_dart(),
-            Self::Database => 4.into_dart(),
-            Self::Rows => 5.into_dart(),
+            Self::Code => 4.into_dart(),
+            Self::Database => 5.into_dart(),
+            Self::Rows => 6.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -9339,6 +9352,7 @@ impl SseEncode for crate::api::workspace::BridgeAnswer {
         <i64>::sse_encode(self.count, serializer);
         <Option<String>>::sse_encode(self.text, serializer);
         <Option<crate::api::workspace::BridgeTextStyle>>::sse_encode(self.style, serializer);
+        <Option<String>>::sse_encode(self.language, serializer);
         <Option<crate::api::database::BridgeDatabase>>::sse_encode(self.database, serializer);
         <Vec<crate::api::database::BridgeRow>>::sse_encode(self.rows, serializer);
     }
@@ -9405,7 +9419,8 @@ impl SseEncode for crate::api::workspace::BridgeBlockKind {
             match self {
                 crate::api::workspace::BridgeBlockKind::Text => 0,
                 crate::api::workspace::BridgeBlockKind::Database => 1,
-                crate::api::workspace::BridgeBlockKind::Unknown => 2,
+                crate::api::workspace::BridgeBlockKind::Code => 2,
+                crate::api::workspace::BridgeBlockKind::Unknown => 3,
                 _ => {
                     unimplemented!("");
                 }
@@ -9888,15 +9903,18 @@ impl SseEncode for crate::api::workspace::BridgeMutationKind {
                 crate::api::workspace::BridgeMutationKind::JoinTextBlock => 7,
                 crate::api::workspace::BridgeMutationKind::SetTextStyle => 8,
                 crate::api::workspace::BridgeMutationKind::SetSectionBoundary => 9,
-                crate::api::workspace::BridgeMutationKind::AddDatabaseBlock => 10,
-                crate::api::workspace::BridgeMutationKind::RenameDatabase => 11,
-                crate::api::workspace::BridgeMutationKind::AddField => 12,
-                crate::api::workspace::BridgeMutationKind::RenameField => 13,
-                crate::api::workspace::BridgeMutationKind::RemoveField => 14,
-                crate::api::workspace::BridgeMutationKind::AddOption => 15,
-                crate::api::workspace::BridgeMutationKind::AddRow => 16,
-                crate::api::workspace::BridgeMutationKind::RemoveRow => 17,
-                crate::api::workspace::BridgeMutationKind::SetCell => 18,
+                crate::api::workspace::BridgeMutationKind::TurnIntoCode => 10,
+                crate::api::workspace::BridgeMutationKind::TurnIntoText => 11,
+                crate::api::workspace::BridgeMutationKind::SetCodeLanguage => 12,
+                crate::api::workspace::BridgeMutationKind::AddDatabaseBlock => 13,
+                crate::api::workspace::BridgeMutationKind::RenameDatabase => 14,
+                crate::api::workspace::BridgeMutationKind::AddField => 15,
+                crate::api::workspace::BridgeMutationKind::RenameField => 16,
+                crate::api::workspace::BridgeMutationKind::RemoveField => 17,
+                crate::api::workspace::BridgeMutationKind::AddOption => 18,
+                crate::api::workspace::BridgeMutationKind::AddRow => 19,
+                crate::api::workspace::BridgeMutationKind::RemoveRow => 20,
+                crate::api::workspace::BridgeMutationKind::SetCell => 21,
                 _ => {
                     unimplemented!("");
                 }
@@ -10034,8 +10052,9 @@ impl SseEncode for crate::api::workspace::BridgeQueryKind {
                 crate::api::workspace::BridgeQueryKind::Pages => 1,
                 crate::api::workspace::BridgeQueryKind::Views => 2,
                 crate::api::workspace::BridgeQueryKind::Text => 3,
-                crate::api::workspace::BridgeQueryKind::Database => 4,
-                crate::api::workspace::BridgeQueryKind::Rows => 5,
+                crate::api::workspace::BridgeQueryKind::Code => 4,
+                crate::api::workspace::BridgeQueryKind::Database => 5,
+                crate::api::workspace::BridgeQueryKind::Rows => 6,
                 _ => {
                     unimplemented!("");
                 }

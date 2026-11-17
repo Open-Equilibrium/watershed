@@ -1,5 +1,5 @@
 //! Meta-Harness's API: the messages its service and clients exchange as JSON text frames over one
-//! WebSocket (ADR-0185, ADR-0297). A client sends `{"id", "call"}` for one answer, `{"id",
+//! WebSocket (ADR-0185, ADR-0304). A client sends `{"id", "call"}` for one answer, `{"id",
 //! "stream"}` for an answer followed by items, and `{"cancel": id}` to end a stream. The service
 //! answers `{"id", "ok"}` or `{"id", "error"}`, then sends a stream's `{"id", "item"}` frames and
 //! finally `{"id", "end": null}`.

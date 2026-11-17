@@ -177,12 +177,19 @@ class _Button extends StatelessWidget {
     if (hint == null || hint.isEmpty || !ShortcutReveal.shown(context)) {
       return button;
     }
-    // The hint sits on the button's corner, so the button keeps its size.
+    // The hint sits on the button's corner, so the button keeps its size and the taps under the
+    // hint still press it. The stack passes the layout's constraints to the button, so a stretched
+    // button stays stretched.
     return Stack(
       clipBehavior: Clip.none,
+      fit: StackFit.passthrough,
       children: [
         button,
-        Positioned(top: -9, right: -6, child: KeyBadge(hint)),
+        Positioned(
+          top: -9,
+          right: -6,
+          child: IgnorePointer(child: KeyBadge(hint)),
+        ),
       ],
     );
   }
@@ -551,14 +558,16 @@ bool writeText(TextEditingController controller, TextEditingValue value) {
 }
 
 /// Gives a field its fresh controller when it builds after [writeText], holding what the old one
-/// holds then, so keys typed since the write are kept. `listener` moves to the fresh controller. The
-/// old one is disposed after that frame.
+/// holds then, so keys typed since the write are kept. `listener` moves to the fresh controller,
+/// which `create` makes when the field needs its own kind. The old one is disposed after that
+/// frame.
 TextEditingController adoptController(
   TextEditingController previous, {
   VoidCallback? listener,
+  TextEditingController Function(TextEditingValue value)? create,
 }) {
   if (listener != null) previous.removeListener(listener);
-  final fresh = TextEditingController.fromValue(previous.value);
+  final fresh = (create ?? TextEditingController.fromValue)(previous.value);
   if (listener != null) fresh.addListener(listener);
   WidgetsBinding.instance.addPostFrameCallback((_) => previous.dispose());
   return fresh;

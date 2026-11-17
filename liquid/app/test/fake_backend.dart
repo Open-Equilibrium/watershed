@@ -27,6 +27,9 @@ class FakeProject implements ProjectBackend {
   /// What [start] and [open] fail with.
   Object? openError;
 
+  /// Holds what [start] and [open] return until it completes, so a later call can return first.
+  Completer<void>? hold;
+
   /// What [onlySessionInWorktree] fails with.
   Object? onlyInWorktreeError;
 
@@ -44,15 +47,21 @@ class FakeProject implements ProjectBackend {
     calls.add(
       'start $text ${model.model} base=$base worktree=$worktree ${permissions.name}',
     );
+    final gate = hold;
+    final next = session;
     if (openError case final error?) throw error;
-    return session;
+    await gate?.future;
+    return next;
   }
 
   @override
   Future<SessionBackend> open(String id) async {
     calls.add('open $id');
+    final gate = hold;
+    final next = session;
     if (openError case final error?) throw error;
-    return session;
+    await gate?.future;
+    return next;
   }
 
   @override
@@ -117,10 +126,17 @@ class FakeSession implements SessionBackend {
   /// What [send] fails with.
   Object? sendError;
 
+  /// What [setPermissions] and [setModel] fail with.
+  Object? permissionsError;
+  Object? modelError;
+
   /// The applied counts Liquid confirmed, in order.
   final confirmed = <int>[];
 
   void emit(BridgeEvent event) => _events.add(event);
+
+  /// Fails the event stream, as the bridge's stream can.
+  void fail(Object error) => _events.addError(error);
 
   /// Whether Liquid released the session.
   bool closed = false;
@@ -139,7 +155,10 @@ class FakeSession implements SessionBackend {
     late final StreamSubscription<BridgeEvent> source;
     late final StreamController<BridgeEvent> controller;
     controller = StreamController(
-      onListen: () => source = _events.stream.listen(controller.add),
+      onListen: () => source = _events.stream.listen(
+        controller.add,
+        onError: controller.addError,
+      ),
       onCancel: () async => unawaited(source.cancel()),
     );
     return controller.stream;
@@ -212,12 +231,16 @@ class FakeSession implements SessionBackend {
   @override
   Future<void> setModel(BridgeModelChoice model) async {
     calls.add('model ${model.model}');
+    if (modelError case final error?) throw error;
     chosen = model;
   }
 
   @override
-  Future<void> setPermissions(BridgePermissions permissions) async =>
-      calls.add('permissions ${permissions.name}');
+  Future<void> setPermissions(BridgePermissions permissions) async {
+    calls.add('permissions ${permissions.name}');
+    if (permissionsError case final error?) throw error;
+  }
+
   @override
   Future<void> sendQueuedNow(int turn) async => calls.add('send now $turn');
   @override

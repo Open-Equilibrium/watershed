@@ -30,8 +30,8 @@ pub enum BridgeMutationKind {
     RenamePage,
     /// Adds a Text Block holding `text` to `page`, after the View `after` or first.
     AddTextBlock,
-    /// Replaces `delete` units at `at` in `block` on its home `page` with `text`; positions
-    /// count UTF-16 units, as Dart does.
+    /// Replaces `delete` units at `at` in the Text or Code `block` on its home `page` with
+    /// `text`; positions count UTF-16 units, as Dart does.
     EditText,
     /// Removes `view` from `page`.
     RemoveView,
@@ -44,6 +44,13 @@ pub enum BridgeMutationKind {
     SetTextStyle,
     /// Starts a Section at `view` on `page`, or stops one, as `boundary` says.
     SetSectionBoundary,
+    /// Turns the Text Block `block` on its home `page` into a Code Block in plain text.
+    TurnIntoCode,
+    /// Turns the Code Block `block` on its home `page` into a paragraph.
+    TurnIntoText,
+    /// Sets the Code Block `block`'s language on its home `page` to `text`; empty for plain
+    /// text.
+    SetCodeLanguage,
     /// Adds a Database Block named `text`, with a text field "Name", to `page`, after the
     /// View `after` or first.
     AddDatabaseBlock,
@@ -196,6 +203,9 @@ pub enum BridgeQueryKind {
     /// `block`'s text and style on its home `page` into `text` and `style`; none once the
     /// Block is removed.
     Text,
+    /// The Code `block`'s code and language on its home `page` into `text` and `language`;
+    /// none once the Block is removed or if it is no Code Block.
+    Code,
     /// The Database `block`'s name and fields on its home `page` into `database`; none
     /// once the Block is removed or if it is no Database.
     Database,
@@ -252,6 +262,8 @@ pub enum BridgeBlockKind {
     Text,
     /// A Database Block.
     Database,
+    /// A Code Block.
+    Code,
     /// A Block of a kind a later version adds, which shows as a placeholder (ADR-0245).
     Unknown,
 }
@@ -284,6 +296,8 @@ pub struct BridgeAnswer {
     pub text: Option<String>,
     /// A Text Block's style, with its text.
     pub style: Option<BridgeTextStyle>,
+    /// A Code Block's language, with its code; empty for plain text.
+    pub language: Option<String>,
     /// A Database's name and fields.
     pub database: Option<BridgeDatabase>,
     /// A Database's rows.
@@ -433,6 +447,19 @@ impl BridgeMutation {
                 page: id(&self.page, PageId::parse, "page")?,
                 view: id(&self.view, ViewId::parse, "view")?,
                 boundary: self.boundary,
+            },
+            BridgeMutationKind::TurnIntoCode => Mutation::TurnIntoCode {
+                page: page()?,
+                block: block()?,
+            },
+            BridgeMutationKind::TurnIntoText => Mutation::TurnIntoText {
+                page: page()?,
+                block: block()?,
+            },
+            BridgeMutationKind::SetCodeLanguage => Mutation::SetCodeLanguage {
+                page: page()?,
+                block: block()?,
+                language: text()?,
             },
             BridgeMutationKind::AddDatabaseBlock => Mutation::AddDatabaseBlock {
                 page: page()?,

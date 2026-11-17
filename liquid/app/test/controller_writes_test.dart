@@ -73,6 +73,16 @@ void main() {
         'The first line once its Text Block takes over; the line is no longer built, so ⌘Z cannot reach it.',
       ),
       (
+        'lib/src/workspace/code_block.dart',
+        '_text.value = value;',
+        'Code Block ⏎, ⇥ and ⇧⇥: a person\'s own change, which stays undoable.',
+      ),
+      (
+        'lib/src/workspace/code_block.dart',
+        '_search.clear();',
+        'The language search, emptied as its picker opens; the field is built only while open.',
+      ),
+      (
         'lib/src/controls.dart',
         'controller.value = value;',
         'writeText itself: the one place Liquid writes text into a field.',

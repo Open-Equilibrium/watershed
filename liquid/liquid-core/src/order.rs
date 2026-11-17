@@ -102,6 +102,15 @@ impl Order {
         }
     }
 
+    /// Every View of `block` shows it as `kind` now.
+    pub(crate) fn set_kind(&mut self, block: &BlockId, kind: BlockKind) {
+        for placed in &mut self.placed {
+            if &placed.view.block == block {
+                placed.view.kind = kind;
+            }
+        }
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.placed.len()
     }

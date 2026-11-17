@@ -1,5 +1,5 @@
 //! Agent sessions for the Liquid app: Meta-Harness's service, a project's threads and one followed
-//! thread (ADR-0280, ADR-0297). Calls run on flutter_rust_bridge's worker threads, never on the
+//! thread (ADR-0280, ADR-0304). Calls run on flutter_rust_bridge's worker threads, never on the
 //! Dart main isolate, and events stream to Dart as they arrive (ADR-0182).
 
 use std::collections::HashMap;
@@ -13,7 +13,7 @@ use meta_harness_core::{
     Automation, LineageChanges, LocalServer, Permissions, StartThread, ThreadEvent, ThreadSummary,
     TurnStatus, Watch, Workspace, default_home, visible_name,
 };
-use tokio::runtime::Runtime;
+use tokio::runtime::{Runtime, RuntimeFlavor};
 
 use crate::api::details::{BridgeAutomation, BridgeLineage, BridgeLocalServer, BridgeUsageLimits};
 use crate::api::events::{BridgeEvent, BridgeFileChange};
@@ -129,13 +129,21 @@ pub struct BridgeQuestionAnswer {
     pub values: Vec<String>,
 }
 
-/// Runs `future` for a synchronous bridge call. Inside the runtime, such as in a Rust consumer's
-/// callback, `block_on` would panic, so the worker blocks in place instead.
-pub(crate) fn run<T>(future: impl Future<Output = T>) -> T {
-    if tokio::runtime::Handle::try_current().is_ok() {
-        tokio::task::block_in_place(|| RUNTIME.handle().block_on(future))
-    } else {
-        RUNTIME.block_on(future)
+/// Runs `future` for a synchronous bridge call. Inside a multi-thread runtime, such as in a Rust
+/// consumer's callback, `block_on` would panic, so the worker blocks in place instead. A
+/// current-thread runtime cannot block in place, so the future runs on a thread of its own.
+pub(crate) fn run<T: Send>(future: impl Future<Output = T> + Send) -> T {
+    match tokio::runtime::Handle::try_current() {
+        Ok(current) if current.runtime_flavor() == RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(|| RUNTIME.handle().block_on(future))
+        }
+        Ok(_) => std::thread::scope(|scope| {
+            scope
+                .spawn(|| RUNTIME.block_on(future))
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+        }),
+        Err(_) => RUNTIME.block_on(future),
     }
 }
 
@@ -193,7 +201,7 @@ impl AgentHost {
     pub fn set_writer_model(&self, choice: BridgeModelChoice) -> Result<(), String> {
         run(self
             .host
-            .set_writer_model(&convert::to_model_choice(choice)))
+            .set_writer_model(&convert::to_model_choice(choice)?))
     }
 
     /// The project for the folder `root`.
@@ -234,7 +242,7 @@ impl AgentProject {
     ) -> Result<AgentSession, String> {
         let thread = run(self.project.start(StartThread {
             text,
-            model: convert::to_model_choice(model),
+            model: convert::to_model_choice(model)?,
             workspace: match (base, worktree) {
                 (Some(base), _) => Workspace::NewWorktree { base },
                 (None, Some(path)) => Workspace::Worktree { path: path.into() },
@@ -521,9 +529,14 @@ impl AgentSession {
         self.credit.confirm(u64::try_from(applied).unwrap_or(0));
     }
 
-    /// The session now, to restore the Chat after falling behind (ADR-0290).
+    /// The session now, to restore the Chat after falling behind (ADR-0290). Deltas do not merge
+    /// across its sequence, so the restored Chat never replays text it holds.
     pub fn snapshot(&self) -> Result<BridgeSnapshot, String> {
-        run(self.thread.snapshot()).map(convert::snapshot)
+        self.credit.begin_snapshot();
+        let snapshot = run(self.thread.snapshot()).map(convert::snapshot);
+        self.credit
+            .end_snapshot(snapshot.as_ref().ok().map(|snapshot| snapshot.sequence));
+        snapshot
     }
 
     /// Sends `text`: an idle session starts a turn; a running one takes it as a steer with
@@ -654,7 +667,7 @@ impl AgentSession {
 
     /// Changes the model for the next turn.
     pub fn set_model(&self, model: BridgeModelChoice) -> Result<(), String> {
-        run(self.thread.set_model(&convert::to_model_choice(model)))
+        run(self.thread.set_model(&convert::to_model_choice(model)?))
     }
 
     /// Changes what the agent may do without asking.

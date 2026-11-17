@@ -1,6 +1,6 @@
 #!/bin/sh
 # Installs Meta-Harness from an unpacked download: meta, the pinned T3 Code, the licenses and, unless
-# --no-service is given, the login service (ADR-0286, ADR-0296). A newer download installs over an
+# --no-service is given, the login service (ADR-0286, ADR-0303). A newer download installs over an
 # older one; each step replaces only the files of its own kind.
 set -eu
 

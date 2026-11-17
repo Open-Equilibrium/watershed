@@ -54,7 +54,12 @@ pub(crate) fn replica_key(
         Some(name) => keys.read(name)?,
         None => None,
     };
-    let filed = keys.read(&path)?;
+    // Once the named key is found, the path entry is only cleanup, so a failed lookup of it must
+    // not block the key.
+    let filed = match stored {
+        Some(_) => keys.read(&path).unwrap_or(None),
+        None => keys.read(&path)?,
+    };
     let key = match (stored, filed) {
         (Some(key), _) | (None, Some(key)) => key,
         (None, None) if has_database => {

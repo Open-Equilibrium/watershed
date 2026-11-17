@@ -1,4 +1,4 @@
-//! `meta`, Meta-Harness's command line (ADR-0286, ADR-0296): it runs the service, which the
+//! `meta`, Meta-Harness's command line (ADR-0286, ADR-0303): it runs the service, which the
 //! login service starts, and talks to it like any client. Data commands print JSON.
 
 mod hosts;

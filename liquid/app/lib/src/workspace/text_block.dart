@@ -17,8 +17,7 @@ import 'page_views.dart';
 import 'slash_commands.dart';
 import 'workspace_state.dart';
 
-/// A caret offset that means a Text Block's end.
-const _end = 1 << 30;
+const _end = caretEnd;
 
 /// One Text Block on its Page, with the divider above it when it starts a Section. It
 /// follows only its own Block (client architecture rule 6); typing shows at once and
@@ -197,9 +196,9 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   /// Takes `choice`, whose writes quitting waits for.
   void _take(SlashCommand choice) => _state.track(_choose(choice));
 
-  /// Applies `choice` in place of what was typed for it: a style, or a Table in this line's
-  /// place, starting the Section the line started. A line that ends the Page stays, empty,
-  /// below the Table, so the Page goes on.
+  /// Applies `choice` in place of what was typed for it: a style, this line turned into
+  /// code, or a Table in this line's place, starting the Section the line started. A line
+  /// that ends the Page stays, empty, below the Table, so the Page goes on.
   Future<void> _choose(SlashCommand choice) async {
     _closeMenu();
     _set('', 0);
@@ -208,6 +207,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       if (style != _style) _restyle(style);
       return;
     }
+    if (choice.block == BridgeBlockKind.code) return _turnIntoCode();
     final views = widget.views;
     final view = widget.view;
     final last = widget.index == (views.count ?? 0) - 1;
@@ -454,7 +454,11 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
 
   void _takeCaret() {
     final caret = widget.views.caret.value;
-    if (caret == null || caret.view != widget.view.id) return;
+    if (caret == null ||
+        caret.view != widget.view.id ||
+        caret.kind != BridgeBlockKind.text) {
+      return;
+    }
     // What the input queue wrote last is what the core holds, so it needs no read first.
     if (caret.text case final text?) {
       _stored = text;
@@ -505,6 +509,13 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (_composing && !_state.quitting) return;
     final text = _text.text;
     if (text == stored) return;
+    if (codeTyped(text, stored, _text.selection.baseOffset)) {
+      final rest = text.substring(codeShortcut.length);
+      _set(rest, 0);
+      _send(rest);
+      _turnIntoCode();
+      return;
+    }
     if (shortcutTyped(text, stored, _text.selection.baseOffset, _style) case (
       final typed,
       final style,
@@ -556,6 +567,17 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         .write(change, [block], chain: chain)
         .then<void>((_) {}, onError: (Object _) {}),
   );
+
+  /// Turns this Text Block into a Code Block, which takes the caret at its start once built
+  /// (ADR-0302).
+  void _turnIntoCode() {
+    _write(
+      mutation(BridgeMutationKind.turnIntoCode, page: _page, block: block),
+    );
+    widget.views.moveCaret(
+      Caret(widget.view.id, 0, kind: BridgeBlockKind.code),
+    );
+  }
 
   /// Ticks or unticks a to-do, which ⌘⏎ and its box do; other styles stay.
   void _toggleToDo() {
@@ -689,14 +711,18 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     return (caret - edge).abs() < 1;
   }
 
-  /// Puts the caret into the neighbouring Text Block, past Blocks of other kinds: at the end
-  /// above, at the start below.
+  /// Puts the caret into the neighbouring Text or Code Block, past Blocks of other kinds: at
+  /// the end above, at the start below.
   bool _move(int by) {
     // The caret is the input queue's to place while the structure changes.
     if (_editor.busy) return false;
-    final neighbour = widget.views.textFrom(widget.index + by, by);
+    final neighbour = widget.views.caretFrom(widget.index + by, by);
     if (neighbour == null) return false;
-    widget.views.caret.value = Caret(neighbour.id, by < 0 ? _end : 0);
+    widget.views.caret.value = Caret(
+      neighbour.id,
+      by < 0 ? _end : 0,
+      kind: neighbour.kind,
+    );
     return true;
   }
 
@@ -837,7 +863,10 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     for (var index = widget.index - 1; index >= 0; index--) {
       // Read as far as readRun reached, without pushing the shown windows out.
       final above = widget.views.peek(index);
-      if (above == null || styles[above.block] != BridgeTextStyle.numbered) {
+      // A Block of another kind ends the run, also one that was a numbered item before.
+      if (above == null ||
+          above.kind != BridgeBlockKind.text ||
+          styles[above.block] != BridgeTextStyle.numbered) {
         break;
       }
       number++;

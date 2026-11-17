@@ -4,8 +4,8 @@
 #![allow(clippy::unwrap_used)]
 
 use liquid_core::{
-    Action, Actor, Applied, AreaId, Error, MemoryStore, Mutation, Operation, Origin, PageId,
-    Permission, PersonId, Request, TextStyle, ViewId,
+    Action, Actor, Applied, AreaId, BlockId, BlockKind, Code, Error, MemoryStore, Mutation,
+    Operation, Origin, PageId, Permission, PersonId, Request, TextStyle, ViewId,
 };
 
 type Workspace = liquid_core::Workspace<MemoryStore>;
@@ -611,4 +611,163 @@ fn enter_at_a_section_s_start_keeps_the_new_text_block_in_that_section() {
         .collect();
     assert_eq!(texts(&mut workspace, &lisbon), ["Plan", "", "Day one"]);
     assert_eq!(boundaries, [false, true, false]);
+}
+
+fn kinds(workspace: &mut Workspace, page: &PageId) -> Vec<BlockKind> {
+    let views = workspace.views(page, 0, usize::MAX).unwrap();
+    views.iter().map(|view| view.kind).collect()
+}
+
+#[test]
+fn a_text_block_turns_into_code_and_back_keeping_its_view_and_text() {
+    let mut workspace = workspace();
+    let acme = area(&mut workspace, "Acme API");
+    let api = page(&mut workspace, &acme, None, "API design");
+    let (intro, intro_view) = text_block(&mut workspace, &api, None, "Shares round:");
+    let (share, _) = text_block(&mut workspace, &api, Some(&intro_view), "share()");
+    let turn = |block: &BlockId| Mutation::TurnIntoCode {
+        page: api.clone(),
+        block: block.clone(),
+    };
+
+    apply(&mut workspace, turn(&share));
+    assert_eq!(
+        kinds(&mut workspace, &api),
+        [BlockKind::Text, BlockKind::Code]
+    );
+    assert_eq!(
+        workspace.text(&api, &share).unwrap(),
+        None,
+        "no Text Block now"
+    );
+    let insert = |at, text: &str| Mutation::EditText {
+        page: api.clone(),
+        block: share.clone(),
+        at,
+        delete: 0,
+        insert: text.into(),
+    };
+    apply(&mut workspace, insert(7, " {\n  return 0;\n}"));
+    let language = |language: &str| Mutation::SetCodeLanguage {
+        page: api.clone(),
+        block: share.clone(),
+        language: language.into(),
+    };
+    apply(&mut workspace, language("typescript"));
+    workspace.close_page(&api);
+    assert_eq!(
+        workspace.code(&api, &share).unwrap(),
+        Some(Code {
+            text: "share() {\n  return 0;\n}".into(),
+            language: "typescript".into(),
+        }),
+        "stored, so read again after the Page closed"
+    );
+    apply(&mut workspace, language(""));
+    assert_eq!(
+        workspace.code(&api, &share).unwrap().unwrap().language,
+        "",
+        "Plain text"
+    );
+
+    apply(
+        &mut workspace,
+        Mutation::TurnIntoText {
+            page: api.clone(),
+            block: share.clone(),
+        },
+    );
+    assert_eq!(
+        kinds(&mut workspace, &api),
+        [BlockKind::Text, BlockKind::Text]
+    );
+    assert_eq!(workspace.code(&api, &share).unwrap(), None);
+    assert_eq!(
+        workspace.text(&api, &share).unwrap().as_deref(),
+        Some("share() {\n  return 0;\n}")
+    );
+    assert_eq!(
+        workspace.style(&api, &share).unwrap(),
+        Some(TextStyle::Paragraph)
+    );
+    assert_eq!(workspace.code(&api, &intro).unwrap(), None, "a Text Block");
+}
+
+#[test]
+fn a_code_block_neither_splits_joins_nor_takes_text_block_writes() {
+    let mut workspace = workspace();
+    let acme = area(&mut workspace, "Acme API");
+    let api = page(&mut workspace, &acme, None, "API design");
+    let (above, above_view) = text_block(&mut workspace, &api, None, "Shares round:");
+    let (code, code_view) = text_block(&mut workspace, &api, Some(&above_view), "share()");
+    let (_, below_view) = text_block(&mut workspace, &api, Some(&code_view), "Reports");
+    apply(
+        &mut workspace,
+        Mutation::TurnIntoCode {
+            page: api.clone(),
+            block: code.clone(),
+        },
+    );
+
+    let refused = [
+        Mutation::SplitTextBlock {
+            page: api.clone(),
+            block: code.clone(),
+            view: code_view.clone(),
+            at: 2,
+            style: TextStyle::Paragraph,
+        },
+        // ⌫ at the start of the Text Block below joins nothing into the code.
+        Mutation::JoinTextBlock {
+            page: api.clone(),
+            view: below_view,
+        },
+        // Nor does the code join the Text Block above.
+        Mutation::JoinTextBlock {
+            page: api.clone(),
+            view: code_view,
+        },
+        Mutation::SetTextStyle {
+            page: api.clone(),
+            block: code.clone(),
+            style: TextStyle::Quote,
+        },
+        Mutation::TurnIntoCode {
+            page: api.clone(),
+            block: code,
+        },
+        Mutation::SetCodeLanguage {
+            page: api.clone(),
+            block: above.clone(),
+            language: "rust".into(),
+        },
+        Mutation::TurnIntoText {
+            page: api.clone(),
+            block: above,
+        },
+    ];
+    let before = history(&mut workspace).len();
+    for mutation in refused {
+        assert_eq!(
+            edit(&mut workspace, mutation.clone()).map(|_| ()),
+            Err(Error::NotFound),
+            "{mutation:?}"
+        );
+    }
+    assert_eq!(history(&mut workspace).len(), before);
+    assert_eq!(
+        texts_or_code(&mut workspace, &api),
+        ["Shares round:", "share()", "Reports"]
+    );
+}
+
+fn texts_or_code(workspace: &mut Workspace, page: &PageId) -> Vec<String> {
+    let views = workspace.views(page, 0, usize::MAX).unwrap();
+    views
+        .iter()
+        .map(|view| match workspace.text(page, &view.block).unwrap() {
+            Some(text) => text,
+            None => workspace.code(page, &view.block).unwrap().unwrap().text,
+        })
+        .collect()
 }
