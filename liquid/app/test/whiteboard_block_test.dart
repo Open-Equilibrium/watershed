@@ -23,7 +23,8 @@ void main() {
       ..tool = BoardTool.pen
       ..pen = BridgePen.fountain
       ..shape = ShapeKind.snap
-      ..wholeEraser = false;
+      ..wholeEraser = false
+      ..highlighterOnly = false;
   });
 
   Finder board() => find.byKey(const Key('whiteboard'));
@@ -197,6 +198,48 @@ void main() {
     expect(points.length, 11);
     expect(added.x, 100);
     expect(added.w, 100);
+  });
+
+  testWidgets('the highlighter marks beneath, straight along a line', (
+    tester,
+  ) async {
+    await kit.show(tester, [const WhiteboardPart()]);
+    await focus(tester);
+    await key(tester, LogicalKeyboardKey.keyH);
+    await draw(tester, [
+      for (var x = 100.0; x <= 300; x += 10) Offset(x, 150 + (x % 20) / 10),
+    ]);
+    final [mark] = lastEdit().add;
+    expect(mark.pen, BridgePen.highlighter);
+    expect(mark.color, BridgeInkColor.yellow);
+    expect(unpackPoints(mark.points), hasLength(2), reason: 'straightened');
+  });
+
+  testWidgets('the eraser can take only the highlighter\'s marks', (
+    tester,
+  ) async {
+    final line = [for (var x = 100.0; x <= 300; x += 5) Offset(x, 100)];
+    final ink = [for (final at in line) InkPoint(at.dx, at.dy)];
+    await kit.show(tester, [
+      WhiteboardPart([
+        stroke(line),
+        newElement(
+          BridgeElementKind.stroke,
+          frame: pointsBounds(ink),
+          color: BridgeInkColor.yellow,
+          width: 1,
+          pen: BridgePen.highlighter,
+          points: packPoints(ink),
+        ),
+      ]),
+    ]);
+    await focus(tester);
+    await key(tester, LogicalKeyboardKey.keyE);
+    boardTools
+      ..wholeEraser = true
+      ..highlighterOnly = true;
+    await draw(tester, [const Offset(200, 80), const Offset(200, 120)]);
+    expect(lastEdit().remove, ['element 1']);
   });
 
   testWidgets('drawing and holding still snaps the stroke into a shape', (

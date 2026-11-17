@@ -41,6 +41,27 @@ Color inkColor(WsPalette ws, BridgeInkColor color) => switch (color) {
   BridgeInkColor.pink => WsPalette.light.tag8,
 };
 
+/// The pens', shapes' and text's colors.
+const inkColors = [
+  BridgeInkColor.text,
+  BridgeInkColor.data1,
+  BridgeInkColor.data2,
+  BridgeInkColor.data3,
+];
+
+/// The highlighter's colors.
+const highlightColors = [
+  BridgeInkColor.yellow,
+  BridgeInkColor.green,
+  BridgeInkColor.blue,
+  BridgeInkColor.pink,
+];
+
+/// Whether an element is the highlighter's mark, drawn beneath the rest.
+bool isHighlight(BridgeElement element) =>
+    element.kind == BridgeElementKind.stroke &&
+    element.pen == BridgePen.highlighter;
+
 /// The highlighter's widths, thin to broad, in board points.
 const highlighterSizes = [12.0, 18.0, 26.0];
 

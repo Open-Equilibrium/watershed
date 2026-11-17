@@ -128,7 +128,7 @@ class BoardSurfaceState extends State<BoardSurface> {
     }
     final at = board.toBoard(event.localPosition);
     switch (tools.tool) {
-      case BoardTool.pen:
+      case BoardTool.pen || BoardTool.highlighter:
         _startInk(at, event);
       case BoardTool.shape when tools.shape == ShapeKind.snap:
         _startInk(at, event);
@@ -261,7 +261,11 @@ class BoardSurfaceState extends State<BoardSurface> {
   void _armHold() {
     _hold?.cancel();
     _hold = Timer(const Duration(milliseconds: 500), () {
-      if (_drag != _Drag.ink || _ink.length < 3) return;
+      if (_drag != _Drag.ink ||
+          _ink.length < 3 ||
+          tools.tool == BoardTool.highlighter) {
+        return;
+      }
       final shape = _shapeOf(_ink);
       if (shape == null) return;
       setState(() {
@@ -271,17 +275,23 @@ class BoardSurfaceState extends State<BoardSurface> {
     });
   }
 
-  BridgeInkColor get _inkColor => tools.colorOf(
-    tools.tool == BoardTool.shape ? BoardTool.shape : BoardTool.pen,
-  );
-  int get _inkWidth => tools.widthOf(
-    tools.tool == BoardTool.shape ? BoardTool.shape : BoardTool.pen,
-  );
+  /// The tool whose color and width ink takes.
+  BoardTool get _inkTool => switch (tools.tool) {
+    BoardTool.shape || BoardTool.highlighter => tools.tool,
+    _ => BoardTool.pen,
+  };
+  BridgeInkColor get _inkColor => tools.colorOf(_inkTool);
+  int get _inkWidth => tools.widthOf(_inkTool);
+  BridgePen get _inkPen => switch (tools.tool) {
+    BoardTool.shape => BridgePen.ball,
+    BoardTool.highlighter => BridgePen.highlighter,
+    _ => tools.pen,
+  };
 
   void _showInk() => setState(
     () => _draft = Draft(
       ink: [..._ink],
-      pen: tools.tool == BoardTool.shape ? BridgePen.ball : tools.pen,
+      pen: _inkPen,
       color: _inkColor,
       width: _inkWidth,
     ),
@@ -289,6 +299,19 @@ class BoardSurfaceState extends State<BoardSurface> {
 
   void _endInk() {
     final snapping = tools.tool == BoardTool.shape;
+    // A highlight drawn along a line straightens, as GoodNotes' does.
+    if (tools.tool == BoardTool.highlighter && _ink.length > 2) {
+      final (first, last) = (_ink.first, _ink.last);
+      var length = 0.0;
+      for (var at = 1; at < _ink.length; at++) {
+        length += (_ink[at].offset - _ink[at - 1].offset).distance;
+      }
+      if ((last.offset - first.offset).distance >= 0.9 * length) {
+        _ink
+          ..clear()
+          ..addAll([first, last]);
+      }
+    }
     final shape = _snapped ?? (snapping ? _shapeOf(_ink) : null);
     if (shape != null) {
       unawaited(board.edit(add: [shape]));
@@ -302,7 +325,7 @@ class BoardSurfaceState extends State<BoardSurface> {
                 frame: pointsBounds(piece),
                 color: _inkColor,
                 width: _inkWidth,
-                pen: snapping ? BridgePen.ball : tools.pen,
+                pen: _inkPen,
                 points: packPoints(piece),
               ),
           ],
@@ -420,7 +443,8 @@ class BoardSurfaceState extends State<BoardSurface> {
         kept.add(element);
         continue;
       }
-      if (!touches(element, board.cache, at, radius)) {
+      if ((tools.highlighterOnly && !isHighlight(element)) ||
+          !touches(element, board.cache, at, radius)) {
         kept.add(element);
         continue;
       }
@@ -869,6 +893,8 @@ class BoardSurfaceState extends State<BoardSurface> {
         tools.tool = BoardTool.lasso;
       case LogicalKeyboardKey.keyP:
         tools.tool = BoardTool.pen;
+      case LogicalKeyboardKey.keyH:
+        tools.tool = BoardTool.highlighter;
       case LogicalKeyboardKey.keyE:
         tools.tool = BoardTool.eraser;
       case LogicalKeyboardKey.keyT:

@@ -44,6 +44,8 @@ class BoardPainter extends CustomPainter {
     required this.hidden,
     required this.editing,
     this.dots = false,
+    this.paper = false,
+    this.beneath,
   }) : super(repaint: board);
 
   final BoardController board;
@@ -54,6 +56,12 @@ class BoardPainter extends CustomPainter {
   final Set<String> hidden;
   final String? editing;
   final bool dots;
+
+  /// Whether the ink lies on a document's paper rather than a board's canvas.
+  final bool paper;
+
+  /// Draws what lies beneath the ink, in board points, such as a document's pages.
+  final void Function(Canvas canvas, Rect view)? beneath;
 
   /// The handles' size on screen.
   static const handle = 8.0;
@@ -75,10 +83,15 @@ class BoardPainter extends CustomPainter {
     if (dots) _dots(canvas, size);
     canvas.scale(zoom);
     canvas.translate(-board.origin.dx, -board.origin.dy);
-    for (final element in board.elements) {
-      if (hidden.contains(element.id) || element.id == editing) continue;
-      if (!boundsOf(element).overlaps(view)) continue;
-      paintElement(canvas, element);
+    beneath?.call(canvas, view);
+    // The highlighter's marks lie beneath the rest of the ink.
+    for (final beneath in [true, false]) {
+      for (final element in board.elements) {
+        if (isHighlight(element) != beneath) continue;
+        if (hidden.contains(element.id) || element.id == editing) continue;
+        if (!boundsOf(element).overlaps(view)) continue;
+        paintElement(canvas, element);
+      }
     }
     _draft(canvas);
     canvas.restore();
@@ -122,7 +135,10 @@ class BoardPainter extends CustomPainter {
             ..translate(element.x, element.y)
             ..scale(sx, sy)
             ..translate(-source.left, -source.top)
-            ..drawPath(board.cache.outline(element), Paint()..color = color);
+            ..drawPath(
+              board.cache.outline(element),
+              _inkPaint(color, highlight: isHighlight(element)),
+            );
         }
       case BridgeElementKind.shape:
         canvas
@@ -143,6 +159,16 @@ class BoardPainter extends CustomPainter {
         painter.dispose();
     }
     canvas.restore();
+  }
+
+  /// Ink's paint; the highlighter's is multiplied onto paper, so text shows through it,
+  /// and translucent on a board's canvas.
+  Paint _inkPaint(Color color, {required bool highlight}) {
+    final paint = Paint()..color = color;
+    if (!highlight) return paint;
+    return paper
+        ? (paint..blendMode = BlendMode.multiply)
+        : (paint..color = color.withValues(alpha: 0.55));
   }
 
   TextPainter textPainter(BridgeElement element, Color color) => TextPainter(
@@ -171,7 +197,10 @@ class BoardPainter extends CustomPainter {
           draft.ink,
           penOptions(draft.pen, draft.width, complete: false),
         ),
-        Paint()..color = inkColor(ws, draft.color),
+        _inkPaint(
+          inkColor(ws, draft.color),
+          highlight: draft.pen == BridgePen.highlighter,
+        ),
       );
     }
     if (draft.shape case final shape?) paintElement(canvas, shape);
@@ -241,7 +270,9 @@ class BoardPainter extends CustomPainter {
       old.hidden != hidden ||
       old.editing != editing ||
       old.ws != ws ||
-      old.dots != dots;
+      old.dots != dots ||
+      old.paper != paper ||
+      old.beneath != beneath;
 }
 
 /// The selection's frame on the board, as its four corners clockwise from the top left,

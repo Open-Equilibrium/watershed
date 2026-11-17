@@ -12,7 +12,7 @@ import '../workspace/workspace_state.dart';
 import 'board.dart';
 
 /// The five tools, as GoodNotes has them (ADR-0306).
-enum BoardTool { lasso, pen, eraser, shape, text }
+enum BoardTool { lasso, pen, highlighter, eraser, shape, text }
 
 /// What the shape tool makes: a drawn shape snapped, or one dragged out.
 enum ShapeKind { snap, rectangle, ellipse, line, arrow }
@@ -29,14 +29,19 @@ class BoardTools extends ChangeNotifier {
   /// Whether the eraser removes whole elements, rather than the parts it passes.
   bool wholeEraser = false;
 
+  /// Whether the eraser takes only the highlighter's marks, as GoodNotes' erase filter.
+  bool highlighterOnly = false;
+
   /// Each tool's color and width; the eraser's width is its size, text's its size.
   final colors = <BoardTool, BridgeInkColor>{
     BoardTool.pen: BridgeInkColor.data3,
+    BoardTool.highlighter: BridgeInkColor.yellow,
     BoardTool.shape: BridgeInkColor.data2,
     BoardTool.text: BridgeInkColor.text,
   };
   final widths = <BoardTool, int>{
     BoardTool.pen: 1,
+    BoardTool.highlighter: 1,
     BoardTool.shape: 1,
     BoardTool.text: 1,
     BoardTool.eraser: 1,
@@ -196,11 +201,7 @@ class BoardController extends ChangeNotifier {
           BridgeMutationKind.editDrawing,
           page: views.page,
           block: view.block,
-          drawing: BridgeDrawingEdit(
-            add: add,
-            change: change,
-            remove: remove,
-          ),
+          drawing: BridgeDrawingEdit(add: add, change: change, remove: remove),
         ),
         [view.block],
       );

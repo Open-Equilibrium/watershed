@@ -37,6 +37,7 @@ class BoardToolBars extends StatelessWidget {
               for (final (tool, icon, name) in const [
                 (BoardTool.lasso, LucideIcons.lasso, 'Lasso'),
                 (BoardTool.pen, LucideIcons.pen, 'Pen'),
+                (BoardTool.highlighter, LucideIcons.highlighter, 'Highlighter'),
                 (BoardTool.eraser, LucideIcons.eraser, 'Eraser'),
                 (BoardTool.shape, LucideIcons.shapes, 'Shape'),
                 (BoardTool.text, LucideIcons.type, 'Text'),
@@ -61,16 +62,19 @@ class BoardToolBars extends StatelessWidget {
     final tools = boardTools;
     final tool = tools.tool;
     final selection = board.selection;
-    List<Widget> colors(BridgeInkColor on, ValueChanged<BridgeInkColor> pick) =>
-        [
-          for (final color in BridgeInkColor.values)
-            _Swatch(
-              key: ValueKey('color ${color.name}'),
-              color: inkColor(context.ws, color),
-              on: color == on,
-              onTap: () => pick(color),
-            ),
-        ];
+    List<Widget> colors(
+      BridgeInkColor on,
+      ValueChanged<BridgeInkColor> pick, {
+      List<BridgeInkColor> from = inkColors,
+    }) => [
+      for (final color in from)
+        _Swatch(
+          key: ValueKey('color ${color.name}'),
+          color: inkColor(context.ws, color),
+          on: color == on,
+          onTap: () => pick(color),
+        ),
+    ];
     List<Widget> widths(int on, ValueChanged<int> pick, {bool dots = false}) =>
         [
           for (var width = 0; width < 3; width++)
@@ -121,12 +125,28 @@ class BoardToolBars extends StatelessWidget {
           const _Separator(),
           ...widths(tools.widthOf(tool), (width) => set(tool, width: width)),
         ];
+      case BoardTool.highlighter:
+        return [
+          ...colors(
+            tools.colorOf(tool),
+            (color) => set(tool, color: color),
+            from: highlightColors,
+          ),
+          const _Separator(),
+          ...widths(tools.widthOf(tool), (width) => set(tool, width: width)),
+        ];
       case BoardTool.eraser:
         return [
           _Segments(
             labels: const ['Partial', 'Whole'],
             on: tools.wholeEraser ? 1 : 0,
             onTap: (at) => tools.update(() => tools.wholeEraser = at == 1),
+          ),
+          const _Separator(),
+          _Segments(
+            labels: const ['All ink', 'Highlighter only'],
+            on: tools.highlighterOnly ? 1 : 0,
+            onTap: (at) => tools.update(() => tools.highlighterOnly = at == 1),
           ),
           const _Separator(),
           ...widths(
