@@ -8,6 +8,7 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
+use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Empty, Full, Limited};
@@ -95,17 +96,13 @@ where
                 read = reader.read(&mut buffer) => match read {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
-                        if sink
-                            .send(Message::Binary(buffer[..n].to_vec().into()))
-                            .await
-                            .is_err()
-                        {
+                        if !sent(&mut sink, Message::Binary(buffer[..n].to_vec().into())).await {
                             break;
                         }
                     }
                 },
                 _ = ping.tick() => {
-                    if sink.send(Message::Ping(Vec::new().into())).await.is_err() {
+                    if !sent(&mut sink, Message::Ping(Vec::new().into())).await {
                         break;
                     }
                 }
@@ -117,7 +114,11 @@ where
         while let Ok(Some(Ok(frame))) = tokio::time::timeout(IDLE, frames.next()).await {
             match frame {
                 Message::Binary(bytes) => {
-                    if writer.write_all(&bytes).await.is_err() {
+                    // A local end that stops reading ends the relay as a silent peer does.
+                    if !matches!(
+                        tokio::time::timeout(IDLE, writer.write_all(&bytes)).await,
+                        Ok(Ok(()))
+                    ) {
                         break;
                     }
                 }
@@ -130,6 +131,18 @@ where
         () = up => {}
         () = down => {}
     }
+}
+
+/// Sends `message` on `sink` unless the peer does not take it within [`IDLE`]; answers whether it was
+/// sent. A peer that stops reading holds the relay no longer than a silent one.
+async fn sent<S>(sink: &mut SplitSink<WebSocketStream<S>, Message>, message: Message) -> bool
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    matches!(
+        tokio::time::timeout(IDLE, sink.send(message)).await,
+        Ok(Ok(()))
+    )
 }
 
 /// Serves HTTP on the WebSocket `socket` of a host's tunnel, for T3 at `t3`, until the client

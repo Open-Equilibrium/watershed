@@ -4,6 +4,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::SinkExt;
 use futures_util::stream::{Pending, pending};
 use http_body_util::{Full, StreamBody};
 use hyper::body::{Bytes, Frame};
@@ -196,4 +197,21 @@ async fn a_decision_without_a_level_passes_only_as_a_refusal() {
         passes(deny.to_string().into_bytes(), Access::Auto).await,
         Ok(())
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_relay_ends_when_its_local_end_stops_reading() {
+    let (socket_end, far_end) = tokio::io::duplex(1024);
+    let socket = WebSocketStream::from_raw_socket(socket_end, Role::Client, None).await;
+    let mut peer = WebSocketStream::from_raw_socket(far_end, Role::Server, None).await;
+    // The peer sends a frame, which the relay writes to a local end that never reads.
+    peer.send(tokio_tungstenite::tungstenite::Message::Binary(
+        vec![7u8; 100].into(),
+    ))
+    .await
+    .unwrap();
+    let (tcp, _tcp_far) = tokio::io::duplex(16);
+    tokio::time::timeout(Duration::from_secs(600), relay(tcp, socket))
+        .await
+        .expect("the relay ends once its local end has stopped reading");
 }
