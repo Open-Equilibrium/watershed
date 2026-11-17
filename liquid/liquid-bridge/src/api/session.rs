@@ -179,6 +179,12 @@ impl AgentHost {
         Ok(Self { host })
     }
 
+    /// Whether the host answers the calls a device makes: a host's token may make none of them, so a
+    /// connection with one is not a device's (ADR-0288).
+    pub(crate) fn answers_devices(&self) -> Result<(), String> {
+        run(self.host.status()).map(drop)
+    }
+
     /// The providers T3 offers, with their models.
     pub fn providers(&self) -> Result<Vec<BridgeProvider>, String> {
         Ok(run(self.host.providers())?

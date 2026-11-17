@@ -12,7 +12,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 import 'thread.dart';
 
-// These functions are ignored because they are not marked as `pub`: `connect_remote_with`, `export_record_to`, `new`, `permissions_of`, `pump`, `range_diff`, `resubscribe`, `run`, `spawn_stream`, `subscribe_again`, `summary`
+// These functions are ignored because they are not marked as `pub`: `answers_devices`, `connect_remote_with`, `export_record_to`, `new`, `permissions_of`, `pump`, `range_diff`, `resubscribe`, `run`, `spawn_stream`, `subscribe_again`, `summary`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `automations_with`, `events_with`, `follow`, `forward`, `lineage_with`, `servers_with`
 

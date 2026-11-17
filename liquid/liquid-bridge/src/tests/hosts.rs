@@ -209,6 +209,65 @@ fn a_device_pairs_under_liquid_the_computer_name_and_its_own_tag() {
     );
 }
 
+/// A service on `home` whose remote listener answers at a free loopback port, with a local client of
+/// it and the URL the listener answers at.
+fn remote_service(home: &Home) -> (Service, remote::Host, String) {
+    let service = start(home.path());
+    let local = RUNTIME
+        .block_on(remote::Host::connect(home.path(), "test"))
+        .expect("a local client connects");
+    let port = free_port();
+    RUNTIME
+        .block_on(local.remote_on(port))
+        .expect("remote access turns on");
+    (service, local, format!("ws://127.0.0.1:{port}"))
+}
+
+#[test]
+fn a_host_code_is_refused_and_saves_nothing() {
+    let home = Home::new();
+    let (service, local, url) = remote_service(&home);
+    let tokens = Memory::default();
+    let client = "liquid-studio-s-mac";
+    let code = RUNTIME
+        .block_on(local.invite(ClientKind::Host, Access::Auto))
+        .expect("a code");
+
+    let refused = pair_with(&tokens, &url, &code, client).unwrap_err();
+    assert_eq!(
+        refused,
+        format!(
+            "That code pairs a host, not a device: enter a code from meta invite --device instead. The host keeps this device paired as {client}; run meta host revoke {client} there to remove that pairing."
+        )
+    );
+    assert_eq!(
+        tokens.read(&url).unwrap(),
+        None,
+        "a host's token is not kept"
+    );
+    stop(service);
+}
+
+#[test]
+fn a_host_token_is_not_reachable_as_a_device() {
+    let home = Home::new();
+    let (service, local, url) = remote_service(&home);
+    let tokens = Memory::default();
+    let code = RUNTIME
+        .block_on(local.invite(ClientKind::Host, Access::Auto))
+        .expect("a code");
+    let pairing = RUNTIME
+        .block_on(remote::pair(&url, &code, "liquid-studio-s-mac"))
+        .expect("the host pairs");
+    tokens.write(&url, &pairing.token).unwrap();
+
+    assert!(
+        reach_remote_with(&tokens, &url).is_err(),
+        "a token that may not make a device's call does not show as connected"
+    );
+    stop(service);
+}
+
 #[test]
 fn a_long_computer_name_keeps_its_tag_within_the_limit_an_agent_host_keeps() {
     // An agent host keeps a client name of 64 characters at most, so the tag must fit within it.

@@ -118,6 +118,19 @@ pub(crate) fn pair_with(
         ));
     }
     let paired = run(remote::pair(address, code, client))?;
+    // A host's code pairs a host, whose token may make none of a device's calls: it is refused, and
+    // the pairing the other host made stays there until its `meta host revoke`.
+    if let Err(error) = device_answers(address, &paired.token, client) {
+        return Err(if error == REFUSED_CALL {
+            format!(
+                "That code pairs a host, not a device: enter a code from meta invite --device instead. The host keeps this device paired as {client}; run meta host revoke {client} there to remove that pairing."
+            )
+        } else {
+            format!(
+                "Could not check the pairing: {error} The host keeps this device paired as {client}; meta host revoke {client} there removes it."
+            )
+        });
+    }
     tokens.write(address, &paired.token).map_err(|error| {
         format!(
             "{error} The host keeps this device paired; meta host revoke {client} there removes it."
@@ -129,6 +142,15 @@ pub(crate) fn pair_with(
     })
 }
 
+/// The refusal of a call that a client's kind does not make, as the core words it (ADR-0299).
+const REFUSED_CALL: &str = "This client may not make that call.";
+
+/// Whether `token` answers a device's calls, checked before Liquid keeps it.
+fn device_answers(address: &str, token: &str, client: &str) -> Result<(), String> {
+    let host = run(remote::Host::connect_to(address, token, client))?;
+    run(host.status()).map(drop)
+}
+
 pub(crate) fn reach_remote_with(tokens: &dyn Tokens, address: &str) -> Result<BridgeReach, String> {
-    reach(AgentHost::connect_remote_with(tokens, address).map(drop))
+    reach(AgentHost::connect_remote_with(tokens, address).and_then(|host| host.answers_devices()))
 }
