@@ -41,9 +41,18 @@ impl Plan {
         if path.is_empty() {
             path = vec!["/usr/bin".to_owned(), "/bin".to_owned()];
         }
+        // Service files hold text, so a path that is not UTF-8 would be written as another path.
+        let utf8 = |p: &Path| {
+            p.to_str().map(str::to_owned).ok_or_else(|| {
+                format!(
+                    "{} is not UTF-8, which a login service cannot carry.",
+                    p.display()
+                )
+            })
+        };
         let mut environment = vec![
             ("PATH", path.join(":")),
-            ("META_HARNESS_HOME", home.to_string_lossy().into_owned()),
+            ("META_HARNESS_HOME", utf8(&home)?),
         ];
         for name in PASSED {
             if let Some(value) = var(name).filter(|v| v.starts_with('/')) {
@@ -51,8 +60,8 @@ impl Plan {
             }
         }
         // A service file is line-based; a control character would end or break an entry.
-        let program_text = program.to_string_lossy();
-        for value in std::iter::once(program_text.as_ref())
+        let program_text = utf8(&program)?;
+        for value in std::iter::once(program_text.as_str())
             .chain(environment.iter().map(|(_, v)| v.as_str()))
         {
             if value.chars().any(char::is_control) {
@@ -406,6 +415,13 @@ mod tests {
         );
         let broken = Plan::new(dir.0.join("meta"), dir.0.join("da\nta"), |_| None);
         assert!(broken.is_err_and(|e| e.contains("control character")));
+        // A path that is not UTF-8 would be written as another path, so it is refused.
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let not_utf8 = PathBuf::from(std::ffi::OsStr::from_bytes(b"/data/\xff"));
+            assert!(Plan::new(dir.0.join("meta"), not_utf8, |_| None).is_err());
+        }
         // Without an absolute folder, PATH names the system folders, never none.
         let relative = Plan::new(dir.0.join("meta"), dir.0.join("data"), |name| {
             (name == "PATH").then(|| ".:bin".to_owned())
