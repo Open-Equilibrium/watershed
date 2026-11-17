@@ -7,10 +7,11 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'board.dart';
+import 'rough.dart';
 import 'board_controller.dart';
 
 /// The tool bar at a focused board's bottom: lasso, pen, eraser, shape and text, then the
-/// board's hand-drawn or clean style, whose icon shows the style it has; with the chosen
+/// board's style, hand-drawn or clean, both shown with the chosen one raised; with the chosen
 /// tool's options just above it, always in one order: kind, color, width (approved
 /// Whiteboard Block mockups, sections 2 and 3).
 class BoardToolBars extends StatelessWidget {
@@ -48,17 +49,7 @@ class BoardToolBars extends StatelessWidget {
                   onTap: () => boardTools.tool = tool,
                 ),
               const _Separator(),
-              _IconButton(
-                key: const Key('whiteboard style'),
-                icon: board.handDrawn
-                    ? LucideIcons.lineSquiggle
-                    : LucideIcons.ruler,
-                label: board.handDrawn
-                    ? 'Hand-drawn; click for clean lines'
-                    : 'Clean; click for hand-drawn lines',
-                on: false,
-                onTap: () => unawaited(board.toggleStyle()),
-              ),
+              _StyleSwitch(board: board),
             ],
           ),
         ],
@@ -467,4 +458,104 @@ class _Segments extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The board's style as two choices side by side, the chosen one raised: a sketched square
+/// with "Aa" in Excalifont, and an exact one with "Aa" in Liquid's typeface, sized as the
+/// text tool's T. A click on the other switches the whole board.
+class _StyleSwitch extends StatelessWidget {
+  const _StyleSwitch({required this.board});
+
+  final BoardController board;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    Widget choice(bool hand) {
+      final on = board.handDrawn == hand;
+      final color = on ? ws.text : ws.textMuted;
+      return _Tap(
+        label: hand ? 'Hand-drawn' : 'Clean',
+        onTap: () {
+          if (!on) unawaited(board.toggleStyle());
+        },
+        child: Container(
+          key: ValueKey(hand ? 'style hand-drawn' : 'style clean'),
+          height: 26,
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          decoration: BoxDecoration(
+            color: on ? ws.canvas : null,
+            borderRadius: BorderRadius.circular(6),
+            border: on ? Border.all(color: ws.border) : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CustomPaint(
+                size: const Size.square(15),
+                painter: _Square(color: color, hand: hand),
+              ),
+              const SizedBox(width: 3),
+              Text(
+                'Aa',
+                style: TextStyle(
+                  fontSize: hand ? 15 : 13.5,
+                  height: 16 / (hand ? 15 : 13.5),
+                  color: color,
+                  fontFamily: hand ? handFont : WsMetrics.fontUi.first,
+                  fontFamilyFallback: WsMetrics.fontUi,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      key: const Key('whiteboard style'),
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: ws.subtle,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [choice(true), const SizedBox(width: 2), choice(false)],
+      ),
+    );
+  }
+}
+
+class _Square extends CustomPainter {
+  const _Square({required this.color, required this.hand});
+
+  final Color color;
+  final bool hand;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final box = Rect.fromLTWH(2.5, 2.5, size.width - 5, size.height - 5);
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4
+      ..strokeCap = StrokeCap.round;
+    canvas.drawPath(
+      hand
+          ? roughPolygon([
+              box.topLeft,
+              box.topRight,
+              box.bottomRight,
+              box.bottomLeft,
+            ], const RoughOptions(seed: 5, maxRandomnessOffset: 0.7))
+          : (Path()..addRRect(
+              RRect.fromRectAndRadius(box, const Radius.circular(1.5)),
+            )),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_Square old) => old.color != color || old.hand != hand;
 }

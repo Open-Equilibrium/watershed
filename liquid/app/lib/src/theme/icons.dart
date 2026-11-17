@@ -96,6 +96,5 @@ abstract final class LucideIcons {
   static const moveUpRight = IconData(0xe493, fontFamily: _family);
   static const triangle = IconData(0xe192, fontFamily: _family);
   static const lineSquiggle = IconData(0xe67a, fontFamily: _family);
-  static const ruler = IconData(0xe14b, fontFamily: _family);
   static const presentation = IconData(0xe4ae, fontFamily: _family);
 }

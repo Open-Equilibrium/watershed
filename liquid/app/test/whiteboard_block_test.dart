@@ -315,23 +315,25 @@ void main() {
     expect(text.x, 120);
   });
 
-  testWidgets('the style button switches the whole board to clean and back', (
+  testWidgets('the style switch sets the whole board to clean and back', (
     tester,
   ) async {
     await kit.show(tester, [const WhiteboardPart()]);
     await focus(tester);
-    await tester.tap(find.byKey(const Key('whiteboard style')));
+    BridgeWhiteboardStyle style() => kit.fake.whiteboards.values.single.style;
+    await tester.tap(find.byKey(const ValueKey('style hand-drawn')));
     await tester.pumpAndSettle();
     expect(
-      kit.fake.whiteboards.values.single.style,
-      BridgeWhiteboardStyle.clean,
+      kit.applied(BridgeMutationKind.setWhiteboardStyle),
+      isEmpty,
+      reason: 'the chosen style stays as it is',
     );
-    await tester.tap(find.byKey(const Key('whiteboard style')));
+    await tester.tap(find.byKey(const ValueKey('style clean')));
     await tester.pumpAndSettle();
-    expect(
-      kit.fake.whiteboards.values.single.style,
-      BridgeWhiteboardStyle.handDrawn,
-    );
+    expect(style(), BridgeWhiteboardStyle.clean);
+    await tester.tap(find.byKey(const ValueKey('style hand-drawn')));
+    await tester.pumpAndSettle();
+    expect(style(), BridgeWhiteboardStyle.handDrawn);
   });
 
   testWidgets('pinching zooms a board and the right button pans it', (
