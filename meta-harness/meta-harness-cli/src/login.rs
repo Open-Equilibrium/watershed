@@ -180,9 +180,32 @@ impl Manager {
         let folder = self.file.parent().expect("a service file has a folder");
         std::fs::create_dir_all(folder)
             .map_err(|e| format!("Could not create {}: {e}", folder.display()))?;
+        let previous = match std::fs::read(&self.file) {
+            Ok(bytes) => Some(bytes),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(format!("Could not read {}: {e}", self.file.display())),
+        };
         std::fs::write(&self.file, (self.render)(plan))
             .map_err(|e| format!("Could not write {}: {e}", self.file.display()))?;
-        run_all(&self.start, &mut run).map(|_| ())
+        let started = run_all(&self.start, &mut run).map(|_| ());
+        if let Err(error) = started {
+            // The file keeps naming the data folder the service ran with, which uninstall checks.
+            let restored = match previous {
+                Some(bytes) => std::fs::write(&self.file, bytes),
+                None => match std::fs::remove_file(&self.file) {
+                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+                    _ => Ok(()),
+                },
+            };
+            return Err(match restored {
+                Ok(()) => error,
+                Err(e) => format!(
+                    "{error}. The previous service file could not be restored: {e} ({})",
+                    self.file.display()
+                ),
+            });
+        }
+        Ok(())
     }
 
     /// The data folder the installed service keeps, from its file; `None` without a file.
@@ -529,6 +552,19 @@ mod tests {
         let home = home.to_string_lossy().into_owned();
         assert_eq!(plist_home(&plist_of(&plan)), Some(home.clone()));
         assert_eq!(unit_home(&unit_of(&plan)), Some(home));
+    }
+
+    #[test]
+    fn a_replacement_that_fails_keeps_the_data_folder_of_the_service_on_record() {
+        let dir = Dir::new();
+        let manager = Manager::systemd(&dir.0.join("config"));
+        let old = Plan::new(dir.0.join("bin/meta"), dir.0.join("lib/data"), |_| None).unwrap();
+        installed(&manager, &old);
+        let outside = Plan::new(dir.0.join("bin/meta"), dir.0.join("outside"), |_| None).unwrap();
+        let result = manager.install(&outside, |_| Err("daemon-reload failed".to_owned()));
+        assert!(result.is_err());
+        // Uninstall checks the folder this file names, so the old one must still be named.
+        assert_eq!(manager.recorded_home(), Ok(Some(old.home)));
     }
 
     #[test]
