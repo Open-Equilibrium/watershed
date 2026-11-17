@@ -209,6 +209,20 @@ fn a_device_pairs_under_liquid_the_computer_name_and_its_own_tag() {
     );
 }
 
+#[test]
+fn a_long_computer_name_keeps_its_tag_within_the_limit_an_agent_host_keeps() {
+    // An agent host keeps a client name of 64 characters at most, so the tag must fit within it.
+    assert_eq!(
+        client_name(&"a".repeat(100), "3f2a").unwrap(),
+        format!("liquid-{}-3f2a", "a".repeat(52))
+    );
+    // A cut that lands on a separator leaves none before the tag.
+    assert_eq!(
+        client_name(&format!("{} bee", "a".repeat(51)), "3f2a").unwrap(),
+        format!("liquid-{}-3f2a", "a".repeat(51))
+    );
+}
+
 /// Needs the operating system's keychain, which CI hosts lack; run it by hand with
 /// `cargo test -p liquid_bridge -- --ignored keychain`.
 #[test]

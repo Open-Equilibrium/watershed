@@ -39,9 +39,13 @@ pub fn pair_agent_host(address: String, code: String) -> Result<BridgePairing, S
     pair_with(&DeviceTokens {}, &address, &code, &client)
 }
 
+/// The longest client name an agent host keeps unchanged: 64 characters, the limit its `printable`
+/// applies. The name is ASCII, so its UTF-16 units are its characters too.
+const NAME_CHARS: usize = 64;
+
 /// The name Liquid pairs under on an agent host: `liquid-`, this computer's name in lower case with
-/// each run of other characters one hyphen, and `tag`, so `meta host revoke` names exactly this
-/// device even beside a computer of the same name.
+/// each run of other characters one hyphen, cut so the name fits `NAME_CHARS`, and `tag`, so
+/// `meta host revoke` names exactly this device even beside a computer of the same name.
 pub(crate) fn client_name(computer: &str, tag: &str) -> Result<String, String> {
     let words: Vec<String> = computer
         .split(|character: char| !character.is_ascii_alphanumeric())
@@ -51,7 +55,9 @@ pub(crate) fn client_name(computer: &str, tag: &str) -> Result<String, String> {
     if words.is_empty() {
         return Err("This computer has no name to pair under.".into());
     }
-    Ok(format!("liquid-{}-{tag}", words.join("-")))
+    let room = NAME_CHARS.saturating_sub("liquid--".len() + tag.len());
+    let computer: String = words.join("-").chars().take(room).collect();
+    Ok(format!("liquid-{}-{tag}", computer.trim_end_matches('-')))
 }
 
 /// Four random lowercase hex digits that tell this pairing apart from another of the same name.
