@@ -6,10 +6,30 @@ use std::path::PathBuf;
 
 use crate::config::{Action, Blocks, Change, McpServer, Proposed, Store};
 
-/// A store in a fresh folder, removed on drop.
+/// A store in a fresh folder. Fields drop in declaration order, so the store closes before its
+/// folder is removed.
 struct Fixture {
-    dir: PathBuf,
     store: Store,
+    dir: Folder,
+}
+
+/// A folder removed on drop; a failed removal is printed, not ignored.
+struct Folder(PathBuf);
+
+impl std::ops::Deref for Folder {
+    type Target = PathBuf;
+
+    fn deref(&self) -> &PathBuf {
+        &self.0
+    }
+}
+
+impl Drop for Folder {
+    fn drop(&mut self) {
+        if let Err(error) = std::fs::remove_dir_all(&self.0) {
+            eprintln!("could not remove {}: {error}", self.0.display());
+        }
+    }
 }
 
 impl Fixture {
@@ -20,17 +40,14 @@ impl Fixture {
         let dir = std::env::temp_dir().join(format!("mh-config-{name}"));
         std::fs::create_dir_all(&dir).unwrap();
         let store = Store::open(&dir.join("meta-harness.sqlite")).unwrap();
-        Self { dir, store }
+        Self {
+            store,
+            dir: Folder(dir),
+        }
     }
 
     fn reopen(&self) -> Store {
         Store::open(&self.dir.join("meta-harness.sqlite")).unwrap()
-    }
-}
-
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
 
