@@ -138,12 +138,18 @@ class DocumentPages {
     );
   }
 
-  /// The page whose middle lies nearest the board point `at`.
-  int pageNear(Offset at) {
+  /// The page nearest the board point `at`.
+  int pageNear(Offset at) => nearest(sheets, at);
+
+  /// Of `sheets`, the one holding the height of `at`, or else the nearest above or below.
+  static int nearest(List<Rect> sheets, Offset at) {
     var best = 0;
     var distance = double.infinity;
     for (final (index, sheet) in sheets.indexed) {
-      final away = (sheet.center.dy - at.dy).abs();
+      final away = math.max(
+        0.0,
+        math.max(sheet.top - at.dy, at.dy - sheet.bottom),
+      );
       if (away < distance) (best, distance) = (index, away);
     }
     return best;

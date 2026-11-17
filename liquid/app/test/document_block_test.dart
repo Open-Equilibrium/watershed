@@ -164,6 +164,26 @@ void main() {
     expect(stroke.docPage, 0);
   });
 
+  testWidgets('ink low on a page stays there when the next page is shorter', (
+    tester,
+  ) async {
+    await showPdf(tester, sizes: const [Size(595, 842), Size(842, 595)]);
+    await tester.tap(find.byKey(const Key('document')));
+    await tester.pumpAndSettle();
+    final first = board(tester).sheets.first;
+    board(tester)
+      ..origin = Offset(board(tester).origin.dx, first.bottom - 200)
+      ..notifyListeners();
+    await tester.pumpAndSettle();
+    await draw(tester, [
+      first.topLeft + const Offset(100, 800),
+      first.topLeft + const Offset(200, 805),
+    ]);
+    final [stroke] = lastEdit().add;
+    expect(stroke.docPage, 0);
+    expect(stroke.y, closeTo(800, 1));
+  });
+
   testWidgets('a tall, narrow page is drawn no taller than 4,096 pixels', (
     tester,
   ) async {

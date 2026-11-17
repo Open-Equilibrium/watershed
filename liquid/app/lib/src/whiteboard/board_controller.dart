@@ -302,16 +302,7 @@ class BoardController extends ChangeNotifier {
     return null;
   }
 
-  /// The page nearest a board point.
-  int _nearestPage(Offset at) {
-    var best = 0;
-    var distance = double.infinity;
-    for (final (index, sheet) in sheets.indexed) {
-      final away = (sheet.center.dy - at.dy).abs();
-      if (away < distance) (best, distance) = (index, away);
-    }
-    return best;
-  }
+  int _nearestPage(Offset at) => DocumentPages.nearest(sheets, at);
 
   /// `element` as stored, its frame in its page's points, moved onto the board; none for a
   /// page the document does not have.
