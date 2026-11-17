@@ -110,6 +110,20 @@ fn free_port() -> u16 {
         .port()
 }
 
+/// Turns on `host`'s remote access on a free port and answers that port. A port found free can
+/// be taken by another test before the service binds it, so a taken one is tried again.
+async fn remote_on_free(host: &remote::Host) -> u16 {
+    for _ in 0..5 {
+        let port = free_port();
+        match host.remote_on(port).await {
+            Ok(_) => return port,
+            Err(error) if error.contains("already in use") => continue,
+            Err(error) => panic!("{error}"),
+        }
+    }
+    panic!("no free port for remote access");
+}
+
 fn worktree() -> Workspace {
     Workspace::NewWorktree {
         base: "main".to_owned(),
@@ -1076,8 +1090,7 @@ async fn connects(url: &str, token: &str, name: &str) -> bool {
 async fn a_client_name_keeps_no_control_characters() {
     let (dir, _repo, _home) = fixture();
     let (_service, local) = start_service(&dir.path().join("meta")).await;
-    let port = free_port();
-    local.remote_on(port).await.unwrap();
+    let port = remote_on_free(&local).await;
     let url = format!("ws://127.0.0.1:{port}");
     let code = local
         .invite(ClientKind::Device, Access::Auto)
@@ -1122,8 +1135,7 @@ async fn remote_access_that_cannot_bind_at_start_says_so_and_binds_once_the_port
     let (dir, _repo, _home) = fixture();
     let meta = dir.path().join("meta");
     let (service, local) = start_service(&meta).await;
-    let port = free_port();
-    local.remote_on(port).await.unwrap();
+    let port = remote_on_free(&local).await;
     drop(local);
     service.stop().await;
     // Another program holds the port while the service starts.
@@ -1152,8 +1164,7 @@ async fn remote_access_that_cannot_bind_at_start_says_so_and_binds_once_the_port
 async fn the_remote_listener_closes_a_handshake_beyond_its_limit_at_once() {
     let (dir, _repo, _home) = fixture();
     let (_service, local) = start_service(&dir.path().join("meta")).await;
-    let port = free_port();
-    local.remote_on(port).await.unwrap();
+    let port = remote_on_free(&local).await;
     let address = format!("127.0.0.1:{port}");
     // Connections that never complete a handshake take the whole limit. The listener accepts in
     // order, so the next connection is accepted only after them.
@@ -1174,8 +1185,7 @@ async fn the_remote_listener_closes_a_handshake_beyond_its_limit_at_once() {
 async fn turning_remote_access_off_ends_the_connections_it_admitted() {
     let (dir, _repo, _home) = fixture();
     let (_service, local) = start_service(&dir.path().join("meta")).await;
-    let port = free_port();
-    local.remote_on(port).await.unwrap();
+    let port = remote_on_free(&local).await;
     let url = format!("ws://127.0.0.1:{port}");
     let code = local
         .invite(ClientKind::Device, Access::Auto)
@@ -1362,9 +1372,8 @@ async fn a_link_without_an_access_level_takes_the_level_its_host_invited() {
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    a.remote_on(free_port()).await.unwrap();
-    b.remote_on(port_b).await.unwrap();
+    remote_on_free(&a).await;
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let url_b = format!("ws://127.0.0.1:{port_b}");
@@ -1385,9 +1394,8 @@ async fn a_host_invited_at_approval_required_cannot_link_at_auto_but_links_at_th
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    a.remote_on(free_port()).await.unwrap();
-    b.remote_on(port_b).await.unwrap();
+    remote_on_free(&a).await;
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let url_b = format!("ws://127.0.0.1:{port_b}");
@@ -1415,9 +1423,8 @@ async fn a_host_pairs_under_a_tagged_name_that_its_revoke_message_quotes() {
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    a.remote_on(free_port()).await.unwrap();
-    b.remote_on(port_b).await.unwrap();
+    remote_on_free(&a).await;
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let url_b = format!("ws://127.0.0.1:{port_b}");
@@ -1479,8 +1486,7 @@ async fn a_host_invited_read_only_gets_a_pairing_code_that_grants_orchestration_
     let (dir, _repo, _home) = fixture();
     let home = dir.path().join("b");
     let (_b, b) = start_service(&home).await;
-    let port = free_port();
-    b.remote_on(port).await.unwrap();
+    let port = remote_on_free(&b).await;
     let url = format!("ws://127.0.0.1:{port}");
     let code = b.invite(ClientKind::Host, Access::ReadOnly).await.unwrap();
     let paired = remote::pair(&url, &code, "other").await.unwrap();
@@ -1500,9 +1506,8 @@ async fn a_host_link_whose_tunnel_port_is_taken_at_restart_moves_to_a_new_port()
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
     let (a_service, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    a.remote_on(free_port()).await.unwrap();
-    b.remote_on(port_b).await.unwrap();
+    remote_on_free(&a).await;
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
@@ -1579,9 +1584,8 @@ async fn a_peer_that_never_answers_a_link_is_given_up_on_and_holds_no_other_chan
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    a.remote_on(free_port()).await.unwrap();
-    b.remote_on(port_b).await.unwrap();
+    remote_on_free(&a).await;
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let silent = silent_peer().await;
@@ -1605,8 +1609,7 @@ async fn a_peer_that_never_answers_a_link_is_given_up_on_and_holds_no_other_chan
 async fn a_name_already_paired_is_refused_and_its_code_is_still_good() {
     let (dir, _repo, _home) = fixture();
     let (_service, local) = start_service(&dir.path().join("meta")).await;
-    let port = free_port();
-    local.remote_on(port).await.unwrap();
+    let port = remote_on_free(&local).await;
     let url = format!("ws://127.0.0.1:{port}");
     let first = local
         .invite(ClientKind::Device, Access::Auto)
@@ -1654,9 +1657,8 @@ async fn a_host_asking_for_more_than_it_was_invited_at_is_refused_before_linking
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    a.remote_on(free_port()).await.unwrap();
-    b.remote_on(port_b).await.unwrap();
+    remote_on_free(&a).await;
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let code = b.invite(ClientKind::Host, Access::ReadOnly).await.unwrap();
@@ -1684,9 +1686,8 @@ async fn a_host_asking_for_less_than_its_invite_names_its_pairing_and_level() {
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    a.remote_on(free_port()).await.unwrap();
-    b.remote_on(port_b).await.unwrap();
+    remote_on_free(&a).await;
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let code = b
@@ -1721,9 +1722,8 @@ async fn a_link_made_is_reported_made_even_when_its_time_cannot_be_stored() {
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    a.remote_on(free_port()).await.unwrap();
-    b.remote_on(port_b).await.unwrap();
+    remote_on_free(&a).await;
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     // Every update of a link's row fails, as a store that cannot be written does.
@@ -1748,8 +1748,7 @@ async fn a_host_link_older_than_25_days_is_made_again_when_the_service_starts() 
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
     let (a_service, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    b.remote_on(port_b).await.unwrap();
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
@@ -1810,9 +1809,8 @@ async fn linked(dir: &Path) -> Linked {
     let (home_a, home_b) = (dir.join("a"), dir.join("b"));
     let (a_service, a) = start_service(&home_a).await;
     let (b_service, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    a.remote_on(free_port()).await.unwrap();
-    b.remote_on(port_b).await.unwrap();
+    remote_on_free(&a).await;
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let url_b = format!("ws://127.0.0.1:{port_b}");
@@ -2219,8 +2217,7 @@ async fn a_decision_with_another_pairings_client_id_is_refused_by_the_tunnel() {
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
     let (_c, c) = start_service(&home_c).await;
-    let port_b = free_port();
-    b.remote_on(port_b).await.unwrap();
+    let port_b = remote_on_free(&b).await;
     for host in [&a, &b, &c] {
         host.host_agents(true).await.unwrap();
     }
@@ -2254,8 +2251,7 @@ async fn a_token_exchange_with_another_pairings_client_id_is_refused_by_the_tunn
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
     let (_c, c) = start_service(&home_c).await;
-    let port_b = free_port();
-    b.remote_on(port_b).await.unwrap();
+    let port_b = remote_on_free(&b).await;
     for host in [&a, &b, &c] {
         host.host_agents(true).await.unwrap();
     }
@@ -2298,9 +2294,8 @@ async fn revoking_a_name_with_no_client_still_ends_the_sign_ins_made_under_it() 
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
-    let port_b = free_port();
-    a.remote_on(free_port()).await.unwrap();
-    b.remote_on(port_b).await.unwrap();
+    remote_on_free(&a).await;
+    let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let url_b = format!("ws://127.0.0.1:{port_b}");
@@ -2347,8 +2342,7 @@ async fn revoking_a_host_ends_the_t3_sessions_its_link_made() {
     let (_a, a) = start_service(&home_a).await;
     let (_b, b) = start_service(&home_b).await;
     let (_c, c) = start_service(&home_c).await;
-    let port_b = free_port();
-    b.remote_on(port_b).await.unwrap();
+    let port_b = remote_on_free(&b).await;
     for host in [&a, &b, &c] {
         host.host_agents(true).await.unwrap();
     }
