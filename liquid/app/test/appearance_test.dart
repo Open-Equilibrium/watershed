@@ -60,7 +60,9 @@ void main() {
       final appearance = AppearanceController();
       await tester.pumpWidget(
         LiquidApp(
-          launch: Launch.session(SessionState(FakeProject()), info),
+          launch: ValueNotifier(
+            Launch.session(SessionState(FakeProject()), info),
+          ),
           appearance: appearance,
         ),
       );
@@ -100,7 +102,9 @@ void main() {
       final cards = SessionCardSettingsController();
       await tester.pumpWidget(
         LiquidApp(
-          launch: Launch.session(SessionState(FakeProject()), info),
+          launch: ValueNotifier(
+            Launch.session(SessionState(FakeProject()), info),
+          ),
           appearance: AppearanceController(),
           cardSettings: cards,
         ),
@@ -166,7 +170,7 @@ void main() {
     final state = SessionState(FakeProject());
     await tester.pumpWidget(
       LiquidApp(
-        launch: Launch.session(state, info),
+        launch: ValueNotifier(Launch.session(state, info)),
         appearance: appearance,
         diffSettings: diff,
       ),
@@ -194,7 +198,9 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1600, 900));
     await tester.pumpWidget(
       LiquidApp(
-        launch: Launch.session(SessionState(FakeProject()), info),
+        launch: ValueNotifier(
+          Launch.session(SessionState(FakeProject()), info),
+        ),
         appearance: appearance,
         diffSettings: diff,
       ),
@@ -203,6 +209,33 @@ void main() {
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
   }
+
+  testWidgets(
+    'a failed save is still shown after another agent host is shown',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1600, 900));
+      final appearance = AppearanceController(const Appearance(), _Disk());
+      final surface = ValueNotifier(
+        Launch.session(SessionState(FakeProject()), info),
+      );
+      await tester.pumpWidget(
+        LiquidApp(launch: surface, appearance: appearance),
+      );
+      await tester.pumpAndSettle();
+      surface.value = Launch.session(SessionState(FakeProject()), info);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Dark'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Could not save the appearance: disk full'),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets('a failed save shows one notice at the top of Settings until ✕', (
     tester,

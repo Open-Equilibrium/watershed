@@ -41,6 +41,15 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Harness home** — The configuration folder Meta-Harness owns for one harness, such as Claude Code's `CLAUDE_CONFIG_DIR` or Codex's `CODEX_HOME`, which T3 Code starts the harness with; the person's own harness configuration stays untouched (ADR-0298).
 - **Meta-Harness service** — The `meta serve` process that owns a data folder (`META_HARNESS_HOME`, else `~/.meta-harness`), runs the pinned T3 Code server and serves Meta-Harness's API to clients such as `meta` and Liquid (ADR-0297).
 - **Meta-Harness API version** — The number a client names in the `meta-harness-api` header of its handshake; the service admits only its own ([V-Spec](docs/concept/V-Spec_MetaHarness.html#surfaces)).
+- **Remote access** — The service's listener on this computer's Tailscale addresses, off until a person turns it on (ADR-0299).
+- **Pairing code** — The single-use code that `meta invite` issues so that one device or host can pair with this computer's remote access (ADR-0299).
+- **Pairing name** — The name a device or host pairs under, unique among the clients paired here; T3 labels a host link's sessions with it, and `meta host revoke` names it (ADR-0300, ADR-0301).
+- **Access level** — The level at which a linked host's agents may act here, as T3 names them (`read-only` to `full-access`); the receiving host sets it when it invites the host, and a link may ask for less (ADR-0300).
+- **Device token** — The token a device keeps after pairing; what it may reach is in [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) (ADR-0299).
+- **Host token** — The token another host keeps after pairing; what it may reach is in [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) (ADR-0288, ADR-0299).
+- **Host link** — A link that lets one host's T3 Code reach another's; Meta-Harness pairs each direction separately, carries it through a host tunnel and renews it (ADR-0285, ADR-0288, ADR-0299).
+- **Host tunnel** — The request-passing path of a host link: a loopback port on the linking host to the other host's remote access, which passes only the requests a link makes; what it refuses is in [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) (ADR-0300, ADR-0301).
+- **Peer link** — T3 Code's own link from one T3 server to another's `/mcp`, which a host link carries (ADR-0288).
 - **Login service** — The per-user launchd agent or systemd user unit that keeps `meta serve` running (ADR-0286).
 - **BYOA** — "Bring Your Own Agent"; plugging an external agent in as the Meta-Agent.
 - **AgentPulse** — Meta-Harness subsystem measuring rework ratio, first-attempt success rate, and cost-per-productive-outcome. Meta-Harness computes/stores the metrics; Liquid only renders them.
@@ -173,6 +182,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Harness handoff** — Continuing a conversation in another harness as a new session that receives the earlier conversation as bounded text, without native tool or reasoning state (ADR-0231).
 - **Area** — A part of a Workspace that Roles, replication and encryption treat as one unit. Its area key is wrapped for every device and headless replica allowed in it (ADR-0224, ADR-0228).
 - **Agent host** — Where Meta-Harness runs agents: by default the operating-system account it is installed on (ADR-0254), or a separate machine, VM, container or account the person sets up and links. A default agent host has no replica of its own: its agents use the person's Liquid through the Workspace CLI/API (ADR-0255).
+- **Active agent host** — The agent host Liquid's agent sessions run on, chosen under Settings → Agent hosts; This Mac when none is chosen (ADR-0295).
 - **Subagent** — A thread an agent starts through T3 Code's orchestration tools (ADR-0288), in any harness, with any model and on any agent host, which reports back to it as messages; its authority never exceeds its parent's grant (ADR-0253).
 - **Grant** — What a person signs to let an agent act for them in a Workspace: an area, actions and an expiry, never more than that person may do; revoking it makes the Sync Server refuse the agent's changes (ADR-0223).
 - **Agent-sessions area** — The area where Meta-Harness mirrors agent session records at turn boundaries, so another of the person's agent hosts can continue a session (ADR-0229).

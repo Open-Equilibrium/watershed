@@ -22,6 +22,7 @@ use crate::api::record::{README, THREAD_FILE, download_dir, record_name, write_f
 use crate::api::thread::{BridgeContext, BridgeSnapshot, BridgeStatistics, BridgeTurn};
 use crate::convert;
 use crate::frb_generated::StreamSink;
+use crate::keys::{DeviceTokens, Tokens};
 use crate::stream::{self, until_ended};
 
 /// How long a burst of lineage changes settles before the lineage is read again.
@@ -162,6 +163,26 @@ impl AgentHost {
         let host = run(Host::connect(&folder, "liquid"))
             .map_err(|error| format!("{error} Liquid looked in {} ({found}).", folder.display()))?;
         Ok(Self { host })
+    }
+
+    /// Connects to the agent host at `address` with the device token filed under it (ADR-0299).
+    pub fn connect_remote(address: String) -> Result<Self, String> {
+        Self::connect_remote_with(&DeviceTokens {}, &address)
+    }
+
+    /// As [`AgentHost::connect_remote`], with the tokens kept in `tokens`.
+    pub(crate) fn connect_remote_with(tokens: &dyn Tokens, address: &str) -> Result<Self, String> {
+        let token = tokens.read(address)?.ok_or_else(|| {
+            format!("Liquid holds no device token for {address}; forget that agent host and pair it again.")
+        })?;
+        let host = run(Host::connect_to(address, &token, "liquid"))?;
+        Ok(Self { host })
+    }
+
+    /// Whether the host answers the calls a device makes: a host's token may make none of them, so a
+    /// connection with one is not a device's (ADR-0288).
+    pub(crate) fn answers_devices(&self) -> Result<(), String> {
+        run(self.host.status()).map(drop)
     }
 
     /// The providers T3 offers, with their models.

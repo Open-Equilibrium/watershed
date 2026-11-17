@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+
 import 'agent/sidebar.dart';
+import 'agent_hosts/agent_hosts.dart';
 import 'rust/api/session.dart';
 import 'rust/api/replica.dart';
 import 'session/backend.dart';
@@ -26,25 +29,40 @@ String projectName(String project) =>
         .lastWhere((part) => part.isNotEmpty, orElse: () => '/');
 
 /// Connects to Meta-Harness for the project the environment names; `META_HARNESS_HOME` may name its
-/// data folder. The start page then begins or continues a session.
-Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
+/// data folder. The start page then begins or continues a session. With `activeAddress`, the
+/// session runs on that agent host (ADR-0295), where the project folder is, so this Mac does not
+/// look for it.
+Future<Launch> launchFromEnvironment(
+  Map<String, String> environment, {
+  String? activeAddress,
+}) async {
   final project = environment['LIQUID_PROJECT'];
   if (project == null) {
     return const Launch.problem(
       'Start Liquid with LIQUID_PROJECT set to a project directory.',
     );
   }
-  if (!Directory(project).existsSync()) {
-    return Launch.problem('LIQUID_PROJECT names no directory: $project');
-  }
   final home = environment['META_HARNESS_HOME'];
-  // A relative folder would be looked up from wherever Liquid started.
-  if (home != null && !File(home).isAbsolute) {
-    return Launch.problem('META_HARNESS_HOME must be an absolute path: $home');
+  if (activeAddress == null) {
+    if (!Directory(project).existsSync()) {
+      return Launch.problem('LIQUID_PROJECT names no directory: $project');
+    }
+    // A relative folder would be looked up from wherever Liquid started.
+    if (home != null && !File(home).isAbsolute) {
+      return Launch.problem(
+        'META_HARNESS_HOME must be an absolute path: $home',
+      );
+    }
+  } else if (!Directory(project).isAbsolute) {
+    return Launch.problem(
+      'LIQUID_PROJECT must be an absolute path on the agent host $activeAddress: $project',
+    );
   }
   final root = Directory(project).absolute.path;
   try {
-    final host = await AgentHost.connect(home: home);
+    final host = activeAddress == null
+        ? await AgentHost.connect(home: home)
+        : await AgentHost.connectRemote(address: activeAddress);
     final state = SessionState(
       RustProjectBackend(host, await host.project(root: root)),
     );
@@ -54,9 +72,43 @@ Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
       SessionInfo(project: projectName(project), path: root),
     );
   } on Object catch (error) {
+    if (activeAddress != null) {
+      return Launch.problem(
+        'Liquid could not connect to the agent host $activeAddress: ${messageOf(error)}',
+      );
+    }
     // The bridge's error says that Meta-Harness is not running and where Liquid looked.
     return Launch.problem('$error');
   }
+}
+
+/// Shows the agent host at `address` (null: This Mac) as Liquid's agent area at once, and releases the
+/// session it replaces. `connect` returns why the host cannot be shown, and then the area stays as it
+/// was; the answer is null once it is shown. A host whose choice `isCurrent` no longer finds is not
+/// shown, since a later choice is, and its session is released.
+Future<String?> showAgentHost(
+  ValueNotifier<Launch> surface,
+  Future<Launch> Function(String? address) connect,
+  String? address, {
+  required bool Function() isCurrent,
+}) async {
+  final next = await connect(address);
+  if (!isCurrent()) {
+    // A session that fails to release is not shown; the choice that replaced it is.
+    try {
+      await next.state?.dispose();
+    } on Object {
+      // Nothing to show for it: the session is no longer Liquid's.
+    }
+    return 'Another agent host was chosen meanwhile.';
+  }
+  if (next.state == null) {
+    return next.problem ?? 'Liquid could not start sessions on it.';
+  }
+  final previous = surface.value.state;
+  surface.value = next;
+  if (previous != null) unawaited(previous.dispose());
+  return null;
 }
 
 /// Opens the Workspace whose replica lives in `dir` and follows it, or says why it did not

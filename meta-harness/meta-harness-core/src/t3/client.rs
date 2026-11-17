@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
@@ -15,6 +15,8 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+
+use crate::util::lock;
 
 /// The orchestration protocol this client speaks; T3 answers 426 to any other.
 const ORCHESTRATION_PROTOCOL: u32 = 2;
@@ -68,10 +70,6 @@ struct State {
 }
 
 type Link = Arc<Mutex<State>>;
-
-fn lock(link: &Link) -> MutexGuard<'_, State> {
-    link.lock().unwrap_or_else(PoisonError::into_inner)
-}
 
 /// One client of a T3 server. It keeps its connection until `close`, and reconnects when T3 drops it.
 #[derive(Clone)]

@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 use tokio::sync::{Notify, mpsc};
@@ -200,7 +200,7 @@ impl Thread {
         let applied = state.clone();
         let follower = tokio::spawn(async move {
             while let Some(message) = stream.recv().await {
-                let mut state = applied.lock().unwrap_or_else(PoisonError::into_inner);
+                let mut state = crate::util::lock(&applied);
                 if message["kind"] == "snapshot" {
                     // T3 sent the thread again on a new connection; its events go on from there.
                     restore(&mut state, &message);
@@ -210,7 +210,7 @@ impl Thread {
                 }
             }
             // T3 ended the stream, so the subscribers end with it, and later ones end at once.
-            let mut state = applied.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut state = crate::util::lock(&applied);
             state.ended = true;
             state.subscribers.clear();
         });
@@ -224,7 +224,7 @@ impl Thread {
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        crate::util::lock(&self.state)
     }
 
     /// T3's thread id.

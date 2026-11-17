@@ -13,10 +13,14 @@ workspace = true
 
 [dependencies]
 futures-util.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
 getrandom.workspace = true
 rustix.workspace = true
 serde.workspace = true
 rusqlite.workspace = true
+sha2.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "net", "process"] }
 tokio-tungstenite.workspace = true

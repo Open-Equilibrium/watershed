@@ -18,11 +18,11 @@ import 'theme/theme.dart';
 import 'theme/tokens.g.dart';
 
 /// A section of Settings.
-enum _Section { appearance, shortcuts, writer }
+enum _Section { appearance, shortcuts, writer, agentHosts }
 
 /// Settings: Appearance with theme, text size and thread details, Shortcuts with the profile, every
-/// action's keys and recording new ones, and the Writer model with a project. It replaces the main
-/// area; esc closes it, or first dismisses a failed save's notice.
+/// action's keys and recording new ones, the Writer model with a project, and Agent hosts. It
+/// replaces the main area; esc closes it, or first dismisses a failed save's notice.
 class SettingsPage extends StatefulWidget {
   const SettingsPage({
     super.key,
@@ -33,6 +33,7 @@ class SettingsPage extends StatefulWidget {
     this.appearance,
     this.cardSettings,
     this.writer,
+    this.agentHosts,
   });
 
   final ShortcutController shortcuts;
@@ -50,6 +51,9 @@ class SettingsPage extends StatefulWidget {
 
   /// The Writer model section; none without the project's backend.
   final Widget? writer;
+
+  /// The Agent hosts section (ADR-0295); none without the agent hosts' settings.
+  final Widget? agentHosts;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -122,6 +126,8 @@ class _SettingsPageState extends State<SettingsPage> {
                       ('Shortcuts', _Section.shortcuts),
                       if (widget.writer != null)
                         ('Writer model', _Section.writer),
+                      if (widget.agentHosts != null)
+                        ('Agent hosts', _Section.agentHosts),
                     ])
                       Semantics(
                         selected: _section == section,
@@ -179,13 +185,15 @@ class _SettingsPageState extends State<SettingsPage> {
                       _section,
                       widget.appearance,
                       widget.writer,
+                      widget.agentHosts,
                     )) {
-                      (_Section.appearance, final appearance?, _) =>
+                      (_Section.appearance, final appearance?, _, _) =>
                         AppearancePane(
                           appearance: appearance,
                           cardSettings: widget.cardSettings,
                         ),
-                      (_Section.writer, _, final writer?) => writer,
+                      (_Section.writer, _, final writer?, _) => writer,
+                      (_Section.agentHosts, _, _, final hosts?) => hosts,
                       _ => ShortcutsPane(shortcuts: widget.shortcuts),
                     },
                   ),

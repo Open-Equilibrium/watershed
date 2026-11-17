@@ -10,6 +10,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::config::Change;
+use crate::hosts::{Access, ClientKind};
 use crate::{GitActionRequest, ModelChoice, Permissions, StartThread, ThreadSummary};
 
 /// The header a client names itself with; the configuration log records it (ADR-0298).
@@ -19,8 +20,29 @@ pub const CLIENT_HEADER: &str = "meta-harness-client";
 /// names none, is refused at the handshake, since it would misread the frames.
 pub const API_HEADER: &str = "meta-harness-api";
 
+/// The header that asks the remote listener to pair a new client with the pairing code it names
+/// (ADR-0299).
+pub const PAIRING_HEADER: &str = "meta-harness-pairing";
+
+/// The header that makes a host's connection a tunnel to its T3 server (ADR-0288).
+pub const TUNNEL_HEADER: &str = "meta-harness-tunnel";
+
 /// The API version this build speaks: the calls, streams and frames below.
 pub const API_VERSION: u32 = 1;
+
+/// The frame a service answers a pairing with: its name, the token the client presents from now on
+/// (ADR-0299) and the highest access level the client may ask a link for (ADR-0300). A service that
+/// names no level gives `auto`.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct Pairing {
+    /// The service's name for itself, which the client keeps as the host's name.
+    pub name: String,
+    /// The token the client presents from now on.
+    pub token: String,
+    /// The access the client was paired at.
+    #[serde(default)]
+    pub access: Access,
+}
 
 /// A call with one answer.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -28,6 +50,13 @@ pub const API_VERSION: u32 = 1;
 pub(crate) enum Call {
     /// The host's T3 Code server.
     Host(HostCall),
+    /// Remote access to this service; answered only on this computer (ADR-0299).
+    Remote(RemoteCall),
+    /// A pairing code for a new device or host, answered only on this computer (ADR-0299). A host's
+    /// access is the highest level its agents get here (ADR-0300); a device ignores it.
+    Invite { kind: ClientKind, access: Access },
+    /// The other hosts this one links to and the clients paired with it (ADR-0285).
+    Hosts(HostsCall),
     /// A project, by its folder.
     Project {
         /// The project folder.
@@ -64,6 +93,43 @@ pub(crate) enum HostCall {
     EnvironmentName,
     WriterModel,
     SetWriterModel(ModelChoice),
+}
+
+/// A call to the remote listener.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum RemoteCall {
+    /// Listens on the tailnet at `port`, from now on and after each start.
+    On { port: u16 },
+    /// Stops listening there.
+    Off,
+    /// Where it listens, if it does.
+    Status,
+}
+
+/// A call to the hosts this one links to.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum HostsCall {
+    /// A pairing code from this host's T3 Code, which another host's link redeems. The only call
+    /// a host's token may make (ADR-0288).
+    T3Pairing,
+    /// Revokes the client named so: its token is refused from its next connection on (ADR-0299).
+    Revoke(String),
+    /// Links the host at `address` with `code` from its `meta invite --host`, at `access`
+    /// (ADR-0285, ADR-0288). Answers the linked host's name.
+    Add {
+        address: String,
+        code: String,
+        /// The level asked for; `None` takes the level the other host allows.
+        access: Option<Access>,
+    },
+    /// The hosts this one links to and the clients paired with it.
+    List,
+    /// Unlinks the host named so.
+    Remove(String),
+    /// Turns agents from other hosts on or off (ADR-0300).
+    Agents(bool),
 }
 
 /// A call to a project.
@@ -266,4 +332,15 @@ pub struct Status {
     pub pid: u32,
     /// The current configuration revision.
     pub revision: u64,
+}
+
+/// Where the remote listener answers, while it is on.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct RemoteStatus {
+    /// The port it listens on.
+    pub port: u16,
+    /// Each address, as `ws://<ip>:<port>`, which a host or device names to reach it.
+    pub addresses: Vec<String>,
+    /// Why remote access is on but does not listen yet, such as a port that another program holds.
+    pub waiting: Option<String>,
 }

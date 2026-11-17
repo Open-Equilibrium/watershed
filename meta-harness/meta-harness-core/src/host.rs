@@ -37,6 +37,8 @@ pub struct Host {
     // Locked only to stop it, so a shutdown stops T3 while calls still hold the host.
     server: tokio::sync::Mutex<Server>,
     client: Client,
+    /// T3's origin, `http://127.0.0.1:<port>`.
+    origin: String,
 }
 
 impl Host {
@@ -49,9 +51,34 @@ impl Host {
         let server = Server::start(&config.binary, &config.home).await?;
         let client = Client::connect(&server.origin, server.issuer()).await?;
         Ok(Self {
+            origin: server.origin.clone(),
             server: tokio::sync::Mutex::new(server),
             client,
         })
+    }
+
+    /// The address T3 listens on, `127.0.0.1:<port>`, which a tunnel to this host reaches.
+    pub(crate) fn t3_address(&self) -> &str {
+        self.origin.trim_start_matches("http://")
+    }
+
+    /// Whether T3 accepts agents from other hosts here (ADR-0300).
+    pub(crate) async fn linked_environments(&self) -> Result<bool, String> {
+        let config = self.client.call("server.getConfig", json!({})).await?;
+        Ok(config["settings"]["linkedEnvironmentsEnabled"]
+            .as_bool()
+            .unwrap_or(false))
+    }
+
+    /// Turns T3's switch for agents from other hosts on or off (ADR-0300).
+    pub(crate) async fn set_linked_environments(&self, on: bool) -> Result<(), String> {
+        self.client
+            .call(
+                "server.updateSettings",
+                json!({"patch": {"linkedEnvironmentsEnabled": on}}),
+            )
+            .await
+            .map(|_| ())
     }
 
     /// The T3 project for the folder `root`, created when T3 has none yet.

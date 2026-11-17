@@ -4,6 +4,8 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../agent_hosts/agent_hosts.dart';
+import '../agent_hosts/agent_hosts_pane.dart';
 import '../appearance.dart';
 import '../controls.dart';
 import '../diff/diff_model.dart';
@@ -43,10 +45,12 @@ class AgentShell extends StatefulWidget {
     this.info,
     this.workspace,
     this.workspaceProblem,
+    this.agentProblem,
     this.shortcuts,
     this.diffSettings,
     this.cardSettings,
     this.appearance,
+    this.agentHosts,
     this.parseDiff = parsePatchInBackground,
   }) : assert((state == null) == (info == null));
 
@@ -57,6 +61,9 @@ class AgentShell extends StatefulWidget {
   /// The Workspace, or why it did not open.
   final WorkspaceState? workspace;
   final String? workspaceProblem;
+
+  /// Why no agent session started, shown in the sidebar until one does.
+  final String? agentProblem;
 
   /// Theme and text size, which Settings change; without it Settings show only shortcuts.
   final AppearanceController? appearance;
@@ -69,6 +76,9 @@ class AgentShell extends StatefulWidget {
 
   /// Which rows the session card shows; all of them, unsaved, without it.
   final SessionCardSettingsController? cardSettings;
+
+  /// The agent hosts Settings lists (ADR-0295); without it Settings show no Agent hosts section.
+  final AgentHostsController? agentHosts;
 
   /// How the Diff panel reads a patch; tests pass the synchronous parser.
   final PatchParser parseDiff;
@@ -108,6 +118,17 @@ class _AgentShellState extends State<AgentShell> {
   /// settings save again.
   final _saveFailure = ValueNotifier<SaveFailure?>(null);
 
+  /// The hooks this shell set on each settings object, which it removes when it goes. A new shell,
+  /// such as one shown for another agent host, sets its own before this one is disposed.
+  final _hooks =
+      <
+        (
+          SavedSettings<Object?>,
+          void Function(String problem),
+          void Function(String? failure),
+        )
+      >[];
+
   /// Stops the session before the app exits; Meta-Harness keeps running after Liquid closes.
   late final _lifecycle = AppLifecycleListener(
     onExitRequested: () async {
@@ -133,10 +154,13 @@ class _AgentShellState extends State<AgentShell> {
     }
     widget.workspace?.open.addListener(_pageOpened);
     for (final settings in _saved.nonNulls) {
-      settings.report = (problem) => widget.state != null
+      void report(String problem) => widget.state != null
           ? widget.state!.notify(NoticeLevel.error, problem)
           : widget.workspace?.report(problem);
-      settings.saveOutcome = (failure) => _saveOutcome(settings, failure);
+      void outcome(String? failure) => _saveOutcome(settings, failure);
+      settings.report = report;
+      settings.saveOutcome = outcome;
+      _hooks.add((settings, report, outcome));
     }
     if (_shortcuts.firstStart) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _askProfile());
@@ -153,7 +177,7 @@ class _AgentShellState extends State<AgentShell> {
   }
 
   /// Shows a failed save at the top of Settings, or clears the notice once the same settings save.
-  void _saveOutcome(SavedSettings<Object?> settings, String? failure) {
+  void _saveOutcome(Object settings, String? failure) {
     if (failure != null) {
       _saveFailure.value = (settings: settings, text: failure);
     } else if (_saveFailure.value?.settings == settings) {
@@ -228,9 +252,9 @@ class _AgentShellState extends State<AgentShell> {
     _cardToggleFocus.dispose();
     _settings.dispose();
     _focus.dispose();
-    for (final settings in _saved.nonNulls) {
-      settings.report = null;
-      settings.saveOutcome = null;
+    for (final (settings, report, outcome) in _hooks) {
+      if (settings.report == report) settings.report = null;
+      if (settings.saveOutcome == outcome) settings.saveOutcome = null;
     }
     _saveFailure.dispose();
     if (widget.shortcuts == null) _shortcuts.dispose();
@@ -432,6 +456,7 @@ class _AgentShellState extends State<AgentShell> {
                     info: widget.info,
                     workspace: widget.workspace,
                     workspaceProblem: widget.workspaceProblem,
+                    agentProblem: widget.agentProblem,
                     onSettings: _toggleSettings,
                     onNewSession: _newSession,
                     onShowSession: _showSession,
@@ -455,6 +480,15 @@ class _AgentShellState extends State<AgentShell> {
                             writer: project == null
                                 ? null
                                 : WriterModelPane(project: project),
+                            agentHosts: widget.agentHosts == null
+                                ? null
+                                : AgentHostsPane(
+                                    hosts: widget.agentHosts!,
+                                    saveOutcome: (failure) => _saveOutcome(
+                                      widget.agentHosts!,
+                                      failure,
+                                    ),
+                                  ),
                           );
                         }
                         final open = widget.workspace?.open.value;

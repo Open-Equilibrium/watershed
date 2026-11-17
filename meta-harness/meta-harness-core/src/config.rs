@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -173,13 +173,14 @@ impl Store {
                 ));
             }
         }
-        db.execute_batch(&format!("BEGIN; {schema} COMMIT;"))
+        db.execute_batch(&format!("BEGIN; {schema} {} COMMIT;", crate::hosts::SCHEMA))
             .map_err(failed)?;
         Ok(Self { db: Mutex::new(db) })
     }
 
-    fn db(&self) -> std::sync::MutexGuard<'_, Connection> {
-        self.db.lock().unwrap_or_else(PoisonError::into_inner)
+    /// The connection to the store, which the hosts' tables share.
+    pub(crate) fn db(&self) -> std::sync::MutexGuard<'_, Connection> {
+        crate::util::lock(&self.db)
     }
 
     /// The current revision.
@@ -592,11 +593,11 @@ fn check_size(blocks: &Blocks) -> Result<(), String> {
 }
 
 /// SQLite stores integers signed; Meta-Harness's numbers and times are never negative.
-fn sql(value: u64) -> i64 {
+pub(crate) fn sql(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
-fn count(value: i64) -> u64 {
+pub(crate) fn count(value: i64) -> u64 {
     u64::try_from(value).unwrap_or_default()
 }
 
@@ -608,11 +609,11 @@ fn parse<T: for<'a> Deserialize<'a>>(text: &str) -> Result<T, String> {
     serde_json::from_str(text).map_err(|e| format!("The configuration store is damaged: {e}"))
 }
 
-fn failed(error: rusqlite::Error) -> String {
+pub(crate) fn failed(error: rusqlite::Error) -> String {
     format!("The configuration store failed: {error}")
 }
 
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))

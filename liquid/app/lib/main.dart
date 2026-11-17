@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_io.dart'
     show ExternalLibrary;
 
+import 'src/agent_hosts/agent_hosts.dart';
 import 'src/app.dart';
 import 'src/appearance.dart';
 import 'src/diff/diff_settings.dart';
@@ -33,7 +34,13 @@ Future<void> main() async {
     Platform.environment,
     defaultTargetPlatform,
   );
-  final launch = await launchFromEnvironment(Platform.environment);
+  // Liquid's agent hosts: which host sessions run on, read before the session connects to it.
+  final agentHostsFile = SettingsFile(File('$settings/agent_hosts.json'));
+  final agentHosts = await AgentHostsSettings.load(agentHostsFile);
+  final launch = await launchFromEnvironment(
+    Platform.environment,
+    activeAddress: agentHosts.activeAddress,
+  );
   // Without a session the Workspace still opens; the reason stays in the terminal.
   if (launch.problem case final problem?) stderr.writeln('Liquid: $problem');
   // Beside the settings, in Liquid's data folder.
@@ -41,9 +48,11 @@ Future<void> main() async {
     '$settings/Workspace',
     show: launch.state == null,
   );
+  // The agent area Liquid shows; choosing another agent host replaces it at once (ADR-0295).
+  final surface = ValueNotifier(launch);
   runApp(
     LiquidApp(
-      launch: launch,
+      launch: surface,
       workspace: workspace,
       workspaceProblem: workspaceProblem,
       shortcuts: await ShortcutController.load(
@@ -58,6 +67,22 @@ Future<void> main() async {
       ),
       appearance: await AppearanceController.load(
         SettingsFile(File('$settings/appearance.json')),
+      ),
+      agentHosts: AgentHostsController(
+        settings: agentHosts,
+        bridge: RustAgentHostBridge(
+          home: Platform.environment['META_HARNESS_HOME'],
+        ),
+        save: (next) => agentHostsFile.save(next.toJson()),
+        switchTo: (address, isCurrent) => showAgentHost(
+          surface,
+          (address) => launchFromEnvironment(
+            Platform.environment,
+            activeAddress: address,
+          ),
+          address,
+          isCurrent: isCurrent,
+        ),
       ),
     ),
   );

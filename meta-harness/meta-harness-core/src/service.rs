@@ -4,6 +4,7 @@
 //! its address, into `connection.json`, which only the user can read.
 
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -16,13 +17,20 @@ use tokio::sync::{Mutex, mpsc};
 use tokio::task::{AbortHandle, JoinHandle};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
-use tokio_tungstenite::tungstenite::http::StatusCode;
+
+mod admit;
+mod listener;
 
 use crate::api::{
-    self, Call, Checkout, ConfigCall, GitCall, HostCall, ProjectCall, Reply, Stream, ThreadCall,
+    self, Call, Checkout, ConfigCall, GitCall, HostCall, HostsCall, ProjectCall, Reply, Stream,
+    ThreadCall,
 };
-use crate::config::{Homes, Proposed, Store, provider_instances};
-use crate::{AcpAgent, Host, HostConfig, Project, Thread};
+use crate::config::{Homes, Proposed, Store, now_ms, provider_instances};
+use crate::hosts::{self, Links};
+
+use crate::util::IDLE;
+use crate::{AcpAgent, Host, HostConfig, Project, Thread, tunnel};
+use admit::{Admission, Caller, Listener, admit, header, revoked};
 
 /// The file that tells clients where the service listens and which token it accepts.
 pub const CONNECTION_FILE: &str = "connection.json";
@@ -33,8 +41,24 @@ const OUTGOING: usize = 256;
 /// Threads a connection keeps followed after their last call; a stream keeps its own thread.
 const FOLLOWED: usize = 32;
 
+/// How many remote connections may be in their handshake at once; the excess is closed (ADR-0299).
+const HANDSHAKES: usize = 32;
+
 /// How long a new connection may take to complete its handshake.
 const HANDSHAKE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The refusal of a call or stream that the caller's kind does not make (ADR-0299).
+const REFUSED_CALL: &str = "This client may not make that call.";
+
+/// The refusal of a link while T3 refuses agents from other hosts here (ADR-0300).
+const LINKS_OFF: &str =
+    "Agents from other hosts are off here. Turn them on first: meta host agents on.";
+
+/// Revocations a connection may still be behind on; one behind further ends (see [`revoked`]).
+const REVOKED: usize = 64;
+
+/// How often linked hosts are checked for links that are due (ADR-0288).
+const RELINK_EVERY: std::time::Duration = std::time::Duration::from_secs(3600);
 
 /// Meta-Harness's data folder: `META_HARNESS_HOME`, which must be absolute, else `.meta-harness`
 /// in the home folder, as T3 Code keeps `~/.t3`.
@@ -67,7 +91,10 @@ pub struct Service {
     /// The bearer token every connection must send.
     pub token: String,
     host: Arc<Host>,
+    shared: Arc<Shared>,
     accept: JoinHandle<()>,
+    relink: JoinHandle<()>,
+    retry: JoinHandle<()>,
     stopping: tokio::sync::watch::Sender<bool>,
     connection_file: PathBuf,
 }
@@ -82,12 +109,40 @@ struct Shared {
     stopping: tokio::sync::watch::Receiver<bool>,
     /// Held until the last connection and call ends; a new service on the folder fails until then.
     _lock: std::fs::File,
+    /// The name of each client revoked; its open connections end (ADR-0299).
+    revoked: tokio::sync::broadcast::Sender<String>,
+    /// This host's name for other hosts: T3's name for it, in lower case.
+    name: String,
+    /// Where the remote listener binds; `None` for the Tailscale addresses.
+    remote_bind: Option<Vec<IpAddr>>,
+    /// The remote listener while remote access is on.
+    remote: std::sync::Mutex<listener::Remote>,
+    /// Held while remote access is turned on or off, or bound again, so those changes do not
+    /// interleave.
+    remote_serial: tokio::sync::Mutex<()>,
+    /// The hosts this one links to and their tunnels.
+    links: Links,
+    /// The handshake slots of the remote listener (see [`HANDSHAKES`]).
+    handshakes: Arc<tokio::sync::Semaphore>,
+    /// Held for reading by each sign-in a tunnel forwards until T3 answers it, and for writing while
+    /// a client's T3 sessions end, so no sign-in in flight survives that (ADR-0301).
+    sign_ins: Arc<tokio::sync::RwLock<()>>,
 }
 
 impl Service {
     /// Takes the data folder, writes the current configuration into the harness homes, starts
-    /// T3 with Claude Code and Codex pointed at them and listens for clients.
+    /// T3 with Claude Code and Codex pointed at them and listens for clients. Remote access binds
+    /// the Tailscale addresses.
     pub async fn start(config: ServiceConfig) -> Result<Self, String> {
+        Self::start_with_remote(config, None).await
+    }
+
+    /// As [`Service::start`], but remote access binds `remote_bind` instead of the Tailscale
+    /// addresses (ADR-0299); the tests bind loopback this way.
+    pub async fn start_with_remote(
+        config: ServiceConfig,
+        remote_bind: Option<Vec<IpAddr>>,
+    ) -> Result<Self, String> {
         create_private_dir(&config.home)?;
         let lock = take_lock(&config.home)?;
         let store = Store::open(&config.home.join("meta-harness.sqlite"))?;
@@ -100,14 +155,18 @@ impl Service {
         if let Err(error) = homes.write(&store.current()?.blocks, &person_codex) {
             eprintln!("meta: {error}");
         }
+        let t3_home = config.home.join("t3");
+        let (links_t3, links_home) = (config.t3.clone(), t3_home.clone());
         let host = Arc::new(
             Host::start(HostConfig {
-                binary: config.t3,
-                home: config.home.join("t3"),
+                binary: config.t3.clone(),
+                home: t3_home.clone(),
                 acp_agents: config.acp_agents,
             })
             .await?,
         );
+        let name = host.environment_name().await?.to_lowercase();
+        let links = Links::new(name.clone(), links_t3, links_home);
         let claude_dir = std::env::var("CLAUDE_CONFIG_DIR").ok();
         let instances = provider_instances(
             &host.provider_instances().await?,
@@ -120,13 +179,14 @@ impl Service {
             .await
             .map_err(|e| format!("Could not listen on the loopback: {e}"))?;
         let url = format!("ws://{}", listener.local_addr().map_err(|e| e.to_string())?);
-        let token = fresh_token();
+        let token = hosts::new_token();
         let connection_file = config.home.join(CONNECTION_FILE);
         write_private(
             &connection_file,
             &json!({"url": url, "token": token, "pid": std::process::id()}).to_string(),
         )?;
         let (stopping, stopped) = tokio::sync::watch::channel(false);
+        let (revoked, _) = tokio::sync::broadcast::channel(REVOKED);
         let shared = Arc::new(Shared {
             host: host.clone(),
             store,
@@ -135,21 +195,39 @@ impl Service {
             token: token.clone(),
             stopping: stopped,
             _lock: lock,
+            revoked,
+            name,
+            remote_bind,
+            remote: std::sync::Mutex::new(listener::Remote::default()),
+            remote_serial: tokio::sync::Mutex::default(),
+            links,
+            handshakes: Arc::new(tokio::sync::Semaphore::new(HANDSHAKES)),
+            sign_ins: Arc::new(tokio::sync::RwLock::new(())),
         });
-        let accept = tokio::spawn(async move {
-            loop {
-                match listener.accept().await {
-                    Ok((socket, _)) => drop(tokio::spawn(serve(shared.clone(), socket))),
-                    // Such as too many open files: the service keeps listening.
-                    Err(_) => tokio::time::sleep(std::time::Duration::from_millis(100)).await,
-                }
-            }
-        });
+        // Remote access stays on across restarts (ADR-0299); a port it cannot take is retried.
+        let remembered = hosts::remote_port(&shared.store.db())?;
+        if let Some(port) = remembered
+            && let Err(error) = listener::start(&shared, port).await
+        {
+            eprintln!("meta: remote access is not listening yet: {error}");
+        }
+        shared.links.start_tunnels(&shared.store).await?;
+        let accept = tokio::spawn(accept(
+            listener,
+            shared.clone(),
+            Listener::Local,
+            shared.stopping.clone(),
+        ));
+        let relink = tokio::spawn(relink(shared.clone()));
+        let retry = tokio::spawn(listener::retry(shared.clone()));
         Ok(Self {
             url,
             token,
             host,
+            shared,
             accept,
+            relink,
+            retry,
             stopping,
             connection_file,
         })
@@ -168,16 +246,14 @@ impl Service {
 impl Drop for Service {
     fn drop(&mut self) {
         self.accept.abort();
+        self.relink.abort();
+        self.retry.abort();
+        self.shared.links.stop();
+        // The remote listener's tasks hold the shared state, so they end with it.
+        drop(crate::util::lock(&self.shared.remote).listening.take());
         let _ = self.stopping.send(true);
         let _ = std::fs::remove_file(&self.connection_file);
     }
-}
-
-/// A bearer token of 256 random bits, new at each start.
-fn fresh_token() -> String {
-    let mut bytes = [0u8; 32];
-    getrandom::fill(&mut bytes).expect("the operating system provides random bytes");
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn create_private_dir(path: &Path) -> Result<(), String> {
@@ -222,59 +298,58 @@ fn write_private(path: &Path, text: &str) -> Result<(), String> {
         .map_err(|e| format!("Could not write {}: {e}", path.display()))
 }
 
-/// Whether `given` equals `expected`, in time that does not depend on where they differ.
-fn same(given: &[u8], expected: &[u8]) -> bool {
-    given.len() == expected.len()
-        && given
-            .iter()
-            .zip(expected)
-            .fold(0u8, |diff, (a, b)| diff | (a ^ b))
-            == 0
+/// Makes the links that are due, now and every hour, until the service stops (ADR-0288).
+async fn relink(shared: Arc<Shared>) {
+    loop {
+        shared.links.relink_due(&shared.store).await;
+        tokio::time::sleep(RELINK_EVERY).await;
+    }
 }
 
-/// One client connection: its handshake must carry the token; then each request runs on its
-/// own task, and streams end when the client cancels them or leaves.
+/// Serves each connection that `listener` accepts, until the task ends.
+async fn accept(
+    listener: TcpListener,
+    shared: Arc<Shared>,
+    kind: Listener,
+    ends: tokio::sync::watch::Receiver<bool>,
+) {
+    crate::util::accept_each(listener, move |socket| {
+        // A remote connection needs one of the handshake slots; with none free it is closed.
+        let slot = match kind {
+            Listener::Local => Ok(None),
+            Listener::Remote => shared.handshakes.clone().try_acquire_owned().map(Some),
+        };
+        let (shared, ends) = (shared.clone(), ends.clone());
+        async move {
+            if let Ok(slot) = slot {
+                serve(shared, socket, kind, ends, slot).await;
+            }
+        }
+    })
+    .await;
+}
+
+/// One client connection: its handshake must admit it (see [`admit`]); then each request runs on
+/// its own task, and streams end when the client cancels them or leaves.
 // tungstenite's handshake callback returns its own large error response.
 #[allow(clippy::result_large_err)]
-async fn serve(shared: Arc<Shared>, socket: TcpStream) {
+async fn serve(
+    shared: Arc<Shared>,
+    socket: TcpStream,
+    listener: Listener,
+    ends: tokio::sync::watch::Receiver<bool>,
+    slot: Option<tokio::sync::OwnedSemaphorePermit>,
+) {
     let mut client = String::new();
+    let mut admission = None;
+    // Subscribed before the token is checked, so no revocation during the handshake is missed.
+    let mut revocations = shared.revoked.subscribe();
     let check = |request: &Request, response: Response| -> Result<Response, ErrorResponse> {
-        let bearer = request
-            .headers()
-            .get("authorization")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("Bearer "));
-        if !bearer.is_some_and(|b| same(b.as_bytes(), shared.token.as_bytes())) {
-            let mut refused = ErrorResponse::new(Some("Meta-Harness needs its token.".into()));
-            *refused.status_mut() = StatusCode::UNAUTHORIZED;
-            return Err(refused);
-        }
-        let version = request
-            .headers()
-            .get(api::API_HEADER)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse::<u32>().ok());
-        if version != Some(api::API_VERSION) {
-            let body = format!("Meta-Harness speaks API version {}.", api::API_VERSION);
-            let mut refused = ErrorResponse::new(Some(body));
-            *refused.status_mut() = StatusCode::UPGRADE_REQUIRED;
-            refused
-                .headers_mut()
-                .insert(api::API_HEADER, api::API_VERSION.into());
-            return Err(refused);
-        }
-        client = request
-            .headers()
-            .get(api::CLIENT_HEADER)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("unnamed")
-            .chars()
-            .filter(|c| !c.is_control())
-            .take(64)
-            .collect();
+        admission = Some(admit(&shared, listener, request)?);
+        client = hosts::printable(header(request, api::CLIENT_HEADER).unwrap_or("unnamed"));
         Ok(response)
     };
-    let Ok(Ok(socket)) = tokio::time::timeout(
+    let Ok(Ok(mut socket)) = tokio::time::timeout(
         HANDSHAKE,
         tokio_tungstenite::accept_hdr_async(socket, check),
     )
@@ -282,29 +357,79 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream) {
     else {
         return;
     };
+    // The handshake is over, so its slot is free for the next connection.
+    drop(slot);
+    let (caller, owner) = match admission {
+        Some(Admission::Session(caller, owner)) => (caller, owner),
+        Some(Admission::Tunnel(owner, access)) => {
+            let mut ends = ends.clone();
+            tokio::select! {
+                () = tunnel::serve(
+                    socket,
+                    shared.host.t3_address().to_owned(),
+                    owner.clone(),
+                    access,
+                    shared.sign_ins.clone(),
+                ) => {}
+                () = revoked(&mut revocations, Some(&owner)) => {}
+                _ = ends.wait_for(|stopped| *stopped) => {}
+            }
+            return;
+        }
+        Some(Admission::Paired(token, access)) => {
+            let answer = serde_json::to_string(&api::Pairing {
+                name: shared.name.clone(),
+                token,
+                access,
+            })
+            .expect("pairings serialize");
+            let _ = socket.send(Message::Text(answer.into())).await;
+            let _ = socket.close(None).await;
+            return;
+        }
+        None => return,
+    };
     let (mut sink, mut frames) = socket.split();
     let (out, mut outgoing) = mpsc::channel::<Message>(OUTGOING);
-    let writer = tokio::spawn(async move {
+    // The connection's tasks are owned here, so when the connection ends, aborted or not, they end too
+    // and nothing they hold outlives it (their state holds the service's data-folder lock).
+    let mut tasks = tokio::task::JoinSet::new();
+    tasks.spawn(async move {
         while let Some(message) = outgoing.recv().await {
             if sink.send(message).await.is_err() {
                 break;
             }
         }
     });
-    let mut stopping = shared.stopping.clone();
+    let mut stopping = ends;
     let session = Arc::new(Session {
         shared,
         client,
+        caller,
         projects: Mutex::default(),
         threads: Mutex::default(),
     });
     let mut streams: HashMap<u64, AbortHandle> = HashMap::new();
+    let mut ping = crate::util::pings();
+    let mut heard = tokio::time::Instant::now();
     loop {
+        // The ping is sent after the select, so no guard it holds lives across that await.
         let frame = tokio::select! {
-            frame = frames.next() => frame,
+            frame = frames.next() => Some(frame),
             _ = stopping.wait_for(|stopped| *stopped) => break,
+            () = revoked(&mut revocations, owner.as_deref()) => break,
+            _ = ping.tick() => None,
+        };
+        let Some(frame) = frame else {
+            if heard.elapsed() > IDLE {
+                break;
+            }
+            // A full queue is a peer that is not reading, which the next ping finds.
+            let _ = out.try_send(Message::Ping(Vec::new().into()));
+            continue;
         };
         let Some(Ok(frame)) = frame else { break };
+        heard = tokio::time::Instant::now();
         let Message::Text(text) = frame else { continue };
         let request = match serde_json::from_str::<api::Request>(&text) {
             Ok(request) => request,
@@ -315,16 +440,21 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream) {
                     .and_then(|v| v["id"].as_u64());
                 if let Some(id) = id {
                     let error = format!("Meta-Harness does not understand this request: {error}");
-                    let _ = out.send(frame_of(&Reply::Error { id, error })).await;
+                    // A client that does not read its replies is disconnected, rather than holding
+                    // the loop, which must go on noticing revocation and shutdown.
+                    if out.try_send(frame_of(&Reply::Error { id, error })).is_err() {
+                        break;
+                    }
                 }
                 continue;
             }
         };
+        while tasks.try_join_next().is_some() {}
         streams.retain(|_, task| !task.is_finished());
         match request {
             api::Request::Call { id, call } => {
                 let (session, out) = (session.clone(), out.clone());
-                tokio::spawn(async move {
+                tasks.spawn(async move {
                     let reply = match session.call(call).await {
                         Ok(ok) => Reply::Ok { id, ok },
                         Err(error) => Reply::Error { id, error },
@@ -334,14 +464,14 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream) {
             }
             api::Request::Stream { id, stream } => {
                 let (session, out) = (session.clone(), out.clone());
-                let task = tokio::spawn(async move {
+                let task = tasks.spawn(async move {
                     if let Err(error) = session.stream(id, stream, &out).await {
                         let _ = out.send(frame_of(&Reply::Error { id, error })).await;
                     }
                 });
                 // A client that reuses a live stream's id ends that stream, so none is left
                 // running without a way to cancel it.
-                if let Some(earlier) = streams.insert(id, task.abort_handle()) {
+                if let Some(earlier) = streams.insert(id, task) {
                     earlier.abort();
                 }
             }
@@ -352,10 +482,7 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream) {
             }
         }
     }
-    for task in streams.values() {
-        task.abort();
-    }
-    writer.abort();
+    tasks.abort_all();
 }
 
 fn frame_of(reply: &Reply) -> Message {
@@ -396,6 +523,7 @@ fn to(value: impl Serialize) -> Result<Value, String> {
 struct Session {
     shared: Arc<Shared>,
     client: String,
+    caller: Caller,
     projects: Mutex<HashMap<String, Project>>,
     /// Followed threads, the most recently used last.
     threads: Mutex<Vec<(String, Thread)>>,
@@ -449,6 +577,9 @@ impl Session {
     }
 
     async fn call(&self, call: Call) -> Result<Value, String> {
+        if !self.caller.answers(&call) {
+            return Err(REFUSED_CALL.to_owned());
+        }
         match call {
             Call::Host(call) => self.host_call(call).await,
             Call::Project { root, call } => self.project_call(&root, call).await,
@@ -458,6 +589,55 @@ impl Session {
             }
             Call::Git { checkout, call } => git_call(&self.git(&checkout).await?, call).await,
             Call::Config(call) => self.config_call(call),
+            Call::Remote(call) => listener::call(&self.shared, call).await,
+            Call::Invite { kind, access } => to(hosts::invite(
+                &self.shared.store.db(),
+                kind,
+                access,
+                now_ms(),
+            )?),
+            Call::Hosts(call) => self.hosts_call(call).await,
+        }
+    }
+
+    async fn hosts_call(&self, call: HostsCall) -> Result<Value, String> {
+        let shared = &self.shared;
+        match call {
+            HostsCall::T3Pairing => to(shared.links.pairing_code(self.caller.access()).await?),
+            HostsCall::Revoke(name) => {
+                // The client goes first, so none of its connections is admitted again. Then the sign-ins
+                // in flight finish, its open connections end with its token (ADR-0299), and the sessions
+                // its sign-ins made end (ADR-0301). A failure there leaves the name to revoke again.
+                let had_client = hosts::revoke(&shared.store.db(), &name)?;
+                let ended = {
+                    let _sign_ins = shared.sign_ins.write().await;
+                    let _ = shared.revoked.send(name.clone());
+                    shared.links.end_sessions(&name).await
+                };
+                match ended {
+                    Ok(ended) if had_client || ended > 0 => to(()),
+                    Ok(_) => Err(format!("There is no client named {name}.")),
+                    Err(error) => Err(format!(
+                        "{error} The client's T3 sessions did not all end; run \"meta host revoke {name}\" again."
+                    )),
+                }
+            }
+            HostsCall::Add {
+                address,
+                code,
+                access,
+            } => {
+                if !shared.host.linked_environments().await? {
+                    return Err(LINKS_OFF.to_owned());
+                }
+                to(shared
+                    .links
+                    .add(&shared.store, &address, &code, access)
+                    .await?)
+            }
+            HostsCall::List => to(shared.links.list(&shared.store).await?),
+            HostsCall::Remove(name) => to(shared.links.remove(&shared.store, &name).await?),
+            HostsCall::Agents(on) => to(shared.host.set_linked_environments(on).await?),
         }
     }
 
@@ -534,6 +714,9 @@ impl Session {
         stream: Stream,
         out: &mpsc::Sender<Message>,
     ) -> Result<(), String> {
+        if !self.caller.streams() {
+            return Err(REFUSED_CALL.to_owned());
+        }
         match stream {
             Stream::Subscribe { root, id: thread } => {
                 // The stream holds the thread, so it stays followed however many others open.

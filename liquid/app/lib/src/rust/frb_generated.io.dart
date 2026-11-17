@@ -7,6 +7,7 @@ import 'api/database.dart';
 import 'api/details.dart';
 import 'api/events.dart';
 import 'api/git.dart';
+import 'api/hosts.dart';
 import 'api/media.dart';
 import 'api/replica.dart';
 import 'api/session.dart';
@@ -380,6 +381,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgePage dco_decode_bridge_page(dynamic raw);
 
   @protected
+  BridgePairing dco_decode_bridge_pairing(dynamic raw);
+
+  @protected
   BridgePermissions dco_decode_bridge_permissions(dynamic raw);
 
   @protected
@@ -402,6 +406,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeQuestionAnswer dco_decode_bridge_question_answer(dynamic raw);
+
+  @protected
+  BridgeReach dco_decode_bridge_reach(dynamic raw);
 
   @protected
   BridgeRef dco_decode_bridge_ref(dynamic raw);
@@ -1045,6 +1052,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgePage sse_decode_bridge_page(SseDeserializer deserializer);
 
   @protected
+  BridgePairing sse_decode_bridge_pairing(SseDeserializer deserializer);
+
+  @protected
   BridgePermissions sse_decode_bridge_permissions(SseDeserializer deserializer);
 
   @protected
@@ -1073,6 +1083,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeQuestionAnswer sse_decode_bridge_question_answer(
     SseDeserializer deserializer,
   );
+
+  @protected
+  BridgeReach sse_decode_bridge_reach(SseDeserializer deserializer);
 
   @protected
   BridgeRef sse_decode_bridge_ref(SseDeserializer deserializer);
@@ -1908,6 +1921,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bridge_page(BridgePage self, SseSerializer serializer);
 
   @protected
+  void sse_encode_bridge_pairing(BridgePairing self, SseSerializer serializer);
+
+  @protected
   void sse_encode_bridge_permissions(
     BridgePermissions self,
     SseSerializer serializer,
@@ -1951,6 +1967,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     BridgeQuestionAnswer self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_bridge_reach(BridgeReach self, SseSerializer serializer);
 
   @protected
   void sse_encode_bridge_ref(BridgeRef self, SseSerializer serializer);

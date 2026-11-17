@@ -1,5 +1,6 @@
 //! T3 Code's side: its server, its client protocol and a thread's projection (ADR-0281).
 
+mod cli;
 mod client;
 mod live;
 mod projection;
@@ -7,6 +8,7 @@ mod server;
 
 pub use live::Watch;
 
+pub(crate) use cli::{link, links, pairing_code, revoke_session, sessions, unlink};
 pub(crate) use client::Client;
 pub(crate) use projection::{Change, Projection, prompt_of};
 pub(crate) use server::Server;
@@ -18,8 +20,7 @@ use serde_json::Value;
 pub(crate) fn fresh_id(prefix: &str) -> String {
     let mut bytes = [0u8; 12];
     getrandom::fill(&mut bytes).expect("the operating system provides random bytes");
-    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-    format!("{prefix}-{hex}")
+    format!("{prefix}-{}", crate::util::hex(&bytes))
 }
 
 /// Milliseconds since the Unix epoch of an ISO 8601 UTC time such as

@@ -23,6 +23,9 @@ pub(crate) struct Keychain;
 /// The keychain service Liquid files its replica keys under.
 const SERVICE: &str = "Liquid replica key";
 
+/// The keychain service Liquid files each agent host's device token under, by the host's address.
+const TOKEN_SERVICE: &str = "Liquid agent host token";
+
 /// The file in a replica's folder that holds the name its key is filed under (ADR-0275).
 pub(crate) const KEY_NAME_FILE: &str = "replica.keyname";
 
@@ -162,15 +165,25 @@ pub(crate) fn random_hex() -> Result<String, String> {
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
+/// A place that holds agent hosts' device tokens, each filed under the host's address (ADR-0299).
+pub(crate) trait Tokens {
+    /// The token filed under `address`, or none if none was ever stored there.
+    fn read(&self, address: &str) -> Result<Option<String>, String>;
+    /// Files `token` under `address`.
+    fn write(&self, address: &str, token: &str) -> Result<(), String>;
+    /// Removes the token filed under `address`; removing none is not an error.
+    fn delete(&self, address: &str) -> Result<(), String>;
+}
+
 impl Keychain {
-    fn entry(name: &str) -> Result<keyring::Entry, String> {
-        keyring::Entry::new(SERVICE, name).map_err(|error| error.to_string())
+    fn entry(service: &str, name: &str) -> Result<keyring::Entry, String> {
+        keyring::Entry::new(service, name).map_err(|error| error.to_string())
     }
 }
 
 impl Keys for Keychain {
     fn read(&self, name: &str) -> Result<Option<[u8; 32]>, String> {
-        match Self::entry(name)?.get_secret() {
+        match Self::entry(SERVICE, name)?.get_secret() {
             Ok(secret) => secret
                 .try_into()
                 .map(Some)
@@ -181,13 +194,41 @@ impl Keys for Keychain {
     }
 
     fn write(&self, name: &str, key: &[u8; 32]) -> Result<(), String> {
-        Self::entry(name)?
+        Self::entry(SERVICE, name)?
             .set_secret(key)
             .map_err(|error| error.to_string())
     }
 
     fn delete(&self, name: &str) -> Result<(), String> {
-        match Self::entry(name)?.delete_credential() {
+        match Self::entry(SERVICE, name)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+}
+
+/// The device tokens of agent hosts, filed in the keychain under each host's address (ADR-0299).
+/// It is a braced struct, which the bridge's Dart binding generator can read, unlike the unit
+/// [`Keychain`] of the replica keys.
+pub(crate) struct DeviceTokens {}
+
+impl Tokens for DeviceTokens {
+    fn read(&self, address: &str) -> Result<Option<String>, String> {
+        match Keychain::entry(TOKEN_SERVICE, address)?.get_password() {
+            Ok(token) => Ok(Some(token)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn write(&self, address: &str, token: &str) -> Result<(), String> {
+        Keychain::entry(TOKEN_SERVICE, address)?
+            .set_password(token)
+            .map_err(|error| error.to_string())
+    }
+
+    fn delete(&self, address: &str) -> Result<(), String> {
+        match Keychain::entry(TOKEN_SERVICE, address)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(error) => Err(error.to_string()),
         }

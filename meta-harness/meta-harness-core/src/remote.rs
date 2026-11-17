@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use futures_util::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
@@ -14,12 +14,16 @@ use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::http::{Response, StatusCode};
+use tokio_tungstenite::tungstenite::handshake::client::Request;
+use tokio_tungstenite::tungstenite::http::{HeaderValue, Response, StatusCode};
 
 use crate::api::{
-    self, Call, Checkout, ConfigCall, GitCall, HostCall, ProjectCall, Reply, ThreadCall,
+    self, Call, Checkout, ConfigCall, GitCall, HostCall, HostsCall, ProjectCall, RemoteCall,
+    RemoteStatus, Reply, ThreadCall,
 };
 use crate::config::{Change, Current, LogEntry, Proposal};
+use crate::hosts::{Access, ClientKind, HostList};
+use crate::util::{TIMEOUT, lock};
 use crate::{
     Automation, Context, GitActionRequest, GitProgress, GitStatus, Lineage, LineageChanges,
     LocalServer, ModelChoice, Permissions, Provider, PullRequestDetail, Refs, RequestId,
@@ -84,7 +88,7 @@ impl Endpoint {
                 let text = std::fs::read_to_string(path).map_err(|_| {
                     format!(
                         "Meta-Harness is not running: {} is missing. Install Meta-Harness. Start \
-                         it with `meta serve`, or `meta service install` for the login service; \
+                         it with \"meta serve\", or \"meta service install\" for the login service; \
                          its log is service.log in the data folder.",
                         path.display()
                     )
@@ -112,10 +116,6 @@ enum Waiter {
 struct Link {
     out: mpsc::UnboundedSender<Message>,
     waiters: Arc<Mutex<Option<HashMap<u64, Waiter>>>>,
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 struct Inner {
@@ -176,27 +176,17 @@ impl Host {
             return Ok(link.clone());
         }
         let (url, token) = self.inner.endpoint.resolve()?;
-        let mut request = url
-            .as_str()
-            .into_client_request()
-            .map_err(|e| format!("Bad Meta-Harness address {url}: {e}"))?;
-        let headers = request.headers_mut();
-        headers.insert(
-            "authorization",
-            format!("Bearer {token}")
-                .parse()
-                .map_err(|_| "The Meta-Harness token is not a header value.".to_owned())?,
-        );
-        headers.insert(
-            api::CLIENT_HEADER,
-            self.inner
-                .client
-                .parse()
-                .map_err(|_| "The client name is not a header value.".to_owned())?,
-        );
-        headers.insert(api::API_HEADER, api::API_VERSION.into());
-        let (socket, _) = tokio_tungstenite::connect_async(request)
+        let bearer = format!("Bearer {token}");
+        let request = handshake(
+            &url,
+            &[
+                ("authorization", bearer.as_str()),
+                (api::CLIENT_HEADER, self.inner.client.as_str()),
+            ],
+        )?;
+        let (socket, _) = tokio::time::timeout(TIMEOUT, tokio_tungstenite::connect_async(request))
             .await
+            .map_err(|_| format!("Could not reach Meta-Harness at {url}: it did not answer in time."))?
             .map_err(|e| match e {
                 // A service that stopped without removing its connection file.
                 tokio_tungstenite::tungstenite::Error::Io(io)
@@ -204,7 +194,7 @@ impl Host {
                 {
                     format!(
                         "Meta-Harness is not running: nothing answers at {url}. Start it with \
-                         `meta serve`, or `meta service install` for the login service; its log \
+                         \"meta serve\", or \"meta service install\" for the login service; its log \
                          is service.log in the data folder."
                     )
                 }
@@ -371,6 +361,134 @@ impl Host {
     /// The configuration log, oldest first.
     pub async fn log(&self) -> Result<Vec<LogEntry>, String> {
         self.call(Call::Config(ConfigCall::Log)).await
+    }
+
+    /// Turns remote access on at `port` (`meta remote on`), answering where it listens.
+    pub async fn remote_on(&self, port: u16) -> Result<RemoteStatus, String> {
+        self.call(Call::Remote(RemoteCall::On { port })).await
+    }
+
+    /// Turns remote access off (`meta remote off`).
+    pub async fn remote_off(&self) -> Result<(), String> {
+        self.call(Call::Remote(RemoteCall::Off)).await
+    }
+
+    /// Where the remote listener answers, while it is on.
+    pub async fn remote_status(&self) -> Result<Option<RemoteStatus>, String> {
+        self.call(Call::Remote(RemoteCall::Status)).await
+    }
+
+    /// A pairing code for a new client of `kind`, valid for five minutes, which gives a host
+    /// client `access` (`meta invite`).
+    pub async fn invite(&self, kind: ClientKind, access: Access) -> Result<String, String> {
+        self.call(Call::Invite { kind, access }).await
+    }
+
+    /// A pairing code from this host's T3 Code, which another host's link redeems (ADR-0288).
+    pub async fn t3_pairing(&self) -> Result<String, String> {
+        self.call(Call::Hosts(HostsCall::T3Pairing)).await
+    }
+
+    /// Revokes the client named `name`, whose token is refused from its next connection on.
+    pub async fn revoke_client(&self, name: &str) -> Result<(), String> {
+        self.call(Call::Hosts(HostsCall::Revoke(name.to_owned())))
+            .await
+    }
+
+    /// Links the host at `address` (`ws://…`) with `code` from its `meta invite --host`, at
+    /// `access` or the level the other host allows, and answers the linked host's name and level
+    /// (`meta host add`).
+    pub async fn host_add(
+        &self,
+        address: &str,
+        code: &str,
+        access: Option<Access>,
+    ) -> Result<(String, Access), String> {
+        self.call(Call::Hosts(HostsCall::Add {
+            address: address.to_owned(),
+            code: code.to_owned(),
+            access,
+        }))
+        .await
+    }
+
+    /// Unlinks the host named `name` (`meta host remove`) and answers the name this host paired
+    /// under at that host, which its `meta host revoke` names.
+    pub async fn host_remove(&self, name: &str) -> Result<String, String> {
+        self.call(Call::Hosts(HostsCall::Remove(name.to_owned())))
+            .await
+    }
+
+    /// The hosts this one links to and the clients paired with it (`meta host list`).
+    pub async fn hosts(&self) -> Result<HostList, String> {
+        self.call(Call::Hosts(HostsCall::List)).await
+    }
+
+    /// Turns agents from other hosts on or off (`meta host agents`).
+    pub async fn host_agents(&self, on: bool) -> Result<(), String> {
+        self.call(Call::Hosts(HostsCall::Agents(on))).await
+    }
+}
+
+/// The request for a WebSocket handshake to `url` that carries `headers`.
+pub(crate) fn handshake(url: &str, headers: &[(&'static str, &str)]) -> Result<Request, String> {
+    let version = api::API_VERSION.to_string();
+    let mut request = url
+        .into_client_request()
+        .map_err(|e| format!("Bad Meta-Harness address {url}: {e}"))?;
+    for (name, value) in headers
+        .iter()
+        .copied()
+        .chain([(api::API_HEADER, version.as_str())])
+    {
+        let value =
+            HeaderValue::from_str(value).map_err(|_| format!("{name} is not a header value."))?;
+        request.headers_mut().insert(name, value);
+    }
+    Ok(request)
+}
+
+/// Pairs this client with the remote listener at `address` (`ws://…`), using `code`, a pairing code
+/// that the other side issued. Answers the other side's name, the token this client uses from now
+/// on and the access it was paired at (ADR-0299, ADR-0300).
+pub async fn pair(address: &str, code: &str, client: &str) -> Result<api::Pairing, String> {
+    let request = handshake(
+        address,
+        &[(api::PAIRING_HEADER, code), (api::CLIENT_HEADER, client)],
+    )?;
+    let (mut socket, _) = tokio::time::timeout(TIMEOUT, tokio_tungstenite::connect_async(request))
+        .await
+        .map_err(|_| format!("Meta-Harness at {address} did not answer in time."))?
+        .map_err(|e| match e {
+            // The refusal says why in its body, such as a code that is wrong or used.
+            tokio_tungstenite::tungstenite::Error::Http(response) => refusal(&response),
+            e => format!("Could not reach Meta-Harness at {address}: {e}"),
+        })?;
+    let answer = tokio::time::timeout(TIMEOUT, async {
+        loop {
+            match socket.next().await {
+                Some(Ok(Message::Text(text))) => return Some(text),
+                Some(Ok(_)) => {}
+                _ => return None,
+            }
+        }
+    })
+    .await
+    .ok()
+    .flatten()
+    .ok_or_else(|| format!("Meta-Harness at {address} did not answer the pairing."))?;
+    let _ = socket.close(None).await;
+    serde_json::from_str(&answer).map_err(|e| format!("Meta-Harness answered unexpectedly: {e}"))
+}
+
+/// The reason a service gave for refusing a handshake, from its body.
+fn refusal(response: &Response<Option<Vec<u8>>>) -> String {
+    let body = response.body().as_deref().unwrap_or_default();
+    let reason = String::from_utf8_lossy(body).trim().to_owned();
+    if reason.is_empty() {
+        format!("Meta-Harness refused the pairing ({}).", response.status())
+    } else {
+        reason
     }
 }
 

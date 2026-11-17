@@ -1,14 +1,19 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/app.dart';
 import 'package:liquid/src/launch.dart';
 
 void main() {
-  testWidgets('shows a launch problem in place of the shell', (tester) async {
+  testWidgets('shows a launch problem in the sidebar, with the shell built', (
+    tester,
+  ) async {
     await tester.pumpWidget(
-      const LiquidApp(
-        launch: Launch.problem(
-          'Start Liquid with LIQUID_PROJECT set to a project directory.',
+      LiquidApp(
+        launch: ValueNotifier(
+          const Launch.problem(
+            'Start Liquid with LIQUID_PROJECT set to a project directory.',
+          ),
         ),
       ),
     );
@@ -16,6 +21,6 @@ void main() {
       find.text('Start Liquid with LIQUID_PROJECT set to a project directory.'),
       findsOneWidget,
     );
-    expect(find.byType(AgentShell), findsNothing);
+    expect(find.byType(AgentShell), findsOneWidget);
   });
 }

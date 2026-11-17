@@ -10,7 +10,7 @@ Linux and macOS share the same [public installation guarantee and maintenance li
 |---|---|---|
 | Flow Agent authoring, Fixture execution and provider-only Flows | Linux x86_64; macOS ARM64 | Implemented; productive provider execution is restricted to Ubuntu 24.04 and macOS 27. |
 | Flow Agent Tool execution with mandatory Flow-owned write protection | Linux x86_64; macOS ARM64 | Linux Bubblewrap/seccomp and Mac Seatbelt replacements integrated; native evidence is linked above. Failed admission/readiness prevents launch without fallback. |
-| Meta-Harness CLI, service and host-local agent control | Linux x86_64; macOS ARM64; Windows 11 x86_64 (ADR-0291) | In development on macOS ARM64 and Linux x86_64: `meta`, its login service and installer, running a pinned T3 Code server that Liquid's agent surface reaches (ADR-0281, ADR-0296); not released. The Linux login service is not yet verified natively; Windows is not implemented. |
+| Meta-Harness CLI, service and host-local agent control | Linux x86_64; macOS ARM64; Windows 11 x86_64 (ADR-0291) | In development on macOS ARM64 and Linux x86_64: `meta`, its login service and installer, running a pinned T3 Code server that Liquid's agent surface reaches (ADR-0281, ADR-0296), with remote access and host links over Tailscale (ADR-0299); not released. The Linux login service is not yet verified natively; Windows is not implemented. |
 | Liquid desktop client | Linux x86_64; macOS ARM64; Windows 11 x86_64 and ARM64 | In development on macOS ARM64: the agent surface for a project's T3 Code sessions and the local Workspace, not released. Linux and Windows are not implemented. |
 | Liquid mobile client | Android ARM64 | Not implemented. |
 

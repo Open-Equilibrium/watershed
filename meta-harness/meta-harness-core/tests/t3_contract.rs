@@ -8,12 +8,16 @@ use std::process::Command;
 use std::time::Duration;
 
 use futures_util::FutureExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+use meta_harness_core::{
+    Access, CONNECTION_FILE, Change, ClientKind, Service, ServiceConfig, remote, t3_version,
+};
 use meta_harness_core::{
     AcpAgent, AgentEvent, GitAction, GitActionRequest, GitProgress, Group, Host, HostConfig,
     LineCount, ModelChoice, Permissions, Relation, Request, Snapshot, StartThread, Thread,
     ThreadEvent, TurnStatus, Workspace,
 };
-use meta_harness_core::{CONNECTION_FILE, Change, Service, ServiceConfig, remote, t3_version};
 
 const AGENT: &str = "scripted";
 
@@ -60,10 +64,14 @@ async fn host(home: &Path) -> Host {
 }
 
 /// Starts a service on `home`, which keeps T3's data in `home/t3`, and connects a client to it.
+/// Its remote listener binds loopback.
 async fn start_service(home: &Path) -> (Service, remote::Host) {
-    let service = Service::start(service_config(home))
-        .await
-        .expect("the service starts");
+    let service = Service::start_with_remote(
+        service_config(home),
+        Some(vec![std::net::Ipv4Addr::LOCALHOST.into()]),
+    )
+    .await
+    .expect("the service starts");
     let host = remote::Host::connect(home, "contract")
         .await
         .expect("a client connects");
@@ -91,6 +99,15 @@ fn service_config(home: &Path) -> ServiceConfig {
         t3: t3(),
         acp_agents: agents(home),
     }
+}
+
+/// A free loopback port, for a remote listener.
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
 }
 
 fn worktree() -> Workspace {
@@ -882,6 +899,37 @@ async fn an_approved_configuration_reaches_the_harness_homes_t3_runs_them_in() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_dropped_service_takes_its_streams_with_it_and_frees_its_folder() {
+    let (dir, repo, _) = fixture();
+    let home = dir.path().join("meta");
+    let (service, client) = start_service(&home).await;
+    // A stream the client keeps open, which the dropped service's connection still serves.
+    let _statuses = client
+        .project(&repo)
+        .await
+        .unwrap()
+        .git()
+        .watch()
+        .await
+        .unwrap();
+    drop(service);
+    let started = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            if let Ok(service) = Service::start(service_config(&home)).await {
+                return service;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await;
+    assert!(
+        started.is_ok(),
+        "the folder is still held by the dropped service's stream"
+    );
+    started.unwrap().stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_client_goes_on_after_the_service_restarts() {
     let (dir, repo, _) = fixture();
     let home = dir.path().join("meta");
@@ -939,4 +987,1360 @@ async fn the_service_refuses_a_client_that_names_no_api_version_or_another() {
         assert_eq!(refused.headers()["meta-harness-api"], "1");
     }
     service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_that_stops_reading_its_replies_is_disconnected() {
+    use futures_util::SinkExt;
+    use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
+    let (dir, _repo, _home) = fixture();
+    let (service, _local) = start_service(&dir.path().join("meta")).await;
+    let mut request = service.url.as_str().into_client_request().unwrap();
+    request.headers_mut().insert(
+        "authorization",
+        format!("Bearer {}", service.token).parse().unwrap(),
+    );
+    request
+        .headers_mut()
+        .insert("meta-harness-api", "1".parse().unwrap());
+    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    // Each malformed request is answered, and the answers are never read.
+    let disconnected = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            if socket
+                .send(Message::Text(r#"{"id":1,"bogus":true}"#.into()))
+                .await
+                .is_err()
+            {
+                return;
+            }
+        }
+    })
+    .await;
+    assert!(
+        disconnected.is_ok(),
+        "the service disconnects a client that never reads"
+    );
+    service.stop().await;
+}
+
+/// Whether a client named `name` with `token` connects to the remote listener at `url`.
+async fn connects(url: &str, token: &str, name: &str) -> bool {
+    remote::Host::connect_to(url, token, name).await.is_ok()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_name_keeps_no_control_characters() {
+    let (dir, _repo, _home) = fixture();
+    let (_service, local) = start_service(&dir.path().join("meta")).await;
+    let port = free_port();
+    local.remote_on(port).await.unwrap();
+    let url = format!("ws://127.0.0.1:{port}");
+    let code = local
+        .invite(ClientKind::Device, Access::Auto)
+        .await
+        .unwrap();
+    remote::pair(&url, &code, "phone\tlaptop").await.unwrap();
+    let clients = local.hosts().await.unwrap().clients;
+    assert_eq!(
+        clients[0].name, "phonelaptop",
+        "meta host list prints the name"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_address_names_a_websocket_address() {
+    let (dir, _repo, _home) = fixture();
+    let (_service, local) = start_service(&dir.path().join("meta")).await;
+    local.host_agents(true).await.unwrap();
+    let error = local
+        .host_add("127.0.0.1:3774", "AAAA-AAAA", None)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error,
+        "Enter the address as ws://HOST:PORT, as meta invite prints it."
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn remote_access_refuses_port_zero() {
+    let (dir, _repo, _home) = fixture();
+    let (_service, local) = start_service(&dir.path().join("meta")).await;
+    assert!(
+        local.remote_on(0).await.is_err(),
+        "port 0 is no port to listen on"
+    );
+    assert!(local.remote_status().await.unwrap().is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn remote_access_that_cannot_bind_at_start_says_so_and_binds_once_the_port_is_free() {
+    let (dir, _repo, _home) = fixture();
+    let meta = dir.path().join("meta");
+    let (service, local) = start_service(&meta).await;
+    let port = free_port();
+    local.remote_on(port).await.unwrap();
+    drop(local);
+    service.stop().await;
+    // Another program holds the port while the service starts.
+    let holder = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+    let (service, local) = start_service(&meta).await;
+    let waiting = local.remote_status().await.unwrap().expect("still on");
+    assert!(waiting.addresses.is_empty());
+    assert!(waiting.waiting.is_some(), "on, not listening yet");
+    drop(holder);
+    // Binding is tried again every 30 seconds, so the listener comes up within a minute.
+    let listening = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let status = local.remote_status().await.unwrap().expect("still on");
+            if status.waiting.is_none() {
+                return status;
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    })
+    .await;
+    assert!(listening.is_ok(), "bound again");
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_remote_listener_closes_a_handshake_beyond_its_limit_at_once() {
+    let (dir, _repo, _home) = fixture();
+    let (_service, local) = start_service(&dir.path().join("meta")).await;
+    let port = free_port();
+    local.remote_on(port).await.unwrap();
+    let address = format!("127.0.0.1:{port}");
+    // Connections that never complete a handshake take the whole limit. The listener accepts in
+    // order, so the next connection is accepted only after them.
+    let idle =
+        futures_util::future::join_all((0..32).map(|_| tokio::net::TcpStream::connect(&address)))
+            .await;
+    let mut extra = tokio::net::TcpStream::connect(&address).await.unwrap();
+    let mut byte = [0u8; 1];
+    let closed = tokio::time::timeout(Duration::from_secs(5), extra.read(&mut byte))
+        .await
+        .expect("closed without waiting for a handshake")
+        .unwrap();
+    assert_eq!(closed, 0, "the extra connection is closed");
+    drop(idle);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn turning_remote_access_off_ends_the_connections_it_admitted() {
+    let (dir, _repo, _home) = fixture();
+    let (_service, local) = start_service(&dir.path().join("meta")).await;
+    let port = free_port();
+    local.remote_on(port).await.unwrap();
+    let url = format!("ws://127.0.0.1:{port}");
+    let code = local
+        .invite(ClientKind::Device, Access::Auto)
+        .await
+        .unwrap();
+    let token = remote::pair(&url, &code, "phone").await.unwrap().token;
+    let device = remote::Host::connect_to(&url, &token, "phone")
+        .await
+        .unwrap();
+    device.status().await.unwrap();
+
+    local.remote_off().await.unwrap();
+    let ended = tokio::time::timeout(Duration::from_secs(10), async {
+        while device.status().await.is_ok() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    assert!(
+        ended.is_ok(),
+        "the device's connection ended with remote access"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_pairs_once_and_keeps_its_access_across_a_restart_while_a_host_only_asks_for_a_pairing_code()
+ {
+    let (_dir, _repo, home) = fixture();
+    let (service, local) = start_service(&home).await;
+    let port = free_port();
+    let status = local.remote_on(port).await.unwrap();
+    let url = format!("ws://127.0.0.1:{port}");
+    assert_eq!(status.addresses, [url.as_str()]);
+
+    let code = local
+        .invite(ClientKind::Device, Access::Auto)
+        .await
+        .unwrap();
+    let token = remote::pair(&url, &code, "phone").await.unwrap().token;
+    let used = remote::pair(&url, &code, "tablet").await.unwrap_err();
+    assert_eq!(used, "That pairing code is wrong, already used or expired.");
+    let wrong = remote::pair(&url, "AAAA-AAAA", "tablet").await.unwrap_err();
+    assert_eq!(wrong, used);
+
+    let device = remote::Host::connect_to(&url, &token, "phone")
+        .await
+        .unwrap();
+    device.status().await.unwrap();
+    device.config().await.unwrap();
+    // Remote access, invitations, the host list and host agents stay with this computer.
+    assert!(device.remote_status().await.is_err());
+    assert!(
+        device
+            .invite(ClientKind::Device, Access::Auto)
+            .await
+            .is_err()
+    );
+    assert!(device.hosts().await.is_err());
+    assert!(device.host_agents(true).await.is_err());
+    assert!(!may_tunnel(&url, &token).await, "a device is no tunnel");
+
+    // Remote access that is on, and the device's pairing, survive a restart.
+    drop(local);
+    service.stop().await;
+    let (_service, local) = start_service(&home).await;
+    let status = local.remote_status().await.unwrap().expect("still on");
+    assert_eq!(status.port, port);
+    assert!(connects(&url, &token, "phone").await);
+    local.revoke_client("phone").await.unwrap();
+    assert!(!connects(&url, &token, "phone").await);
+
+    let host_code = local.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let paired = remote::pair(&url, &host_code, "other").await.unwrap();
+    let (name, host_token) = (paired.name, paired.token);
+    assert_eq!(name, local.environment_name().await.unwrap().to_lowercase());
+    let host = remote::Host::connect_to(&url, &host_token, "other")
+        .await
+        .unwrap();
+    assert!(
+        host.status().await.is_err(),
+        "a host asks for a T3 pairing code only"
+    );
+    assert!(!host.t3_pairing().await.unwrap().is_empty());
+    assert!(!connects(&url, &"0".repeat(64), "other").await);
+
+    local.remote_off().await.unwrap();
+    assert!(local.remote_status().await.unwrap().is_none());
+}
+
+/// T3's own list of the environments linked in `home`.
+fn t3_environments(home: &Path) -> Vec<serde_json::Value> {
+    let output = Command::new(t3())
+        .args(["environment", "list", "--json"])
+        .env("T3CODE_HOME", home.join("t3"))
+        .env("T3CODE_TELEMETRY_ENABLED", "false")
+        .output()
+        .unwrap();
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+/// Whether T3's settings file in `home` turns linked environments on. T3 leaves out a setting at
+/// its default, which is off.
+fn linked_environments_setting(home: &Path) -> bool {
+    let text = std::fs::read_to_string(home.join("t3/userdata/settings.json")).unwrap();
+    serde_json::from_str::<serde_json::Value>(&text).unwrap()["linkedEnvironmentsEnabled"]
+        .as_bool()
+        .unwrap_or(false)
+}
+
+/// The tunnel port and link time that Meta-Harness keeps for the host `name` in `home`.
+fn peer_row(home: &Path, name: &str) -> (u16, Option<i64>) {
+    rusqlite::Connection::open(home.join("meta-harness.sqlite"))
+        .unwrap()
+        .query_row(
+            "SELECT tunnel_port, linked_ms FROM peer WHERE name = ?1",
+            [name],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_removing_it_unlinks_it()
+ {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
+    let (_a, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let (port_a, port_b) = (free_port(), free_port());
+    a.remote_on(port_a).await.unwrap();
+    b.remote_on(port_b).await.unwrap();
+    let address = format!("ws://127.0.0.1:{port_b}");
+    let waiting = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let refused = a
+        .host_add(&address, &waiting, Some(Access::Auto))
+        .await
+        .unwrap_err();
+    assert!(refused.contains("meta host agents on"), "{refused}");
+    a.host_agents(true).await.unwrap();
+    b.host_agents(true).await.unwrap();
+    assert!(linked_environments_setting(&home_a));
+
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let (name, _) = a
+        .host_add(&address, &code, Some(Access::Auto))
+        .await
+        .unwrap();
+    assert_eq!(name, b.environment_name().await.unwrap().to_lowercase());
+    let listed = a.hosts().await.unwrap();
+    assert_eq!(listed.hosts.len(), 1);
+    assert!(listed.hosts[0].reachable);
+    assert_eq!(listed.hosts[0].access, Access::Auto);
+    // T3 itself lists the link to B's environment, which answers.
+    let linked = t3_environments(&home_a);
+    let environment = std::fs::read_to_string(home_b.join("t3/userdata/environment-id")).unwrap();
+    assert_eq!(linked.len(), 1);
+    assert_eq!(linked[0]["environmentId"], environment.trim());
+    assert_eq!(linked[0]["status"], "reachable");
+
+    // The address is linked already, so the add is refused before B pairs with A.
+    let again = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let clients = b.hosts().await.unwrap().clients.len();
+    let error = a
+        .host_add(&address, &again, Some(Access::Auto))
+        .await
+        .unwrap_err();
+    assert!(error.contains("is linked already"), "{error}");
+    assert_eq!(b.hosts().await.unwrap().clients.len(), clients);
+
+    let (tunnel, _) = peer_row(&home_a, &name);
+    // The name that B revokes this pairing by, which B still holds (ADR-0301).
+    let client = a.host_remove(&name).await.unwrap();
+    assert!(host_client_names(&b).await.contains(&client), "{client}");
+    assert!(t3_environments(&home_a).is_empty(), "T3 forgets the link");
+    assert!(a.hosts().await.unwrap().hosts.is_empty());
+    assert!(std::net::TcpStream::connect(("127.0.0.1", tunnel)).is_err());
+    a.host_agents(false).await.unwrap();
+    assert!(!linked_environments_setting(&home_a));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_without_an_access_level_takes_the_level_its_host_invited() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
+    let (_a, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let port_b = free_port();
+    a.remote_on(free_port()).await.unwrap();
+    b.remote_on(port_b).await.unwrap();
+    a.host_agents(true).await.unwrap();
+    b.host_agents(true).await.unwrap();
+    let url_b = format!("ws://127.0.0.1:{port_b}");
+    let code = b
+        .invite(ClientKind::Host, Access::FullAccess)
+        .await
+        .unwrap();
+    let (_, access) = a.host_add(&url_b, &code, None).await.unwrap();
+    assert_eq!(access, Access::FullAccess);
+    let listed = a.hosts().await.unwrap();
+    assert_eq!(listed.hosts[0].access, Access::FullAccess);
+    assert!(listed.hosts[0].reachable, "a full-access link answers");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_invited_at_approval_required_cannot_link_at_auto_but_links_at_that_level() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
+    let (_a, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let port_b = free_port();
+    a.remote_on(free_port()).await.unwrap();
+    b.remote_on(port_b).await.unwrap();
+    a.host_agents(true).await.unwrap();
+    b.host_agents(true).await.unwrap();
+    let url_b = format!("ws://127.0.0.1:{port_b}");
+    // The tunnel of b refuses T3's approval of a link above the level b invited (ADR-0301).
+    let code = b
+        .invite(ClientKind::Host, Access::ApprovalRequired)
+        .await
+        .unwrap();
+    assert!(a.host_add(&url_b, &code, Some(Access::Auto)).await.is_err());
+    let code = b
+        .invite(ClientKind::Host, Access::ApprovalRequired)
+        .await
+        .unwrap();
+    let (_, access) = a
+        .host_add(&url_b, &code, Some(Access::ApprovalRequired))
+        .await
+        .unwrap();
+    assert_eq!(access, Access::ApprovalRequired);
+    assert!(a.hosts().await.unwrap().hosts[0].reachable);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_pairs_under_a_tagged_name_that_its_revoke_message_quotes() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
+    let (_a, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let port_b = free_port();
+    a.remote_on(free_port()).await.unwrap();
+    b.remote_on(port_b).await.unwrap();
+    a.host_agents(true).await.unwrap();
+    b.host_agents(true).await.unwrap();
+    let url_b = format!("ws://127.0.0.1:{port_b}");
+    // The link fails after b paired with a, so the message tells b which pairing to revoke.
+    let code = b
+        .invite(ClientKind::Host, Access::ApprovalRequired)
+        .await
+        .unwrap();
+    let error = a
+        .host_add(&url_b, &code, Some(Access::Auto))
+        .await
+        .unwrap_err();
+    let me = a.environment_name().await.unwrap().to_lowercase();
+    let pairing = b
+        .hosts()
+        .await
+        .unwrap()
+        .clients
+        .into_iter()
+        .find(|client| client.kind == ClientKind::Host)
+        .expect("b paired with a")
+        .name;
+    // A long host name is cut so that the whole name fits what T3 keeps.
+    let (host, tag) = pairing.rsplit_once('-').expect("the host name, then a tag");
+    assert!(!host.is_empty() && me.trim().starts_with(host), "{pairing}");
+    assert!(
+        tag.len() == 4 && tag.chars().all(|c| c.is_ascii_hexdigit()),
+        "{pairing}"
+    );
+    assert!(
+        error.contains(&format!("meta host revoke {pairing}")),
+        "{error}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_already_linked_at_an_address_is_not_paired_again() {
+    let (dir, _repo, _home) = fixture();
+    let link = linked(dir.path()).await;
+    let (_b, b) = &link.b;
+    let (_a, a) = &link.a;
+    let clients = b.hosts().await.unwrap().clients.len();
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let error = a
+        .host_add(&link.url_b, &code, Some(Access::Auto))
+        .await
+        .unwrap_err();
+    assert!(error.contains(&link.name), "{error}");
+    assert_eq!(
+        b.hosts().await.unwrap().clients.len(),
+        clients,
+        "no stray pairing"
+    );
+    assert_eq!(a.hosts().await.unwrap().hosts.len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_invited_read_only_gets_a_pairing_code_that_grants_orchestration_read_only() {
+    let (dir, _repo, _home) = fixture();
+    let home = dir.path().join("b");
+    let (_b, b) = start_service(&home).await;
+    let port = free_port();
+    b.remote_on(port).await.unwrap();
+    let url = format!("ws://127.0.0.1:{port}");
+    let code = b.invite(ClientKind::Host, Access::ReadOnly).await.unwrap();
+    let paired = remote::pair(&url, &code, "other").await.unwrap();
+    assert_eq!(paired.access, Access::ReadOnly);
+    let host = remote::Host::connect_to(&url, &paired.token, "other")
+        .await
+        .unwrap();
+    let credential = host.t3_pairing().await.unwrap();
+    let answer = exchange(&t3_address(&home), &credential, None);
+    assert_eq!(status_of(&answer), 200, "{answer}");
+    assert_eq!(body_json(&answer)["scope"], "orchestration:read");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_link_whose_tunnel_port_is_taken_at_restart_moves_to_a_new_port() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
+    let (a_service, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let port_b = free_port();
+    a.remote_on(free_port()).await.unwrap();
+    b.remote_on(port_b).await.unwrap();
+    a.host_agents(true).await.unwrap();
+    b.host_agents(true).await.unwrap();
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let (name, _) = a
+        .host_add(&format!("ws://127.0.0.1:{port_b}"), &code, None)
+        .await
+        .unwrap();
+    let old = peer_row(&home_a, &name).0;
+    drop(a);
+    a_service.stop().await;
+
+    // Another program takes the tunnel's port while the service is down.
+    let holder = std::net::TcpListener::bind(("127.0.0.1", old)).unwrap();
+    let (_a_service, a) = start_service(&home_a).await;
+    assert_ne!(peer_row(&home_a, &name).0, old, "the tunnel moved");
+    let linked = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            if t3_environments(&home_a)
+                .iter()
+                .any(|link| link["status"] == "reachable")
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await;
+    assert!(linked.is_ok(), "linked again through the new port");
+    assert!(a.hosts().await.unwrap().hosts[0].reachable);
+    drop(holder);
+}
+
+/// A peer that answers the pairing of a new host with a name and token, and then accepts every
+/// connection and answers none of them (a peer that stops answering after the handshake).
+// tungstenite's handshake callback returns its own large error response.
+#[allow(clippy::result_large_err)]
+async fn silent_peer() -> String {
+    use futures_util::SinkExt;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((socket, _)) = listener.accept().await {
+            let mut pairing = false;
+            let Ok(mut socket) = tokio_tungstenite::accept_hdr_async(
+                socket,
+                |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+                 response: tokio_tungstenite::tungstenite::handshake::server::Response| {
+                    pairing = request.headers().contains_key(meta_harness_core::api::PAIRING_HEADER);
+                    Ok(response)
+                },
+            )
+            .await
+            else {
+                continue;
+            };
+            if pairing {
+                let answer = r#"{"name":"silent","token":"silent-token","access":"auto"}"#;
+                let _ = socket
+                    .send(tokio_tungstenite::tungstenite::Message::Text(answer.into()))
+                    .await;
+                let _ = socket.close(None).await;
+            } else {
+                held.push(socket);
+            }
+        }
+    });
+    url
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_peer_that_never_answers_a_link_is_given_up_on_and_holds_no_other_change() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
+    let (_a, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let port_b = free_port();
+    a.remote_on(free_port()).await.unwrap();
+    b.remote_on(port_b).await.unwrap();
+    a.host_agents(true).await.unwrap();
+    b.host_agents(true).await.unwrap();
+    let silent = silent_peer().await;
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let given_up = tokio::time::timeout(Duration::from_secs(60), a.host_add(&silent, &code, None))
+        .await
+        .expect("the link gives up on a peer that never answers");
+    assert!(given_up.is_err());
+    // The change that waited for it is over, so the next link goes through.
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let linked = tokio::time::timeout(
+        Duration::from_secs(60),
+        a.host_add(&format!("ws://127.0.0.1:{port_b}"), &code, None),
+    )
+    .await
+    .expect("a link is not held behind the silent one");
+    assert!(linked.is_ok(), "{linked:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_name_already_paired_is_refused_and_its_code_is_still_good() {
+    let (dir, _repo, _home) = fixture();
+    let (_service, local) = start_service(&dir.path().join("meta")).await;
+    let port = free_port();
+    local.remote_on(port).await.unwrap();
+    let url = format!("ws://127.0.0.1:{port}");
+    let first = local
+        .invite(ClientKind::Device, Access::Auto)
+        .await
+        .unwrap();
+    remote::pair(&url, &first, "phone").await.unwrap();
+    let second = local
+        .invite(ClientKind::Device, Access::Auto)
+        .await
+        .unwrap();
+    let refused = remote::pair(&url, &second, "phone").await.unwrap_err();
+    assert_eq!(
+        refused,
+        "A client named phone is paired already; pair under another name."
+    );
+    remote::pair(&url, &second, "tablet")
+        .await
+        .expect("the code was not spent");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn removing_a_host_ends_the_tunnel_connections_open_to_it() {
+    let (dir, _repo, _home) = fixture();
+    let link = linked(dir.path()).await;
+    let (_a, a) = &link.a;
+    let port = peer_row(&dir.path().join("a"), &link.name).0;
+    let mut tunnel = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    // Let the tunnel open its WebSocket before the host is removed.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    a.host_remove(&link.name).await.unwrap();
+    let ended = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut byte = [0u8; 1];
+        tunnel.read(&mut byte).await
+    })
+    .await
+    .expect("the connection ends with its tunnel");
+    assert_eq!(ended.unwrap(), 0, "the tunnel's connection is closed");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_asking_for_more_than_it_was_invited_at_is_refused_before_linking() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
+    let (_a, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let port_b = free_port();
+    a.remote_on(free_port()).await.unwrap();
+    b.remote_on(port_b).await.unwrap();
+    a.host_agents(true).await.unwrap();
+    b.host_agents(true).await.unwrap();
+    let code = b.invite(ClientKind::Host, Access::ReadOnly).await.unwrap();
+    let error = a
+        .host_add(
+            &format!("ws://127.0.0.1:{port_b}"),
+            &code,
+            Some(Access::Auto),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        error.contains("invited this host at read-only; ask for that or less."),
+        "{error}"
+    );
+    assert!(
+        a.hosts().await.unwrap().hosts.is_empty(),
+        "nothing is linked"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_asking_for_less_than_its_invite_names_its_pairing_and_level() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
+    let (_a, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let port_b = free_port();
+    a.remote_on(free_port()).await.unwrap();
+    b.remote_on(port_b).await.unwrap();
+    a.host_agents(true).await.unwrap();
+    b.host_agents(true).await.unwrap();
+    let code = b
+        .invite(ClientKind::Host, Access::ApprovalRequired)
+        .await
+        .unwrap();
+    a.host_add(
+        &format!("ws://127.0.0.1:{port_b}"),
+        &code,
+        Some(Access::ReadOnly),
+    )
+    .await
+    .unwrap();
+    let listed = a.hosts().await.unwrap();
+    assert_eq!(listed.hosts[0].access, Access::ReadOnly);
+    let client = &host_client_names(&b).await[0];
+    assert_eq!(
+        &listed.hosts[0].client, client,
+        "the pairing a host removal names"
+    );
+    let paired = b.hosts().await.unwrap().clients;
+    assert_eq!(
+        paired[0].access,
+        Access::ApprovalRequired,
+        "the level the host was invited at"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_made_is_reported_made_even_when_its_time_cannot_be_stored() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
+    let (_a, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let port_b = free_port();
+    a.remote_on(free_port()).await.unwrap();
+    b.remote_on(port_b).await.unwrap();
+    a.host_agents(true).await.unwrap();
+    b.host_agents(true).await.unwrap();
+    // Every update of a link's row fails, as a store that cannot be written does.
+    rusqlite::Connection::open(home_a.join("meta-harness.sqlite"))
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER refuse_link_time BEFORE UPDATE ON peer \
+             BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+        )
+        .unwrap();
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let (name, _) = a
+        .host_add(&format!("ws://127.0.0.1:{port_b}"), &code, None)
+        .await
+        .expect("the link is made, so the add reports it");
+    assert!(a.hosts().await.unwrap().hosts[0].reachable, "{name}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_link_older_than_25_days_is_made_again_when_the_service_starts() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
+    let (a_service, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let port_b = free_port();
+    b.remote_on(port_b).await.unwrap();
+    a.host_agents(true).await.unwrap();
+    b.host_agents(true).await.unwrap();
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let (name, _) = a
+        .host_add(
+            &format!("ws://127.0.0.1:{port_b}"),
+            &code,
+            Some(Access::ReadOnly),
+        )
+        .await
+        .unwrap();
+    drop(a);
+    a_service.stop().await;
+
+    // The link was made 26 days ago; the service makes it again as it starts.
+    let aged = peer_row(&home_a, &name).1.unwrap() - 26 * 24 * 3_600_000;
+    rusqlite::Connection::open(home_a.join("meta-harness.sqlite"))
+        .unwrap()
+        .execute("UPDATE peer SET linked_ms = ?1", [aged])
+        .unwrap();
+    let (_service, a) = start_service(&home_a).await;
+    let relinked = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let linked = a.hosts().await.unwrap().hosts[0].linked_ms.unwrap_or(0);
+            if linked > aged as u64 {
+                return linked;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await;
+    assert!(relinked.is_ok(), "linked again within a minute");
+    assert_eq!(t3_environments(&home_a)[0]["status"], "reachable");
+}
+
+/// Whether a connection with `token` to the remote listener at `url` may tunnel: it must name the
+/// tunnel header, which only a host may use.
+async fn may_tunnel(url: &str, token: &str) -> bool {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    let mut request = url.into_client_request().unwrap();
+    let headers = request.headers_mut();
+    headers.insert("authorization", format!("Bearer {token}").parse().unwrap());
+    headers.insert("meta-harness-api", "1".parse().unwrap());
+    headers.insert("meta-harness-tunnel", "t3".parse().unwrap());
+    tokio_tungstenite::connect_async(request).await.is_ok()
+}
+
+/// Two services, each with its remote listener on loopback and agents from other hosts on, where
+/// `a` has linked `b` at the default access.
+struct Linked {
+    a: (Service, remote::Host),
+    b: (Service, remote::Host),
+    name: String,
+    url_b: String,
+}
+
+async fn linked(dir: &Path) -> Linked {
+    let (home_a, home_b) = (dir.join("a"), dir.join("b"));
+    let (a_service, a) = start_service(&home_a).await;
+    let (b_service, b) = start_service(&home_b).await;
+    let port_b = free_port();
+    a.remote_on(free_port()).await.unwrap();
+    b.remote_on(port_b).await.unwrap();
+    a.host_agents(true).await.unwrap();
+    b.host_agents(true).await.unwrap();
+    let url_b = format!("ws://127.0.0.1:{port_b}");
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let (name, _) = a.host_add(&url_b, &code, Some(Access::Auto)).await.unwrap();
+    Linked {
+        a: (a_service, a),
+        b: (b_service, b),
+        name,
+        url_b,
+    }
+}
+
+/// The headers of a form body.
+const FORM: &[(&str, &str)] = &[("Content-Type", "application/x-www-form-urlencoded")];
+/// The headers of a JSON body.
+const JSON: &[(&str, &str)] = &[("Content-Type", "application/json")];
+
+/// Sends one HTTP/1.1 request with `headers` and `body` to `addr` and answers everything sent
+/// back, the connection closing after the answer.
+fn http(addr: &str, method: &str, path: &str, headers: &[(&str, &str)], body: &str) -> String {
+    http_at(addr, addr, method, path, headers, body)
+}
+
+/// As [`http`], sent to `connect` with the Host header `host`: a tunnel passes the header on, and
+/// T3 binds a token to the host it was issued for.
+fn http_at(
+    connect: &str,
+    host: &str,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &str,
+) -> String {
+    let mut stream = std::net::TcpStream::connect(connect).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+    let mut request = format!("{method} {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n");
+    for (name, value) in headers {
+        request.push_str(&format!("{name}: {value}\r\n"));
+    }
+    request.push_str(&format!("Content-Length: {}\r\n\r\n{body}", body.len()));
+    std::io::Write::write_all(&mut stream, request.as_bytes()).unwrap();
+    let mut answer = String::new();
+    let _ = std::io::Read::read_to_string(&mut stream, &mut answer);
+    answer
+}
+
+/// Posts `body` with `headers` to `path` at `addr`, which must answer with success; answers its
+/// JSON body.
+fn post(addr: &str, path: &str, headers: &[(&str, &str)], body: &str) -> serde_json::Value {
+    let answer = http(addr, "POST", path, headers, body);
+    assert!((200..300).contains(&status_of(&answer)), "{path}: {answer}");
+    body_json(&answer)
+}
+
+/// The status code of an HTTP answer.
+fn status_of(answer: &str) -> u16 {
+    answer
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .unwrap_or(0)
+}
+
+/// The JSON object in an HTTP answer's body.
+fn body_json(answer: &str) -> serde_json::Value {
+    let body = &answer[answer.find('{').unwrap()..=answer.rfind('}').unwrap()];
+    serde_json::from_str(body).unwrap()
+}
+
+/// The address T3 in `home` listens on, from the runtime record it writes.
+fn t3_address(home: &Path) -> String {
+    let text = std::fs::read_to_string(home.join("t3/userdata/server-runtime.json")).unwrap();
+    let origin = serde_json::from_str::<serde_json::Value>(&text).unwrap()["origin"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    origin.trim_start_matches("http://").to_owned()
+}
+
+/// Exchanges the bootstrap pairing `credential` at T3 in `origin` for a bearer token, asking for
+/// `scope` when given; answers the HTTP answer.
+fn exchange(origin: &str, credential: &str, scope: Option<&str>) -> String {
+    let mut form = format!(
+        "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange\
+         &subject_token={credential}\
+         &subject_token_type=urn%3At3%3Aparams%3Aoauth%3Atoken-type%3Aenvironment-bootstrap\
+         &requested_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aaccess_token"
+    );
+    if let Some(scope) = scope {
+        form.push_str(&format!("&scope={scope}"));
+    }
+    http(origin, "POST", "/oauth/token", FORM, &form)
+}
+
+/// Percent-encodes `text` for a form body, keeping only the unreserved characters.
+fn form_value(text: &str) -> String {
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                char::from(b).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// `bytes` in unpadded base64url, as PKCE writes a code challenge.
+fn base64url(bytes: &[u8]) -> String {
+    const LETTERS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut text = String::new();
+    for chunk in bytes.chunks(3) {
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |n, (i, b)| n | u32::from(*b) << (16 - 8 * i));
+        for i in 0..=chunk.len() {
+            text.push(char::from(LETTERS[((n >> (18 - 6 * i)) & 63) as usize]));
+        }
+    }
+    text
+}
+
+/// The first `key` in the query of `url`.
+fn query(url: &str, key: &str) -> String {
+    let query = url.split_once('?').unwrap().1;
+    query
+        .split('&')
+        .find_map(|pair| pair.strip_prefix(&format!("{key}=")))
+        .unwrap()
+        .to_owned()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_tunnel_passes_only_the_paths_a_link_uses() {
+    let (dir, _repo, _home) = fixture();
+    let link = linked(dir.path()).await;
+    let port = peer_row(&dir.path().join("a"), &link.name).0;
+    let addr = format!("127.0.0.1:{port}");
+    for (method, path) in [
+        ("GET", "/api/auth/session"),
+        ("POST", "/api/auth/browser-session"),
+        ("POST", "/oauth/token"),
+        ("POST", "/api/auth/websocket-ticket"),
+        ("GET", "/api/projects"),
+        ("GET", "/api/orchestration/shell"),
+        ("GET", "/ws"),
+        // The paths a link uses, by other methods than T3 serves them with.
+        ("POST", "/.well-known/t3/environment"),
+        ("GET", "/oauth/mcp/token"),
+        ("PUT", "/mcp"),
+        ("GET", "/"),
+    ] {
+        let answer = http(&addr, method, path, &[], "");
+        assert_eq!(status_of(&answer), 403, "{method} {path}");
+    }
+    let descriptor = http(&addr, "GET", "/.well-known/t3/environment", &[], "");
+    assert_eq!(status_of(&descriptor), 200, "the link's descriptor");
+    let mcp = http(&addr, "GET", "/mcp", &[], "");
+    assert_ne!(status_of(&mcp), 403, "the link's MCP path");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pairing_code_from_a_host_token_redeems_only_orchestration_scopes() {
+    let (dir, _repo, _home) = fixture();
+    let (home_b, port_b) = (dir.path().join("b"), free_port());
+    let (_b, b) = start_service(&home_b).await;
+    b.remote_on(port_b).await.unwrap();
+    let url = format!("ws://127.0.0.1:{port_b}");
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let token = remote::pair(&url, &code, "other").await.unwrap().token;
+    let host = remote::Host::connect_to(&url, &token, "other")
+        .await
+        .unwrap();
+    let origin = t3_address(&home_b);
+    // Each exchange spends its code, so each one takes a new code from the host token.
+    for scope in ["terminal:operate", "filesystem:write", "settings:write"] {
+        let credential = host.t3_pairing().await.unwrap();
+        let answer = exchange(&origin, &credential, Some(scope));
+        assert_ne!(status_of(&answer), 200, "{scope} is refused: {answer}");
+    }
+    let credential = host.t3_pairing().await.unwrap();
+    let answer = exchange(&origin, &credential, None);
+    assert_eq!(status_of(&answer), 200, "{answer}");
+    assert_eq!(
+        body_json(&answer)["scope"],
+        "orchestration:read orchestration:operate"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn revoking_a_client_closes_the_connections_it_has_open() {
+    let (dir, _repo, _home) = fixture();
+    let link = linked(dir.path()).await;
+    let (_a, _) = &link.a;
+    let (_b, b) = &link.b;
+    let code = b.invite(ClientKind::Device, Access::Auto).await.unwrap();
+    let token = remote::pair(&link.url_b, &code, "phone")
+        .await
+        .unwrap()
+        .token;
+    let device = remote::Host::connect_to(&link.url_b, &token, "phone")
+        .await
+        .unwrap();
+    device.status().await.unwrap();
+    // A connection through a's tunnel to b's T3 stays open between requests.
+    let port = peer_row(&dir.path().join("a"), &link.name).0;
+    let mut tunnel = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    let request =
+        format!("GET /.well-known/t3/environment HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n");
+    tunnel.write_all(request.as_bytes()).await.unwrap();
+    let mut answer = [0u8; 12];
+    tunnel.read_exact(&mut answer).await.unwrap();
+    assert_eq!(&answer, b"HTTP/1.1 200");
+
+    b.revoke_client("phone").await.unwrap();
+    // The host pairs under its name and a tag, which the revocation names exactly.
+    let host = b
+        .hosts()
+        .await
+        .unwrap()
+        .clients
+        .into_iter()
+        .find(|client| client.kind == ClientKind::Host)
+        .unwrap();
+    b.revoke_client(&host.name).await.unwrap();
+    assert!(
+        device.status().await.is_err(),
+        "the device's connection ended"
+    );
+    let ended = tokio::time::timeout(Duration::from_secs(20), async {
+        let mut rest = Vec::new();
+        tunnel.read_to_end(&mut rest).await
+    })
+    .await;
+    assert!(ended.is_ok(), "the tunnel's connection ended");
+}
+
+/// Signs an MCP client in through the tunnel at `addr` with a pairing code of its receiving host,
+/// and answers the bearer token that its requests carry: the sign-in a link makes (ADR-0301).
+fn sign_in(addr: &str, pairing: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let resource = format!("http://{addr}/mcp");
+    let redirect = "http://127.0.0.1/t3code-peer-link";
+    let registered = post(
+        addr,
+        "/oauth/mcp/register",
+        JSON,
+        &serde_json::json!({"client_name": "tester", "redirect_uris": [redirect]}).to_string(),
+    );
+    let client_id = registered["client_id"].as_str().unwrap().to_owned();
+    let verifier = "a".repeat(64);
+    let challenge = base64url(&Sha256::digest(verifier.as_bytes()));
+    let decided = post(
+        addr,
+        "/oauth/mcp/decision",
+        JSON,
+        &serde_json::json!({
+            "authorization": {
+                "response_type": "code",
+                "client_id": client_id,
+                "redirect_uri": redirect,
+                "code_challenge": challenge,
+                "code_challenge_method": "S256",
+                "state": "state",
+                "resource": resource,
+            },
+            "decision": {"_tag": "pairing-code", "access": "auto", "code": pairing},
+        })
+        .to_string(),
+    );
+    let code = query(decided["redirectTo"].as_str().unwrap(), "code");
+    let form = format!(
+        "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={verifier}&resource={}",
+        form_value(&code),
+        form_value(redirect),
+        form_value(&client_id),
+        form_value(&resource),
+    );
+    let token = post(addr, "/oauth/mcp/token", FORM, &form);
+    format!("Bearer {}", token["access_token"].as_str().unwrap())
+}
+
+/// The `client_id` that a client registered through the tunnel at `addr` is given.
+fn register_client(addr: &str) -> String {
+    let registered = post(
+        addr,
+        "/oauth/mcp/register",
+        JSON,
+        &serde_json::json!({"client_name": "tester", "redirect_uris": ["http://127.0.0.1/t3code-peer-link"]}).to_string(),
+    );
+    registered["client_id"].as_str().unwrap().to_owned()
+}
+
+/// The answer to a decision that approves the sign-in of `client_id` at auto, with the pairing
+/// code `pairing`, sent through the tunnel at `addr`.
+fn decide(addr: &str, client_id: &str, pairing: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let redirect = "http://127.0.0.1/t3code-peer-link";
+    let challenge = base64url(&Sha256::digest("a".repeat(64).as_bytes()));
+    http(
+        addr,
+        "POST",
+        "/oauth/mcp/decision",
+        JSON,
+        &serde_json::json!({
+            "authorization": {
+                "response_type": "code",
+                "client_id": client_id,
+                "redirect_uri": redirect,
+                "code_challenge": challenge,
+                "code_challenge_method": "S256",
+                "state": "state",
+                "resource": format!("http://{addr}/mcp"),
+            },
+            "decision": {"_tag": "pairing-code", "access": "auto", "code": pairing},
+        })
+        .to_string(),
+    )
+}
+
+/// The answer to an MCP initialize request that `bearer` makes to `connect` with the Host `host`.
+fn mcp_answer(connect: &str, host: &str, bearer: &str) -> String {
+    let initialize = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "tester", "version": "0"},
+        },
+    });
+    http_at(
+        connect,
+        host,
+        "POST",
+        "/mcp",
+        &[
+            ("Authorization", bearer),
+            ("Accept", "application/json, text/event-stream"),
+            ("Content-Type", "application/json"),
+        ],
+        &initialize.to_string(),
+    )
+}
+
+/// The active T3 sessions in `home`, as `t3 auth session list --json` lists them.
+fn t3_sessions(home: &Path) -> Vec<serde_json::Value> {
+    let output = Command::new(t3())
+        .args(["auth", "session", "list", "--json"])
+        .env("T3CODE_HOME", home.join("t3"))
+        .env("T3CODE_TELEMETRY_ENABLED", "false")
+        .output()
+        .unwrap();
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_linked_agents_mcp_request_reaches_t3_through_the_tunnel() {
+    let (dir, _repo, _home) = fixture();
+    let link = linked(dir.path()).await;
+    let (_b, b) = &link.b;
+    let port = peer_row(&dir.path().join("a"), &link.name).0;
+    let addr = format!("127.0.0.1:{port}");
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let host_token = remote::pair(&link.url_b, &code, "tester")
+        .await
+        .unwrap()
+        .token;
+    let host = remote::Host::connect_to(&link.url_b, &host_token, "tester")
+        .await
+        .unwrap();
+    let bearer = sign_in(&addr, &host.t3_pairing().await.unwrap());
+    let answer = mcp_answer(&addr, &addr, &bearer);
+    assert_eq!(status_of(&answer), 200, "{answer}");
+    assert!(answer.contains("protocolVersion"), "{answer}");
+}
+
+/// The names of the host clients paired with `on`.
+async fn host_client_names(on: &remote::Host) -> Vec<String> {
+    on.hosts()
+        .await
+        .unwrap()
+        .clients
+        .into_iter()
+        .filter(|client| client.kind == ClientKind::Host)
+        .map(|client| client.name)
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_decision_with_another_pairings_client_id_is_refused_by_the_tunnel() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b, home_c) = (
+        dir.path().join("a"),
+        dir.path().join("b"),
+        dir.path().join("c"),
+    );
+    let (_a, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let (_c, c) = start_service(&home_c).await;
+    let port_b = free_port();
+    b.remote_on(port_b).await.unwrap();
+    for host in [&a, &b, &c] {
+        host.host_agents(true).await.unwrap();
+    }
+    let url_b = format!("ws://127.0.0.1:{port_b}");
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let (name_a, _) = a.host_add(&url_b, &code, None).await.unwrap();
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let (name_c, _) = c.host_add(&url_b, &code, None).await.unwrap();
+    let addr_a = format!("127.0.0.1:{}", peer_row(&home_a, &name_a).0);
+    let addr_c = format!("127.0.0.1:{}", peer_row(&home_c, &name_c).0);
+    // A's client_id names A's pairing; presented through C's tunnel it names another pairing.
+    let client_id = register_client(&addr_a);
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let tester = remote::pair(&url_b, &code, "tester").await.unwrap().token;
+    let tester = remote::Host::connect_to(&url_b, &tester, "tester")
+        .await
+        .unwrap();
+    let pairing = tester.t3_pairing().await.unwrap();
+    let answer = decide(&addr_c, &client_id, &pairing);
+    assert_eq!(status_of(&answer), 403, "{answer}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_token_exchange_with_another_pairings_client_id_is_refused_by_the_tunnel() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b, home_c) = (
+        dir.path().join("a"),
+        dir.path().join("b"),
+        dir.path().join("c"),
+    );
+    let (_a, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let (_c, c) = start_service(&home_c).await;
+    let port_b = free_port();
+    b.remote_on(port_b).await.unwrap();
+    for host in [&a, &b, &c] {
+        host.host_agents(true).await.unwrap();
+    }
+    let url_b = format!("ws://127.0.0.1:{port_b}");
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let (name_a, _) = a.host_add(&url_b, &code, None).await.unwrap();
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let (name_c, _) = c.host_add(&url_b, &code, None).await.unwrap();
+    let addr_a = format!("127.0.0.1:{}", peer_row(&home_a, &name_a).0);
+    let addr_c = format!("127.0.0.1:{}", peer_row(&home_c, &name_c).0);
+    // A's sign-in is approved through A's tunnel, as an agent of A would.
+    let client_id = register_client(&addr_a);
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let tester = remote::pair(&url_b, &code, "tester").await.unwrap().token;
+    let tester = remote::Host::connect_to(&url_b, &tester, "tester")
+        .await
+        .unwrap();
+    let decided = body_json(&decide(
+        &addr_a,
+        &client_id,
+        &tester.t3_pairing().await.unwrap(),
+    ));
+    let approved = query(decided["redirectTo"].as_str().unwrap(), "code");
+    // The exchange reaches C's tunnel with A's client_id and A's Host, so the token would bind to A.
+    let verifier = "a".repeat(64);
+    let form = format!(
+        "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={verifier}&resource={}",
+        form_value(&approved),
+        form_value("http://127.0.0.1/t3code-peer-link"),
+        form_value(&client_id),
+        form_value(&format!("http://{addr_a}/mcp")),
+    );
+    let answer = http_at(&addr_c, &addr_a, "POST", "/oauth/mcp/token", FORM, &form);
+    assert_eq!(status_of(&answer), 403, "{answer}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn revoking_a_name_with_no_client_still_ends_the_sign_ins_made_under_it() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
+    let (_a, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let port_b = free_port();
+    a.remote_on(free_port()).await.unwrap();
+    b.remote_on(port_b).await.unwrap();
+    a.host_agents(true).await.unwrap();
+    b.host_agents(true).await.unwrap();
+    let url_b = format!("ws://127.0.0.1:{port_b}");
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let (name_a, _) = a.host_add(&url_b, &code, None).await.unwrap();
+    let addr_a = format!("127.0.0.1:{}", peer_row(&home_a, &name_a).0);
+    let clients = host_client_names(&b).await;
+    let [client] = clients.as_slice() else {
+        panic!("one host pairs with b: {clients:?}")
+    };
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let tester = remote::pair(&url_b, &code, "tester").await.unwrap().token;
+    let tester = remote::Host::connect_to(&url_b, &tester, "tester")
+        .await
+        .unwrap();
+    let _ = sign_in(&addr_a, &tester.t3_pairing().await.unwrap());
+    assert!(
+        t3_sessions(&home_b)
+            .iter()
+            .any(|s| s["client"]["label"] == client.as_str())
+    );
+    // The client row is gone while its session stays, as after a revoke that failed midway.
+    rusqlite::Connection::open(home_b.join("meta-harness.sqlite"))
+        .unwrap()
+        .execute("DELETE FROM client WHERE name = ?1", [client])
+        .unwrap();
+    b.revoke_client(client).await.unwrap();
+    assert!(
+        t3_sessions(&home_b)
+            .iter()
+            .all(|s| s["client"]["label"] != client.as_str()),
+        "the name's sessions end"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn revoking_a_host_ends_the_t3_sessions_its_link_made() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b, home_c) = (
+        dir.path().join("a"),
+        dir.path().join("b"),
+        dir.path().join("c"),
+    );
+    let (_a, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let (_c, c) = start_service(&home_c).await;
+    let port_b = free_port();
+    b.remote_on(port_b).await.unwrap();
+    for host in [&a, &b, &c] {
+        host.host_agents(true).await.unwrap();
+    }
+    let url_b = format!("ws://127.0.0.1:{port_b}");
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let (name_a, _) = a.host_add(&url_b, &code, None).await.unwrap();
+    // The hosts share one environment name, so A's pairing is named by the only pairing B holds.
+    let a_clients = host_client_names(&b).await;
+    assert_eq!(a_clients.len(), 1, "{a_clients:?}");
+    let a_client = a_clients[0].clone();
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let (name_c, _) = c.host_add(&url_b, &code, None).await.unwrap();
+
+    // A signs an agent in through its own tunnel; C's tunnel is another valid way to reach B's T3.
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let tester = remote::pair(&url_b, &code, "tester").await.unwrap().token;
+    let tester = remote::Host::connect_to(&url_b, &tester, "tester")
+        .await
+        .unwrap();
+    let addr_a = format!("127.0.0.1:{}", peer_row(&home_a, &name_a).0);
+    let addr_c = format!("127.0.0.1:{}", peer_row(&home_c, &name_c).0);
+    let bearer = sign_in(&addr_a, &tester.t3_pairing().await.unwrap());
+    assert_eq!(status_of(&mcp_answer(&addr_c, &addr_a, &bearer)), 200);
+
+    b.revoke_client(&a_client).await.unwrap();
+    assert!(
+        t3_sessions(&home_b)
+            .iter()
+            .all(|session| session["client"]["label"] != a_client.as_str()),
+        "A's T3 sessions end with its pairing"
+    );
+    let refused = mcp_answer(&addr_c, &addr_a, &bearer);
+    assert_eq!(
+        status_of(&refused),
+        401,
+        "T3 refuses the revoked session's token: {refused:?}"
+    );
 }
