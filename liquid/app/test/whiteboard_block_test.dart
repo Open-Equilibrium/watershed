@@ -307,6 +307,11 @@ void main() {
     await tester.tapAt(screen(tester, const Offset(120, 120)));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('whiteboard text')), 'Lisbon');
+    // A click in the box places the caret and keeps the box open.
+    await tester.tap(find.byKey(const Key('whiteboard text')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('whiteboard text')), findsOneWidget);
+    expect(kit.applied(BridgeMutationKind.editWhiteboard), isEmpty);
     await tester.tapAt(screen(tester, const Offset(500, 300)));
     await tester.pumpAndSettle();
     final [text] = lastEdit().add;

@@ -883,35 +883,38 @@ class BoardSurfaceState extends State<BoardSurface> {
     return LayoutBuilder(
       builder: (context, constraints) {
         _size = constraints.biggest;
-        return RawGestureDetector(
-          gestures: {
-            _Claim: GestureRecognizerFactoryWithHandlers<_Claim>(
-              () => _Claim(),
-              (claim) => claim
-                ..claims = ((event) =>
-                    widget.focused ||
-                    event.buttons & kSecondaryMouseButton != 0)
-                ..onPanZoom = (pan, scale, focal) {
-                  board.pan(pan);
-                  if (scale != 1) board.zoomBy(scale, focal);
+        // The text box being written sits above the board's pointer handling, so a click
+        // in it places the caret rather than ending it.
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: RawGestureDetector(
+                gestures: {
+                  _Claim: GestureRecognizerFactoryWithHandlers<_Claim>(
+                    () => _Claim(),
+                    (claim) => claim
+                      ..claims = ((event) =>
+                          widget.focused ||
+                          event.buttons & kSecondaryMouseButton != 0)
+                      ..onPanZoom = (pan, scale, focal) {
+                        board.pan(pan);
+                        if (scale != 1) board.zoomBy(scale, focal);
+                      },
+                  ),
                 },
-            ),
-          },
-          child: Listener(
-            onPointerDown: _down,
-            onPointerMove: _move,
-            onPointerUp: _up,
-            onPointerCancel: _up,
-            onPointerSignal: _signal,
-            child: MouseRegion(
-              cursor: widget.focused && tools.tool != BoardTool.lasso
-                  ? SystemMouseCursors.precise
-                  : MouseCursor.defer,
-              child: Stack(
-                children: [
-                  Positioned.fill(
+                child: Listener(
+                  onPointerDown: _down,
+                  onPointerMove: _move,
+                  onPointerUp: _up,
+                  onPointerCancel: _up,
+                  onPointerSignal: _signal,
+                  child: MouseRegion(
+                    cursor: widget.focused && tools.tool != BoardTool.lasso
+                        ? SystemMouseCursors.precise
+                        : MouseCursor.defer,
                     child: CustomPaint(
                       key: const Key('whiteboard canvas'),
+                      size: Size.infinite,
                       painter: BoardPainter(
                         board: board,
                         ws: ws,
@@ -922,26 +925,22 @@ class BoardSurfaceState extends State<BoardSurface> {
                       ),
                     ),
                   ),
-                  if (text != null) _textEditor(context, text),
-                  if (!board.loaded ||
-                      board.elements.isNotEmpty ||
-                      !widget.focused)
-                    const SizedBox.shrink()
-                  else
-                    Positioned(
-                      left: 12,
-                      top: 10,
-                      child: IgnorePointer(
-                        child: Text(
-                          'Draw with the pen, or choose a tool below',
-                          style: TextStyle(fontSize: 12, color: ws.textFaint),
-                        ),
-                      ),
-                    ),
-                ],
+                ),
               ),
             ),
-          ),
+            if (text != null) _textEditor(context, text),
+            if (board.loaded && board.elements.isEmpty && widget.focused)
+              Positioned(
+                left: 12,
+                top: 10,
+                child: IgnorePointer(
+                  child: Text(
+                    'Draw with the pen, or choose a tool below',
+                    style: TextStyle(fontSize: 12, color: ws.textFaint),
+                  ),
+                ),
+              ),
+          ],
         );
       },
     );
