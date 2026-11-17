@@ -94,7 +94,12 @@ Future<String?> showAgentHost(
 }) async {
   final next = await connect(address);
   if (!isCurrent()) {
-    await next.state?.dispose();
+    // A session that fails to release is not shown; the choice that replaced it is.
+    try {
+      await next.state?.dispose();
+    } on Object {
+      // Nothing to show for it: the session is no longer Liquid's.
+    }
     return 'Another agent host was chosen meanwhile.';
   }
   if (next.state == null) {

@@ -118,6 +118,27 @@ void main() {
     ], reason: 'This Mac is asked by null');
   });
 
+  test(
+    'a superseded choice whose session fails to release keeps the one shown',
+    () async {
+      const info = SessionInfo(project: 'acme-api');
+      final shown = Launch.session(SessionState(FakeProject()), info);
+      final surface = ValueNotifier(shown);
+      final superseded = FakeProject()
+        ..closeError = StateError('the host is gone');
+
+      final failure = await showAgentHost(
+        surface,
+        (address) async => Launch.session(SessionState(superseded), info),
+        'ws://studio.local:3774',
+        isCurrent: () => false,
+      );
+
+      expect(failure, isNotNull);
+      expect(surface.value, same(shown));
+    },
+  );
+
   test('names the project by its directory', () {
     expect(projectName('/work/acme-api/'), 'acme-api');
     expect(projectName('/'), '/');

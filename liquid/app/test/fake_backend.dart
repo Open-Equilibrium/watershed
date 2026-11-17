@@ -101,8 +101,14 @@ class FakeProject implements ProjectBackend {
   /// Whether Liquid released the project.
   bool closed = false;
 
+  /// What [close] fails with.
+  Object? closeError;
+
   @override
-  void close() => closed = true;
+  void close() {
+    if (closeError case final error?) throw error;
+    closed = true;
+  }
 }
 
 /// One session on the fake host: [emit] streams events; everything else is recorded in [calls].
