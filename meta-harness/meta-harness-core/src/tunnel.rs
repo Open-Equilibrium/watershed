@@ -160,13 +160,17 @@ pub(crate) async fn serve<S>(
 /// Answers `request`: a path a link uses goes to T3 at `t3`, and any other is refused. A link's
 /// registration takes the name of its host, and its decision goes on only when it asks for no
 /// more than `level`.
-async fn forward(
-    request: Request<Incoming>,
+pub(crate) async fn forward<B>(
+    request: Request<B>,
     t3: String,
     owner: String,
     level: Access,
     sign_ins: Arc<RwLock<()>>,
-) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Infallible> {
+) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Infallible>
+where
+    B: Body<Data = Bytes> + Send + Sync + 'static,
+    B::Error: Into<BoxError>,
+{
     let path = request.uri().path();
     if !passes(request.method(), path) {
         return Ok(answer(StatusCode::FORBIDDEN));
@@ -175,7 +179,9 @@ async fn forward(
     let request = match path {
         REGISTER_PATH => named(request, &owner).await,
         DECISION_PATH => checked(request, &owner, level).await,
-        _ => Ok(request.map(|body| body.boxed())),
+        // Read before the gate is held, so a body that never arrives holds no sign-in.
+        TOKEN_PATH => buffered(request).await,
+        _ => Ok(request.map(|body| body.map_err(Into::<BoxError>::into).boxed())),
     };
     let request = match request {
         Ok(request) => request,
@@ -183,9 +189,12 @@ async fn forward(
     };
     let answered = if gated {
         // A token exchange makes the session, so it is held until T3 has answered: a revoke that
-        // waits on the gate then ends that session too.
+        // waits on the gate then ends that session too. T3 gets a bounded time to answer.
         let _in_flight = sign_ins.read().await;
-        send(request, &t3).await
+        tokio::time::timeout(TIMEOUT, send(request, &t3))
+            .await
+            .ok()
+            .flatten()
     } else {
         send(request, &t3).await
     };
@@ -195,21 +204,33 @@ async fn forward(
     })
 }
 
-/// Reads a link's request body whole. A body over [`BODY`] bytes is too large.
+/// Reads a link's request body whole. A body over [`BODY`] bytes is too large, and one that does
+/// not arrive within [`TIMEOUT`] is given up on.
 async fn read<B>(body: B) -> Result<Bytes, StatusCode>
 where
     B: Body<Data = Bytes> + Send + 'static,
     B::Error: Into<BoxError>,
 {
-    let collected = Limited::new(body, BODY)
-        .collect()
+    let collected = tokio::time::timeout(TIMEOUT, Limited::new(body, BODY).collect())
         .await
+        .map_err(|_| StatusCode::REQUEST_TIMEOUT)?
         .map_err(|_| StatusCode::PAYLOAD_TOO_LARGE)?;
     Ok(collected.to_bytes())
 }
 
+/// The request with its body read whole, as the tunnel passes it on.
+async fn buffered<B>(request: Request<B>) -> Result<Request<BoxBody<Bytes, BoxError>>, StatusCode>
+where
+    B: Body<Data = Bytes> + Send + 'static,
+    B::Error: Into<BoxError>,
+{
+    let (parts, body) = request.into_parts();
+    let bytes = read(body).await?;
+    Ok(resend(parts, bytes))
+}
+
 /// `parts` with `bytes` as its body, whose length its headers then state.
-fn resend(mut parts: Parts, bytes: Bytes) -> Request<BoxBody<Bytes, hyper::Error>> {
+fn resend(mut parts: Parts, bytes: Bytes) -> Request<BoxBody<Bytes, BoxError>> {
     parts.headers.remove(TRANSFER_ENCODING);
     parts
         .headers
@@ -226,7 +247,7 @@ pub(crate) async fn checked<B>(
     request: Request<B>,
     owner: &str,
     level: Access,
-) -> Result<Request<BoxBody<Bytes, hyper::Error>>, StatusCode>
+) -> Result<Request<BoxBody<Bytes, BoxError>>, StatusCode>
 where
     B: Body<Data = Bytes> + Send + 'static,
     B::Error: Into<BoxError>,
@@ -255,7 +276,7 @@ where
 pub(crate) async fn named<B>(
     request: Request<B>,
     owner: &str,
-) -> Result<Request<BoxBody<Bytes, hyper::Error>>, StatusCode>
+) -> Result<Request<BoxBody<Bytes, BoxError>>, StatusCode>
 where
     B: Body<Data = Bytes> + Send + 'static,
     B::Error: Into<BoxError>,
@@ -272,10 +293,11 @@ where
 
 /// Sends `request` to T3 at `t3` unchanged, over a connection that lasts as long as the body of
 /// the answer, which streams back as it comes.
-async fn send(
-    request: Request<BoxBody<Bytes, hyper::Error>>,
-    t3: &str,
-) -> Option<Response<Incoming>> {
+async fn send<B>(request: Request<B>, t3: &str) -> Option<Response<Incoming>>
+where
+    B: Body<Data = Bytes> + Send + 'static,
+    B::Error: Into<BoxError>,
+{
     let socket = TcpStream::connect(t3).await.ok()?;
     let (mut sender, connection) = client::handshake(TokioIo::new(socket)).await.ok()?;
     tokio::spawn(async move {

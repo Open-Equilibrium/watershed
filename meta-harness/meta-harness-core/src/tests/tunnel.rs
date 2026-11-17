@@ -1,17 +1,20 @@
 //! The tunnel checks the level of each decision a link sends (ADR-0301): a link asks for no more
 //! than the level its host invited.
 
+use std::sync::Arc;
 use std::time::Duration;
 
-use http_body_util::Full;
-use hyper::body::Bytes;
+use futures_util::stream::{Pending, pending};
+use http_body_util::{Full, StreamBody};
+use hyper::body::{Bytes, Frame};
 use hyper::{Request, StatusCode};
 use serde_json::json;
+use tokio::sync::RwLock;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::protocol::Role;
 
 use crate::hosts::Access;
-use crate::tunnel::{checked, client_name_of, relay};
+use crate::tunnel::{checked, client_name_of, forward, relay};
 
 /// The name of the host these tests stand for, and the client_id that T3 signs for it.
 const OWNER: &str = "host-1a2b";
@@ -116,4 +119,38 @@ async fn a_decision_for_another_client_is_refused() {
             .map(|_| ()),
         Err(StatusCode::FORBIDDEN)
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_token_exchange_whose_body_never_arrives_holds_no_sign_in_gate() {
+    // T3 accepts the connection and answers nothing, so an exchange that reaches it waits there.
+    let t3 = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let t3_address = t3.local_addr().unwrap().to_string();
+    let gate = Arc::new(RwLock::new(()));
+    // A body that is announced but never arrives.
+    let withheld: StreamBody<Pending<Result<Frame<Bytes>, std::io::Error>>> =
+        StreamBody::new(pending());
+    let request = Request::post("/oauth/mcp/token").body(withheld).unwrap();
+    let (answer, revoked) = tokio::join!(
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            forward(
+                request,
+                t3_address,
+                OWNER.to_owned(),
+                Access::Auto,
+                gate.clone()
+            ),
+        ),
+        tokio::time::timeout(Duration::from_secs(5), gate.write()),
+    );
+    assert!(
+        revoked.is_ok(),
+        "a revoke gets the gate while the body is pending"
+    );
+    let answered = answer
+        .expect("the exchange ends")
+        .expect("the tunnel answers");
+    assert_eq!(answered.status(), StatusCode::REQUEST_TIMEOUT);
+    drop(t3);
 }
