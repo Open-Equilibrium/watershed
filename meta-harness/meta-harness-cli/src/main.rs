@@ -97,7 +97,7 @@ fn status_text(status: &api::Status) -> String {
     if !status.reconciled {
         text.push_str(&format!(
             "\nThe harness homes are not reconciled with revision {}: approving a change writes \
-             them again first, and is refused while that fails.",
+             the new revision into them, and is refused while that fails.",
             status.revision
         ));
     }

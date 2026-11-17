@@ -405,12 +405,11 @@ fn a_failed_rollback_is_reported_with_the_failure_that_caused_it() {
 }
 
 #[test]
-fn a_failed_rollback_refuses_approvals_until_the_current_revision_is_written() {
+fn a_failed_rollback_leaves_the_homes_unreconciled_until_an_approval_writes_them() {
     let fixture = Fixture::new();
     let store = &fixture.store;
     let first = propose(store, vec![instruction("rules", "x")]);
     let second = propose(store, vec![instruction("more", "y")]);
-    let before = store.current().unwrap();
     let raw = rusqlite::Connection::open(fixture.dir.join("meta-harness.sqlite")).unwrap();
     raw.execute_batch(
         "CREATE TRIGGER refuse BEFORE INSERT ON revision BEGIN SELECT RAISE(ABORT, 'refused'); END;",
@@ -430,19 +429,14 @@ fn a_failed_rollback_refuses_approvals_until_the_current_revision_is_written() {
     assert!(!store.reconciled());
 
     raw.execute_batch("DROP TRIGGER refuse").unwrap();
-    // While the homes refuse writes, the next approval is refused and says what to do.
+    // The homes still refuse writes, so the next approval's own write fails and it is refused.
     let refused = store
         .approve("cli", second, |_| Err("the homes refuse writes".to_owned()))
         .unwrap_err();
-    assert!(
-        refused.starts_with("The harness homes could not be brought back")
-            && refused.contains("the homes refuse writes")
-            && refused.ends_with("Fix that, then approve again."),
-        "{refused}"
-    );
+    assert!(refused.contains("the homes refuse writes"), "{refused}");
     assert!(!store.reconciled());
 
-    // A write of the current revision comes first; once it succeeds, the approval goes on.
+    // Once the homes take the approved revision, the approval's write puts it in and reconciles.
     let written = std::cell::RefCell::new(Vec::new());
     store
         .approve("cli", second, |blocks| {
@@ -451,8 +445,35 @@ fn a_failed_rollback_refuses_approvals_until_the_current_revision_is_written() {
         })
         .unwrap();
     let written = written.into_inner();
-    assert_eq!(written.len(), 2);
-    assert_eq!(written[0], before.blocks);
+    assert_eq!(written.len(), 1);
+    assert!(written[0].instructions.contains_key("more"));
     assert!(store.reconciled());
     assert_eq!(store.current().unwrap().revision, 1);
+}
+#[test]
+fn a_revert_is_approved_while_the_homes_refuse_the_current_revision() {
+    let fixture = Fixture::new();
+    let store = &fixture.store;
+    let rules = propose(store, vec![instruction("rules", "x")]);
+    store.approve("cli", rules, |_| Ok(())).unwrap();
+    // The service starts with homes that refuse the current revision, which records it.
+    store.set_reconciled(false);
+    let revert = store
+        .propose("cli", "back to the start", Proposed::Restore(0))
+        .unwrap();
+    let written = std::cell::RefCell::new(Vec::new());
+    let approved = store
+        .approve("cli", revert, |blocks| {
+            written.borrow_mut().push(blocks.clone());
+            if blocks.instructions.is_empty() {
+                Ok(())
+            } else {
+                Err("the homes refuse revision 1".to_owned())
+            }
+        })
+        .unwrap();
+    assert_eq!(approved.revision, 2);
+    assert!(store.reconciled());
+    // Only the approval's own write reached the homes.
+    assert_eq!(written.into_inner(), vec![Blocks::default()]);
 }

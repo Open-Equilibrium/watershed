@@ -185,7 +185,8 @@ impl Store {
     }
 
     /// Whether the harness homes hold the current revision. A failed write that its restore could
-    /// not undo leaves them not reconciled, until a write of the current revision succeeds.
+    /// not undo leaves them not reconciled, until a later write succeeds: an approval's, or the
+    /// service's at start.
     pub fn reconciled(&self) -> bool {
         self.reconciled.load(Ordering::SeqCst)
     }
@@ -272,8 +273,7 @@ impl Store {
     /// makes a new one once `write` put its blocks into the harness homes. While `write` runs, no
     /// other approval does, so the homes always end on the current revision; if it fails, nothing
     /// is approved and `write` puts the current revision back. If that restore fails too, the homes
-    /// are not reconciled: each approval then first writes the current revision, and is refused
-    /// while that fails.
+    /// are not reconciled until an approval's write succeeds, which puts its whole revision in.
     pub fn approve(
         &self,
         client: &str,
@@ -284,15 +284,6 @@ impl Store {
         let tx = db.transaction().map_err(failed)?;
         let proposed: Proposed = parse(&undecided(&tx, number)?)?;
         let base = current(&tx)?;
-        if !self.reconciled() {
-            write(&base.blocks).map_err(|error| {
-                format!(
-                    "The harness homes could not be brought back to the current configuration, so \
-                     no change is approved. {error}. Fix that, then approve again."
-                )
-            })?;
-            self.set_reconciled(true);
-        }
         let blocks = match proposed {
             Proposed::Changes(changes) => {
                 let mut blocks = base.blocks.clone();
@@ -324,14 +315,20 @@ impl Store {
             )?;
             tx.commit().map_err(failed)
         });
-        if let Err(error) = recorded {
-            return Err(match write(&base.blocks) {
-                Ok(()) => error,
-                Err(restore) => {
-                    self.set_reconciled(false);
-                    format!("{error}. The harness homes could not be restored: {restore}")
-                }
-            });
+        match recorded {
+            Ok(()) => self.set_reconciled(true),
+            Err(error) => {
+                return Err(match write(&base.blocks) {
+                    Ok(()) => {
+                        self.set_reconciled(true);
+                        error
+                    }
+                    Err(restore) => {
+                        self.set_reconciled(false);
+                        format!("{error}. The harness homes could not be restored: {restore}")
+                    }
+                });
+            }
         }
         Ok(Current { revision, blocks })
     }
