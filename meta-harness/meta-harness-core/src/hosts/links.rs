@@ -179,6 +179,9 @@ pub(crate) struct Links {
     t3_home: PathBuf,
     /// The tunnel listeners by host name; a host's tunnel stops when it is removed.
     tunnels: Mutex<HashMap<String, JoinHandle<()>>>,
+    /// Held while a link is added, removed or made again, so that one change finishes before the
+    /// next reads the hosts it changes.
+    serial: tokio::sync::Mutex<()>,
 }
 
 impl Links {
@@ -189,6 +192,7 @@ impl Links {
             t3,
             t3_home,
             tunnels: Mutex::default(),
+            serial: tokio::sync::Mutex::default(),
         }
     }
 
@@ -216,6 +220,7 @@ impl Links {
         code: &str,
         access: Option<Access>,
     ) -> Result<(String, Access), String> {
+        let _serial = self.serial.lock().await;
         if let Some(name) = linked_at(&store.db(), address)? {
             return Err(format!(
                 "{address} is linked already, as {name}; \"meta host remove {name}\" unlinks it first."
@@ -272,6 +277,7 @@ impl Links {
 
     /// Unlinks the host `name`: its T3 forgets the link, its tunnel stops and it is removed.
     pub(crate) async fn remove(&self, store: &Store, name: &str) -> Result<(), String> {
+        let _serial = self.serial.lock().await;
         let host = linked_named(&store.db(), name)?
             .ok_or_else(|| format!("There is no linked host named {name}."))?;
         let url = tunnel_url(host.tunnel_port);
@@ -310,6 +316,8 @@ impl Links {
     /// Links again each host whose link is due (see [`is_due`]). A host that does not answer is
     /// tried again at the next pass, and reported meanwhile.
     pub(crate) async fn relink_due(&self, store: &Store) {
+        // Read under the lock, so a host removed meanwhile is not linked again.
+        let _serial = self.serial.lock().await;
         let due: Vec<LinkedHost> = match linked(&store.db()) {
             Ok(hosts) => hosts
                 .into_iter()
