@@ -340,7 +340,12 @@ impl Links {
             self.forget(store, name)?;
             return Err(error);
         }
-        set_linked(&store.db(), name, now_ms())
+        // The link is made, so a time that cannot be stored is reported and no more: a link with no
+        // time is due, and the next relink pass makes it again.
+        if let Err(error) = set_linked(&store.db(), name, now_ms()) {
+            eprintln!("meta: could not record the link to {name}: {error}");
+        }
+        Ok(())
     }
 
     /// Unlinks the host `name`: its T3 forgets the link, its tunnel stops and it is removed. Answers

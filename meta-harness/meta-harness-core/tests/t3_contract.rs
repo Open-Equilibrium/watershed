@@ -1607,6 +1607,33 @@ async fn a_host_asking_for_less_than_its_invite_names_its_pairing_and_level() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_link_made_is_reported_made_even_when_its_time_cannot_be_stored() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
+    let (_a, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let port_b = free_port();
+    a.remote_on(free_port()).await.unwrap();
+    b.remote_on(port_b).await.unwrap();
+    a.host_agents(true).await.unwrap();
+    b.host_agents(true).await.unwrap();
+    // Every update of a link's row fails, as a store that cannot be written does.
+    rusqlite::Connection::open(home_a.join("meta-harness.sqlite"))
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER refuse_link_time BEFORE UPDATE ON peer \
+             BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+        )
+        .unwrap();
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let (name, _) = a
+        .host_add(&format!("ws://127.0.0.1:{port_b}"), &code, None)
+        .await
+        .expect("the link is made, so the add reports it");
+    assert!(a.hosts().await.unwrap().hosts[0].reachable, "{name}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_host_link_older_than_25_days_is_made_again_when_the_service_starts() {
     let (dir, _repo, _home) = fixture();
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
