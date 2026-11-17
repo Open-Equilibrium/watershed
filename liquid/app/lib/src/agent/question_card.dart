@@ -50,6 +50,10 @@ class _QuestionCardState extends State<QuestionCard> with ReadDelay {
     return typed.isNotEmpty ? [typed] : _chosen[question.id] ?? const [];
   }
 
+  /// Whether a question's answer is the typed text, which the agent gets as written.
+  bool _isTyped(BridgeQuestion question) =>
+      (_typed[question.id] ?? '').trim().isNotEmpty;
+
   bool get _answered => _values(_question).isNotEmpty;
   bool get _complete => _questions.every((q) => _values(q).isNotEmpty);
 
@@ -106,7 +110,11 @@ class _QuestionCardState extends State<QuestionCard> with ReadDelay {
   void _send() => decided(
     () => widget.state.answer(widget.request, [
       for (final question in _questions)
-        BridgeQuestionAnswer(question: question.id, values: _values(question)),
+        BridgeQuestionAnswer(
+          question: question.id,
+          values: _values(question),
+          typed: _isTyped(question),
+        ),
     ]),
   );
 

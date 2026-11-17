@@ -414,10 +414,17 @@ class BridgeQuestionAnswer {
   /// The chosen labels, or the typed text.
   final List<String> values;
 
-  const BridgeQuestionAnswer({required this.question, required this.values});
+  /// Whether `values` is the typed text, which goes to the agent as written.
+  final bool typed;
+
+  const BridgeQuestionAnswer({
+    required this.question,
+    required this.values,
+    required this.typed,
+  });
 
   @override
-  int get hashCode => question.hashCode ^ values.hashCode;
+  int get hashCode => question.hashCode ^ values.hashCode ^ typed.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -425,7 +432,8 @@ class BridgeQuestionAnswer {
       other is BridgeQuestionAnswer &&
           runtimeType == other.runtimeType &&
           question == other.question &&
-          values == other.values;
+          values == other.values &&
+          typed == other.typed;
 }
 
 /// A session as one subscription begins: its snapshot, and the id [`AgentSession::events`] streams

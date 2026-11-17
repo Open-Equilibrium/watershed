@@ -626,7 +626,7 @@ void main() {
         expect(state.request.value?.id, 'q1');
 
         await state.answer(question, [
-          BridgeQuestionAnswer(question: 'Which?', values: ['B']),
+          BridgeQuestionAnswer(question: 'Which?', values: ['B'], typed: false),
         ]);
         await emit(event(BridgeEventKind.requestResolved, 5, requestId: 'q1'));
         expect(

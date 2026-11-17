@@ -127,6 +127,8 @@ pub struct BridgeQuestionAnswer {
     pub question: String,
     /// The chosen labels, or the typed text.
     pub values: Vec<String>,
+    /// Whether `values` is the typed text, which goes to the agent as written.
+    pub typed: bool,
 }
 
 /// Runs `future` for a synchronous bridge call. Inside a multi-thread runtime, such as in a Rust
@@ -642,7 +644,7 @@ impl AgentSession {
         let answers: Vec<(String, Vec<String>)> = answers
             .into_iter()
             .map(|a| {
-                let values = convert::answer_values(&asked, &a.question, a.values);
+                let values = convert::answer_values(&asked, &a.question, a.values, a.typed);
                 (a.question, values)
             })
             .collect();
