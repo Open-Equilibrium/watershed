@@ -43,6 +43,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Meta-Harness API version** — The number a client names in the `meta-harness-api` header of its handshake; the service admits only its own ([V-Spec](docs/concept/V-Spec_MetaHarness.html#surfaces)).
 - **Remote access** — The service's listener on this computer's Tailscale addresses, off until a person turns it on (ADR-0299).
 - **Pairing code** — The single-use code that `meta invite` issues so that one device or host can pair with this computer's remote access (ADR-0299).
+- **Pairing name** — The name a device or host pairs under, unique among the clients paired here; T3 labels a host link's sessions with it, and `meta host revoke` names it (ADR-0300, ADR-0301).
 - **Access level** — The level at which a linked host's agents may act here, as T3 names them (`read-only` to `full-access`); the receiving host sets it when it invites the host, and a link may ask for less (ADR-0300).
 - **Device token** — The token a device keeps after pairing; what it may reach is in [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) (ADR-0299).
 - **Host token** — The token another host keeps after pairing; what it may reach is in [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) (ADR-0288, ADR-0299).
