@@ -193,6 +193,73 @@ void main() {
     expect(lastEdit().add, isEmpty);
   });
 
+  testWidgets('a board read during an eraser drag brings nothing back', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      WhiteboardPart([
+        stroke([for (var x = 100.0; x <= 300; x += 5) Offset(x, 100)]),
+      ]),
+    ]);
+    await focus(tester);
+    await key(tester, LogicalKeyboardKey.keyE);
+    final gesture = await tester.startGesture(
+      screen(tester, const Offset(150, 80)),
+      kind: PointerDeviceKind.mouse,
+    );
+    await gesture.moveTo(screen(tester, const Offset(150, 120)));
+    await tester.pump();
+    // A read another write started lands while the eraser is down.
+    await kit.boardOf(tester).read();
+    await tester.pump();
+    // Around, above the stroke, to cut it again further on.
+    await gesture.moveTo(screen(tester, const Offset(150, 60)));
+    await gesture.moveTo(screen(tester, const Offset(250, 60)));
+    await gesture.moveTo(screen(tester, const Offset(250, 120)));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    final edit = lastEdit();
+    expect(edit.remove, ['element 0']);
+    expect(edit.add, hasLength(3), reason: 'three pieces, none twice');
+  });
+
+  testWidgets('erasing part of a resized stroke keeps its pieces\' size', (
+    tester,
+  ) async {
+    final drawn = stroke([
+      for (var x = 100.0; x <= 300; x += 5) Offset(x, 100),
+    ]);
+    await kit.show(tester, [
+      WhiteboardPart([
+        BridgeElement(
+          kind: drawn.kind,
+          x: 100,
+          y: 100,
+          w: 400,
+          h: 0,
+          rotation: 0,
+          color: drawn.color,
+          width: drawn.width,
+          pen: drawn.pen,
+          points: drawn.points,
+          shape: drawn.shape,
+          seed: drawn.seed,
+          arrowhead: false,
+          corners: drawn.corners,
+          text: '',
+        ),
+      ]),
+    ]);
+    await focus(tester);
+    await key(tester, LogicalKeyboardKey.keyE);
+    await draw(tester, [const Offset(300, 80), const Offset(300, 120)]);
+    expect(lastEdit().add, hasLength(2));
+    for (final piece in lastEdit().add) {
+      final bounds = pointsBounds(unpackPoints(piece.points));
+      expect(piece.w / bounds.width, closeTo(2, 0.01), reason: 'still twice');
+    }
+  });
+
   testWidgets(
     'the lasso selects what it encloses; a drag moves it, ⌫ deletes',
     (tester) async {

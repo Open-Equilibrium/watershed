@@ -96,6 +96,23 @@ class BoardController extends ChangeNotifier {
 
   /// Edits sent and not yet read back.
   int _writing = 0;
+
+  /// Gestures under way, which a read must not overtake, and whether one was held back.
+  int _holds = 0;
+  var _heldRead = false;
+
+  /// Holds reads back while a gesture works on the elements as shown.
+  void hold() => _holds++;
+
+  /// Ends a gesture; a read held back meanwhile runs now, unless an edit's own read will.
+  void release() {
+    if (_holds > 0) _holds--;
+    if (_holds == 0 && _heldRead) {
+      _heldRead = false;
+      if (_writing == 0) unawaited(read());
+    }
+  }
+
   int _reads = 0;
   var _disposed = false;
 
@@ -113,6 +130,10 @@ class BoardController extends ChangeNotifier {
         query(BridgeQueryKind.whiteboard, page: views.page, block: view.block),
       );
       if (_disposed || asked != _reads || writing != _writing) return;
+      if (_holds > 0) {
+        _heldRead = true;
+        return;
+      }
       final board = answer.whiteboard;
       if (board == null) return;
       elements = board.elements;

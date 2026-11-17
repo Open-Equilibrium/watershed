@@ -142,7 +142,14 @@ class BoardSurfaceState extends State<BoardSurface> {
         _pointer = null;
         _startText(at);
     }
+    // A read during the gesture would put back what it took or moved.
+    if (_drag != _Drag.none && _drag != _Drag.pan) {
+      _held = true;
+      board.hold();
+    }
   }
+
+  var _held = false;
 
   void _move(PointerMoveEvent event) {
     if (event.pointer != _pointer) return;
@@ -202,6 +209,10 @@ class BoardSurfaceState extends State<BoardSurface> {
         _endTransform();
       case _Drag.pan || _Drag.none:
         break;
+    }
+    if (_held) {
+      _held = false;
+      board.release();
     }
     setState(() => _draft = Draft.none);
   }
@@ -419,21 +430,42 @@ class BoardSurfaceState extends State<BoardSurface> {
         _taken(element);
         continue;
       }
-      // The stroke's points on the board, cut where the eraser passes.
-      final points = [
-        for (final point in board.cache.points(element))
-          () {
-            final p = strokePoint(element, board.cache, point.offset);
-            return InkPoint(p.dx, p.dy, point.pressure);
-          }(),
-      ];
+      // The eraser in the stroke's own points, as drawn, so its pieces keep the
+      // stroke's size, stretch and turn.
+      final source = board.cache.bounds(element);
+      final sx = source.width == 0 ? 1.0 : element.w / source.width;
+      final sy = source.height == 0 ? 1.0 : element.h / source.height;
+      final local = unturned(element, at);
+      final drawn = Offset(
+        source.left + (local.dx - element.x) / sx,
+        source.top + (local.dy - element.y) / sy,
+      );
+      final scale = math.max(sx.abs(), sy.abs());
       final half = penSizes[element.width.clamp(0, 2)] / 2;
-      final pieces = eraseInside(points, at, radius, halfWidth: half);
+      final pieces = eraseInside(
+        board.cache.points(element),
+        drawn,
+        radius / (scale == 0 ? 1 : scale),
+        halfWidth: half,
+      );
       _taken(element);
       for (final piece in pieces) {
+        final bounds = pointsBounds(piece);
+        final unturnedFrame = Rect.fromLTWH(
+          element.x + (bounds.left - source.left) * sx,
+          element.y + (bounds.top - source.top) * sy,
+          bounds.width * sx,
+          bounds.height * sy,
+        );
+        // Turned about its own center, the piece lies where it lay in the stroke.
         final made = newElement(
           BridgeElementKind.stroke,
-          frame: pointsBounds(piece),
+          frame: Rect.fromCenter(
+            center: turned(element, unturnedFrame.center),
+            width: unturnedFrame.width,
+            height: unturnedFrame.height,
+          ),
+          rotation: element.rotation,
           color: element.color,
           width: element.width,
           pen: element.pen,
@@ -447,7 +479,7 @@ class BoardSurfaceState extends State<BoardSurface> {
           y: made.y,
           w: made.w,
           h: made.h,
-          rotation: 0,
+          rotation: made.rotation,
           color: made.color,
           width: made.width,
           pen: made.pen,
@@ -488,7 +520,7 @@ class BoardSurfaceState extends State<BoardSurface> {
           y: piece.y,
           w: piece.w,
           h: piece.h,
-          rotation: 0,
+          rotation: piece.rotation,
           color: piece.color,
           width: piece.width,
           pen: piece.pen,
