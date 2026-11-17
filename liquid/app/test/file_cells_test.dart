@@ -278,6 +278,31 @@ void main() {
     },
   );
 
+  testWidgets('a file removed after an add stays removed on the next add', (
+    tester,
+  ) async {
+    await bookings(tester, () async => const []);
+    for (final name in ['A.pdf', 'B.pdf']) {
+      kit.fake.files['/Users/me/$name'] = Uint8List(3);
+    }
+    Future<void> paste(String name) async {
+      readClipboard = () async => Pasted(files: ['/Users/me/$name']);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+    }
+
+    await tester.tap(fileCell('r2'));
+    await tester.pumpAndSettle();
+    await paste('A.pdf');
+    expect(lastWrite(), 'r2: A.pdf');
+    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+    await tester.pumpAndSettle();
+    await paste('B.pdf');
+    expect(lastWrite(), 'r2: B.pdf');
+  });
+
   testWidgets('a cell takes at most 100 files', (tester) async {
     await bookings(tester, () async => [await stored('Hotel.eml', 1)]);
     kit.fake.files['/Users/me/a.pdf'] = Uint8List(1);

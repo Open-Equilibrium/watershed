@@ -268,7 +268,10 @@ class CellSelection extends ChangeNotifier {
   void removeFile(int index) {
     if (_target case (final row, final field, final cell?)
         when cell.kind == BridgeCellKind.files && index < cell.files.length) {
-      final files = [...cell.files]..removeAt(index);
+      // From the files an add wrote, if a read does not show them yet.
+      final held = _written[(row.id, field.id)] ?? cell.files;
+      if (index >= held.length) return;
+      final files = [...held]..removeAt(index);
       _write(
         row,
         field,
@@ -589,18 +592,29 @@ class CellSelection extends ChangeNotifier {
     );
   }
 
-  void _write(BridgeRow row, BridgeField field, BridgeCell cell) =>
-      write(row, field, cell).then<void>((_) {}, onError: (Object _) {});
+  /// Writes a cell; any other write to a file cell supersedes the list an add wrote.
+  void _write(BridgeRow row, BridgeField field, BridgeCell cell) {
+    _written.remove((row.id, field.id));
+    write(row, field, cell).then<void>((_) {}, onError: (Object _) {});
+  }
 
-  /// Forgets the ticks a read now shows, looking only at the rows read.
-  void read(int? Function(String row) rowIndex) =>
-      _ticks.removeWhere((at, checked) {
-        final index = rowIndex(at.$1);
-        final row = index == null ? null : rowAt(index);
-        if (row == null) return false;
-        final cell = row.cells.where((cell) => cell.field == at.$2).firstOrNull;
-        return (cell?.value.checked ?? false) == checked;
-      });
+  /// Forgets the ticks and file lists a read now shows, looking only at the rows read.
+  void read(int? Function(String row) rowIndex) {
+    BridgeCell? shown((String, String) at) {
+      final index = rowIndex(at.$1);
+      final row = index == null ? null : rowAt(index);
+      return row?.cells.where((cell) => cell.field == at.$2).firstOrNull?.value;
+    }
+
+    _ticks.removeWhere((at, checked) {
+      final index = rowIndex(at.$1);
+      if (index == null || rowAt(index) == null) return false;
+      return (shown(at)?.checked ?? false) == checked;
+    });
+    _written.removeWhere(
+      (at, files) => _sameFiles(shown(at)?.files ?? const [], files),
+    );
+  }
 
   /// ⏎ keeps the edit and selects the cell, ⇥ keeps it and selects the next one, esc
   /// undoes it; the rest is typing.
