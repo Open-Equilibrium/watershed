@@ -295,3 +295,18 @@ async fn a_client_whose_t3_stays_gone_closes_for_good() {
     assert!(ended.is_none());
     assert!(client.call("x", json!({})).await.is_err());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dropped_call_forgets_its_waiter() {
+    let fake = Fake::start(|_, _, _| Vec::new()).await;
+    let client = connect(&fake).await;
+    let call = tokio::spawn({
+        let client = client.clone();
+        async move { client.call("slow", json!({})).await }
+    });
+    fake.received("slow", 1).await;
+    assert_eq!(client.waiting(), 1);
+    call.abort();
+    assert!(call.await.unwrap_err().is_cancelled());
+    assert_eq!(client.waiting(), 0);
+}

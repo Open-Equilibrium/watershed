@@ -79,6 +79,19 @@ pub(crate) struct Client {
     next: Arc<AtomicU64>,
 }
 
+/// A call's waiter, removed when the call's future ends before its reply: a dropped call would
+/// otherwise keep an entry that no reply removes.
+struct Waiting {
+    link: Link,
+    id: String,
+}
+
+impl Drop for Waiting {
+    fn drop(&mut self) {
+        lock(&self.link).waiters.remove(&self.id);
+    }
+}
+
 /// An open stream request and its items, as T3 sends them. Dropped, it tells T3 to stop the request
 /// (Effect RPC's `Interrupt`) and forgets it.
 pub(crate) struct Subscription {
@@ -155,6 +168,10 @@ impl Client {
         let id = self.next_id();
         let (reply, answer) = oneshot::channel();
         self.request(&id, &request_frame(&id, tag, payload), Waiter::Call(reply))?;
+        let _waiter = Waiting {
+            link: self.link.clone(),
+            id,
+        };
         answer
             .await
             .map_err(|_| "T3 connection is closed".to_owned())?
