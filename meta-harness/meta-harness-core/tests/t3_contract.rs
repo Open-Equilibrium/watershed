@@ -964,6 +964,36 @@ async fn connects(url: &str, token: &str, name: &str) -> bool {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn turning_remote_access_off_ends_the_connections_it_admitted() {
+    let (dir, _repo, _home) = fixture();
+    let (_service, local) = start_service(&dir.path().join("meta")).await;
+    let port = free_port();
+    local.remote_on(port).await.unwrap();
+    let url = format!("ws://127.0.0.1:{port}");
+    let code = local
+        .invite(ClientKind::Device, Access::Auto)
+        .await
+        .unwrap();
+    let token = remote::pair(&url, &code, "phone").await.unwrap().token;
+    let device = remote::Host::connect_to(&url, &token, "phone")
+        .await
+        .unwrap();
+    device.status().await.unwrap();
+
+    local.remote_off().await.unwrap();
+    let ended = tokio::time::timeout(Duration::from_secs(10), async {
+        while device.status().await.is_ok() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    assert!(
+        ended.is_ok(),
+        "the device's connection ended with remote access"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_device_pairs_once_and_keeps_its_access_across_a_restart_while_a_host_only_asks_for_a_pairing_code()
  {
     let (_dir, _repo, home) = fixture();

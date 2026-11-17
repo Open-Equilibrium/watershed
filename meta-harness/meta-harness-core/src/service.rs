@@ -196,7 +196,12 @@ impl Service {
             eprintln!("meta: remote access is off: {error}");
         }
         shared.links.start_tunnels(&shared.store).await?;
-        let accept = tokio::spawn(accept(listener, shared.clone(), Listener::Local));
+        let accept = tokio::spawn(accept(
+            listener,
+            shared.clone(),
+            Listener::Local,
+            shared.stopping.clone(),
+        ));
         let relink = tokio::spawn(relink(shared.clone()));
         Ok(Self {
             url,
@@ -283,15 +288,28 @@ async fn relink(shared: Arc<Shared>) {
 }
 
 /// Serves each connection that `listener` accepts, until the task ends.
-async fn accept(listener: TcpListener, shared: Arc<Shared>, kind: Listener) {
-    crate::util::accept_each(listener, move |socket| serve(shared.clone(), socket, kind)).await;
+async fn accept(
+    listener: TcpListener,
+    shared: Arc<Shared>,
+    kind: Listener,
+    ends: tokio::sync::watch::Receiver<bool>,
+) {
+    crate::util::accept_each(listener, move |socket| {
+        serve(shared.clone(), socket, kind, ends.clone())
+    })
+    .await;
 }
 
 /// One client connection: its handshake must admit it (see [`admit`]); then each request runs on
 /// its own task, and streams end when the client cancels them or leaves.
 // tungstenite's handshake callback returns its own large error response.
 #[allow(clippy::result_large_err)]
-async fn serve(shared: Arc<Shared>, socket: TcpStream, listener: Listener) {
+async fn serve(
+    shared: Arc<Shared>,
+    socket: TcpStream,
+    listener: Listener,
+    ends: tokio::sync::watch::Receiver<bool>,
+) {
     let mut client = String::new();
     let mut admission = None;
     let check = |request: &Request, response: Response| -> Result<Response, ErrorResponse> {
@@ -316,11 +334,11 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream, listener: Listener) {
         Some(Admission::Session(caller, owner)) => (caller, owner),
         Some(Admission::Tunnel(owner, access)) => {
             let mut revocations = shared.revoked.subscribe();
-            let mut stopping = shared.stopping.clone();
+            let mut ends = ends.clone();
             tokio::select! {
                 () = tunnel::serve(socket, shared.host.t3_address().to_owned(), access) => {}
                 () = revoked(&mut revocations, Some(&owner)) => {}
-                _ = stopping.wait_for(|stopped| *stopped) => {}
+                _ = ends.wait_for(|stopped| *stopped) => {}
             }
             return;
         }
@@ -346,7 +364,7 @@ async fn serve(shared: Arc<Shared>, socket: TcpStream, listener: Listener) {
             }
         }
     });
-    let mut stopping = shared.stopping.clone();
+    let mut stopping = ends;
     let mut revocations = shared.revoked.subscribe();
     let session = Arc::new(Session {
         shared,

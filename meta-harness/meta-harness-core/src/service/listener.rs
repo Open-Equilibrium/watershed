@@ -21,6 +21,8 @@ pub(super) struct Listening {
     port: u16,
     addresses: Vec<SocketAddr>,
     tasks: Vec<JoinHandle<()>>,
+    /// The connections it admitted watch this channel, which closes when the listener is dropped.
+    ends: tokio::sync::watch::Sender<bool>,
 }
 
 impl Drop for Listening {
@@ -63,10 +65,12 @@ fn serve_on(
     port: u16,
     sockets: Vec<std::net::TcpListener>,
 ) -> Result<Listening, String> {
+    let (ends, _) = tokio::sync::watch::channel(false);
     let mut listening = Listening {
         port,
         addresses: Vec::new(),
         tasks: Vec::new(),
+        ends,
     };
     for socket in sockets {
         listening.addresses.extend(socket.local_addr().ok());
@@ -76,6 +80,7 @@ fn serve_on(
             listener,
             shared.clone(),
             Listener::Remote,
+            listening.ends.subscribe(),
         )));
     }
     Ok(listening)
