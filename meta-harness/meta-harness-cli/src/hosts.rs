@@ -18,7 +18,10 @@ pub async fn remote(host: &remote::Host, args: &[&str]) -> Result<(), String> {
         }
         ["status"] => {
             match host.remote_status().await? {
-                Some(status) => println!("Remote access is on at {}.", status.addresses.join(", ")),
+                Some(status) => match status.waiting {
+                    Some(reason) => println!("Remote access is on, not listening yet: {reason}"),
+                    None => println!("Remote access is on at {}.", status.addresses.join(", ")),
+                },
                 None => println!("Remote access is off."),
             }
             Ok(())
@@ -42,6 +45,9 @@ pub async fn invite(host: &remote::Host, args: &[&str]) -> Result<(), String> {
         .remote_status()
         .await?
         .ok_or("Remote access is off; turn it on first with meta remote on.")?;
+    if let Some(reason) = status.waiting {
+        return Err(format!("Remote access is on, not listening yet: {reason}"));
+    }
     let code = host.invite(kind, access).await?;
     println!("Pairing code {code}, valid for 5 minutes and for one use.");
     for address in &status.addresses {

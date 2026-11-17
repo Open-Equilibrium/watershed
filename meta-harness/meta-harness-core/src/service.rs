@@ -94,6 +94,7 @@ pub struct Service {
     shared: Arc<Shared>,
     accept: JoinHandle<()>,
     relink: JoinHandle<()>,
+    retry: JoinHandle<()>,
     stopping: tokio::sync::watch::Sender<bool>,
     connection_file: PathBuf,
 }
@@ -115,7 +116,10 @@ struct Shared {
     /// Where the remote listener binds; `None` for the Tailscale addresses.
     remote_bind: Option<Vec<IpAddr>>,
     /// The remote listener while remote access is on.
-    remote: std::sync::Mutex<Option<listener::Listening>>,
+    remote: std::sync::Mutex<listener::Remote>,
+    /// Held while remote access is turned on or off, or bound again, so those changes do not
+    /// interleave.
+    remote_serial: tokio::sync::Mutex<()>,
     /// The hosts this one links to and their tunnels.
     links: Links,
     /// The handshake slots of the remote listener (see [`HANDSHAKES`]).
@@ -191,16 +195,17 @@ impl Service {
             revoked,
             name,
             remote_bind,
-            remote: std::sync::Mutex::new(None),
+            remote: std::sync::Mutex::new(listener::Remote::default()),
+            remote_serial: tokio::sync::Mutex::default(),
             links,
             handshakes: Arc::new(tokio::sync::Semaphore::new(HANDSHAKES)),
         });
-        // Remote access stays on across restarts (ADR-0299); a port it cannot take is reported.
+        // Remote access stays on across restarts (ADR-0299); a port it cannot take is retried.
         let remembered = hosts::remote_port(&shared.store.db())?;
         if let Some(port) = remembered
             && let Err(error) = listener::start(&shared, port).await
         {
-            eprintln!("meta: remote access is off: {error}");
+            eprintln!("meta: remote access is not listening yet: {error}");
         }
         shared.links.start_tunnels(&shared.store).await?;
         let accept = tokio::spawn(accept(
@@ -210,6 +215,7 @@ impl Service {
             shared.stopping.clone(),
         ));
         let relink = tokio::spawn(relink(shared.clone()));
+        let retry = tokio::spawn(listener::retry(shared.clone()));
         Ok(Self {
             url,
             token,
@@ -217,6 +223,7 @@ impl Service {
             shared,
             accept,
             relink,
+            retry,
             stopping,
             connection_file,
         })
@@ -236,9 +243,10 @@ impl Drop for Service {
     fn drop(&mut self) {
         self.accept.abort();
         self.relink.abort();
+        self.retry.abort();
         self.shared.links.stop();
         // The remote listener's tasks hold the shared state, so they end with it.
-        drop(crate::util::lock(&self.shared.remote).take());
+        drop(crate::util::lock(&self.shared.remote).listening.take());
         let _ = self.stopping.send(true);
         let _ = std::fs::remove_file(&self.connection_file);
     }

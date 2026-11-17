@@ -342,4 +342,6 @@ pub struct RemoteStatus {
     pub port: u16,
     /// Each address, as `ws://<ip>:<port>`, which a host or device names to reach it.
     pub addresses: Vec<String>,
+    /// Why remote access is on but does not listen yet, such as a port that another program holds.
+    pub waiting: Option<String>,
 }

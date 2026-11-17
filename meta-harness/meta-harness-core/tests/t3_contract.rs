@@ -964,6 +964,48 @@ async fn connects(url: &str, token: &str, name: &str) -> bool {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn remote_access_refuses_port_zero() {
+    let (dir, _repo, _home) = fixture();
+    let (_service, local) = start_service(&dir.path().join("meta")).await;
+    assert!(
+        local.remote_on(0).await.is_err(),
+        "port 0 is no port to listen on"
+    );
+    assert!(local.remote_status().await.unwrap().is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn remote_access_that_cannot_bind_at_start_says_so_and_binds_once_the_port_is_free() {
+    let (dir, _repo, _home) = fixture();
+    let meta = dir.path().join("meta");
+    let (service, local) = start_service(&meta).await;
+    let port = free_port();
+    local.remote_on(port).await.unwrap();
+    drop(local);
+    service.stop().await;
+    // Another program holds the port while the service starts.
+    let holder = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+    let (service, local) = start_service(&meta).await;
+    let waiting = local.remote_status().await.unwrap().expect("still on");
+    assert!(waiting.addresses.is_empty());
+    assert!(waiting.waiting.is_some(), "on, not listening yet");
+    drop(holder);
+    // Binding is tried again every 30 seconds, so the listener comes up within a minute.
+    let listening = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let status = local.remote_status().await.unwrap().expect("still on");
+            if status.waiting.is_none() {
+                return status;
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    })
+    .await;
+    assert!(listening.is_ok(), "bound again");
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn the_remote_listener_closes_a_handshake_beyond_its_limit_at_once() {
     let (dir, _repo, _home) = fixture();
     let (_service, local) = start_service(&dir.path().join("meta")).await;
