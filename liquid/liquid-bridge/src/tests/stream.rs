@@ -60,6 +60,26 @@ fn delta(item: u64, delta: &str) -> ThreadEvent {
     })
 }
 
+/// A bridge event that appends `text` to item 1 at `sequence`.
+fn delta_at(sequence: u64, text: &str) -> BridgeEvent {
+    BridgeEvent::from(ThreadEvent {
+        sequence,
+        event: AgentEvent::ContentDelta {
+            item: ItemId(1),
+            delta: text.to_owned(),
+        },
+    })
+}
+
+/// The text of each pending event, in order.
+fn pending_text(outbox: &Outbox) -> Vec<String> {
+    outbox
+        .pending
+        .iter()
+        .filter_map(|event| event.text.clone())
+        .collect()
+}
+
 /// Starts forwarding a session's events under `credit`; the events are sent in, and what the
 /// sink receives comes out.
 fn start_forwarding(
@@ -122,8 +142,9 @@ fn gathers_streaming_text_until_its_window_passes() {
             sender.send(delta("late")).await.expect("sent");
         });
         let mut outbox = Outbox::default();
-        outbox.admit(BridgeEvent::from(delta("0")));
-        gather(&mut outbox, &mut receiver, async {
+        let credit = Credit::default();
+        outbox.admit(BridgeEvent::from(delta("0")), &credit);
+        gather(&mut outbox, &mut receiver, &credit, async {
             let _ = window.await;
         })
         .await;
@@ -155,8 +176,9 @@ fn gathers_streaming_text_until_its_window_passes() {
             .await
             .expect("sent");
         let mut outbox = Outbox::default();
-        outbox.admit(BridgeEvent::from(delta("0")));
-        gather(&mut outbox, &mut receiver, std::future::pending()).await;
+        let credit = Credit::default();
+        outbox.admit(BridgeEvent::from(delta("0")), &credit);
+        gather(&mut outbox, &mut receiver, &credit, std::future::pending()).await;
         assert_eq!(outbox.pending.len(), 2);
     });
 }
@@ -230,7 +252,7 @@ fn merges_consecutive_deltas_of_one_item() {
         })),
         delta(2, "!"),
     ] {
-        push(&mut merged, event);
+        push(&mut merged, event, Some(0));
     }
     let summary: Vec<_> = merged
         .iter()
@@ -283,6 +305,31 @@ fn holds_events_beyond_the_window_until_liquid_confirms() {
             "a confirmation reopens the window for what waits"
         );
     });
+}
+
+#[test]
+fn deltas_on_either_side_of_a_recovery_snapshot_stay_apart() {
+    let credit = Credit::default();
+    let mut outbox = Outbox::default();
+    outbox.admit(delta_at(1, "A"), &credit);
+    // Liquid restores from a snapshot at sequence 1, which holds "A"; "B" comes after it, so
+    // merging the two would replay "A".
+    credit.begin_snapshot();
+    credit.end_snapshot(Some(1));
+    outbox.admit(delta_at(2, "B"), &credit);
+    assert_eq!(pending_text(&outbox), ["A", "B"]);
+}
+
+#[test]
+fn deltas_taken_while_a_recovery_snapshot_is_taken_stay_apart() {
+    let credit = Credit::default();
+    let mut outbox = Outbox::default();
+    credit.begin_snapshot();
+    outbox.admit(delta_at(1, "A"), &credit);
+    outbox.admit(delta_at(2, "B"), &credit);
+    // Either delta may fall before the snapshot's sequence, so neither merges with the other.
+    credit.end_snapshot(Some(2));
+    assert_eq!(pending_text(&outbox), ["A", "B"]);
 }
 
 #[test]
@@ -349,6 +396,78 @@ fn closing_the_credit_releases_a_forwarder_that_waits_for_the_next_event() {
             Arc::strong_count(&probe),
             1,
             "the forwarder released its sink"
+        );
+    });
+}
+
+#[test]
+fn closing_the_credit_releases_every_forwarder_that_shares_it() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        // Two forwarders of one session, each idle on a subscription that stays open.
+        let mut senders = Vec::new();
+        let mut forwarding = Vec::new();
+        for _ in 0..2 {
+            let (sender, receiver) = tokio::sync::mpsc::channel(16);
+            senders.push(sender);
+            forwarding.push(tokio::spawn(forward(
+                receiver,
+                || std::future::ready(Some(never())),
+                credit.clone(),
+                |_event| true,
+            )));
+        }
+        settle().await;
+        credit.close();
+        for forwarding in forwarding {
+            tokio::time::timeout(Duration::from_secs(1), forwarding)
+                .await
+                .expect("each forwarder returns once the session closed")
+                .expect("forward completes");
+        }
+    });
+}
+
+#[test]
+fn closing_the_credit_ends_a_resubscription_that_is_still_pending() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let probe = Arc::new(());
+        let held = probe.clone();
+        let (entered, mut reached) = tokio::sync::mpsc::unbounded_channel();
+        let (sender, receiver) = tokio::sync::mpsc::channel(16);
+        // The subscription closes, and the resubscription that replaces it never answers.
+        let forwarding = tokio::spawn(forward(
+            receiver,
+            move || {
+                let _ = entered.send(());
+                let held = held.clone();
+                async move {
+                    let _held = held;
+                    std::future::pending::<Option<tokio::sync::mpsc::Receiver<ThreadEvent>>>().await
+                }
+            },
+            credit.clone(),
+            |_event| true,
+        ));
+        drop(sender);
+        reached.recv().await.expect("the resubscription starts");
+        // An ordinary confirmation does not end the attempt; only the session's drop does.
+        credit.confirm(0);
+        settle().await;
+        assert!(
+            !forwarding.is_finished(),
+            "the resubscription is still pending"
+        );
+        credit.close();
+        tokio::time::timeout(Duration::from_secs(1), forwarding)
+            .await
+            .expect("forward returns once the session closed, while the resubscription waits")
+            .expect("forward completes");
+        assert_eq!(
+            Arc::strong_count(&probe),
+            1,
+            "the pending resubscription was released"
         );
     });
 }

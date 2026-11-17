@@ -7,7 +7,9 @@ void main() {
   testWidgets('shows a launch problem in place of the shell', (tester) async {
     await tester.pumpWidget(
       const LiquidApp(
-        launch: Launch.problem('Start Liquid with LIQUID_PROJECT set to a project directory.'),
+        launch: Launch.problem(
+          'Start Liquid with LIQUID_PROJECT set to a project directory.',
+        ),
       ),
     );
     expect(

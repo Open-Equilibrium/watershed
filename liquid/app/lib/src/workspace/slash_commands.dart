@@ -4,29 +4,40 @@ import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
-import 'page_editor.dart' show markdownShortcuts;
+import 'page_editor.dart' show codeShortcut, markdownShortcuts;
 
-/// A slash command: a Text Block style, or a Table without one.
+/// A slash command: a Text Block style, or a Block of another kind without one.
 @immutable
 class SlashCommand {
-  const SlashCommand(this.label, this.icon, {this.style, this.description});
+  const SlashCommand(
+    this.label,
+    this.icon, {
+    this.style,
+    this.block,
+    this.description,
+  });
 
   final String label;
   final IconData icon;
   final BridgeTextStyle? style;
 
+  /// The kind of Block it adds, for a command without a style.
+  final BridgeBlockKind? block;
+
   /// What it holds, under its label.
   final String? description;
 
-  /// The Markdown shortcut that formats the same way.
-  String? get shortcut => markdownShortcuts.entries
-      .where((shortcut) => shortcut.value == style)
-      .firstOrNull
-      ?.key
-      .trimRight();
+  /// The Markdown shortcut that does the same.
+  String? get shortcut => block == BridgeBlockKind.code
+      ? codeShortcut
+      : markdownShortcuts.entries
+            .where((shortcut) => style != null && shortcut.value == style)
+            .firstOrNull
+            ?.key
+            .trimRight();
 }
 
-/// The slash commands in order: the Text Block styles, then Table.
+/// The slash commands in order: the Text Block styles, then the other Blocks.
 const slashCommands = [
   SlashCommand('Text', LucideIcons.text, style: BridgeTextStyle.paragraph),
   SlashCommand(
@@ -60,7 +71,18 @@ const slashCommands = [
     style: BridgeTextStyle.todo,
   ),
   SlashCommand('Quote', LucideIcons.textQuote, style: BridgeTextStyle.quote),
-  SlashCommand('Table', LucideIcons.table, description: 'Fields and rows'),
+  SlashCommand(
+    'Table',
+    LucideIcons.table,
+    block: BridgeBlockKind.database,
+    description: 'Fields and rows',
+  ),
+  SlashCommand(
+    'Code',
+    LucideIcons.code,
+    block: BridgeBlockKind.code,
+    description: 'Code with syntax colors',
+  ),
 ];
 
 /// The choices whose label holds `query`, ignoring case.
@@ -70,8 +92,8 @@ List<SlashCommand> slashCommandsFor(String query) => [
 ];
 
 /// The slash command menu that `/` opens in an empty Text Block, as in Notion and T3 Code
-/// (approved Table View
-/// mockups, section 2): the Text Block styles, then Table, filtered by what follows `/`.
+/// (approved Table View mockups, section 2, and ADR-0302): the Text
+/// Block styles, then the other Blocks, filtered by what follows `/`.
 class SlashCommands extends StatefulWidget {
   const SlashCommands({
     super.key,
@@ -138,8 +160,8 @@ class _SlashCommandsState extends State<SlashCommands> {
       final index = widget.chosen;
       if (index >= choices.length) return;
       final choice = choices[index];
-      final table = choice.style == null;
-      final labels = table && choices.first.style != null ? 2 : 1;
+      final block = choice.style == null;
+      final labels = block && choices.first.style != null ? 2 : 1;
       final item =
           labels * SlashCommands._labelHeight +
           choices
@@ -148,7 +170,7 @@ class _SlashCommandsState extends State<SlashCommands> {
                 0.0,
                 (top, above) => top + SlashCommands._itemHeight(above),
               );
-      final first = index == 0 || (choices[index - 1].style == null) != table;
+      final first = index == 0 || (choices[index - 1].style == null) != block;
       final position = _list.position;
       final top = first ? item - SlashCommands._labelHeight : item;
       final bottom =
@@ -177,7 +199,7 @@ class _SlashCommandsState extends State<SlashCommands> {
       ),
     );
     final texts = choices.where((choice) => choice.style != null);
-    final tables = choices.where((choice) => choice.style == null);
+    final blocks = choices.where((choice) => choice.style == null);
     Widget item(SlashCommand choice) {
       final index = choices.indexOf(choice);
       return MouseRegion(
@@ -213,6 +235,8 @@ class _SlashCommandsState extends State<SlashCommands> {
                       if (choice.description case final description?)
                         Text(
                           description,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: WsMetrics.fsSmall,
                             color: ws.textFaint,
@@ -262,9 +286,9 @@ class _SlashCommandsState extends State<SlashCommands> {
                       label('Text'),
                       ...texts.map(item),
                     ],
-                    if (tables.isNotEmpty) ...[
-                      label('Table'),
-                      ...tables.map(item),
+                    if (blocks.isNotEmpty) ...[
+                      label('Blocks'),
+                      ...blocks.map(item),
                     ],
                   ],
                 ),

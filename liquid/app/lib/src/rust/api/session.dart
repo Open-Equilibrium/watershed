@@ -187,7 +187,8 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Changes what the agent may do without asking.
   Future<void> setPermissions({required BridgePermissions permissions});
 
-  /// The session now, to restore the Chat after falling behind (ADR-0290).
+  /// The session now, to restore the Chat after falling behind (ADR-0290). Deltas do not merge
+  /// across its sequence, so the restored Chat never replays text it holds.
   Future<BridgeSnapshot> snapshot();
 
   /// The session's exact statistics (ADR-0279).

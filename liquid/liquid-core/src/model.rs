@@ -3,7 +3,7 @@
 //! ```text
 //! Workspace document  { owner, areas: { <area>: { name, sort, deleted } } }
 //! area document       { pages: { <page>: { title, parent?, sort, deleted } } }
-//! Page document       { blocks: { <block>: { kind, text, style, deleted } },
+//! Page document       { blocks: { <block>: { kind, text, style?, language?, deleted } },
 //!                       (a Database Block's entry is in `database.rs`)
 //!                       views: { <view>: { block, sort, boundary, deleted } } }
 //! ```
@@ -33,6 +33,7 @@ pub(crate) const TEXT: &str = "text";
 pub(crate) const BLOCK: &str = "block";
 pub(crate) const STYLE: &str = "style";
 pub(crate) const BOUNDARY: &str = "boundary";
+pub(crate) const LANGUAGE: &str = "language";
 
 /// An area as the Explorer lists it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -74,6 +75,8 @@ pub enum BlockKind {
     Text,
     /// A Database Block.
     Database,
+    /// A Code Block.
+    Code,
     /// A Block of a kind a later version adds, which shows as a placeholder (ADR-0245).
     Unknown,
 }
@@ -84,9 +87,19 @@ impl BlockKind {
         match name {
             Some("text") => Self::Text,
             Some("database") => Self::Database,
+            Some("code") => Self::Code,
             _ => Self::Unknown,
         }
     }
+}
+
+/// A Code Block's content.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Code {
+    /// Its code.
+    pub text: String,
+    /// Its language's name, as Markdown names it after ```; empty for plain text.
+    pub language: String,
 }
 
 /// A new document for this device. Text positions count UTF-16 code units, also when
@@ -287,12 +300,24 @@ pub(crate) fn pages(doc: &AutoCommit) -> Vec<PageEntry> {
 
 /// A live Text Block's text; none for a Block of another kind.
 pub(crate) fn text(doc: &AutoCommit, block: &str) -> Option<String> {
+    let entry = of_kind(doc, block, BlockKind::Text)?;
+    doc.text(&child(doc, &entry, TEXT)?).ok()
+}
+
+/// A live Code Block's code and language; none for a Block of another kind.
+pub(crate) fn code(doc: &AutoCommit, block: &str) -> Option<Code> {
+    let entry = of_kind(doc, block, BlockKind::Code)?;
+    Some(Code {
+        text: doc.text(&child(doc, &entry, TEXT)?).ok()?,
+        language: string(doc, &entry, LANGUAGE).unwrap_or_default(),
+    })
+}
+
+/// A live Block's entry if it is of `kind`.
+pub(crate) fn of_kind(doc: &AutoCommit, block: &str, kind: BlockKind) -> Option<ObjId> {
     let entry = live(doc, BLOCKS, block)?;
-    if string(doc, &entry, KIND).as_deref() != Some("text") {
-        return None;
-    }
-    let text = child(doc, &entry, TEXT)?;
-    doc.text(&text).ok()
+    (BlockKind::of(string(doc, &entry, KIND).as_deref()) == kind && kind != BlockKind::Unknown)
+        .then_some(entry)
 }
 
 /// Whether `at` lies at an end of `text` or between two of its characters, in UTF-16

@@ -166,11 +166,11 @@ pub enum Mutation {
         /// Its text.
         text: String,
     },
-    /// Replaces `delete` units at `at` in a Text Block with `insert`.
+    /// Replaces `delete` units at `at` in a Text or Code Block with `insert`.
     EditText {
         /// The Block's home Page.
         page: PageId,
-        /// The Text Block.
+        /// The Text or Code Block.
         block: BlockId,
         /// Where the edit starts.
         at: usize,
@@ -229,6 +229,31 @@ pub enum Mutation {
         view: ViewId,
         /// Whether a Section starts here.
         boundary: bool,
+    },
+    /// Turns a Text Block into a Code Block in plain text that keeps its text, its Views and
+    /// their Section boundaries, as ``` at its start and the slash command Code do.
+    TurnIntoCode {
+        /// The Block's home Page.
+        page: PageId,
+        /// The Text Block.
+        block: BlockId,
+    },
+    /// Turns a Code Block into a paragraph that keeps its text and Views, as ⌫ in an empty
+    /// Code Block does.
+    TurnIntoText {
+        /// The Block's home Page.
+        page: PageId,
+        /// The Code Block.
+        block: BlockId,
+    },
+    /// Sets a Code Block's language. [`Mutation::EditText`] edits its code.
+    SetCodeLanguage {
+        /// The Block's home Page.
+        page: PageId,
+        /// The Code Block.
+        block: BlockId,
+        /// Its name, as Markdown names it after ```; empty for plain text.
+        language: String,
     },
     /// Adds a Database Block with one text field, "Name", and a View on `page`, at its
     /// start or after the View `after`.

@@ -570,6 +570,11 @@ fn servers_automations_and_lineage_follows_resume_after_meta_harness_restarts() 
     stop(service);
     // Nothing answers for a while, as a restart takes time; each follow retries meanwhile.
     std::thread::sleep(Duration::from_secs(1));
+    // What was delivered before the outage, such as the first turn's changes, says nothing about
+    // the restarted service, so it is dropped before the service comes back.
+    while servers_seen.try_recv().is_ok() {}
+    while tasks_seen.try_recv().is_ok() {}
+    while lineage_seen.try_recv().is_ok() {}
     let (service, _) = host(&fixture);
     // Nothing changes meanwhile, so each follow's first delivery is the one after its reconnect.
     let wait = Duration::from_secs(60);

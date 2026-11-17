@@ -51,6 +51,10 @@ class SessionState {
   /// Incremented on each switch, so reads of an earlier session never land.
   int _generation = 0;
 
+  /// Counts the switches the user asked for, so an open or start that returns after a later switch
+  /// is released, not shown.
+  int _switchRequests = 0;
+
   /// The open session, or null on the start page.
   SessionBackend? get session => _session;
 
@@ -161,6 +165,7 @@ class SessionState {
 
   /// Leaves the open session for the start page.
   Future<void> newSession() async {
+    _switchRequests++;
     await _detach();
     worktree.value = null;
     _setGit(_project.git());
@@ -169,8 +174,9 @@ class SessionState {
 
   /// Opens the stored session `id`.
   Future<void> open(String id) async {
+    final switchRequest = ++_switchRequests;
     try {
-      _attach(await _project.open(id));
+      _attach(await _project.open(id), switchRequest);
     } on Object catch (error) {
       notify(NoticeLevel.error, 'Could not open the session: $error');
     }
@@ -191,6 +197,7 @@ class SessionState {
         notify(NoticeLevel.error, 'No model is available.');
         return;
       }
+      final switchRequest = ++_switchRequests;
       _attach(
         await _project.start(
           text,
@@ -199,6 +206,7 @@ class SessionState {
           worktree: newWorktree.value ? null : worktree.value,
           permissions: permissions.value,
         ),
+        switchRequest,
       );
       unawaited(loadStart());
     } on Object catch (error) {
@@ -283,21 +291,31 @@ class SessionState {
     }
   }
 
-  /// Sets the model: the open session's next turn, else the next new session's. The open session
-  /// reads its context window again, which depends on the model.
+  /// Sets the model: the open session's next turn, else the next new session's. An open session
+  /// takes it first, so a refused change is not shown, and reads its context window again, which
+  /// depends on the model.
   Future<void> setModel(BridgeModelChoice next) async {
-    model.value = next;
     if (_session case final session?) {
-      await _act(() => session.setModel(next), 'apply the model selection');
+      await _act(() async {
+        await session.setModel(next);
+        model.value = next;
+      }, 'apply the model selection');
       await readStatistics();
+    } else {
+      model.value = next;
     }
   }
 
-  /// Sets what the agent may do without asking.
+  /// Sets what the agent may do without asking. An open session takes it first, so a refused
+  /// change is not shown.
   Future<void> setPermissions(BridgePermissions next) async {
-    permissions.value = next;
     if (_session case final session?) {
-      await _act(() => session.setPermissions(next), 'change the permissions');
+      await _act(() async {
+        await session.setPermissions(next);
+        permissions.value = next;
+      }, 'change the permissions');
+    } else {
+      permissions.value = next;
     }
   }
 
@@ -400,9 +418,15 @@ class SessionState {
     await readChanges();
   }
 
+  /// Counts the reads of the Diff, so a read that a newer one overtakes never lands.
+  int _diffRequests = 0;
+
   /// Reads the turns and what the shown ones changed.
   Future<void> readChanges() async {
     final generation = _generation;
+    final diffRequest = ++_diffRequests;
+    bool isLatest() =>
+        generation == _generation && diffRequest == _diffRequests;
     final session = _session;
     try {
       final scope = diffScope.value;
@@ -413,7 +437,7 @@ class SessionState {
             : await checkout.uncommittedChanges(
                 hideWhitespace: hideWhitespace.value,
               );
-        if (generation != _generation) return;
+        if (!isLatest()) return;
         shownScope.value = scope;
         shown.value = null;
         changesProblem.value = null;
@@ -423,7 +447,7 @@ class SessionState {
       final read = session == null
           ? const <BridgeTurn>[]
           : await session.turns();
-      if (generation != _generation) return;
+      if (!isLatest()) return;
       _setTurns(read);
       final pair = compared(read, scope);
       if (pair == null || session == null) {
@@ -441,13 +465,13 @@ class SessionState {
         pair.to.number,
         hideWhitespace: hideWhitespace.value,
       );
-      if (generation != _generation) return;
+      if (!isLatest()) return;
       shownScope.value = scope;
       shown.value = pair;
       changesProblem.value = null;
       changed.value = files;
     } on Object catch (error) {
-      if (generation != _generation) return;
+      if (!isLatest()) return;
       changesProblem.value = (
         title: 'No changes shown',
         text: 'Could not show the changes: $error',
@@ -530,9 +554,18 @@ class SessionState {
 
   // Following the open session.
 
-  void _attach(SessionBackend next) {
+  /// Shows `next` unless a later switch was asked for meanwhile, then releases it.
+  void _attach(SessionBackend next, int switchRequest) {
+    if (switchRequest != _switchRequests) {
+      next.close();
+      return;
+    }
     unawaited(
       _detach().then((_) async {
+        if (switchRequest != _switchRequests) {
+          next.close();
+          return;
+        }
         _session = next;
         final generation = ++_generation;
         try {
@@ -540,7 +573,18 @@ class SessionState {
           final subscribed = await next.subscribe();
           if (generation != _generation) return;
           _restore(subscribed.snapshot);
-          _subscription = next.events(subscribed.id).listen(_receive);
+          final events = next.events(subscribed.id);
+          _subscription = events.listen(
+            _receive,
+            onError: (Object error) {
+              if (generation == _generation) {
+                notify(
+                  NoticeLevel.error,
+                  'Could not follow the session: $error',
+                );
+              }
+            },
+          );
           final title = await next.title();
           if (generation != _generation) return;
           sessionTitle.value = title;

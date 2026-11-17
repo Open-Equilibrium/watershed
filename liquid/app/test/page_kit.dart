@@ -33,6 +33,12 @@ class TablePart extends Part {
   final List<BridgeField> fields;
 }
 
+class CodePart extends Part {
+  const CodePart(this.code, [this.language = '']);
+  final String code;
+  final String language;
+}
+
 class UnknownPart extends Part {
   const UnknownPart({this.boundary = false});
   final bool boundary;
@@ -208,6 +214,23 @@ class PageKit {
             fields: fields,
           );
           fake.rows[added.block!] = [...rows];
+        case CodePart(:final code, :final language):
+          final added = await workspace.apply(
+            mutation(
+              BridgeMutationKind.addTextBlock,
+              page: page,
+              after: after,
+              text: code,
+            ),
+          );
+          after = added.view;
+          final turn = mutation(
+            BridgeMutationKind.turnIntoCode,
+            page: page,
+            block: added.block,
+          );
+          await workspace.apply(turn);
+          if (language.isNotEmpty) fake.languages[added.block!] = language;
         case UnknownPart(:final boundary):
           final views = fake.views[page] ??= [];
           final at = after == null

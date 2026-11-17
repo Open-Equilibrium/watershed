@@ -78,4 +78,6 @@ abstract final class LucideIcons {
   static const gitFork = IconData(0xe28d, fontFamily: _family);
   static const unplug = IconData(0xe45d, fontFamily: _family);
   static const chevronUp = IconData(0xe070, fontFamily: _family);
+  static const code = IconData(0xe093, fontFamily: _family);
+  static const copy = IconData(0xe09e, fontFamily: _family);
 }

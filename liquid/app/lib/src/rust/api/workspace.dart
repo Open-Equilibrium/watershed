@@ -31,6 +31,9 @@ class BridgeAnswer {
   /// A Text Block's style, with its text.
   final BridgeTextStyle? style;
 
+  /// A Code Block's language, with its code; empty for plain text.
+  final String? language;
+
   /// A Database's name and fields.
   final BridgeDatabase? database;
 
@@ -44,6 +47,7 @@ class BridgeAnswer {
     required this.count,
     this.text,
     this.style,
+    this.language,
     this.database,
     required this.rows,
   });
@@ -56,6 +60,7 @@ class BridgeAnswer {
       count.hashCode ^
       text.hashCode ^
       style.hashCode ^
+      language.hashCode ^
       database.hashCode ^
       rows.hashCode;
 
@@ -70,6 +75,7 @@ class BridgeAnswer {
           count == other.count &&
           text == other.text &&
           style == other.style &&
+          language == other.language &&
           database == other.database &&
           rows == other.rows;
 }
@@ -166,6 +172,9 @@ enum BridgeBlockKind {
 
   /// A Database Block.
   database,
+
+  /// A Code Block.
+  code,
 
   /// A Block of a kind a later version adds, which shows as a placeholder (ADR-0245).
   unknown,
@@ -332,8 +341,8 @@ enum BridgeMutationKind {
   /// Adds a Text Block holding `text` to `page`, after the View `after` or first.
   addTextBlock,
 
-  /// Replaces `delete` units at `at` in `block` on its home `page` with `text`; positions
-  /// count UTF-16 units, as Dart does.
+  /// Replaces `delete` units at `at` in the Text or Code `block` on its home `page` with
+  /// `text`; positions count UTF-16 units, as Dart does.
   editText,
 
   /// Removes `view` from `page`.
@@ -351,6 +360,16 @@ enum BridgeMutationKind {
 
   /// Starts a Section at `view` on `page`, or stops one, as `boundary` says.
   setSectionBoundary,
+
+  /// Turns the Text Block `block` on its home `page` into a Code Block in plain text.
+  turnIntoCode,
+
+  /// Turns the Code Block `block` on its home `page` into a paragraph.
+  turnIntoText,
+
+  /// Sets the Code Block `block`'s language on its home `page` to `text`; empty for plain
+  /// text.
+  setCodeLanguage,
 
   /// Adds a Database Block named `text`, with a text field "Name", to `page`, after the
   /// View `after` or first.
@@ -487,6 +506,10 @@ enum BridgeQueryKind {
   /// `block`'s text and style on its home `page` into `text` and `style`; none once the
   /// Block is removed.
   text,
+
+  /// The Code `block`'s code and language on its home `page` into `text` and `language`;
+  /// none once the Block is removed or if it is no Code Block.
+  code,
 
   /// The Database `block`'s name and fields on its home `page` into `database`; none
   /// once the Block is removed or if it is no Database.

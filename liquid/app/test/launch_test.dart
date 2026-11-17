@@ -22,15 +22,18 @@ void main() {
     );
   });
 
-  test('refuses a relative Meta-Harness home, which Liquid cannot resolve', () async {
-    expect(
-      await problemOf({
-        'LIQUID_PROJECT': project,
-        'META_HARNESS_HOME': 'meta-data',
-      }),
-      'META_HARNESS_HOME must be an absolute path: meta-data',
-    );
-  });
+  test(
+    'refuses a relative Meta-Harness home, which Liquid cannot resolve',
+    () async {
+      expect(
+        await problemOf({
+          'LIQUID_PROJECT': project,
+          'META_HARNESS_HOME': 'meta-data',
+        }),
+        'META_HARNESS_HOME must be an absolute path: meta-data',
+      );
+    },
+  );
 
   test('names the project by its directory', () {
     expect(projectName('/work/acme-api/'), 'acme-api');

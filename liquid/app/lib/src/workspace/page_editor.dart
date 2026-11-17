@@ -21,6 +21,17 @@ const markdownShortcuts = {
   '" ': BridgeTextStyle.quote,
 };
 
+/// What turns a Text Block into a Code Block when typed at its start, as in Notion
+/// (ADR-0302).
+const codeShortcut = '```';
+
+/// Whether `text`, typed into a Text Block with the caret at `caret`, just put
+/// [codeShortcut] at its start, where `before` had none.
+bool codeTyped(String text, String before, int caret) =>
+    text.startsWith(codeShortcut) &&
+    !before.startsWith(codeShortcut) &&
+    caret == codeShortcut.length;
+
 /// What `---` typed alone in a Text Block becomes: a Section boundary (approved Section
 /// mockups).
 const sectionBreak = '---';
