@@ -615,7 +615,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   /// editor marked as a Code Block in its language, below this line or in its place if it is
   /// empty, and anything else as text (ADR-0305).
   Future<void> _paste() async {
-    final selection = _text.selection;
     final Pasted pasted;
     try {
       pasted = await readClipboard();
@@ -650,7 +649,14 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
     if (pasted.code case final code?) return _pasteCode(code, pasted.language);
     final text = pasted.text;
-    if (text == null || text.isEmpty || !selection.isValid) return;
+    // Where the caret is now: the text may have changed while the clipboard was read.
+    final selection = _text.selection;
+    if (text == null ||
+        text.isEmpty ||
+        !selection.isValid ||
+        selection.end > _text.text.length) {
+      return;
+    }
     final value = _text.value.replaced(selection, text);
     _text.value = value.copyWith(
       selection: TextSelection.collapsed(offset: selection.start + text.length),

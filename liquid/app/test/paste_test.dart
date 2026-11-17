@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -149,5 +151,33 @@ void main() {
     await paste(tester, 0, 5);
     expect(kit.fake.textsOf(kit.page), ['Five days in Lisbon']);
     expect(field(tester, 0).controller!.selection.baseOffset, 13);
+  });
+
+  testWidgets('⌘V pastes where the caret is once the clipboard answers', (
+    tester,
+  ) async {
+    await kit.show(tester, [const TextPart('Five days in Lisbon')]);
+    final answer = Completer<Pasted>();
+    readClipboard = () => answer.future;
+    await tester.tap(block(0));
+    await tester.pump();
+    field(tester, 0).controller!.selection = const TextSelection.collapsed(
+      offset: 19,
+    );
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await key(tester, LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    // The text gets shorter while the clipboard is read.
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'Five days',
+        selection: TextSelection.collapsed(offset: 9),
+      ),
+    );
+    await tester.pump();
+    answer.complete(const Pasted(text: ' in Porto'));
+    await tester.pumpAndSettle();
+    expect(kit.fake.textsOf(kit.page), ['Five days in Porto']);
   });
 }
