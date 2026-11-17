@@ -47,6 +47,9 @@ const HANDSHAKES: usize = 32;
 /// How long a new connection may take to complete its handshake.
 const HANDSHAKE: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// How long a reply to a malformed request may wait for room in the outgoing queue.
+const REPLY_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// The refusal of a call or stream that the caller's kind does not make (ADR-0299).
 const REFUSED_CALL: &str = "This client may not make that call.";
 
@@ -410,6 +413,8 @@ async fn serve(
         threads: Mutex::default(),
     });
     let mut streams: HashMap<u64, AbortHandle> = HashMap::new();
+    // Signalled by a malformed request's reply that the queue did not take in time.
+    let (stalled, mut stalls) = mpsc::channel::<()>(1);
     let mut ping = crate::util::pings();
     let mut heard = tokio::time::Instant::now();
     loop {
@@ -418,6 +423,7 @@ async fn serve(
             frame = frames.next() => Some(frame),
             _ = stopping.wait_for(|stopped| *stopped) => break,
             () = revoked(&mut revocations, owner.as_deref()) => break,
+            _ = stalls.recv() => break,
             _ = ping.tick() => None,
         };
         let Some(frame) = frame else {
@@ -440,11 +446,19 @@ async fn serve(
                     .and_then(|v| v["id"].as_u64());
                 if let Some(id) = id {
                     let error = format!("Meta-Harness does not understand this request: {error}");
-                    // A client that does not read its replies is disconnected, rather than holding
-                    // the loop, which must go on noticing revocation and shutdown.
-                    if out.try_send(frame_of(&Reply::Error { id, error })).is_err() {
-                        break;
-                    }
+                    // The reply waits on a task of its own, so the loop goes on noticing revocation
+                    // and shutdown. A queue full of stream items drains for a client that reads;
+                    // one that takes no reply within REPLY_WAIT is disconnected.
+                    let (out, stalled) = (out.clone(), stalled.clone());
+                    tasks.spawn(async move {
+                        let reply = frame_of(&Reply::Error { id, error });
+                        if tokio::time::timeout(REPLY_WAIT, out.send(reply))
+                            .await
+                            .is_err()
+                        {
+                            let _ = stalled.try_send(());
+                        }
+                    });
                 }
                 continue;
             }
