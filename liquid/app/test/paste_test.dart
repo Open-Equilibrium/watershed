@@ -42,7 +42,23 @@ void main() {
         }).files,
         ['/a.pdf'],
       );
-      expect(pastedFrom({'image': png, 'text': 'x'}).image, png);
+      expect(pastedFrom({'image': png}).image, png);
+      expect(
+        pastedFrom({'image': png, 'text': 'https://example.com/tram.png'})
+            .image,
+        png,
+        reason: 'a browser copies an image with its address',
+      );
+      final cells = pastedFrom({
+        'image': png,
+        'html': '<table><tr><td>12</td></tr></table>',
+        'text': '12\t30',
+      });
+      expect(
+        (cells.image, cells.text),
+        (null, '12\t30'),
+        reason: 'Excel, Word and Keynote put a picture beside copied text',
+      );
 
       final vscode = pastedFrom({
         'vscode': '{"version":1,"mode":"rust"}',

@@ -48,7 +48,12 @@ Pasted pastedFrom(Map<String, Object?> read) {
   final text = read['text'] as String?;
   final files = (read['files'] as List?)?.cast<String>() ?? const [];
   if (files.isNotEmpty) return Pasted(files: files, text: text);
-  if (read['image'] case final Uint8List image) {
+  // Excel, Word and Keynote put a picture beside copied text, so the text wins; a browser
+  // copies an image with no text but its address.
+  final address =
+      text != null && RegExp(r'^https?://\S+$').hasMatch(text.trim());
+  if (read['image'] case final Uint8List image
+      when text == null || text.trim().isEmpty || address) {
     return Pasted(image: image, text: text);
   }
   if (text != null && text.isNotEmpty) {
