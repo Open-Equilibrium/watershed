@@ -184,6 +184,33 @@ void main() {
     expect(stroke.y, closeTo(800, 1));
   });
 
+  testWidgets('ink on the pages in view shows past a full page above', (
+    tester,
+  ) async {
+    BridgeElement box(int page) => newElement(
+      BridgeElementKind.shape,
+      frame: const Rect.fromLTWH(100, 100, 80, 50),
+      color: BridgeInkColor.data1,
+      width: 1,
+      docPage: page,
+    );
+    await showPdf(
+      tester,
+      sizes: List.filled(6, const Size(595, 842)),
+      ink: [box(2), box(2), box(3)],
+    );
+    kit.fake.readBudget = 2;
+    final fourth = board(tester).sheets[3];
+    board(tester)
+      ..origin = Offset(board(tester).origin.dx, fourth.top + 1)
+      ..notifyListeners();
+    await tester.pumpAndSettle();
+    expect(
+      board(tester).elements.map((element) => element.docPage),
+      contains(3),
+    );
+  });
+
   testWidgets('a tall, narrow page is drawn no taller than 4,096 pixels', (
     tester,
   ) async {
@@ -245,6 +272,36 @@ void main() {
     final [stroke] = lastEdit().add;
     expect(stroke.docPage, 0);
     expect(stroke.x, closeTo(5, 1));
+  });
+
+  testWidgets('the wheel over a focused image scrolls the Page', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      MediaPart(
+        'tram.png',
+        base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAACgAAAAeCAIAAADRv8uKAAAAK0lEQVR4nO3NMQ0AAAgDsMlBNnKQ'
+          'hQw4mvRvputExGKxWCwWi8VisVj8N158a1NqSEcsCQAAAABJRU5ErkJggg==',
+        ),
+      ),
+      for (var line = 0; line < 60; line++) TextPart('Line $line'),
+    ]);
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pumpAndSettle();
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pumpAndSettle();
+    final image = find.byKey(const Key('image ink'));
+    await tester.tap(image);
+    await tester.pumpAndSettle();
+    final scrollable = tester.state<ScrollableState>(
+      find.ancestor(of: image, matching: find.byType(Scrollable)).first,
+    );
+    final mouse = TestPointer(1, PointerDeviceKind.mouse);
+    await tester.sendEventToBinding(mouse.hover(tester.getCenter(image)));
+    await tester.sendEventToBinding(mouse.scroll(const Offset(0, 120)));
+    await tester.pumpAndSettle();
+    expect(scrollable.position.pixels, greaterThan(0));
   });
 
   testWidgets('full screen moves by a page with ↑ and ↓', (tester) async {

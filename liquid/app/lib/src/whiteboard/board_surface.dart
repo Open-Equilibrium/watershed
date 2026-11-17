@@ -232,9 +232,9 @@ class BoardSurfaceState extends State<BoardSurface> {
       : 0.5;
 
   /// The mouse wheel: with the right button held or ⌘ it zooms; on a focused board it
-  /// pans; elsewhere it scrolls the Page.
+  /// pans; elsewhere, and over a board that does not move, it scrolls the Page.
   void _signal(PointerSignalEvent event) {
-    if (event is! PointerScrollEvent) return;
+    if (event is! PointerScrollEvent || board.fixed) return;
     final zooms =
         _rightDown ||
         (widget.focused && HardwareKeyboard.instance.isMetaPressed);
@@ -956,6 +956,7 @@ class BoardSurfaceState extends State<BoardSurface> {
                       ..claims = ((event) =>
                           widget.focused ||
                           event.buttons & kSecondaryMouseButton != 0)
+                      ..panZooms = !board.fixed
                       ..onPanZoom = (pan, scale, focal) {
                         board.pan(pan);
                         if (scale != 1) board.zoomBy(scale, focal);
@@ -1043,10 +1044,11 @@ class BoardSurfaceState extends State<BoardSurface> {
   }
 }
 
-/// Claims a board's pointers before the Page's scrolling can: trackpad gestures always,
-/// and other pointers while `claims` says so, as on a focused board.
+/// Claims a board's pointers before the Page's scrolling can: trackpad gestures unless the
+/// board does not move, and other pointers while `claims` says so, as on a focused board.
 class _Claim extends OneSequenceGestureRecognizer {
   bool Function(PointerDownEvent event) claims = (_) => false;
+  bool panZooms = true;
   void Function(Offset pan, double scale, Offset focal)? onPanZoom;
 
   Offset _pan = Offset.zero;
@@ -1062,7 +1064,7 @@ class _Claim extends OneSequenceGestureRecognizer {
   }
 
   @override
-  bool isPointerPanZoomAllowed(PointerPanZoomStartEvent event) => true;
+  bool isPointerPanZoomAllowed(PointerPanZoomStartEvent event) => panZooms;
 
   @override
   void addAllowedPointerPanZoom(PointerPanZoomStartEvent event) {

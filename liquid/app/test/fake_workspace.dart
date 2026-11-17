@@ -38,6 +38,10 @@ class FakeWorkspace implements LiquidWorkspace {
   /// Each Whiteboard's style and elements, bottom to top.
   final whiteboards = <String, BridgeDrawing>{};
 
+  /// How many elements a drawing's read returns, as the core's point budget: whole pages
+  /// from the window's first, while they fit.
+  var readBudget = 1 << 30;
+
   /// Fails every apply with this text.
   String? refuse;
 
@@ -632,6 +636,23 @@ class FakeWorkspace implements LiquidWorkspace {
     return false;
   }
 
+  List<BridgeElement> _withinBudget(List<BridgeElement> elements) {
+    final pages = {for (final element in elements) element.docPage}.toList()
+      ..sort();
+    var budget = readBudget;
+    final kept = <int>{};
+    for (final page in pages) {
+      final count = elements.where((element) => element.docPage == page).length;
+      if (count > budget) break;
+      budget -= count;
+      kept.add(page);
+    }
+    return [
+      for (final element in elements)
+        if (kept.contains(element.docPage)) element,
+    ];
+  }
+
   @override
   Future<BridgeAnswer> query({required BridgeQuery query}) async {
     asked.add(query);
@@ -708,12 +729,12 @@ class FakeWorkspace implements LiquidWorkspace {
         drawing: switch (whiteboards[query.block]) {
           final board? => BridgeDrawing(
             style: board.style,
-            elements: [
+            elements: _withinBudget([
               for (final element in board.elements)
                 if (element.docPage >= query.start &&
                     element.docPage < query.start + query.limit)
                   element,
-            ],
+            ]),
           ),
           null when media.containsKey(query.block) => const BridgeDrawing(
             style: BridgeDrawingStyle.handDrawn,

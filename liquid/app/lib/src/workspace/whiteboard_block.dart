@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -371,8 +370,9 @@ class BarButton extends StatelessWidget {
   }
 }
 
-/// The ink of the pages in a view of `size` and of those next to them, so scrolling finds
-/// it read (client architecture rule 8).
+/// The ink of the pages in a view of `size` and of those below them, so scrolling finds it
+/// read (client architecture rule 8). The read starts at the first page in view, as it
+/// keeps whole pages from its first within a budget, so a full page above cannot hide them.
 void followPages(BoardController board, Size size) {
   final view = Rect.fromLTWH(
     board.origin.dx,
@@ -385,8 +385,7 @@ void followPages(BoardController board, Size size) {
       if (sheet.overlaps(view)) index,
   ];
   if (shown.isEmpty) return;
-  final first = math.max(0, shown.first - 2);
-  board.showPages(first, shown.last + 3 - first);
+  board.showPages(shown.first, shown.last + 3 - shown.first);
 }
 
 /// Where a document's view is: "3 / 12".
