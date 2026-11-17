@@ -273,6 +273,7 @@ fn stroke(row: usize, points: usize) -> Element {
         },
         color: InkColor::Text,
         width: 1,
+        doc_page: 0,
         content: Content::Stroke {
             pen: Pen::Fountain,
             points: bytes,
@@ -282,7 +283,7 @@ fn stroke(row: usize, points: usize) -> Element {
 
 fn draw(workspace: &mut Workspace<Sqlite>, page: &PageId, block: &BlockId, add: Vec<Element>) {
     workspace
-        .apply(request(Mutation::EditWhiteboard {
+        .apply(request(Mutation::EditDrawing {
             page: page.clone(),
             block: block.clone(),
             add,
@@ -336,7 +337,7 @@ fn whiteboard() {
         workspace.close_page(&page);
         let start = Instant::now();
         let board = workspace
-            .whiteboard(&page, block)
+            .drawing(&page, block, 0..1)
             .expect("the board reads")
             .expect("a live board");
         (start.elapsed(), board.elements.len())

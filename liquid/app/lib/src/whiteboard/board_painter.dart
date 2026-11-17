@@ -44,8 +44,7 @@ class BoardPainter extends CustomPainter {
     required this.hidden,
     required this.editing,
     this.dots = false,
-    this.paper = false,
-    this.beneath,
+    this.pixelRatio = 1,
   }) : super(repaint: board);
 
   final BoardController board;
@@ -57,11 +56,11 @@ class BoardPainter extends CustomPainter {
   final String? editing;
   final bool dots;
 
-  /// Whether the ink lies on a document's paper rather than a board's canvas.
-  final bool paper;
+  /// The screen's device pixels per logical pixel, to draw a document's pages sharp.
+  final double pixelRatio;
 
-  /// Draws what lies beneath the ink, in board points, such as a document's pages.
-  final void Function(Canvas canvas, Rect view)? beneath;
+  /// Whether the ink lies on a document's paper rather than a board's canvas.
+  bool get paper => board.paged;
 
   /// The handles' size on screen.
   static const handle = 8.0;
@@ -83,7 +82,7 @@ class BoardPainter extends CustomPainter {
     if (dots) _dots(canvas, size);
     canvas.scale(zoom);
     canvas.translate(-board.origin.dx, -board.origin.dy);
-    beneath?.call(canvas, view);
+    board.pages?.paint(canvas, view, board.zoom * pixelRatio);
     // The highlighter's marks lie beneath the rest of the ink.
     for (final beneath in [true, false]) {
       for (final element in board.elements) {
@@ -271,8 +270,7 @@ class BoardPainter extends CustomPainter {
       old.editing != editing ||
       old.ws != ws ||
       old.dots != dots ||
-      old.paper != paper ||
-      old.beneath != beneath;
+      old.pixelRatio != pixelRatio;
 }
 
 /// The selection's frame on the board, as its four corners clockwise from the top left,

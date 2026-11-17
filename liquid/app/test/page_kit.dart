@@ -13,6 +13,7 @@ import 'package:liquid/src/shortcuts/shortcut_store.dart';
 import 'package:liquid/src/theme/theme.dart';
 import 'package:liquid/src/whiteboard/board_controller.dart';
 import 'package:liquid/src/workspace/media_block.dart';
+import 'package:liquid/src/workspace/pdf_pages.dart';
 import 'package:liquid/src/workspace/table_block.dart';
 import 'package:liquid/src/workspace/text_block.dart';
 import 'package:liquid/src/workspace/whiteboard_block.dart';
@@ -175,8 +176,13 @@ class PageKit {
     SessionInfo? info,
     ShortcutController? shortcuts,
     void Function()? before,
+    bool pdfRenderer = false,
   }) async {
     await tester.binding.setSurfaceSize(const Size(1400, 900));
+    // Tests have no PDF renderer; those that show PDFs give one before showing the Page.
+    if (!pdfRenderer) {
+      PdfPages.opener = (_) async => throw const PdfUnreadable();
+    }
     fake = FakeWorkspace();
     before?.call();
     workspace = WorkspaceState(fake);
@@ -308,7 +314,9 @@ class PageKit {
 
   /// The board of the Page's only Whiteboard.
   BoardController boardOf(WidgetTester tester) {
-    final block = tester.widget<WhiteboardBlock>(find.byType(WhiteboardBlock));
+    final block = tester.widget<DrawingFrame>(
+      find.byType(DrawingFrame, skipOffstage: false).first,
+    );
     // The Block holds the board; this look adds no user of its own.
     final board = block.views.boardFor(block.view);
     block.views.releaseBoard(block.view);

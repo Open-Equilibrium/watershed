@@ -127,6 +127,13 @@ class BoardSurfaceState extends State<BoardSurface> {
       return;
     }
     final at = board.toBoard(event.localPosition);
+    // A document's ink lies on its pages; between them there is nothing to draw on.
+    final drawing =
+        tools.tool != BoardTool.lasso && tools.tool != BoardTool.eraser;
+    if (board.paged && drawing && board.pageAt(at) == null) {
+      _pointer = null;
+      return;
+    }
     switch (tools.tool) {
       case BoardTool.pen || BoardTool.highlighter:
         _startInk(at, event);
@@ -299,6 +306,15 @@ class BoardSurfaceState extends State<BoardSurface> {
 
   void _endInk() {
     final snapping = tools.tool == BoardTool.shape;
+    // On a document, ink stays on the page it started on, cut at its edge.
+    if (board.paged && _ink.isNotEmpty) {
+      final page = board.pageAt(_ink.first.offset);
+      final sheet = page == null ? null : board.sheets[page];
+      final inside = sheet == null
+          ? 0
+          : _ink.takeWhile((point) => sheet.contains(point.offset)).length;
+      _ink.removeRange(inside, _ink.length);
+    }
     // A highlight drawn along a line straightens, as GoodNotes' does.
     if (tools.tool == BoardTool.highlighter && _ink.length > 2) {
       final (first, last) = (_ink.first, _ink.last);
@@ -965,7 +981,8 @@ class BoardSurfaceState extends State<BoardSurface> {
                         draft: _draft,
                         hidden: const {},
                         editing: text?.id,
-                        dots: widget.focused,
+                        dots: widget.focused && !board.paged,
+                        pixelRatio: MediaQuery.devicePixelRatioOf(context),
                       ),
                     ),
                   ),

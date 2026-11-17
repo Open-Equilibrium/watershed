@@ -1,6 +1,7 @@
 import Carbon.HIToolbox
 import Cocoa
 import FlutterMacOS
+import PDFKit
 import ServiceManagement
 
 class MainFlutterWindow: NSWindow {
@@ -20,6 +21,9 @@ class MainFlutterWindow: NSWindow {
     FlutterMethodChannel(
       name: "liquid/clipboard", binaryMessenger: flutterViewController.engine.binaryMessenger
     ).setMethodCallHandler(readClipboard)
+    FlutterMethodChannel(
+      name: "liquid/pdf", binaryMessenger: flutterViewController.engine.binaryMessenger
+    ).setMethodCallHandler(pdfPages)
     logKeysIfAsked()
 
     super.awakeFromNib()
@@ -96,6 +100,103 @@ private func readClipboard(_ call: FlutterMethodCall, result: @escaping FlutterR
   read["html"] = board.string(forType: .html)
   read["text"] = board.string(forType: .string)
   result(read)
+}
+
+/// The PDFs open in the renderer, by the id Dart holds, each with the queue that draws its
+/// pages one at a time, as PDFKit promises no more; only the main thread touches the map.
+private var pdfDocuments: [Int: (document: PDFDocument, queue: DispatchQueue)] = [:]
+private var nextPDFId = 1
+
+/// Liquid's PDF renderer (ADR-0307): PDFKit reads each file and draws its pages, so Apple's
+/// maintained code parses them. `open` parses off the main thread and answers each page's size
+/// in points; `render` draws one page off the main thread, as RGBA pixels; `close` drops a
+/// document, and an unknown id is ignored.
+private func pdfPages(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+  let arguments = call.arguments as? [String: Any]
+  switch call.method {
+  case "open":
+    let bytes = (arguments?["bytes"] as? FlutterStandardTypedData)?.data ?? Data()
+    // Parsing a large file takes a while, so it runs off the main thread, as `render` does.
+    DispatchQueue.global(qos: .userInitiated).async {
+      guard let document = PDFDocument(data: bytes), !document.isLocked, document.pageCount > 0
+      else {
+        DispatchQueue.main.async {
+          result(FlutterError(code: "unreadable", message: "the PDF cannot be read", details: nil))
+        }
+        return
+      }
+      let sizes = (0..<document.pageCount).map { index -> [Double] in
+        let size = document.page(at: index)?.displaySize ?? .zero
+        return [Double(size.width), Double(size.height)]
+      }
+      DispatchQueue.main.async {
+        let id = nextPDFId
+        nextPDFId += 1
+        pdfDocuments[id] = (document, DispatchQueue(label: "liquid.pdf.\(id)", qos: .userInitiated))
+        result(["id": id, "sizes": sizes])
+      }
+    }
+  case "render":
+    guard let id = arguments?["id"] as? Int, let (document, queue) = pdfDocuments[id],
+      let index = arguments?["page"] as? Int, index >= 0, index < document.pageCount
+    else {
+      return result(FlutterError(code: "notFound", message: "no such PDF page", details: nil))
+    }
+    // The width bounds the bitmap's size; the answer carries the width drawn.
+    let width = min(max((arguments?["width"] as? Int) ?? 1, 1), 4096)
+    queue.async {
+      let drawn = document.page(at: index).flatMap { pdfPixels(of: $0, width: width) }
+      DispatchQueue.main.async {
+        guard let drawn else {
+          return result(
+            FlutterError(code: "render", message: "the page cannot be drawn", details: nil))
+        }
+        result([
+          "width": drawn.width, "height": drawn.height,
+          "pixels": FlutterStandardTypedData(bytes: drawn.pixels),
+        ])
+      }
+    }
+  case "close":
+    if let id = arguments?["id"] as? Int { pdfDocuments[id] = nil }
+    result(nil)
+  default:
+    result(FlutterMethodNotImplemented)
+  }
+}
+
+private extension PDFPage {
+  /// The page's size in points as displayed: its crop box, turned a quarter for a rotation of
+  /// 90 or 270 degrees.
+  var displaySize: CGSize {
+    let box = bounds(for: .cropBox)
+    return rotation % 180 == 0 ? box.size : CGSize(width: box.height, height: box.width)
+  }
+}
+
+/// `page` drawn `width` pixels wide on white, as straight RGBA, 8 bits, row-major, without
+/// padding. PDFKit draws the displayed crop box from the context's origin, so scaling the
+/// context is all the mapping needed.
+private func pdfPixels(of page: PDFPage, width: Int) -> (width: Int, height: Int, pixels: Data)? {
+  let size = page.displaySize
+  guard size.width > 0, size.height > 0 else { return nil }
+  let height = max(1, Int((Double(width) * size.height / size.width).rounded()))
+  guard
+    let context = CGContext(
+      data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+      space: CGColorSpaceCreateDeviceRGB(),
+      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+  else { return nil }
+  // The page is opaque after the white fill, so premultiplied and straight RGBA agree.
+  context.setFillColor(CGColor(gray: 1, alpha: 1))
+  context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+  context.scaleBy(x: CGFloat(width) / size.width, y: CGFloat(height) / size.height)
+  page.draw(with: .cropBox, to: context)
+  // The context owns the pixels, so it must live until they are copied.
+  return withExtendedLifetime(context) { () -> (width: Int, height: Int, pixels: Data)? in
+    guard let pixels = context.data else { return nil }
+    return (width, height, Data(bytes: pixels, count: width * height * 4))
+  }
 }
 
 /// Turns the Liquid key on or off: the login item inside the app bundle remaps

@@ -505,7 +505,15 @@ class FakeWorkspace implements LiquidWorkspace {
         _changed(_blockResource(mutation));
         return BridgeApplied(elements: const [], action: _id());
       case BridgeMutationKind.editDrawing:
-        final board = whiteboards[mutation.block] ?? (throw 'not found');
+        // A Media Block's drawing starts with its first annotation.
+        final board =
+            whiteboards[mutation.block] ??
+            (media.containsKey(mutation.block)
+                ? const BridgeDrawing(
+                    style: BridgeDrawingStyle.handDrawn,
+                    elements: [],
+                  )
+                : throw 'not found');
         final edit = mutation.drawing!;
         final elements = [...board.elements];
         for (final removed in edit.remove) {
@@ -697,7 +705,22 @@ class FakeWorkspace implements LiquidWorkspace {
         pages: const [],
         views: const [],
         count: 0,
-        drawing: whiteboards[query.block],
+        drawing: switch (whiteboards[query.block]) {
+          final board? => BridgeDrawing(
+            style: board.style,
+            elements: [
+              for (final element in board.elements)
+                if (element.docPage >= query.start &&
+                    element.docPage < query.start + query.limit)
+                  element,
+            ],
+          ),
+          null when media.containsKey(query.block) => const BridgeDrawing(
+            style: BridgeDrawingStyle.handDrawn,
+            elements: [],
+          ),
+          null => null,
+        },
         rows: const [],
       ),
       BridgeQueryKind.database => BridgeAnswer(

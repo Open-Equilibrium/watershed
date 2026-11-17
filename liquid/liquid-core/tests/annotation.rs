@@ -6,8 +6,8 @@
 
 use liquid_core::{
     Actor, Applied, BlockId, Content, Created, DrawingStyle, Element, Error, Frame, InkColor,
-    MAX_DOC_PAGES, MAX_ELEMENTS, MemoryStore, Mutation, Origin, PART, PageId, Pen, PersonId,
-    Request, Shape,
+    MAX_DOC_PAGES, MAX_ELEMENTS, MemoryStore, Mutation, Origin, PageId, Pen, PersonId, Request,
+    Shape,
 };
 
 type Workspace = liquid_core::Workspace<MemoryStore>;
@@ -49,7 +49,6 @@ fn agreement() -> (Workspace, PageId, BlockId, BlockId) {
     let mut upload = workspace.begin_upload(&owner, 7).unwrap();
     workspace.upload(&mut upload, b"%PDF-1.").unwrap();
     let attachment = workspace.finish_upload(upload).unwrap();
-    assert!(PART > 7);
     let Created::Block { block: pdf, .. } = created(
         &mut workspace,
         Mutation::AddMediaBlock {
