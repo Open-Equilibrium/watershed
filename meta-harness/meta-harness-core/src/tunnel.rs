@@ -180,7 +180,7 @@ where
         REGISTER_PATH => named(request, &owner).await,
         DECISION_PATH => checked(request, &owner, level).await,
         // Read before the gate is held, so a body that never arrives holds no sign-in.
-        TOKEN_PATH => buffered(request).await,
+        TOKEN_PATH => exchanged(request, &owner).await,
         _ => Ok(request.map(|body| body.map_err(Into::<BoxError>::into).boxed())),
     };
     let request = match request {
@@ -218,15 +218,56 @@ where
     Ok(collected.to_bytes())
 }
 
-/// The request with its body read whole, as the tunnel passes it on.
-async fn buffered<B>(request: Request<B>) -> Result<Request<BoxBody<Bytes, BoxError>>, StatusCode>
+/// Reads a token exchange whole and passes it on when its client_id names the tunnel's owner. T3
+/// makes the session under the name in the client_id, so an exchange of another pairing's code
+/// would label a session with that pairing (ADR-0301). A body without exactly one client_id is
+/// refused.
+async fn exchanged<B>(
+    request: Request<B>,
+    owner: &str,
+) -> Result<Request<BoxBody<Bytes, BoxError>>, StatusCode>
 where
     B: Body<Data = Bytes> + Send + 'static,
     B::Error: Into<BoxError>,
 {
     let (parts, body) = request.into_parts();
     let bytes = read(body).await?;
+    let client = form_field(&bytes, "client_id").and_then(|id| client_name_of(&id));
+    if client.as_deref() != Some(owner) {
+        return Err(StatusCode::FORBIDDEN);
+    }
     Ok(resend(parts, bytes))
+}
+
+/// The value of the one field `key` of an application/x-www-form-urlencoded `body`; `None` when the
+/// field is absent or repeated, or when the body is not a form.
+pub(crate) fn form_field(body: &[u8], key: &str) -> Option<String> {
+    let mut found = None;
+    for pair in std::str::from_utf8(body).ok()?.split('&') {
+        let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if form_text(name)? == key && found.replace(form_text(value)?).is_some() {
+            return None;
+        }
+    }
+    found
+}
+
+/// The text of a form component: `+` is a space, and `%XX` is the byte XX.
+fn form_text(component: &str) -> Option<String> {
+    let mut bytes = Vec::with_capacity(component.len());
+    let mut rest = component.bytes();
+    while let Some(byte) = rest.next() {
+        bytes.push(match byte {
+            b'+' => b' ',
+            b'%' => {
+                let high = (rest.next()? as char).to_digit(16)?;
+                let low = (rest.next()? as char).to_digit(16)?;
+                (high * 16 + low) as u8
+            }
+            other => other,
+        });
+    }
+    String::from_utf8(bytes).ok()
 }
 
 /// `parts` with `bytes` as its body, whose length its headers then state.

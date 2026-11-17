@@ -2108,6 +2108,55 @@ async fn a_decision_with_another_pairings_client_id_is_refused_by_the_tunnel() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_token_exchange_with_another_pairings_client_id_is_refused_by_the_tunnel() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b, home_c) = (
+        dir.path().join("a"),
+        dir.path().join("b"),
+        dir.path().join("c"),
+    );
+    let (_a, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let (_c, c) = start_service(&home_c).await;
+    let port_b = free_port();
+    b.remote_on(port_b).await.unwrap();
+    for host in [&a, &b, &c] {
+        host.host_agents(true).await.unwrap();
+    }
+    let url_b = format!("ws://127.0.0.1:{port_b}");
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let (name_a, _) = a.host_add(&url_b, &code, None).await.unwrap();
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let (name_c, _) = c.host_add(&url_b, &code, None).await.unwrap();
+    let addr_a = format!("127.0.0.1:{}", peer_row(&home_a, &name_a).0);
+    let addr_c = format!("127.0.0.1:{}", peer_row(&home_c, &name_c).0);
+    // A's sign-in is approved through A's tunnel, as an agent of A would.
+    let client_id = register_client(&addr_a);
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let tester = remote::pair(&url_b, &code, "tester").await.unwrap().token;
+    let tester = remote::Host::connect_to(&url_b, &tester, "tester")
+        .await
+        .unwrap();
+    let decided = body_json(&decide(
+        &addr_a,
+        &client_id,
+        &tester.t3_pairing().await.unwrap(),
+    ));
+    let approved = query(decided["redirectTo"].as_str().unwrap(), "code");
+    // The exchange reaches C's tunnel with A's client_id and A's Host, so the token would bind to A.
+    let verifier = "a".repeat(64);
+    let form = format!(
+        "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={verifier}&resource={}",
+        form_value(&approved),
+        form_value("http://127.0.0.1/t3code-peer-link"),
+        form_value(&client_id),
+        form_value(&format!("http://{addr_a}/mcp")),
+    );
+    let answer = http_at(&addr_c, &addr_a, "POST", "/oauth/mcp/token", FORM, &form);
+    assert_eq!(status_of(&answer), 403, "{answer}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn revoking_a_name_with_no_client_still_ends_the_sign_ins_made_under_it() {
     let (dir, _repo, _home) = fixture();
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));

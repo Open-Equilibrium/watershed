@@ -14,7 +14,7 @@ use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::protocol::Role;
 
 use crate::hosts::Access;
-use crate::tunnel::{checked, client_name_of, forward, relay};
+use crate::tunnel::{checked, client_name_of, form_field, forward, relay};
 
 /// The name of the host these tests stand for, and the client_id that T3 signs for it.
 const OWNER: &str = "host-1a2b";
@@ -153,4 +153,21 @@ async fn a_token_exchange_whose_body_never_arrives_holds_no_sign_in_gate() {
         .expect("the tunnel answers");
     assert_eq!(answered.status(), StatusCode::REQUEST_TIMEOUT);
     drop(t3);
+}
+
+#[test]
+fn a_token_form_names_one_client_id_however_it_is_encoded() {
+    let encoded = "grant_type=authorization_code&client_id=eyJ2IjoxLCJuIjoiaG9zdC0xYTJiIiwiciI6W119%2Esignature";
+    assert_eq!(
+        form_field(encoded.as_bytes(), "client_id").as_deref(),
+        Some(CLIENT_ID)
+    );
+    let plus = "client_id=a+b";
+    assert_eq!(
+        form_field(plus.as_bytes(), "client_id").as_deref(),
+        Some("a b")
+    );
+    let repeated = "client_id=a&client_id=b";
+    assert_eq!(form_field(repeated.as_bytes(), "client_id"), None);
+    assert_eq!(form_field(b"code=x", "client_id"), None);
 }
