@@ -264,6 +264,12 @@ class CiProductScopeTest(unittest.TestCase):
         self.commit({"liquid/app/lib/main.dart": "Fixture\n"})
         self.push("f" * 40, scope(True, "flow_agent", "liquid"))
 
+    def test_a_push_to_main_without_its_previous_tip_selects_every_gate(self) -> None:
+        # On main, origin/main is the pushed commit itself, so the branch has no commits outside it.
+        main = self.commit({"meta-harness/meta-harness-core/src/lib.rs": "Fixture\n"})
+        self.git("update-ref", "refs/remotes/origin/main", main)
+        self.push("f" * 40, ALL)
+
     def test_unavailable_comparison_base_fails_without_a_skip_result(self) -> None:
         self.git("update-ref", "-d", "refs/remotes/origin/main")
         for before in ("0" * 40, "f" * 40):
