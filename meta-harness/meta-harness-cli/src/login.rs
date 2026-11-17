@@ -95,6 +95,8 @@ pub struct Manager {
     /// The service file.
     pub file: PathBuf,
     render: fn(&Plan) -> String,
+    /// The data folder a service file's text names.
+    home_of: fn(&str) -> Option<String>,
     start: Vec<Step>,
     stop: Vec<Step>,
 }
@@ -110,6 +112,7 @@ impl Manager {
         let plist = file.to_string_lossy().into_owned();
         Self {
             render: plist_of,
+            home_of: plist_home,
             // A job that is still loaded refuses bootstrap, and a persisted disable blocks it.
             start: vec![
                 step("launchctl", &["bootout", &target], false),
@@ -126,6 +129,7 @@ impl Manager {
         Self {
             file: config.join("systemd/user").join(UNIT),
             render: unit_of,
+            home_of: unit_home,
             start: vec![
                 step("systemctl", &["--user", "daemon-reload"], true),
                 step("systemctl", &["--user", "enable", UNIT], true),
@@ -170,6 +174,15 @@ impl Manager {
         std::fs::write(&self.file, (self.render)(plan))
             .map_err(|e| format!("Could not write {}: {e}", self.file.display()))?;
         run_all(&self.start, &mut run).map(|_| ())
+    }
+
+    /// The data folder the installed service keeps, from its file; `None` without a file.
+    pub fn recorded_home(&self) -> Result<Option<PathBuf>, String> {
+        match std::fs::read_to_string(&self.file) {
+            Ok(text) => Ok((self.home_of)(&text).map(PathBuf::from)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!("Could not read {}: {e}", self.file.display())),
+        }
     }
 
     /// Stops the service and removes its file; the data folder stays. Returns the failures of
@@ -267,6 +280,40 @@ fn systemd_value(value: &str) -> String {
         .replace('"', "\\\"")
         .replace('%', "%%");
     format!("\"{escaped}\"")
+}
+
+/// The data folder a launch agent names, read back from its environment.
+fn plist_home(text: &str) -> Option<String> {
+    let rest = text
+        .split_once("<key>META_HARNESS_HOME</key>\n    <string>")?
+        .1;
+    let value = rest.split_once("</string>")?.0;
+    Some(
+        value
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&"),
+    )
+}
+
+/// The data folder a systemd unit names, read back from its `Environment=` line, which
+/// `systemd_value` quoted and escaped.
+fn unit_home(text: &str) -> Option<String> {
+    let quoted = text
+        .lines()
+        .find_map(|line| line.strip_prefix("Environment=\"META_HARNESS_HOME="))?
+        .strip_suffix('"')?;
+    let mut value = String::new();
+    let mut chars = quoted.chars();
+    while let Some(c) = chars.next() {
+        // A backslash or a percent sign escapes the character after it.
+        if c == '\\' || c == '%' {
+            value.push(chars.next()?);
+        } else {
+            value.push(c);
+        }
+    }
+    Some(value)
 }
 
 /// The systemd user unit: it starts with the user's session and 5 seconds after
@@ -421,7 +468,8 @@ mod tests {
     fn a_systemd_user_unit_quotes_what_systemd_would_expand() {
         let dir = Dir::new();
         let manager = Manager::systemd(&dir.0.join("config"));
-        let (unit, ran) = installed(&manager, &plan(&dir.0));
+        let plan = plan(&dir.0);
+        let (unit, ran) = installed(&manager, &plan);
         let root = dir.0.display();
         assert!(unit.contains(&format!("ExecStart=\"{root}/A & B/bin/meta\" serve\n")));
         assert!(unit.contains("Environment=\"PATH=/usr/bin:/Users/p/.local/bin\"\n"));
@@ -440,6 +488,7 @@ mod tests {
                 "systemctl --user restart meta-harness.service",
             ]
         );
+        assert_eq!(manager.recorded_home(), Ok(Some(plan.home)));
     }
 
     #[test]
@@ -455,6 +504,15 @@ mod tests {
         // systemd expands `$` in ExecStart= only; a `$` in Environment= is literal.
         assert!(unit.contains(&format!("ExecStart=\"{root}/$$bin/meta\" serve\n")));
         assert!(unit.contains(&format!("Environment=\"META_HARNESS_HOME={root}/data$\"\n")));
+    }
+
+    #[test]
+    fn a_service_file_names_the_data_folder_it_was_written_with() {
+        let home = PathBuf::from("/data $ \"q\" \\ 100% & <x>");
+        let plan = Plan::new(PathBuf::from("/bin/meta"), home.clone(), |_| None).unwrap();
+        let home = home.to_string_lossy().into_owned();
+        assert_eq!(plist_home(&plist_of(&plan)), Some(home.clone()));
+        assert_eq!(unit_home(&unit_of(&plan)), Some(home));
     }
 
     #[test]

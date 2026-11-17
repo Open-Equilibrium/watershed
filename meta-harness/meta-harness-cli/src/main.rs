@@ -231,16 +231,30 @@ fn removes_data(prefix: &Path, home: &Path) -> bool {
             .any(|folder| home.starts_with(resolved(prefix.join(folder))))
 }
 
+/// The first of `home` and `recorded`, the data folder the login service keeps, that uninstalling
+/// `prefix` would remove.
+fn data_in_installation(prefix: &Path, recorded: Option<PathBuf>, home: &Path) -> Option<PathBuf> {
+    std::iter::once(home.to_path_buf())
+        .chain(recorded)
+        .find(|home| {
+            // A link to the data folder counts as its target.
+            let target = home.canonicalize().unwrap_or_else(|_| home.clone());
+            removes_data(prefix, &target)
+        })
+}
+
 fn uninstall() -> Result<(), String> {
     let prefix = prefix()?;
     let home = default_home()?;
-    // Checked before anything is removed; a link to the data folder counts as its target.
-    let target = home.canonicalize().unwrap_or_else(|_| home.clone());
-    if removes_data(&prefix, &target) {
+    let manager = login::Manager::current()?;
+    // Checked before anything is removed: the login service may keep a data folder that this
+    // shell does not name.
+    if let Some(data) = data_in_installation(&prefix, manager.recorded_home()?, &home) {
         return Err(format!(
-            "The data folder {} lies in the installation that uninstall removes; set \
-             META_HARNESS_HOME to a folder outside {}.",
-            home.display(),
+            "The data folder {} lies in the installation that uninstall removes, so nothing was \
+             removed. Move it outside {}, set META_HARNESS_HOME to its new place, run `meta \
+             service install` and then uninstall again.",
+            data.display(),
             prefix.display()
         ));
     }
@@ -312,6 +326,19 @@ mod tests {
         ] {
             assert_eq!(removes_data(prefix, Path::new(home)), refused, "{home}");
         }
+    }
+
+    #[test]
+    fn uninstall_checks_the_data_folder_the_login_service_keeps_as_well() {
+        let prefix = Path::new("/opt/mh");
+        let recorded = PathBuf::from("/opt/mh/lib/meta-harness/data");
+        let shell = Path::new("/home/p/.meta-harness");
+        // This shell names a folder outside the installation; the service keeps its data inside.
+        assert_eq!(
+            data_in_installation(prefix, Some(recorded.clone()), shell),
+            Some(recorded)
+        );
+        assert_eq!(data_in_installation(prefix, None, shell), None);
     }
 
     #[test]
