@@ -349,7 +349,9 @@ fn git_runs_through_the_bridge_with_its_progress() {
         move |step| sender.send(step).is_ok(),
     )
     .expect("runs");
-    let steps: Vec<_> = receiver.iter().collect();
+    // A run that never ends stops the collection after a while, so the test fails, not hangs.
+    let steps: Vec<_> =
+        std::iter::from_fn(|| receiver.recv_timeout(Duration::from_secs(10)).ok()).collect();
     assert!(steps.iter().any(|s| s.kind == BridgeGitProgressKind::Phase));
     assert_eq!(
         steps.last().map(|s| s.kind),
