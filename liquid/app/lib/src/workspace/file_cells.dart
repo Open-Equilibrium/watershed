@@ -149,7 +149,21 @@ class FilesPicker extends StatefulWidget {
 
 class _FilesPickerState extends State<FilesPicker> {
   late final _focus = FocusNode(debugLabel: 'Files picker', onKeyEvent: _key);
+  final _list = ScrollController();
   var _chosen = 0;
+
+  /// Chooses the item at `index` and scrolls a file into view.
+  void _choose(int index) {
+    setState(() => _chosen = index);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_list.hasClients || index >= widget.files.length) return;
+      final position = _list.position;
+      final top = index * FilesPicker._itemHeight;
+      final bottom = top + FilesPicker._itemHeight - position.viewportDimension;
+      if (top < position.pixels) position.jumpTo(top);
+      if (bottom > position.pixels) position.jumpTo(bottom);
+    });
+  }
 
   @override
   void initState() {
@@ -164,6 +178,7 @@ class _FilesPickerState extends State<FilesPicker> {
   void dispose() {
     widget.onKeys?.call(null);
     _focus.dispose();
+    _list.dispose();
     super.dispose();
   }
 
@@ -182,7 +197,7 @@ class _FilesPickerState extends State<FilesPicker> {
     switch (event.logicalKey) {
       case LogicalKeyboardKey.arrowDown || LogicalKeyboardKey.arrowUp:
         final by = event.logicalKey == LogicalKeyboardKey.arrowDown ? 1 : -1;
-        setState(() => _chosen = (_chosen + by) % _count);
+        _choose((_chosen + by) % _count);
       case LogicalKeyboardKey.enter || LogicalKeyboardKey.numpadEnter:
         if (event is! KeyRepeatEvent) _take(_chosen);
       case LogicalKeyboardKey.backspace || LogicalKeyboardKey.delete
@@ -267,34 +282,45 @@ class _FilesPickerState extends State<FilesPicker> {
                   ),
                 ),
               ),
-              for (final (index, file) in files.indexed)
-                item(index, [
-                  Icon(_iconOf(file), size: 14, color: ws.textMuted),
-                  const SizedBox(width: WsMetrics.space2),
-                  Expanded(
-                    child: Text(
-                      '${file.name} · ${sizeLabel(file.size)}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: WsMetrics.fsUi,
-                        color: ws.text,
+              // The files scroll in the height the list has; Add files… stays below.
+              Flexible(
+                child: ListView.builder(
+                  controller: _list,
+                  shrinkWrap: true,
+                  itemExtent: FilesPicker._itemHeight,
+                  itemCount: files.length,
+                  itemBuilder: (context, index) {
+                    final file = files[index];
+                    return item(index, [
+                      Icon(_iconOf(file), size: 14, color: ws.textMuted),
+                      const SizedBox(width: WsMetrics.space2),
+                      Expanded(
+                        child: Text(
+                          '${file.name} · ${sizeLabel(file.size)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: WsMetrics.fsUi,
+                            color: ws.text,
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-                  if (index == _chosen) ...[
-                    action(
-                      LucideIcons.download,
-                      ValueKey('file save ${file.name}'),
-                      () => widget.onSave(file),
-                    ),
-                    action(
-                      LucideIcons.x,
-                      ValueKey('file remove ${file.name}'),
-                      () => widget.onRemove(index),
-                    ),
-                  ],
-                ]),
+                      if (index == _chosen) ...[
+                        action(
+                          LucideIcons.download,
+                          ValueKey('file save ${file.name}'),
+                          () => widget.onSave(file),
+                        ),
+                        action(
+                          LucideIcons.x,
+                          ValueKey('file remove ${file.name}'),
+                          () => widget.onRemove(index),
+                        ),
+                      ],
+                    ]);
+                  },
+                ),
+              ),
               Divider(height: 9, thickness: 1, color: ws.border),
             ],
             item(files.length, [

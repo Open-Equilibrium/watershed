@@ -238,7 +238,9 @@ const localPrefix = 'local-';
 /// The lines of a shape in its unturned frame moved to the origin.
 Path shapePath(BridgeElement element, bool hand) {
   final (w, h) = (element.w, element.h);
-  final options = RoughOptions(seed: element.seed == 0 ? 1 : element.seed);
+  // rough.js takes seeds from 1 to 2^31 - 1; the core keeps any u32, which folds into
+  // that range the same on every device.
+  final options = RoughOptions(seed: (element.seed - 1) % 0x7FFFFFFF + 1);
   switch (element.shape) {
     case BridgeShape.rectangle:
       final box = Rect.fromLTWH(0, 0, w, h);

@@ -159,6 +159,23 @@ void main() {
     expect(lastWrite(), 'r1: Invoice.pdf, CP ticket.pdf');
   });
 
+  testWidgets('a cell\'s long list scrolls and keeps Add files… in reach', (
+    tester,
+  ) async {
+    await bookings(
+      tester,
+      () async => [
+        for (var at = 0; at < 60; at++) await stored('Receipt $at.pdf', 10),
+      ],
+    );
+    await tester.tap(fileCell('r1'));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const Key('add files')).hitTestable(), findsOneWidget);
+  });
+
   testWidgets('files dropped on a file cell go into it, not onto the Page', (
     tester,
   ) async {

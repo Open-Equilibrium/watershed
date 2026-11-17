@@ -52,4 +52,33 @@ void main() {
     }
     expect(cache.entries, 1);
   });
+
+  test('a shape from another device with any 32-bit seed draws', () {
+    final shape = newElement(
+      BridgeElementKind.shape,
+      frame: const Rect.fromLTWH(0, 0, 40, 30),
+      color: BridgeInkColor.text,
+      width: 1,
+    );
+    for (final seed in [0, 1, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFF]) {
+      final stored = BridgeElement(
+        kind: shape.kind,
+        x: 0,
+        y: 0,
+        w: 40,
+        h: 30,
+        rotation: 0,
+        color: shape.color,
+        width: 1,
+        pen: shape.pen,
+        points: shape.points,
+        shape: shape.shape,
+        seed: seed,
+        arrowhead: false,
+        corners: shape.corners,
+        text: '',
+      );
+      expect(shapePath(stored, true).getBounds().width, greaterThan(30));
+    }
+  });
 }
