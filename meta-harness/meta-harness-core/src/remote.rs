@@ -23,7 +23,7 @@ use crate::api::{
 };
 use crate::config::{Change, Current, LogEntry, Proposal};
 use crate::hosts::{Access, ClientKind, HostList};
-use crate::util::lock;
+use crate::util::{TIMEOUT, lock};
 use crate::{
     Automation, Context, GitActionRequest, GitProgress, GitStatus, Lineage, LineageChanges,
     LocalServer, ModelChoice, Permissions, Provider, PullRequestDetail, Refs, RequestId,
@@ -184,8 +184,9 @@ impl Host {
                 (api::CLIENT_HEADER, self.inner.client.as_str()),
             ],
         )?;
-        let (socket, _) = tokio_tungstenite::connect_async(request)
+        let (socket, _) = tokio::time::timeout(TIMEOUT, tokio_tungstenite::connect_async(request))
             .await
+            .map_err(|_| format!("Meta-Harness at {url} did not answer in time."))?
             .map_err(|e| match e {
                 // A service that stopped without removing its connection file.
                 tokio_tungstenite::tungstenite::Error::Io(io)
@@ -454,24 +455,27 @@ pub async fn pair(address: &str, code: &str, client: &str) -> Result<api::Pairin
         address,
         &[(api::PAIRING_HEADER, code), (api::CLIENT_HEADER, client)],
     )?;
-    let (mut socket, _) = tokio_tungstenite::connect_async(request)
+    let (mut socket, _) = tokio::time::timeout(TIMEOUT, tokio_tungstenite::connect_async(request))
         .await
+        .map_err(|_| format!("Meta-Harness at {address} did not answer in time."))?
         .map_err(|e| match e {
             // The refusal says why in its body, such as a code that is wrong or used.
             tokio_tungstenite::tungstenite::Error::Http(response) => refusal(&response),
             e => format!("Could not reach Meta-Harness at {address}: {e}"),
         })?;
-    let answer = loop {
-        match socket.next().await {
-            Some(Ok(Message::Text(text))) => break text,
-            Some(Ok(_)) => {}
-            _ => {
-                return Err(format!(
-                    "Meta-Harness at {address} did not answer the pairing."
-                ));
+    let answer = tokio::time::timeout(TIMEOUT, async {
+        loop {
+            match socket.next().await {
+                Some(Ok(Message::Text(text))) => return Some(text),
+                Some(Ok(_)) => {}
+                _ => return None,
             }
         }
-    };
+    })
+    .await
+    .ok()
+    .flatten()
+    .ok_or_else(|| format!("Meta-Harness at {address} did not answer the pairing."))?;
     let _ = socket.close(None).await;
     serde_json::from_str(&answer).map_err(|e| format!("Meta-Harness answered unexpectedly: {e}"))
 }

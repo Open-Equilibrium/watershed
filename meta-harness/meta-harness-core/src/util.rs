@@ -7,6 +7,10 @@ use std::time::Duration;
 
 use tokio::net::{TcpListener, TcpStream};
 
+/// How long a call waits for another process or host before it gives up: a T3 command, a connect
+/// or a pairing (ADR-0288, ADR-0299).
+pub(crate) const TIMEOUT: Duration = Duration::from_secs(30);
+
 /// `bytes` in lower-case hex.
 pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()

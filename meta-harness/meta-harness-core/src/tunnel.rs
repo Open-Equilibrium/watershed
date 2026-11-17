@@ -24,6 +24,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::api;
 use crate::hosts::Access;
+use crate::util::TIMEOUT;
 
 /// The bytes a tunnel message carries at most.
 const CHUNK: usize = 16 * 1024;
@@ -211,7 +212,8 @@ async fn open(tcp: TcpStream, address: String, token: String) {
     ) else {
         return;
     };
-    if let Ok((socket, _)) = tokio_tungstenite::connect_async(request).await {
+    let connected = tokio::time::timeout(TIMEOUT, tokio_tungstenite::connect_async(request)).await;
+    if let Ok(Ok((socket, _))) = connected {
         relay(tcp, socket).await;
     }
 }

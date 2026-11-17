@@ -9,6 +9,7 @@ use serde_json::Value;
 
 use super::server::QUIET_ENV;
 use crate::hosts::Access;
+use crate::util::TIMEOUT;
 
 /// The orchestration scopes an agent sign-in at `access` needs, as T3's own `mcpClientScopes` gives
 /// them (ADR-0300): a pairing code carries exactly these, so T3 grants no more than the level.
@@ -40,9 +41,10 @@ async fn run(binary: &Path, home: &Path, what: &str, args: &[&str]) -> Result<St
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     let child = crate::spawn(&mut command).map_err(|e| format!("Could not run T3: {e}"))?;
-    let output = child
-        .wait_with_output()
+    // Dropped when it gives up, which kills the child (kill_on_drop).
+    let output = tokio::time::timeout(TIMEOUT, child.wait_with_output())
         .await
+        .map_err(|_| format!("T3 could not {what}: it took longer than 30 seconds."))?
         .map_err(|e| format!("Could not run T3: {e}"))?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
