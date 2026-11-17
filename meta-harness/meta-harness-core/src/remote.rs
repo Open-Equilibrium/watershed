@@ -23,7 +23,7 @@ use crate::api::{
 };
 use crate::config::{Change, Current, LogEntry, Proposal};
 use crate::hosts::{Access, ClientKind, HostList};
-use crate::util::{TIMEOUT, lock};
+use crate::util::{IDLE, TIMEOUT, lock};
 use crate::{
     Automation, Context, GitActionRequest, GitProgress, GitStatus, Lineage, LineageChanges,
     LocalServer, ModelChoice, Permissions, Provider, PullRequestDetail, Refs, RequestId,
@@ -210,7 +210,7 @@ impl Host {
         let (out, mut outgoing) = mpsc::unbounded_channel::<Message>();
         let waiters: Arc<Mutex<Option<HashMap<u64, Waiter>>>> =
             Arc::new(Mutex::new(Some(HashMap::new())));
-        tokio::spawn(async move {
+        let writer = tokio::spawn(async move {
             while let Some(message) = outgoing.recv().await {
                 if sink.send(message).await.is_err() {
                     break;
@@ -223,14 +223,18 @@ impl Host {
         // Held weakly, so dropping every handle of this client closes the connection.
         let cancel = out.downgrade();
         tokio::spawn(async move {
-            while let Some(Ok(frame)) = frames.next().await {
+            // Any frame, a pong included, comes at least every PING from a service that is there;
+            // one silent for IDLE is gone, though its socket never closed.
+            while let Ok(Some(Ok(frame))) = tokio::time::timeout(IDLE, frames.next()).await {
                 if let Message::Text(text) = frame
                     && let Ok(reply) = serde_json::from_str::<Reply>(&text)
                 {
                     deliver(&read, &cancel, reply);
                 }
             }
-            // The connection is gone: every waiting call fails and every stream ends.
+            // The connection is gone: its writer closes the socket, every waiting call fails and
+            // every stream ends.
+            writer.abort();
             for (_, waiter) in lock(&read).take().into_iter().flatten() {
                 match waiter {
                     Waiter::Call(answer) => drop(answer.send(Err(LOST_CALL.to_owned()))),
