@@ -964,6 +964,40 @@ async fn connects(url: &str, token: &str, name: &str) -> bool {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_client_name_keeps_no_control_characters() {
+    let (dir, _repo, _home) = fixture();
+    let (_service, local) = start_service(&dir.path().join("meta")).await;
+    let port = free_port();
+    local.remote_on(port).await.unwrap();
+    let url = format!("ws://127.0.0.1:{port}");
+    let code = local
+        .invite(ClientKind::Device, Access::Auto)
+        .await
+        .unwrap();
+    remote::pair(&url, &code, "phone\tlaptop").await.unwrap();
+    let clients = local.hosts().await.unwrap().clients;
+    assert_eq!(
+        clients[0].name, "phonelaptop",
+        "meta host list prints the name"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_address_names_a_websocket_address() {
+    let (dir, _repo, _home) = fixture();
+    let (_service, local) = start_service(&dir.path().join("meta")).await;
+    local.host_agents(true).await.unwrap();
+    let error = local
+        .host_add("127.0.0.1:3774", "AAAA-AAAA", None)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error,
+        "Enter the address as ws://HOST:PORT, as meta invite prints it."
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn remote_access_refuses_port_zero() {
     let (dir, _repo, _home) = fixture();
     let (_service, local) = start_service(&dir.path().join("meta")).await;

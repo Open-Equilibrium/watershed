@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
-use super::{Access, ClientInfo};
+use super::{Access, ClientInfo, printable};
 use crate::config::{Store, count, failed, now_ms, sql};
 use crate::util::{hex, lock};
 use crate::{remote, t3, tunnel};
@@ -261,6 +261,11 @@ impl Links {
         code: &str,
         access: Option<Access>,
     ) -> Result<(String, Access), String> {
+        if !address.starts_with("ws://") {
+            return Err(
+                "Enter the address as ws://HOST:PORT, as meta invite prints it.".to_owned(),
+            );
+        }
         let _serial = self.serial.lock().await;
         if let Some(name) = linked_at(&store.db(), address)? {
             return Err(format!(
@@ -270,7 +275,7 @@ impl Links {
         let client = pairing_name(&self.name);
         let paired = remote::pair(address, code, &client).await?;
         let access = access.unwrap_or(paired.access);
-        let name = paired.name;
+        let name = printable(&paired.name);
         match self
             .link_paired(store, address, &name, paired.token, access)
             .await

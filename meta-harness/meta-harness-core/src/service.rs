@@ -342,12 +342,7 @@ async fn serve(
     let mut revocations = shared.revoked.subscribe();
     let check = |request: &Request, response: Response| -> Result<Response, ErrorResponse> {
         admission = Some(admit(&shared, listener, request)?);
-        client = header(request, api::CLIENT_HEADER)
-            .unwrap_or("unnamed")
-            .chars()
-            .filter(|c| !c.is_control())
-            .take(64)
-            .collect();
+        client = hosts::printable(header(request, api::CLIENT_HEADER).unwrap_or("unnamed"));
         Ok(response)
     };
     let Ok(Ok(mut socket)) = tokio::time::timeout(

@@ -41,6 +41,12 @@ fn new_code() -> String {
     format!("{}-{}", &letters[..4], &letters[4..])
 }
 
+/// A client's name as the store keeps it and `meta host list` prints it: without control characters,
+/// and at most 64 of the rest.
+pub(crate) fn printable(name: &str) -> String {
+    name.chars().filter(|c| !c.is_control()).take(64).collect()
+}
+
 /// A code as it is compared: without its dash or spaces, in capitals, so a typed one matches.
 fn normal(code: &str) -> String {
     code.chars()
@@ -126,7 +132,7 @@ pub(crate) fn pair(
             digest(&token),
             kind.as_str(),
             access.as_str(),
-            name,
+            printable(name),
             sql(now)
         ],
     )
