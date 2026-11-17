@@ -202,7 +202,7 @@ impl Entry {
             .map(|(_, value)| value.as_str())
     }
 
-    /// Its sort key, if usable (ADR-0297).
+    /// Its sort key, if usable (ADR-0304).
     pub(crate) fn sort(&self) -> Option<&str> {
         crate::sort_key::usable(self.get(SORT))
     }

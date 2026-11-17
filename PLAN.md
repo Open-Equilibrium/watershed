@@ -102,7 +102,7 @@ The macOS Liquid app runs its agent sessions on a pinned T3 Code server through 
 #### M3c — Central sync, mobile and headless execution
 
 - Central Sync Server with resumable star-topology exchange, merging with Automerge 3 (ADR-0238); a concurrent edit of one field shows both values, after an approved mockup.
-- ⏎ at the start of a line that shares its sort key with the line above gives that line a new key first (ADR-0296). ⏎ inside such a line moves its tail past the whole tied group today, across another Block or Section; how that split is placed is decided with this work.
+- ⏎ at the start of a line that shares its sort key with the line above gives that line a new key first (ADR-0303). ⏎ inside such a line moves its tail past the whole tied group today, across another Block or Section; how that split is placed is decided with this work.
 - Authorized user devices sync complete Workspaces and continue offline from local replicas.
 - An optional headless replica receives only explicitly enabled Workspaces and exposes the same Role/mutation boundary to Automations, schedules and agents on its host while user devices are offline.
 - Sync applies received actions through the same permissioned mutation/History pipeline.
