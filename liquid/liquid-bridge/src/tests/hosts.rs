@@ -11,6 +11,7 @@ use meta_harness_core::{Kind, Service, ServiceConfig, remote};
 
 use crate::api::hosts::{
     BridgeReach, client_name, forget_with, pair_with, reach_local_agent_host, reach_remote_with,
+    tag,
 };
 use crate::api::session::{AgentHost, RUNTIME};
 use crate::keys::{DeviceTokens, Tokens};
@@ -179,15 +180,26 @@ fn an_agent_host_pairs_connects_reaches_and_is_forgotten_here_only() {
 }
 
 #[test]
-fn a_device_pairs_under_liquid_and_the_computer_name_in_lower_case() {
-    assert_eq!(client_name("Studio's Mac").unwrap(), "liquid-studio-s-mac");
+fn a_device_pairs_under_liquid_the_computer_name_and_its_own_tag() {
     assert_eq!(
-        client_name("  Lab   Mac mini ").unwrap(),
-        "liquid-lab-mac-mini"
+        client_name("Studio's Mac", "3f2a").unwrap(),
+        "liquid-studio-s-mac-3f2a"
     );
-    assert_eq!(client_name("Mac/Ünï").unwrap(), "liquid-mac-n");
+    assert_eq!(
+        client_name("  Lab   Mac mini ", "3f2a").unwrap(),
+        "liquid-lab-mac-mini-3f2a"
+    );
+    // Each pairing draws its own tag, so computers of the same name pair as different devices.
+    let drawn = tag();
     assert!(
-        client_name(" !! ").is_err(),
+        drawn.len() == 4
+            && drawn
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()),
+        "{drawn}"
+    );
+    assert!(
+        client_name(" !! ", "3f2a").is_err(),
         "a computer with no name cannot pair"
     );
 }

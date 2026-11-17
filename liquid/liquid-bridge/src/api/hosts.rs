@@ -35,13 +35,14 @@ pub enum BridgeReach {
 /// `meta invite --device`, under this computer's name. Files the token it issues under `address`.
 /// Nothing is kept when pairing fails.
 pub fn pair_agent_host(address: String, code: String) -> Result<BridgePairing, String> {
-    let client = client_name(&computer_name())?;
+    let client = client_name(&computer_name(), &tag())?;
     pair_with(&DeviceTokens {}, &address, &code, &client)
 }
 
-/// The name Liquid pairs under on an agent host: `liquid-` and this computer's name in lower case,
-/// each run of other characters one hyphen, so `meta host revoke` names exactly this device.
-pub(crate) fn client_name(computer: &str) -> Result<String, String> {
+/// The name Liquid pairs under on an agent host: `liquid-`, this computer's name in lower case with
+/// each run of other characters one hyphen, and `tag`, so `meta host revoke` names exactly this
+/// device even beside a computer of the same name.
+pub(crate) fn client_name(computer: &str, tag: &str) -> Result<String, String> {
     let words: Vec<String> = computer
         .split(|character: char| !character.is_ascii_alphanumeric())
         .filter(|word| !word.is_empty())
@@ -50,7 +51,14 @@ pub(crate) fn client_name(computer: &str) -> Result<String, String> {
     if words.is_empty() {
         return Err("This computer has no name to pair under.".into());
     }
-    Ok(format!("liquid-{}", words.join("-")))
+    Ok(format!("liquid-{}-{tag}", words.join("-")))
+}
+
+/// Four random lowercase hex digits that tell this pairing apart from another of the same name.
+pub(crate) fn tag() -> String {
+    let mut bytes = [0u8; 2];
+    getrandom::fill(&mut bytes).expect("the operating system provides random bytes");
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// This computer's name as its operating system shows it: the computer name on macOS, the host
