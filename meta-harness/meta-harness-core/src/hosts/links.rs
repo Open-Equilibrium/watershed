@@ -197,15 +197,56 @@ impl Links {
     }
 
     /// Starts the tunnels of the hosts already linked, as the service starts. A tunnel whose port
-    /// is taken is reported, and its host stays linked until it is removed.
+    /// is taken moves to a free one (see [`Self::move_tunnel`]).
     pub(crate) async fn start_tunnels(&self, store: &Store) -> Result<(), String> {
         let linked_hosts = linked(&store.db())?;
         for host in linked_hosts {
             match TcpListener::bind(("127.0.0.1", host.tunnel_port)).await {
                 Ok(socket) => self.tunnel(socket, &host),
-                Err(error) => eprintln!("meta: the tunnel to {} is off: {error}", host.name),
+                Err(error) => {
+                    if let Err(moving) = self.move_tunnel(store, &host).await {
+                        eprintln!(
+                            "meta: the tunnel to {} is off: {error}; {moving}",
+                            host.name
+                        );
+                    }
+                }
             }
         }
+        Ok(())
+    }
+
+    /// Moves the tunnel of `host` to a free port and forgets its T3 link to the old one. The host
+    /// is then due, so [`Self::relink_due`] links it again through the new port, with a fresh code.
+    async fn move_tunnel(&self, store: &Store, host: &LinkedHost) -> Result<(), String> {
+        let socket = TcpListener::bind("127.0.0.1:0")
+            .await
+            .map_err(|e| format!("Could not listen on the loopback: {e}"))?;
+        let port = socket
+            .local_addr()
+            .map_err(|e| format!("Could not listen on the loopback: {e}"))?
+            .port();
+        let old = tunnel_url(host.tunnel_port);
+        let t3_links = t3::links(&self.t3, &self.t3_home).await?;
+        if let Some(link) = t3_links.iter().find(|link| link.urls.contains(&old)) {
+            t3::unlink(&self.t3, &self.t3_home, &link.environment_id).await?;
+        }
+        store
+            .db()
+            .execute(
+                "UPDATE peer SET tunnel_port = ?2, linked_ms = NULL WHERE name = ?1",
+                params![host.name, port],
+            )
+            .map_err(failed)?;
+        let moved = LinkedHost {
+            name: host.name.clone(),
+            address: host.address.clone(),
+            token: host.token.clone(),
+            access: host.access,
+            tunnel_port: port,
+            linked_ms: None,
+        };
+        self.tunnel(socket, &moved);
         Ok(())
     }
 

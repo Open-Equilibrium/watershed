@@ -1350,6 +1350,47 @@ async fn a_host_invited_read_only_gets_a_pairing_code_that_grants_orchestration_
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_host_link_whose_tunnel_port_is_taken_at_restart_moves_to_a_new_port() {
+    let (dir, _repo, _home) = fixture();
+    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
+    let (a_service, a) = start_service(&home_a).await;
+    let (_b, b) = start_service(&home_b).await;
+    let port_b = free_port();
+    a.remote_on(free_port()).await.unwrap();
+    b.remote_on(port_b).await.unwrap();
+    a.host_agents(true).await.unwrap();
+    b.host_agents(true).await.unwrap();
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let (name, _) = a
+        .host_add(&format!("ws://127.0.0.1:{port_b}"), &code, None)
+        .await
+        .unwrap();
+    let old = peer_row(&home_a, &name).0;
+    drop(a);
+    a_service.stop().await;
+
+    // Another program takes the tunnel's port while the service is down.
+    let holder = std::net::TcpListener::bind(("127.0.0.1", old)).unwrap();
+    let (_a_service, a) = start_service(&home_a).await;
+    assert_ne!(peer_row(&home_a, &name).0, old, "the tunnel moved");
+    let linked = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            if t3_environments(&home_a)
+                .iter()
+                .any(|link| link["status"] == "reachable")
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await;
+    assert!(linked.is_ok(), "linked again through the new port");
+    assert!(a.hosts().await.unwrap().hosts[0].reachable);
+    drop(holder);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_host_link_older_than_25_days_is_made_again_when_the_service_starts() {
     let (dir, _repo, _home) = fixture();
     let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
