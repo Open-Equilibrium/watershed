@@ -5545,6 +5545,18 @@ impl SseDecode for crate::api::workspace::BridgePage {
     }
 }
 
+impl SseDecode for crate::api::hosts::BridgePairing {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_host = <String>::sse_decode(deserializer);
+        let mut var_client = <String>::sse_decode(deserializer);
+        return crate::api::hosts::BridgePairing {
+            host: var_host,
+            client: var_client,
+        };
+    }
+}
+
 impl SseDecode for crate::api::session::BridgePermissions {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -8306,6 +8318,27 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::workspace::BridgePage>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::hosts::BridgePairing {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.host.into_into_dart().into_dart(),
+            self.client.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::hosts::BridgePairing
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::hosts::BridgePairing>
+    for crate::api::hosts::BridgePairing
+{
+    fn into_into_dart(self) -> crate::api::hosts::BridgePairing {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::session::BridgePermissions {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
@@ -9905,6 +9938,14 @@ impl SseEncode for crate::api::workspace::BridgePage {
         <String>::sse_encode(self.id, serializer);
         <Option<String>>::sse_encode(self.parent, serializer);
         <String>::sse_encode(self.title, serializer);
+    }
+}
+
+impl SseEncode for crate::api::hosts::BridgePairing {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.host, serializer);
+        <String>::sse_encode(self.client, serializer);
     }
 }
 

@@ -487,7 +487,7 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiHostsForgetAgentHost({required String address});
 
-  Future<String> crateApiHostsPairAgentHost({
+  Future<BridgePairing> crateApiHostsPairAgentHost({
     required String address,
     required String code,
   });
@@ -3739,7 +3739,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateApiHostsPairAgentHost({
+  Future<BridgePairing> crateApiHostsPairAgentHost({
     required String address,
     required String code,
   }) {
@@ -3757,7 +3757,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_bridge_pairing,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateApiHostsPairAgentHostConstMeta,
@@ -4738,6 +4738,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       id: dco_decode_String(arr[0]),
       parent: dco_decode_opt_String(arr[1]),
       title: dco_decode_String(arr[2]),
+    );
+  }
+
+  @protected
+  BridgePairing dco_decode_bridge_pairing(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return BridgePairing(
+      host: dco_decode_String(arr[0]),
+      client: dco_decode_String(arr[1]),
     );
   }
 
@@ -6560,6 +6572,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_parent = sse_decode_opt_String(deserializer);
     var var_title = sse_decode_String(deserializer);
     return BridgePage(id: var_id, parent: var_parent, title: var_title);
+  }
+
+  @protected
+  BridgePairing sse_decode_bridge_pairing(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_host = sse_decode_String(deserializer);
+    var var_client = sse_decode_String(deserializer);
+    return BridgePairing(host: var_host, client: var_client);
   }
 
   @protected
@@ -8700,6 +8720,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.id, serializer);
     sse_encode_opt_String(self.parent, serializer);
     sse_encode_String(self.title, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_pairing(BridgePairing self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.host, serializer);
+    sse_encode_String(self.client, serializer);
   }
 
   @protected

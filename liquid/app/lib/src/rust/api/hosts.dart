@@ -7,17 +7,19 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `forget_with`, `pair_with`, `reach_remote_with`, `reach`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `eq`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `client_name`, `computer_name`, `forget_with`, `pair_with`, `reach_remote_with`, `reach`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`
 
 /// Pairs with the agent host at `address` (`ws://…`) using `code`, its pairing code from
-/// `meta invite --device`. Files the token it issues under `address` and answers the host's name.
+/// `meta invite --device`, under this computer's name. Files the token it issues under `address`.
 /// Nothing is kept when pairing fails.
-Future<String> pairAgentHost({required String address, required String code}) =>
-    RustLib.instance.api.crateApiHostsPairAgentHost(
-      address: address,
-      code: code,
-    );
+Future<BridgePairing> pairAgentHost({
+  required String address,
+  required String code,
+}) => RustLib.instance.api.crateApiHostsPairAgentHost(
+  address: address,
+  code: code,
+);
 
 /// Forgets the device token filed under `address`. The host keeps this device paired until its
 /// own `meta host revoke` removes it.
@@ -32,6 +34,29 @@ Future<BridgeReach> reachLocalAgentHost({String? home}) =>
 /// Whether the agent host at `address` answers with the token filed under it.
 Future<BridgeReach> reachRemoteAgentHost({required String address}) =>
     RustLib.instance.api.crateApiHostsReachRemoteAgentHost(address: address);
+
+/// What pairing with an agent host gave: the host's name, and the name this device pairs under,
+/// which `meta host revoke` names to remove it there.
+class BridgePairing {
+  /// The host's name.
+  final String host;
+
+  /// This device's name on the host.
+  final String client;
+
+  const BridgePairing({required this.host, required this.client});
+
+  @override
+  int get hashCode => host.hashCode ^ client.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgePairing &&
+          runtimeType == other.runtimeType &&
+          host == other.host &&
+          client == other.client;
+}
 
 /// Whether an agent host answers, as Settings shows it. A check that fails for another reason, such
 /// as a missing token, is an error that names the reason.

@@ -10,7 +10,7 @@ use std::sync::Mutex;
 use meta_harness_core::{Kind, Service, ServiceConfig, remote};
 
 use crate::api::hosts::{
-    BridgeReach, forget_with, pair_with, reach_local_agent_host, reach_remote_with,
+    BridgeReach, client_name, forget_with, pair_with, reach_local_agent_host, reach_remote_with,
 };
 use crate::api::session::{AgentHost, RUNTIME};
 use crate::keys::{DeviceTokens, Tokens};
@@ -108,7 +108,8 @@ fn an_agent_host_pairs_connects_reaches_and_is_forgotten_here_only() {
     let url = format!("ws://127.0.0.1:{port}");
     let tokens = Memory::default();
 
-    let refused = pair_with(&tokens, &url, "AAAA-AAAA").unwrap_err();
+    let client = "liquid-studio-s-mac";
+    let refused = pair_with(&tokens, &url, "AAAA-AAAA", client).unwrap_err();
     assert!(!refused.is_empty());
     assert_eq!(
         tokens.read(&url).unwrap(),
@@ -119,8 +120,12 @@ fn an_agent_host_pairs_connects_reaches_and_is_forgotten_here_only() {
     let code = RUNTIME
         .block_on(local.invite(Kind::Device))
         .expect("a code");
-    let name = pair_with(&tokens, &url, &code).expect("the device pairs");
-    assert!(!name.is_empty());
+    let pairing = pair_with(&tokens, &url, &code, client).expect("the device pairs");
+    assert!(!pairing.host.is_empty());
+    assert_eq!(
+        pairing.client, client,
+        "the device pairs under its own name"
+    );
     let token = tokens
         .read(&url)
         .unwrap()
@@ -130,7 +135,7 @@ fn an_agent_host_pairs_connects_reaches_and_is_forgotten_here_only() {
         .block_on(local.invite(Kind::Device))
         .expect("a code");
     assert!(
-        pair_with(&tokens, &url, &again).is_err(),
+        pair_with(&tokens, &url, &again, client).is_err(),
         "an address that holds a token is not paired again"
     );
     assert_eq!(tokens.read(&url).unwrap(), Some(token.clone()));
@@ -159,7 +164,32 @@ fn an_agent_host_pairs_connects_reaches_and_is_forgotten_here_only() {
     RUNTIME
         .block_on(remote::Host::connect_to(&url, &token, "test"))
         .expect("the host keeps the device paired");
+    // The host lists the device under the name it paired with, and revoking that name removes it.
+    let paired = RUNTIME.block_on(local.hosts()).expect("the host's clients");
+    assert!(paired.clients.iter().any(|device| device.name == client));
+    RUNTIME
+        .block_on(local.revoke_client(client))
+        .expect("the device is revoked by name");
+    assert!(
+        RUNTIME
+            .block_on(remote::Host::connect_to(&url, &token, "test"))
+            .is_err()
+    );
     stop(service);
+}
+
+#[test]
+fn a_device_pairs_under_liquid_and_the_computer_name_in_lower_case() {
+    assert_eq!(client_name("Studio's Mac").unwrap(), "liquid-studio-s-mac");
+    assert_eq!(
+        client_name("  Lab   Mac mini ").unwrap(),
+        "liquid-lab-mac-mini"
+    );
+    assert_eq!(client_name("Mac/Ünï").unwrap(), "liquid-mac-n");
+    assert!(
+        client_name(" !! ").is_err(),
+        "a computer with no name cannot pair"
+    );
 }
 
 #[test]

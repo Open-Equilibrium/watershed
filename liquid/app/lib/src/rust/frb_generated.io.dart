@@ -369,6 +369,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgePage dco_decode_bridge_page(dynamic raw);
 
   @protected
+  BridgePairing dco_decode_bridge_pairing(dynamic raw);
+
+  @protected
   BridgePermissions dco_decode_bridge_permissions(dynamic raw);
 
   @protected
@@ -1015,6 +1018,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgePage sse_decode_bridge_page(SseDeserializer deserializer);
+
+  @protected
+  BridgePairing sse_decode_bridge_pairing(SseDeserializer deserializer);
 
   @protected
   BridgePermissions sse_decode_bridge_permissions(SseDeserializer deserializer);
@@ -1855,6 +1861,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_bridge_page(BridgePage self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_bridge_pairing(BridgePairing self, SseSerializer serializer);
 
   @protected
   void sse_encode_bridge_permissions(

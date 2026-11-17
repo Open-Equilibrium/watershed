@@ -13,18 +13,23 @@ class SavedAgentHost {
   const SavedAgentHost({
     required this.name,
     required this.address,
+    required this.client,
     this.active = false,
   });
 
-  /// Reads one host from `json`, or none when it names no host and address.
+  /// Reads one host from `json`, or none when it lacks a name, address or device name.
   static SavedAgentHost? fromJson(Object? json) {
     if (json is! Map<String, Object?>) return null;
     final name = json['name'];
     final address = json['address'];
-    if (name is! String || address is! String) return null;
+    final client = json['client'];
+    if (name is! String || address is! String || client is! String) {
+      return null;
+    }
     return SavedAgentHost(
       name: name,
       address: address,
+      client: client,
       active: json['active'] == true,
     );
   }
@@ -32,15 +37,23 @@ class SavedAgentHost {
   final String name;
   final String address;
 
+  /// The name this device paired under on the host, which `meta host revoke` names to remove it.
+  final String client;
+
   /// Whether Liquid's sessions run on this host (ADR-0295).
   final bool active;
 
-  SavedAgentHost copyWith({required bool active}) =>
-      SavedAgentHost(name: name, address: address, active: active);
+  SavedAgentHost copyWith({required bool active}) => SavedAgentHost(
+    name: name,
+    address: address,
+    client: client,
+    active: active,
+  );
 
   Map<String, Object?> toJson() => {
     'name': name,
     'address': address,
+    'client': client,
     'active': active,
   };
 }
@@ -91,8 +104,8 @@ class AgentHostsSettings {
 /// What the Settings section needs from the bridge; tests substitute a fake. A null address is
 /// This Mac.
 abstract interface class AgentHostBridge {
-  /// Pairs with the host at `address` and answers its name.
-  Future<String> pair(String address, String code);
+  /// Pairs with the host at `address`, answering its name and the name this device pairs under.
+  Future<BridgePairing> pair(String address, String code);
 
   /// Forgets the device token of the host at `address` on this Mac.
   Future<void> forget(String address);
@@ -110,7 +123,7 @@ class RustAgentHostBridge implements AgentHostBridge {
   final String? home;
 
   @override
-  Future<String> pair(String address, String code) =>
+  Future<BridgePairing> pair(String address, String code) =>
       pairAgentHost(address: address, code: code);
 
   @override
@@ -176,8 +189,12 @@ class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
   /// Pairs with the host at `address` using `code`, then saves it.
   Future<SavedAgentHost> pair(String address, String code) async {
     const failed = 'Could not add the agent host; nothing changed.';
-    final name = await _step(failed, () => bridge.pair(address, code));
-    final host = SavedAgentHost(name: name, address: address);
+    final paired = await _step(failed, () => bridge.pair(address, code));
+    final host = SavedAgentHost(
+      name: paired.host,
+      address: address,
+      client: paired.client,
+    );
     try {
       await _write(value.added(host));
     } on Object catch (error) {

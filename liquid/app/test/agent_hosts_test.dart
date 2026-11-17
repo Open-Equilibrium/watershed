@@ -18,6 +18,7 @@ import 'fake_backend.dart';
 import 'fake_host.dart';
 
 const remote = 'ws://studio.local:3774';
+const client = 'liquid-studio-s-mac';
 const info = SessionInfo(project: 'acme-api');
 
 /// The bridge's agent hosts in memory: checks answer from `reaches`, and an unlisted host is offline.
@@ -28,10 +29,10 @@ class FakeAgentHosts implements AgentHostBridge {
   Object? forgetError;
 
   @override
-  Future<String> pair(String address, String code) async {
+  Future<BridgePairing> pair(String address, String code) async {
     calls.add('pair $address $code');
     if (pairError case final error?) throw error;
-    return 'Studio mini';
+    return BridgePairing(host: 'Studio mini', client: client);
   }
 
   @override
@@ -124,9 +125,14 @@ void main() {
         const SavedAgentHost(
           name: 'Studio mini',
           address: remote,
+          client: client,
           active: true,
         ),
-        const SavedAgentHost(name: 'Lab', address: 'ws://lab:3774'),
+        const SavedAgentHost(
+          name: 'Lab',
+          address: 'ws://lab:3774',
+          client: client,
+        ),
       ]);
       expect(
         AgentHostsSettings.fromJson(settings.toJson()).activeAddress,
@@ -155,7 +161,7 @@ void main() {
           'hosts': [
             {'name': 'no address'},
             3,
-            {'name': 'Lab', 'address': 'ws://lab:3774'},
+            {'name': 'Lab', 'address': 'ws://lab:3774', 'client': client},
           ],
         }).hosts.map((host) => host.address),
         ['ws://lab:3774'],
@@ -173,7 +179,12 @@ void main() {
         tester,
         controller(
           settings: const AgentHostsSettings([
-            SavedAgentHost(name: 'Studio mini', address: remote, active: true),
+            SavedAgentHost(
+              name: 'Studio mini',
+              address: remote,
+              client: client,
+              active: true,
+            ),
           ]),
           running: remote,
         ),
@@ -227,6 +238,7 @@ void main() {
       expect(bridge.calls, contains('pair $remote AAAA-AAAA'));
       expect(saved.single.activeAddress, isNull);
       expect(saved.single.hosts.single.address, remote);
+      expect(saved.single.hosts.single.client, client);
     },
   );
 
@@ -237,7 +249,7 @@ void main() {
       tester,
       controller(
         settings: const AgentHostsSettings([
-          SavedAgentHost(name: 'Studio mini', address: remote),
+          SavedAgentHost(name: 'Studio mini', address: remote, client: client),
         ]),
       ),
     );
@@ -260,14 +272,21 @@ void main() {
         tester,
         controller(
           settings: const AgentHostsSettings([
-            SavedAgentHost(name: 'Studio mini', address: remote),
+            SavedAgentHost(
+              name: 'Studio mini',
+              address: remote,
+              client: client,
+            ),
           ]),
         ),
       );
 
       await chooseInRow(tester, remote, 'Remove from this device…');
       expect(find.text('Remove Studio mini from this device?'), findsOneWidget);
-      expect(find.textContaining('meta host revoke liquid'), findsOneWidget);
+      expect(
+        find.textContaining('meta host revoke liquid-studio-s-mac'),
+        findsOneWidget,
+      );
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
       expect(bridge.calls, isNot(contains('forget $remote')));

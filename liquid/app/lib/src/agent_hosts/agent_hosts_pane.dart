@@ -88,7 +88,7 @@ class _AgentHostsPaneState extends State<AgentHostsPane> {
         action: 'Remove',
         children: [
           Text(
-            'This forgets its address and device token here. ${host.name} keeps this device paired until meta host revoke liquid runs on it.',
+            'This forgets its address and device token here. ${host.name} keeps this device paired as ${host.client}, until meta host revoke ${host.client} runs there.',
             style: DangerDialog.text(context),
           ),
         ],
