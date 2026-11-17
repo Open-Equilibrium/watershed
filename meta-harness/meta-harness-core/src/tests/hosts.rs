@@ -3,7 +3,7 @@
 
 use rusqlite::Connection;
 
-use crate::hosts::{self, Access, ClientKind};
+use crate::hosts::{self, Access, ClientKind, printable};
 
 const MINUTE: u64 = 60_000;
 
@@ -58,10 +58,25 @@ fn a_token_admits_the_kind_of_client_that_paired_with_it_until_revoked() {
     assert_eq!(kind_of(&db, &host_token), Some(ClientKind::Host));
     assert_eq!(kind_of(&db, &device_token[..63]), None);
 
-    hosts::revoke(&db, "phone").unwrap();
+    assert!(hosts::revoke(&db, "phone").unwrap(), "a client was revoked");
     assert_eq!(kind_of(&db, &device_token), None);
     assert!(
-        hosts::revoke(&db, "phone").is_err(),
+        !hosts::revoke(&db, "phone").unwrap(),
         "nothing left to revoke"
     );
+}
+
+#[test]
+fn a_name_is_trimmed_and_limited_as_t3_limits_it() {
+    assert_eq!(printable("\u{3000} phone \u{feff}"), "phone");
+    assert_eq!(
+        printable("   \n\t"),
+        "unnamed",
+        "an empty name is the default one"
+    );
+    assert_eq!(printable(&"a".repeat(70)).chars().count(), 64);
+    // Sixty emoji are 120 UTF-16 units, more than T3's 100.
+    let emoji = printable(&"\u{1F600}".repeat(60));
+    assert!(emoji.encode_utf16().count() <= 100, "{emoji}");
+    assert!(!emoji.ends_with(char::is_whitespace));
 }

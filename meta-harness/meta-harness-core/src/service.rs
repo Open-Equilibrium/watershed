@@ -124,6 +124,9 @@ struct Shared {
     links: Links,
     /// The handshake slots of the remote listener (see [`HANDSHAKES`]).
     handshakes: Arc<tokio::sync::Semaphore>,
+    /// Held for reading by each sign-in a tunnel forwards until T3 answers it, and for writing while
+    /// a client's T3 sessions end, so no sign-in in flight survives that (ADR-0301).
+    sign_ins: Arc<tokio::sync::RwLock<()>>,
 }
 
 impl Service {
@@ -199,6 +202,7 @@ impl Service {
             remote_serial: tokio::sync::Mutex::default(),
             links,
             handshakes: Arc::new(tokio::sync::Semaphore::new(HANDSHAKES)),
+            sign_ins: Arc::new(tokio::sync::RwLock::new(())),
         });
         // Remote access stays on across restarts (ADR-0299); a port it cannot take is retried.
         let remembered = hosts::remote_port(&shared.store.db())?;
@@ -360,7 +364,13 @@ async fn serve(
         Some(Admission::Tunnel(owner, access)) => {
             let mut ends = ends.clone();
             tokio::select! {
-                () = tunnel::serve(socket, shared.host.t3_address().to_owned(), owner.clone(), access) => {}
+                () = tunnel::serve(
+                    socket,
+                    shared.host.t3_address().to_owned(),
+                    owner.clone(),
+                    access,
+                    shared.sign_ins.clone(),
+                ) => {}
                 () = revoked(&mut revocations, Some(&owner)) => {}
                 _ = ends.wait_for(|stopped| *stopped) => {}
             }
@@ -411,7 +421,8 @@ async fn serve(
             if heard.elapsed() > IDLE {
                 break;
             }
-            let _ = out.send(Message::Ping(Vec::new().into())).await;
+            // A full queue is a peer that is not reading, which the next ping finds.
+            let _ = out.try_send(Message::Ping(Vec::new().into()));
             continue;
         };
         let Some(Ok(frame)) = frame else { break };
@@ -589,15 +600,22 @@ impl Session {
         match call {
             HostsCall::T3Pairing => to(shared.links.pairing_code(self.caller.access()).await?),
             HostsCall::Revoke(name) => {
-                // A host's T3 sessions end before its client goes, so a failure leaves the host to
-                // revoke again (ADR-0301).
-                if hosts::named_kind(&shared.store.db(), &name)? == Some(hosts::ClientKind::Host) {
-                    shared.links.end_sessions(&name).await?;
+                // The client goes first, so none of its connections is admitted again. Then the sign-ins
+                // in flight finish, its open connections end with its token (ADR-0299), and the sessions
+                // its sign-ins made end (ADR-0301). A failure there leaves the name to revoke again.
+                let had_client = hosts::revoke(&shared.store.db(), &name)?;
+                let ended = {
+                    let _sign_ins = shared.sign_ins.write().await;
+                    let _ = shared.revoked.send(name.clone());
+                    shared.links.end_sessions(&name).await
+                };
+                match ended {
+                    Ok(ended) if had_client || ended > 0 => to(()),
+                    Ok(_) => Err(format!("There is no client named {name}.")),
+                    Err(error) => Err(format!(
+                        "{error} The client's T3 sessions did not all end; run \"meta host revoke {name}\" again."
+                    )),
                 }
-                hosts::revoke(&shared.store.db(), &name)?;
-                // The client's open connections end with its token (ADR-0299).
-                let _ = shared.revoked.send(name);
-                to(())
             }
             HostsCall::Add {
                 address,

@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
-use super::{Access, ClientInfo, printable};
+use super::{Access, ClientInfo, fitted, printable};
 use crate::config::{Store, count, failed, now_ms, sql};
-use crate::util::{hex, lock};
+use crate::util::{TIMEOUT, hex, lock};
 use crate::{remote, t3, tunnel};
 
 /// How long after a link was made it is made again: T3 links last 30 days (ADR-0288).
@@ -36,6 +36,8 @@ struct LinkedHost {
 pub struct LinkedHostInfo {
     /// The name the host answers to.
     pub name: String,
+    /// The name this host paired under at that host, which that host's `meta host revoke` names.
+    pub client: String,
     /// Its remote listener's address, as `ws://<ip>:<port>`.
     pub address: String,
     /// The access its agents have here.
@@ -146,7 +148,8 @@ fn linked_at(db: &Connection, address: &str) -> Result<Option<String>, String> {
 fn pairing_name(host: &str) -> String {
     let mut bytes = [0u8; 2];
     getrandom::fill(&mut bytes).expect("the operating system provides random bytes");
-    format!("{host}-{}", hex(&bytes))
+    // Cut so that the whole name is one the other host keeps unchanged.
+    format!("{}-{}", fitted(host, 59, 95), hex(&bytes))
 }
 
 fn remove_linked_host(db: &Connection, name: &str) -> Result<(), String> {
@@ -279,8 +282,20 @@ impl Links {
         }
         let client = pairing_name(&self.name);
         let paired = remote::pair(address, code, &client).await?;
-        let access = access.unwrap_or(paired.access);
         let name = printable(&paired.name);
+        // The level the other host invited this host at is known only once it has paired, so a
+        // request above it is refused before any link is made.
+        let access = match access {
+            Some(asked) if asked > paired.access => {
+                return Err(format!(
+                    "{name} invited this host at {}; ask for that or less. The pairing it made \
+                     stays until \"meta host revoke {client}\" runs on {name}.",
+                    paired.access.as_str()
+                ));
+            }
+            Some(asked) => asked,
+            None => paired.access,
+        };
         match self
             .link_paired(store, address, &name, paired.token, access, &client)
             .await
@@ -345,14 +360,16 @@ impl Links {
     }
 
     /// Ends the T3 sessions that the sign-ins of the client named `client` made here, so that T3
-    /// refuses their tokens from the next request on (ADR-0300, ADR-0301).
-    pub(crate) async fn end_sessions(&self, client: &str) -> Result<(), String> {
+    /// refuses their tokens from the next request on (ADR-0300, ADR-0301). Answers how many ended.
+    pub(crate) async fn end_sessions(&self, client: &str) -> Result<usize, String> {
+        let mut ended = 0;
         for session in t3::sessions(&self.t3, &self.t3_home).await? {
             if session.is_link_of(client) {
                 t3::revoke_session(&self.t3, &self.t3_home, &session.session_id).await?;
+                ended += 1;
             }
         }
-        Ok(())
+        Ok(ended)
     }
 
     /// The linked hosts and the clients paired with this host, with whether each host's T3
@@ -364,6 +381,7 @@ impl Links {
             .map(|host| {
                 let url = tunnel_url(host.tunnel_port);
                 LinkedHostInfo {
+                    client: host.client.clone(),
                     reachable: t3_links
                         .iter()
                         .any(|link| link.status == "reachable" && link.urls.contains(&url)),
@@ -422,8 +440,14 @@ impl Links {
 
     /// Asks the peer for a pairing code over its host token and has T3 link through the tunnel.
     async fn link_t3(&self, host: &LinkedHost) -> Result<(), String> {
-        let other = remote::Host::connect_to(&host.address, &host.token, &self.name).await?;
-        let code = other.t3_pairing().await?;
+        // Bounded, since the serial lock is held meanwhile: a peer that stops answering must not
+        // hold every other change.
+        let code = tokio::time::timeout(TIMEOUT, async {
+            let other = remote::Host::connect_to(&host.address, &host.token, &self.name).await?;
+            other.t3_pairing().await
+        })
+        .await
+        .map_err(|_| format!("{} did not answer in time.", host.name))??;
         t3::link(
             &self.t3,
             &self.t3_home,

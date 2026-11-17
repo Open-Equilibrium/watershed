@@ -52,9 +52,8 @@ pub(crate) enum Call {
     Host(HostCall),
     /// Remote access to this service; answered only on this computer (ADR-0299).
     Remote(RemoteCall),
-    /// A pairing code for a new host or device; answered only on this computer (ADR-0299).
-    /// A pairing code for a new device or host. A host's access is the highest level its agents
-    /// get here (ADR-0300); a device ignores it.
+    /// A pairing code for a new device or host, answered only on this computer (ADR-0299). A host's
+    /// access is the highest level its agents get here (ADR-0300); a device ignores it.
     Invite { kind: ClientKind, access: Access },
     /// The other hosts this one links to and the clients paired with it (ADR-0285).
     Hosts(HostsCall),

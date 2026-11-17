@@ -16,7 +16,7 @@ use crate::util::hex;
 pub(crate) use links::Links;
 pub use links::{HostList, LinkedHostInfo};
 pub use pairing::ClientInfo;
-pub(crate) use pairing::{client, invite, named_kind, pair, printable, revoke};
+pub(crate) use pairing::{client, fitted, invite, pair, printable, revoke};
 
 /// The port the remote listener takes unless `meta remote on --port` names another (ADR-0299).
 pub const DEFAULT_REMOTE_PORT: u16 = 3774;

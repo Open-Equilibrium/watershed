@@ -6,6 +6,7 @@
 //! at is refused the same way (ADR-0300, ADR-0301).
 
 use std::convert::Infallible;
+use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
 use http_body_util::combinators::BoxBody;
@@ -21,12 +22,13 @@ use hyper_util::rt::TokioIo;
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, duplex, split};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::RwLock;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::api;
 use crate::hosts::Access;
-use crate::util::{IDLE, TIMEOUT};
+use crate::util::{IDLE, TIMEOUT, base64url_decode};
 
 /// The bytes a tunnel message carries at most.
 const CHUNK: usize = 16 * 1024;
@@ -40,7 +42,7 @@ const BUFFER: usize = 64 * 1024;
 fn passes(method: &Method, path: &str) -> bool {
     match path {
         "/.well-known/t3/environment" => *method == Method::GET,
-        REGISTER_PATH | DECISION_PATH | "/oauth/mcp/token" => *method == Method::POST,
+        REGISTER_PATH | DECISION_PATH | TOKEN_PATH => *method == Method::POST,
         // The MCP transport answers POST with requests, GET with its stream and DELETE with the end
         // of a session.
         "/mcp" => matches!(*method, Method::GET | Method::POST | Method::DELETE),
@@ -51,11 +53,27 @@ fn passes(method: &Method, path: &str) -> bool {
 /// The path that registers a link's client, whose name the tunnel sets to its host's (ADR-0300).
 const REGISTER_PATH: &str = "/oauth/mcp/register";
 
+/// The path that exchanges a link's approved code for its token, which makes the session.
+const TOKEN_PATH: &str = "/oauth/mcp/token";
+
 /// The path of the decision that approves a link's sign-in, whose level the tunnel checks.
 const DECISION_PATH: &str = "/oauth/mcp/decision";
 
 /// The bytes of a link's request body that the tunnel reads at most, which no request needs more of.
 const BODY: usize = 64 * 1024;
+
+/// The name that a T3 client_id is signed for: the `n` of its payload. The payload is the part
+/// before the dot, base64url of JSON; T3 verifies the signature, which this does not repeat. A
+/// client_id of any other shape names nothing.
+pub(crate) fn client_name_of(client_id: &str) -> Option<String> {
+    let mut parts = client_id.split('.');
+    let (body, _signature, extra) = (parts.next()?, parts.next()?, parts.next());
+    if extra.is_some() {
+        return None;
+    }
+    let payload: Value = serde_json::from_slice(&base64url_decode(body)?).ok()?;
+    payload["n"].as_str().map(str::to_owned)
+}
 
 /// An error that a body or its reader reports.
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -117,14 +135,21 @@ where
 /// Serves HTTP on the WebSocket `socket` of a host's tunnel, for T3 at `t3`, until the client
 /// closes it: the requests for a link's paths reach T3, and the others get 403 (see the module).
 /// `owner` is the host's name for the link and `level` the access it was invited at.
-pub(crate) async fn serve<S>(socket: WebSocketStream<S>, t3: String, owner: String, level: Access)
-where
+pub(crate) async fn serve<S>(
+    socket: WebSocketStream<S>,
+    t3: String,
+    owner: String,
+    level: Access,
+    sign_ins: Arc<RwLock<()>>,
+) where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let (ours, theirs) = duplex(BUFFER);
     let http = server::Builder::new().serve_connection(
         TokioIo::new(theirs),
-        service_fn(move |request| forward(request, t3.clone(), owner.clone(), level)),
+        service_fn(move |request| {
+            forward(request, t3.clone(), owner.clone(), level, sign_ins.clone())
+        }),
     );
     // The relay ends by itself once the HTTP connection has dropped its side and every answer byte
     // is sent, so an answer that ends the connection is not cut short. The connection ends when
@@ -140,21 +165,31 @@ async fn forward(
     t3: String,
     owner: String,
     level: Access,
+    sign_ins: Arc<RwLock<()>>,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Infallible> {
     let path = request.uri().path();
     if !passes(request.method(), path) {
         return Ok(answer(StatusCode::FORBIDDEN));
     }
+    let gated = path == TOKEN_PATH;
     let request = match path {
         REGISTER_PATH => named(request, &owner).await,
-        DECISION_PATH => checked(request, level).await,
+        DECISION_PATH => checked(request, &owner, level).await,
         _ => Ok(request.map(|body| body.boxed())),
     };
     let request = match request {
         Ok(request) => request,
         Err(status) => return Ok(answer(status)),
     };
-    Ok(match send(request, &t3).await {
+    let answered = if gated {
+        // A token exchange makes the session, so it is held until T3 has answered: a revoke that
+        // waits on the gate then ends that session too.
+        let _in_flight = sign_ins.read().await;
+        send(request, &t3).await
+    } else {
+        send(request, &t3).await
+    };
+    Ok(match answered {
         Some(response) => response.map(|body| body.boxed()),
         None => answer(StatusCode::BAD_GATEWAY),
     })
@@ -183,11 +218,13 @@ fn resend(mut parts: Parts, bytes: Bytes) -> Request<BoxBody<Bytes, hyper::Error
     Request::from_parts(parts, body)
 }
 
-/// Reads the body of a decision and passes `request` on with it, when the decision asks for no
-/// more than `level`. A body that is no JSON, or asks for an access that names no level, is
-/// refused, since the tunnel cannot tell what it would grant.
+/// Reads the body of a decision and passes `request` on with it, when the decision is for the client
+/// `owner` (its client_id names it) and asks for no more than `level`. A body that is no JSON,
+/// names another client, or asks for an access that names no level is refused: the tunnel cannot
+/// tell what it would grant, and T3 would label the session by the name in the client_id (ADR-0301).
 pub(crate) async fn checked<B>(
     request: Request<B>,
+    owner: &str,
     level: Access,
 ) -> Result<Request<BoxBody<Bytes, hyper::Error>>, StatusCode>
 where
@@ -197,6 +234,12 @@ where
     let (parts, body) = request.into_parts();
     let bytes = read(body).await?;
     let decision: Value = serde_json::from_slice(&bytes).map_err(|_| StatusCode::FORBIDDEN)?;
+    let client = decision["authorization"]["client_id"]
+        .as_str()
+        .and_then(client_name_of);
+    if client.as_deref() != Some(owner) {
+        return Err(StatusCode::FORBIDDEN);
+    }
     match &decision["decision"]["access"] {
         // A decision that names no level, such as a refusal, grants nothing.
         Value::Null => {}

@@ -11,12 +11,16 @@ use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::protocol::Role;
 
 use crate::hosts::Access;
-use crate::tunnel::{checked, relay};
+use crate::tunnel::{checked, client_name_of, relay};
 
-/// The request a link sends with `body`, a decision of the access `access`.
+/// The name of the host these tests stand for, and the client_id that T3 signs for it.
+const OWNER: &str = "host-1a2b";
+const CLIENT_ID: &str = "eyJ2IjoxLCJuIjoiaG9zdC0xYTJiIiwiciI6W119.signature";
+
+/// A decision of the access `access` for the client that `CLIENT_ID` names.
 fn decision(access: &str) -> Vec<u8> {
     json!({
-        "authorization": {},
+        "authorization": {"client_id": CLIENT_ID},
         "decision": {"_tag": "pairing-code", "access": access, "code": "CODE"},
     })
     .to_string()
@@ -28,7 +32,7 @@ async fn passes(body: Vec<u8>, level: Access) -> Result<(), StatusCode> {
     let request = Request::post("/oauth/mcp/decision")
         .body(Full::new(Bytes::from(body)))
         .unwrap();
-    checked(request, level).await.map(|_| ())
+    checked(request, OWNER, level).await.map(|_| ())
 }
 
 #[tokio::test]
@@ -44,7 +48,7 @@ async fn a_decision_asks_no_more_than_the_invited_level() {
     );
     assert_eq!(passes(decision("approval-required"), invited).await, Ok(()));
     assert_eq!(passes(decision("read-only"), invited).await, Ok(()));
-    let deny = json!({"authorization": {}, "decision": {"_tag": "deny"}});
+    let deny = json!({"authorization": {"client_id": CLIENT_ID}, "decision": {"_tag": "deny"}});
     assert_eq!(passes(deny.to_string().into_bytes(), invited).await, Ok(()));
 }
 
@@ -75,4 +79,41 @@ async fn a_relay_ends_when_its_peer_goes_silent() {
     tokio::time::timeout(Duration::from_secs(600), relay(tcp, socket))
         .await
         .expect("the relay ends once its peer has been silent");
+}
+
+#[test]
+fn a_client_id_names_the_pairing_it_was_registered_for() {
+    // The payload of T3's signed client_id: base64url of {"v":1,"n":"host-1a2b","r":[]}.
+    let client_id = "eyJ2IjoxLCJuIjoiaG9zdC0xYTJiIiwiciI6W119.signature";
+    assert_eq!(client_name_of(client_id).as_deref(), Some("host-1a2b"));
+    assert_eq!(client_name_of("no-signature"), None);
+    assert_eq!(
+        client_name_of("eyJ2IjoxLCJuIjoiaG9zdC0xYTJiIiwiciI6W119.a.b"),
+        None
+    );
+}
+
+#[tokio::test]
+async fn a_decision_for_another_client_is_refused() {
+    let request = |body: serde_json::Value| {
+        Request::post("/oauth/mcp/decision")
+            .body(Full::new(Bytes::from(body.to_string())))
+            .unwrap()
+    };
+    // A client_id T3 signed for another name, such as the one an older pairing registered with.
+    let other = json!({"authorization": {"client_id": "eyJ2IjoxLCJuIjoib3RoZXIifQ.signature"},
+        "decision": {"_tag": "deny"}});
+    assert_eq!(
+        checked(request(other), OWNER, Access::Auto)
+            .await
+            .map(|_| ()),
+        Err(StatusCode::FORBIDDEN)
+    );
+    let anonymous = json!({"authorization": {}, "decision": {"_tag": "deny"}});
+    assert_eq!(
+        checked(request(anonymous), OWNER, Access::Auto)
+            .await
+            .map(|_| ()),
+        Err(StatusCode::FORBIDDEN)
+    );
 }

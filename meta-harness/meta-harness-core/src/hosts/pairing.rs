@@ -1,7 +1,7 @@
 //! Pairing codes and the clients they pair (ADR-0299): a code is single use and expires, and a
 //! client's token admits only the kind of client that paired with it.
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use super::{Access, ClientKind, digest, new_token, same};
@@ -26,6 +26,8 @@ pub struct ClientInfo {
     pub name: String,
     /// What it paired as.
     pub kind: ClientKind,
+    /// The access level it paired at (ADR-0300).
+    pub access: Access,
     /// When it paired, in milliseconds since the Unix epoch.
     pub since_ms: u64,
 }
@@ -42,9 +44,35 @@ fn new_code() -> String {
 }
 
 /// A client's name as the store keeps it and `meta host list` prints it: without control characters,
-/// and at most 64 of the rest.
+/// trimmed, and within the limits T3 gives a client name (64 characters, 100 UTF-16 units), so T3
+/// keeps the name unchanged in its label. A name with nothing left is `unnamed`.
 pub(crate) fn printable(name: &str) -> String {
-    name.chars().filter(|c| !c.is_control()).take(64).collect()
+    let cleaned: String = name.chars().filter(|c| !c.is_control()).collect();
+    match fitted(&cleaned, 64, 100) {
+        text if text.is_empty() => "unnamed".to_owned(),
+        text => text,
+    }
+}
+
+/// The longest start of `text`, without the whitespace around it, that has at most `chars`
+/// characters and `units` UTF-16 units.
+pub(crate) fn fitted(text: &str, chars: usize, units: usize) -> String {
+    let mut used = 0;
+    let fitting: String = text
+        .trim_matches(is_space)
+        .chars()
+        .take(chars)
+        .take_while(|c| {
+            used += c.len_utf16();
+            used <= units
+        })
+        .collect();
+    fitting.trim_matches(is_space).to_owned()
+}
+
+/// Whitespace as JavaScript trims it, which T3 trims client names with.
+fn is_space(c: char) -> bool {
+    c.is_whitespace() || c == '\u{feff}'
 }
 
 /// A code as it is compared: without its dash or spaces, in capitals, so a typed one matches.
@@ -122,6 +150,20 @@ pub(crate) fn pair(
         }
     }
     let (kind, access) = found.ok_or(REFUSED_CODE)?;
+    let name = printable(name);
+    let taken: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM client WHERE name = ?1",
+            [&name],
+            |row| row.get(0),
+        )
+        .map_err(failed)?;
+    if taken > 0 {
+        // Refused before the code is spent: the transaction is dropped unchanged.
+        return Err(format!(
+            "A client named {name} is paired already; pair under another name."
+        ));
+    }
     tx.execute("DELETE FROM pairing WHERE code_hash = ?1", [&wanted])
         .map_err(failed)?;
     let token = new_token();
@@ -132,7 +174,7 @@ pub(crate) fn pair(
             digest(&token),
             kind.as_str(),
             access.as_str(),
-            printable(name),
+            name,
             sql(now)
         ],
     )
@@ -173,49 +215,38 @@ pub(crate) fn client(
     Ok(found)
 }
 
-/// The kind of the client named `name`, if one is paired under that name.
-pub(crate) fn named_kind(db: &Connection, name: &str) -> Result<Option<ClientKind>, String> {
-    let kind: Option<String> = db
-        .query_row("SELECT kind FROM client WHERE name = ?1", [name], |row| {
-            row.get(0)
-        })
-        .optional()
-        .map_err(failed)?;
-    Ok(kind.and_then(|kind| ClientKind::parse(&kind)))
-}
-
-/// Revokes the client named `name`: its token is refused from its next connection on.
-pub(crate) fn revoke(db: &Connection, name: &str) -> Result<(), String> {
+/// Revokes the client named `name`: its token is refused from its next connection on. Answers
+/// whether there was such a client.
+pub(crate) fn revoke(db: &Connection, name: &str) -> Result<bool, String> {
     let removed = db
         .execute("DELETE FROM client WHERE name = ?1", [name])
         .map_err(failed)?;
-    if removed == 0 {
-        Err(format!("There is no client named {name}."))
-    } else {
-        Ok(())
-    }
+    Ok(removed > 0)
 }
 
 /// The clients paired with this host, by name.
 pub(crate) fn clients(db: &Connection) -> Result<Vec<ClientInfo>, String> {
     let mut statement = db
-        .prepare("SELECT name, kind, created_ms FROM client ORDER BY name")
+        .prepare("SELECT name, kind, access, created_ms FROM client ORDER BY name")
         .map_err(failed)?;
     let rows = statement
         .query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
             ))
         })
         .map_err(failed)?;
     rows.map(|row| {
-        let (name, kind, since) = row.map_err(failed)?;
+        let (name, kind, access, since) = row.map_err(failed)?;
         Ok(ClientInfo {
             name,
             kind: ClientKind::parse(&kind)
                 .ok_or("The configuration store holds an unknown client kind.")?,
+            access: Access::parse(&access)
+                .ok_or("The configuration store holds an unknown access level.")?,
             since_ms: count(since),
         })
     })

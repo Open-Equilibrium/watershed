@@ -27,6 +27,29 @@ pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// The bytes of `text` in unpadded base64url, or `None` when it holds another character.
+pub(crate) fn base64url_decode(text: &str) -> Option<Vec<u8>> {
+    let (mut bits, mut count, mut bytes) = (0u32, 0u32, Vec::new());
+    for character in text.bytes() {
+        let value = match character {
+            b'A'..=b'Z' => character - b'A',
+            b'a'..=b'z' => character - b'a' + 26,
+            b'0'..=b'9' => character - b'0' + 52,
+            b'-' => 62,
+            b'_' => 63,
+            _ => return None,
+        };
+        bits = (bits << 6) | u32::from(value);
+        count += 6;
+        if count >= 8 {
+            count -= 8;
+            bytes.push((bits >> count) as u8);
+            bits &= (1 << count) - 1;
+        }
+    }
+    Some(bytes)
+}
+
 /// Locks `mutex`. A holder that panicked leaves the state it guards in place, so the lock is taken
 /// anyway instead of failing every later caller.
 pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -40,11 +63,18 @@ where
     F: Fn(TcpStream) -> Fut,
     Fut: Future<Output = ()> + Send + 'static,
 {
+    // The connections are tasks of this loop, so aborting the loop ends them too.
+    let mut connections = tokio::task::JoinSet::new();
     loop {
-        match listener.accept().await {
-            Ok((socket, _)) => drop(tokio::spawn(serve(socket))),
-            // Such as too many open files: the listener keeps listening.
-            Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+        tokio::select! {
+            accepted = listener.accept() => match accepted {
+                Ok((socket, _)) => {
+                    connections.spawn(serve(socket));
+                }
+                // Such as too many open files: the listener keeps listening.
+                Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+            },
+            Some(_) = connections.join_next(), if !connections.is_empty() => {}
         }
     }
 }
