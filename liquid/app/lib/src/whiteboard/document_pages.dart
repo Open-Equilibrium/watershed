@@ -72,7 +72,8 @@ class DocumentPages {
       ..strokeWidth = 1 / pixelsPerPoint;
     _inView.clear();
     for (final (index, sheet) in sheets.indexed) {
-      if (!sheet.overlaps(view)) continue;
+      // A page with no height or width has nothing to draw.
+      if (sheet.isEmpty || !sheet.overlaps(view)) continue;
       _inView.add(index);
       if (_image case final image?) {
         canvas.drawImageRect(

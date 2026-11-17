@@ -306,6 +306,7 @@ fn erasing_part_of_a_stroke_replaces_it_by_its_pieces_in_one_action() {
     let Some(Created::Elements(new)) = applied.created else {
         panic!("the pieces")
     };
+    assert_eq!(new.len(), pieces.len());
     let read = elements(&mut workspace, &page, &block);
     assert_eq!(
         read,
