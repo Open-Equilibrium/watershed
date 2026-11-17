@@ -57,7 +57,7 @@ async fn a_peer_that_answers_no_connection_is_given_up_on() {
     assert!(connection_lost(&error), "{error}");
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn a_peer_that_goes_silent_after_connecting_fails_its_calls() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}", listener.local_addr().unwrap());
@@ -71,6 +71,8 @@ async fn a_peer_that_goes_silent_after_connecting_fails_its_calls() {
         }
     });
     let host = Host::connect_to(&url, "token", "test").await.unwrap();
+    // The handshake ran on real time; the silence after it is what the idle limit measures.
+    tokio::time::pause();
     let answer = tokio::time::timeout(GUARD, host.status())
         .await
         .expect("the call gives up");
