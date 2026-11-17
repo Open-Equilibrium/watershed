@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use futures_util::future::BoxFuture;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use tokio::net::TcpStream;
@@ -36,7 +37,7 @@ const LOST_CALL: &str = "T3 closed the connection before it answered; the call w
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// Issues an owner token, as `t3 auth session issue` does.
-type Issue = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
+type Issue = Arc<dyn Fn() -> BoxFuture<'static, Result<String, String>> + Send + Sync>;
 
 enum Waiter {
     Call(oneshot::Sender<Result<Value, String>>),
@@ -116,7 +117,7 @@ impl Client {
     /// connection: when T3 closes it, the client reconnects with a new token (see [`keep`]).
     pub async fn connect(
         origin: &str,
-        issue: impl Fn() -> Result<String, String> + Send + Sync + 'static,
+        issue: impl Fn() -> BoxFuture<'static, Result<String, String>> + Send + Sync + 'static,
     ) -> Result<Self, String> {
         let issue: Issue = Arc::new(issue);
         let socket = open(origin, &issue).await?;
@@ -357,13 +358,9 @@ fn dispatch(link: &Link, ack: &mpsc::UnboundedSender<Message>, frame: Value) {
     }
 }
 
-/// Opens a socket to `origin` with a new owner token. Issuing runs a process, so it waits off the
-/// async runtime.
+/// Opens a socket to `origin` with a new owner token.
 async fn open(origin: &str, issue: &Issue) -> Result<Socket, String> {
-    let issuer = issue.clone();
-    let token = tokio::task::spawn_blocking(move || issuer())
-        .await
-        .map_err(|e| e.to_string())??;
+    let token = issue().await?;
     let url = format!(
         "{}/ws?orchestrationProtocol={ORCHESTRATION_PROTOCOL}",
         origin.replacen("http", "ws", 1)

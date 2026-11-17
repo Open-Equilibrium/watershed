@@ -66,7 +66,7 @@ pub(super) async fn follow_answering(
         _ => answer(tag, payload, id),
     })
     .await;
-    let client = Client::connect(&fake.origin, || Ok("token".to_owned()))
+    let client = Client::connect(&fake.origin, || Box::pin(async { Ok("token".to_owned()) }))
         .await
         .unwrap();
     let thread = Thread::follow(client, "thread-1".to_owned(), "/repo".to_owned())
@@ -833,7 +833,7 @@ async fn a_thread_restarts_from_the_snapshot_t3_sends_on_a_new_connection() {
         _ => vec![ok(id, json!({}))],
     })
     .await;
-    let client = Client::connect(&fake.origin, || Ok("token".to_owned()))
+    let client = Client::connect(&fake.origin, || Box::pin(async { Ok("token".to_owned()) }))
         .await
         .unwrap();
     let thread = Thread::follow(client, "thread-1".to_owned(), "/repo".to_owned())
@@ -921,7 +921,7 @@ async fn a_late_branch_answer_keeps_the_newer_branch_t3_already_sent() {
         ],
     })
     .await;
-    let client = Client::connect(&fake.origin, || Ok("token".to_owned()))
+    let client = Client::connect(&fake.origin, || Box::pin(async { Ok("token".to_owned()) }))
         .await
         .unwrap();
     let thread = Thread::follow(client, "thread-1".to_owned(), "/repo".to_owned())

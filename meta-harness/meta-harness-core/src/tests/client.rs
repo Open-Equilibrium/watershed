@@ -12,7 +12,7 @@ use crate::t3::Client;
 const WAIT: Duration = Duration::from_secs(10);
 
 async fn connect(fake: &Fake) -> Client {
-    Client::connect(&fake.origin, || Ok("token".to_owned()))
+    Client::connect(&fake.origin, || Box::pin(async { Ok("token".to_owned()) }))
         .await
         .unwrap()
 }
