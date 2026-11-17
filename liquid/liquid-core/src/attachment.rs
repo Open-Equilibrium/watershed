@@ -52,8 +52,8 @@ pub struct Attachment {
     pub size: u64,
 }
 
-/// A Media Block's content: the attachment it shows.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// A named file: the attachment a Media Block shows, or one file of a file cell.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Media {
     /// The file's name.
     pub name: String,

@@ -5,7 +5,8 @@
 //! area document       { pages: { <page>: { title, parent?, sort, deleted } } }
 //! Page document       { blocks: { <block>: { kind, text, style?, language?, deleted } },
 //!                       (a Media Block's entry: { kind, name, type, attachment, size, deleted })
-//!                       (a Database Block's entry is in `database.rs`)
+//!                       (a Database Block's entry is in `database.rs`, a Whiteboard's in
+//!                        `whiteboard.rs`)
 //!                       views: { <view>: { block, sort, boundary, deleted } } }
 //! ```
 
@@ -83,6 +84,8 @@ pub enum BlockKind {
     Code,
     /// A Media Block, which shows an attachment (ADR-0305).
     Media,
+    /// A Whiteboard Block of strokes, shapes and text (ADR-0306).
+    Whiteboard,
     /// A Block of a kind a later version adds, which shows as a placeholder (ADR-0245).
     Unknown,
 }
@@ -95,6 +98,7 @@ impl BlockKind {
             Some("database") => Self::Database,
             Some("code") => Self::Code,
             Some("media") => Self::Media,
+            Some("whiteboard") => Self::Whiteboard,
             _ => Self::Unknown,
         }
     }
@@ -322,8 +326,12 @@ pub(crate) fn code(doc: &AutoCommit, block: &str) -> Option<Code> {
 
 /// A live Media Block's file and attachment; none for a Block of another kind.
 pub(crate) fn media(doc: &AutoCommit, block: &str) -> Option<Media> {
-    let entry = of_kind(doc, block, BlockKind::Media)?;
-    let size = match doc.get(&entry, SIZE).ok()? {
+    file(doc, &of_kind(doc, block, BlockKind::Media)?)
+}
+
+/// The file a map holds, as a Media Block's entry and each file of a file cell do.
+pub(crate) fn file(doc: &AutoCommit, obj: &ObjId) -> Option<Media> {
+    let size = match doc.get(obj, SIZE).ok()? {
         Some((Value::Scalar(value), _)) => match value.as_ref() {
             ScalarValue::Uint(size) => *size,
             _ => return None,
@@ -331,11 +339,20 @@ pub(crate) fn media(doc: &AutoCommit, block: &str) -> Option<Media> {
         _ => return None,
     };
     Some(Media {
-        name: string(doc, &entry, NAME)?,
-        media_type: string(doc, &entry, TYPE).unwrap_or_default(),
-        attachment: AttachmentId::parse(&string(doc, &entry, ATTACHMENT)?)?,
+        name: string(doc, obj, NAME)?,
+        media_type: string(doc, obj, TYPE).unwrap_or_default(),
+        attachment: AttachmentId::parse(&string(doc, obj, ATTACHMENT)?)?,
         size,
     })
+}
+
+/// Writes a file into a map.
+pub(crate) fn put_file(doc: &mut AutoCommit, obj: &ObjId, file: &Media) -> Result<(), Error> {
+    doc.put(obj, NAME, file.name.as_str())?;
+    doc.put(obj, TYPE, file.media_type.as_str())?;
+    doc.put(obj, ATTACHMENT, file.attachment.as_str())?;
+    doc.put(obj, SIZE, file.size)?;
+    Ok(())
 }
 
 /// A live Block's entry if it is of `kind`.

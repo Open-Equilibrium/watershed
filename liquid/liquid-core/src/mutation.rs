@@ -56,6 +56,8 @@ pub enum FieldKind {
     Date,
     /// Ticked or not.
     Checkbox,
+    /// Files, each a finished attachment (ADR-0305).
+    File,
 }
 
 /// One cell's value. A cell of a field takes only values of the field's kind.
@@ -73,6 +75,9 @@ pub enum Cell {
     Date(String),
     /// Ticked or not.
     Checkbox(bool),
+    /// Files in their order, at most [`crate::MAX_FILES`]; none is an empty cell. The core
+    /// reads each file's size from its attachment.
+    Files(Vec<crate::Media>),
 }
 
 // Numbers compare by their bits, so every Cell equals itself, also one holding NaN, which
@@ -85,6 +90,7 @@ impl PartialEq for Cell {
             (Self::Number(a), Self::Number(b)) => a.to_bits() == b.to_bits(),
             (Self::Select(a), Self::Select(b)) => a == b,
             (Self::Checkbox(a), Self::Checkbox(b)) => a == b,
+            (Self::Files(a), Self::Files(b)) => a == b,
             _ => false,
         }
     }
@@ -271,6 +277,37 @@ pub enum Mutation {
         /// The attachment.
         attachment: AttachmentId,
     },
+    /// Adds an empty, hand-drawn Whiteboard Block with a View on `page`, at its start or
+    /// after the View `after` (ADR-0306).
+    AddWhiteboardBlock {
+        /// The Page.
+        page: PageId,
+        /// The View it follows.
+        after: Option<ViewId>,
+    },
+    /// Sets how a Whiteboard draws its shapes and text.
+    SetWhiteboardStyle {
+        /// The Block's home Page.
+        page: PageId,
+        /// The Whiteboard Block.
+        block: BlockId,
+        /// The style.
+        style: crate::WhiteboardStyle,
+    },
+    /// Removes, changes and adds a Whiteboard's elements in one Action, as erasing part of a
+    /// stroke replaces it by its pieces; new elements go on top, in their order.
+    EditWhiteboard {
+        /// The Block's home Page.
+        page: PageId,
+        /// The Whiteboard Block.
+        block: BlockId,
+        /// New elements.
+        add: Vec<crate::Element>,
+        /// Changes to live elements.
+        change: Vec<crate::ElementChange>,
+        /// Elements to remove.
+        remove: Vec<crate::ElementId>,
+    },
     /// Adds a Database Block with one text field, "Name", and a View on `page`, at its
     /// start or after the View `after`.
     AddDatabaseBlock {
@@ -402,6 +439,8 @@ pub enum Created {
     Row(RowId),
     /// A new option of a select field.
     Option(OptionId),
+    /// New elements of a Whiteboard, in the order they were asked for.
+    Elements(Vec<crate::ElementId>),
 }
 
 /// A resource whose readers must refresh, so each subscribes only to what it shows.
@@ -445,7 +484,9 @@ pub enum Error {
     /// A cell's value is not of its field's kind, or is no valid value of it.
     WrongKind,
     /// A Database holds [`crate::MAX_FIELDS`] fields, or a select field
-    /// [`crate::MAX_OPTIONS`] options, already.
+    /// [`crate::MAX_OPTIONS`] options, already, or a file cell would hold more than
+    /// [`crate::MAX_FILES`] files, or a Whiteboard or a stroke past its caps
+    /// ([`crate::MAX_ELEMENTS`], [`crate::MAX_BOARD_POINTS`], [`crate::MAX_POINTS`]).
     TooMany,
     /// A placement needs a sort key the core cannot write (ADR-0304): one past the cap, after
     /// too many objects were placed at one spot, or one before a neighbor with no usable key;

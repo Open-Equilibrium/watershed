@@ -31,6 +31,10 @@ pub const MAX_FIELDS: usize = 500;
 /// The most live options a select field holds, for the same reason.
 pub const MAX_OPTIONS: usize = 500;
 
+/// The most files a file cell holds, so a window of rows crosses the bridge bounded
+/// (client architecture rule 3).
+pub const MAX_FILES: usize = 100;
+
 /// A Database Block's name and fields.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Database {
@@ -213,6 +217,7 @@ fn kind_name(kind: FieldKind) -> &'static str {
         FieldKind::Select => "select",
         FieldKind::Date => "date",
         FieldKind::Checkbox => "checkbox",
+        FieldKind::File => "file",
     }
 }
 
@@ -223,6 +228,7 @@ fn kind(name: Option<&str>) -> Option<FieldKind> {
         "select" => FieldKind::Select,
         "date" => FieldKind::Date,
         "checkbox" => FieldKind::Checkbox,
+        "file" => FieldKind::File,
         _ => return None,
     })
 }
@@ -406,11 +412,23 @@ pub(crate) fn set_cell(
     let (field_entry, kind) = field(doc, block, field_id)?;
     let cells = map(doc, &row(doc, block, row_id)?, CELLS)?;
     let scalar = match (kind, value) {
-        (_, Cell::Empty) => {
+        (FieldKind::File, Cell::Files(files)) if files.len() > MAX_FILES => {
+            return Err(Error::TooMany);
+        }
+        (FieldKind::File, Cell::Files(files)) if !files.is_empty() => {
+            let list = doc.put_object(&cells, field_id.as_str(), ObjType::List)?;
+            for (at, file) in files.iter().enumerate() {
+                let entry = doc.insert_object(&list, at, ObjType::Map)?;
+                model::put_file(doc, &entry, file)?;
+            }
+            index.set(row_id, field_id, value);
+            return Ok(());
+        }
+        (_, Cell::Empty) | (FieldKind::File, Cell::Files(_)) => {
             if doc.get(&cells, field_id.as_str())?.is_some() {
                 doc.delete(&cells, field_id.as_str())?;
             }
-            index.set(row_id, field_id, value);
+            index.set(row_id, field_id, &Cell::Empty);
             return Ok(());
         }
         (FieldKind::Text, Cell::Text(text)) => ScalarValue::Str(text.as_str().into()),
@@ -604,8 +622,21 @@ fn cells(
     };
     let mut read = HashMap::new();
     for (field, kind) in kinds {
-        let Ok(Some((Value::Scalar(value), _))) = doc.get(&cells, field.as_str()) else {
-            continue;
+        let value = match doc.get(&cells, field.as_str()) {
+            Ok(Some((Value::Scalar(value), _))) => value,
+            Ok(Some((Value::Object(ObjType::List), list))) if *kind == FieldKind::File => {
+                let files: Vec<_> = (0..doc.length(&list).min(MAX_FILES))
+                    .filter_map(|at| match doc.get(&list, at) {
+                        Ok(Some((Value::Object(ObjType::Map), entry))) => model::file(doc, &entry),
+                        _ => None,
+                    })
+                    .collect();
+                if !files.is_empty() {
+                    read.insert(field.clone(), Cell::Files(files));
+                }
+                continue;
+            }
+            _ => continue,
         };
         let cell = match (kind, value.as_ref()) {
             (FieldKind::Text, ScalarValue::Str(text)) => Cell::Text(text.to_string()),
