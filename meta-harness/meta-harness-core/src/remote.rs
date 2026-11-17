@@ -186,7 +186,7 @@ impl Host {
         )?;
         let (socket, _) = tokio::time::timeout(TIMEOUT, tokio_tungstenite::connect_async(request))
             .await
-            .map_err(|_| format!("Meta-Harness at {url} did not answer in time."))?
+            .map_err(|_| format!("Could not reach Meta-Harness at {url}: it did not answer in time."))?
             .map_err(|e| match e {
                 // A service that stopped without removing its connection file.
                 tokio_tungstenite::tungstenite::Error::Io(io)

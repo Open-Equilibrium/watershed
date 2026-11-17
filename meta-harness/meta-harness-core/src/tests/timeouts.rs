@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use tokio::net::TcpListener;
 
-use crate::remote::Host;
+use crate::remote::{Host, connection_lost};
 
 /// Long enough that a call still waiting when it runs out has certainly given up.
 const GUARD: Duration = Duration::from_secs(600);
@@ -52,5 +52,7 @@ async fn a_peer_that_answers_no_connection_is_given_up_on() {
     let answer = tokio::time::timeout(GUARD, Host::connect_to(&url, "token", "test"))
         .await
         .expect("the connection gives up");
-    assert!(answer.is_err(), "a silent peer is no connection");
+    let error = answer.err().expect("a silent peer is no connection");
+    // A timed-out connection is lost, so a reconnecting stream tries again rather than ending.
+    assert!(connection_lost(&error), "{error}");
 }
