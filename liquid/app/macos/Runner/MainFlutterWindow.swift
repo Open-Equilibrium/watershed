@@ -175,12 +175,15 @@ private extension PDFPage {
 }
 
 /// `page` drawn `width` pixels wide on white, as straight RGBA, 8 bits, row-major, without
-/// padding. PDFKit draws the displayed crop box from the context's origin, so scaling the
-/// context is all the mapping needed.
-private func pdfPixels(of page: PDFPage, width: Int) -> (width: Int, height: Int, pixels: Data)? {
+/// padding; a tall page is drawn narrower, so it is never more than 4,096 pixels high. PDFKit
+/// draws the displayed crop box from the context's origin, so scaling the context is all the
+/// mapping needed.
+private func pdfPixels(of page: PDFPage, width asked: Int) -> (width: Int, height: Int, pixels: Data)? {
   let size = page.displaySize
   guard size.width > 0, size.height > 0 else { return nil }
-  let height = max(1, Int((Double(width) * size.height / size.width).rounded()))
+  let tallest = Double(4096) * size.width / size.height
+  let width = max(1, min(asked, Int(tallest)))
+  let height = min(4096, max(1, Int((Double(width) * size.height / size.width).rounded())))
   guard
     let context = CGContext(
       data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,

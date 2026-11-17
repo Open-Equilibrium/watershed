@@ -367,9 +367,35 @@ pub(crate) fn read(
             elements: Vec::new(),
         }));
     };
-    let mut read: Vec<(Option<String>, ElementId, Element)> = Stored::all(doc, &elements)
+    let shown: Vec<Stored> = Stored::all(doc, &elements)
         .into_iter()
         .filter(|stored| pages.contains(&stored.doc_page()))
+        .collect();
+    // One read carries at most a board's points: whole pages from the first, until the next
+    // would pass them, so a window of many full pages still crosses the bridge bounded.
+    let mut per_page: Vec<(u32, usize)> = Vec::new();
+    for stored in &shown {
+        match per_page
+            .iter_mut()
+            .find(|(page, _)| *page == stored.doc_page())
+        {
+            Some((_, points)) => *points += stored.count(),
+            None => per_page.push((stored.doc_page(), stored.count())),
+        }
+    }
+    per_page.sort_unstable();
+    let mut budget = MAX_BOARD_POINTS;
+    let mut last = None;
+    for (page, points) in per_page {
+        if points > budget {
+            break;
+        }
+        budget -= points;
+        last = Some(page);
+    }
+    let mut read: Vec<(Option<String>, ElementId, Element)> = shown
+        .into_iter()
+        .filter(|stored| last.is_some_and(|last| stored.doc_page() <= last))
         .filter_map(|stored| {
             let element = stored.element()?;
             Some((stored.sort, ElementId::stored(&stored.id), element))

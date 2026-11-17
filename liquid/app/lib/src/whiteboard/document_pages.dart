@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/painting.dart';
@@ -56,6 +57,9 @@ class DocumentPages {
   /// Each page's drawing and the width it was drawn at, newest last.
   final _drawn = <int, (int, ui.Image)>{};
   final _asked = <int, int>{};
+
+  /// The pages the last paint showed, which are never let go.
+  final _inView = <int>{};
   var _closed = false;
 
   /// Draws the pages in `view`, in board points, at `pixelsPerPoint`, asking the renderer
@@ -66,8 +70,10 @@ class DocumentPages {
       ..color = const Color(0x22000000)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1 / pixelsPerPoint;
+    _inView.clear();
     for (final (index, sheet) in sheets.indexed) {
       if (!sheet.overlaps(view)) continue;
+      _inView.add(index);
       if (_image case final image?) {
         canvas.drawImageRect(
           image,
@@ -80,12 +86,18 @@ class DocumentPages {
       canvas
         ..drawRect(sheet, paper)
         ..drawRect(sheet, edge);
-      // Drawn in steps of 256 pixels, so zooming asks again only now and then.
-      final wanted = ((sheet.width * pixelsPerPoint / 256).ceil() * 256).clamp(
-        256,
-        4096,
+      // Drawn in steps of 256 pixels, so zooming asks again only now and then, and never
+      // more than 4,096 pixels wide or high.
+      final tallest = (4096 * sheet.width / sheet.height).floor();
+      final wanted = math.max(
+        1,
+        math.min(
+          ((sheet.width * pixelsPerPoint / 256).ceil() * 256).clamp(256, 4096),
+          tallest,
+        ),
       );
-      final drawn = _drawn[index];
+      final drawn = _drawn.remove(index);
+      if (drawn != null) _drawn[index] = drawn;
       if (drawn case (_, final image)) {
         canvas.drawImageRect(
           image,
@@ -112,10 +124,14 @@ class DocumentPages {
             }
             _drawn.remove(index)?.$2.dispose();
             _drawn[index] = (width, image);
-            while (_drawn.length > kept) {
-              final oldest = _drawn.keys.first;
-              _drawn.remove(oldest)?.$2.dispose();
-              _asked.remove(oldest);
+            // The least recently shown go first; pages in view stay, however many.
+            final oldest = [
+              for (final page in _drawn.keys)
+                if (!_inView.contains(page)) page,
+            ];
+            for (final page in oldest.take(math.max(0, _drawn.length - kept))) {
+              _drawn.remove(page)?.$2.dispose();
+              _asked.remove(page);
             }
             onDrawn();
           },

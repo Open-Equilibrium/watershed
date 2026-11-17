@@ -209,3 +209,41 @@ fn actions_recorded_under_the_whiteboard_names_still_read() {
         }
     ));
 }
+
+#[test]
+fn a_read_across_pages_stays_within_one_board_s_points() {
+    let (mut workspace, page, pdf, _) = agreement();
+    let longest: Vec<u8> = (0..liquid_core::MAX_POINTS)
+        .flat_map(|at| [at as f32, 1.0, 0.5])
+        .flat_map(f32::to_le_bytes)
+        .collect();
+    let full = |doc_page| Element {
+        content: Content::Stroke {
+            pen: Pen::Fountain,
+            points: longest.clone(),
+        },
+        ..mark(doc_page, InkColor::Text)
+    };
+    let per_page = liquid_core::MAX_BOARD_POINTS / liquid_core::MAX_POINTS;
+    for doc_page in 0..2 {
+        draw(&mut workspace, &page, &pdf, vec![full(doc_page); per_page]).unwrap();
+    }
+    let read = workspace.drawing(&page, &pdf, 0..2).unwrap().unwrap();
+    let points: usize = read
+        .elements
+        .iter()
+        .map(|(_, element)| match &element.content {
+            Content::Stroke { points, .. } => points.len() / 12,
+            _ => 0,
+        })
+        .sum();
+    assert!(
+        points <= liquid_core::MAX_BOARD_POINTS,
+        "one read carries at most a board's points, not {points}"
+    );
+    assert!(
+        read.elements
+            .iter()
+            .all(|(_, element)| element.doc_page == 0)
+    );
+}

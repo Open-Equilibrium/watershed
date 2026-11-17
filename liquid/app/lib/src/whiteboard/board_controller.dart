@@ -174,6 +174,41 @@ class BoardController extends ChangeNotifier {
     List<String> remove = const [],
   }) async {
     if (add.isEmpty && change.isEmpty && remove.isEmpty) return;
+    // An element moved onto another page of a document goes there: it is removed from its
+    // page and added on the other, as a change keeps an element's page.
+    if (paged) {
+      final moved = <BridgeElementChange>[];
+      for (final changed in change) {
+        final element = elements
+            .where((shown) => shown.id == changed.id)
+            .firstOrNull;
+        final center = Rect.fromLTWH(
+          changed.x,
+          changed.y,
+          changed.w,
+          changed.h,
+        ).center;
+        if (element != null &&
+            isStored(element) &&
+            _nearestPage(center) != element.docPage) {
+          moved.add(changed);
+        }
+      }
+      if (moved.isNotEmpty) {
+        final ids = {for (final changed in moved) changed.id};
+        final byId = {for (final element in elements) element.id: element};
+        add = [
+          ...add,
+          for (final changed in moved)
+            _fresh(_applied(byId[changed.id]!, changed)),
+        ];
+        change = [
+          for (final changed in change)
+            if (!ids.contains(changed.id)) changed,
+        ];
+        remove = [...remove, ...ids];
+      }
+    }
     final removed = remove.toSet();
     final changes = {for (final changed in change) changed.id: changed};
     elements = [
@@ -314,6 +349,26 @@ class BoardController extends ChangeNotifier {
       arrowhead: change.arrowhead,
     );
   }
+
+  /// `element` as a new one, with no name, to be added.
+  static BridgeElement _fresh(BridgeElement element) => BridgeElement(
+    kind: element.kind,
+    x: element.x,
+    y: element.y,
+    w: element.w,
+    h: element.h,
+    rotation: element.rotation,
+    color: element.color,
+    width: element.width,
+    docPage: element.docPage,
+    pen: element.pen,
+    points: element.points,
+    shape: element.shape,
+    seed: element.seed,
+    arrowhead: element.arrowhead,
+    corners: element.corners,
+    text: element.text,
+  );
 
   static BridgeElement _moved(BridgeElement element, Offset by, int page) =>
       BridgeElement(

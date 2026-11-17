@@ -8,10 +8,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/drawing.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
+import 'package:liquid/src/whiteboard/board.dart';
 import 'package:liquid/src/whiteboard/board_controller.dart';
 import 'package:liquid/src/whiteboard/ink_geometry.dart';
 import 'package:liquid/src/workspace/pdf_pages.dart';
 
+import 'fake_workspace.dart';
 import 'page_kit.dart';
 
 /// Annotating PDFs and images in place (ADR-0307).
@@ -30,7 +32,11 @@ void main() {
   });
 
   /// A three-page PDF of A4 pages, as the system's renderer would open it.
-  Future<void> showPdf(WidgetTester tester) async {
+  Future<void> showPdf(
+    WidgetTester tester, {
+    List<Size> sizes = const [Size(595, 842), Size(595, 842), Size(595, 842)],
+    List<BridgeElement> ink = const [],
+  }) async {
     page = (await tester.runAsync(() {
       final drawn = Completer<ui.Image>();
       ui.decodeImageFromPixels(
@@ -42,16 +48,26 @@ void main() {
       );
       return drawn.future;
     }))!;
-    PdfPages.opener = (_) async =>
-        PdfPages(List.filled(3, const Size(595, 842)), (index, width) async {
-          rendered.add((index, width));
-          return page.clone();
-        }, () async {});
+    PdfPages.opener = (_) async => PdfPages(sizes, (index, width) async {
+      rendered.add((index, width));
+      return page.clone();
+    }, () async {});
     await kit.show(tester, [
       const TextPart('The flat, signed:'),
       const MediaPart('Rental agreement.pdf', [37, 80, 68, 70]),
       const TextPart('Key handover at 15:00.'),
     ], pdfRenderer: true);
+    if (ink.isNotEmpty) {
+      final block = kit.fake.media.keys.single;
+      kit.fake.whiteboards[block] = BridgeDrawing(
+        style: BridgeDrawingStyle.handDrawn,
+        elements: [
+          for (final (index, element) in ink.indexed)
+            withId(element, 'ink $index'),
+        ],
+      );
+      await kit.boardOf(tester).read();
+    }
     await tester.pumpAndSettle();
   }
 
@@ -146,6 +162,46 @@ void main() {
     final points = unpackPoints(stroke.points);
     expect(points.every((point) => point.y < first.bottom), isTrue);
     expect(stroke.docPage, 0);
+  });
+
+  testWidgets('a tall, narrow page is drawn no taller than 4,096 pixels', (
+    tester,
+  ) async {
+    await showPdf(tester, sizes: const [Size(100, 5000)]);
+    expect(rendered, isNotEmpty);
+    for (final (_, width) in rendered) {
+      expect(width * 5000 / 100, lessThanOrEqualTo(4096));
+    }
+  });
+
+  testWidgets('ink moved onto another page goes with it', (tester) async {
+    await showPdf(
+      tester,
+      ink: [
+        newElement(
+          BridgeElementKind.shape,
+          frame: const Rect.fromLTWH(100, 700, 80, 50),
+          color: BridgeInkColor.data1,
+          width: 1,
+        ),
+      ],
+    );
+    await tester.tap(find.byKey(const Key('document')));
+    await tester.pumpAndSettle();
+    final first = board(tester).sheets.first;
+    final box = first.topLeft + const Offset(140, 725);
+    board(tester)
+      ..origin = Offset(board(tester).origin.dx, first.bottom - 220)
+      ..notifyListeners();
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
+    await tester.pumpAndSettle();
+    await draw(tester, [box, box + const Offset(1, 1)]);
+    await draw(tester, [box, box + const Offset(0, 150)]);
+    final edit = lastEdit();
+    expect(edit.remove, ['ink 0']);
+    final [moved] = edit.add;
+    expect(moved.docPage, 1);
   });
 
   testWidgets('an image takes ink over itself, in its pixels', (tester) async {
