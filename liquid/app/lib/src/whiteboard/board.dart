@@ -135,10 +135,14 @@ Rect boundsOf(BridgeElement element) {
 class BoardCache {
   final _points = <String, List<InkPoint>>{};
   final _outlines = <String, Path>{};
-  final _shapes = <(String, double, double, bool, int), Path>{};
+  final _shapes =
+      <(String, double, double, bool, int, BridgeShape, bool), Path>{};
 
-  List<InkPoint> points(BridgeElement element) =>
-      _points.putIfAbsent(element.id ?? '', () => _decode(element.points));
+  /// A stroke's points, decoded once; an element with no identity, as a draft, is not kept.
+  List<InkPoint> points(BridgeElement element) => switch (element.id) {
+    final id? => _points.putIfAbsent(id, () => _decode(element.points)),
+    null => _decode(element.points),
+  };
 
   static List<InkPoint> _decode(Uint8List bytes) {
     try {
@@ -149,19 +153,31 @@ class BoardCache {
   }
 
   /// A stroke's outline in its points' own place, before its frame moves it.
-  Path outline(BridgeElement element) => _outlines.putIfAbsent(
-    '${element.id} ${element.pen.name} ${element.width}',
-    () => inkOutline(points(element), penOptions(element.pen, element.width)),
-  );
+  Path outline(BridgeElement element) {
+    Path draw() =>
+        inkOutline(points(element), penOptions(element.pen, element.width));
+    return switch (element.id) {
+      final id? => _outlines.putIfAbsent(
+        '$id ${element.pen.name} ${element.width}',
+        draw,
+      ),
+      null => draw(),
+    };
+  }
 
-  /// A shape's lines in a frame of `size` at the origin, hand-drawn or clean.
-  Path shape(BridgeElement element, bool hand) => _shapes.putIfAbsent((
-    element.id ?? '',
-    element.w,
-    element.h,
-    hand,
-    element.width,
-  ), () => shapePath(element, hand));
+  /// A shape's lines in a frame of its size at the origin, hand-drawn or clean.
+  Path shape(BridgeElement element, bool hand) => switch (element.id) {
+    final id? => _shapes.putIfAbsent((
+      id,
+      element.w,
+      element.h,
+      hand,
+      element.width,
+      element.shape,
+      element.arrowhead,
+    ), () => shapePath(element, hand)),
+    null => shapePath(element, hand),
+  };
 
   /// Forgets the elements no longer on the board.
   void keepOnly(Iterable<String> ids) {
@@ -171,6 +187,18 @@ class BoardCache {
     _shapes.removeWhere((key, _) => !kept.contains(key.$1));
   }
 }
+
+/// Whether an element is stored, so it can be selected, changed or removed: not one shown
+/// while its write is on its way, nor a piece the eraser is still cutting.
+bool isStored(BridgeElement element) =>
+    element.id != null &&
+    !element.id!.startsWith(pendingPrefix) &&
+    !element.id!.startsWith(localPrefix);
+
+/// The names given to elements shown before the core names them; they hold no space, as
+/// the outline cache's keys are split on one.
+const pendingPrefix = 'pending-';
+const localPrefix = 'local-';
 
 /// The lines of a shape in its unturned frame moved to the origin.
 Path shapePath(BridgeElement element, bool hand) {

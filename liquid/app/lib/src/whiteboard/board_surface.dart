@@ -402,6 +402,11 @@ class BoardSurfaceState extends State<BoardSurface> {
     final kept = <BridgeElement>[];
     var changed = false;
     for (final element in board.elements) {
+      // An element still on its way is erased once it is stored.
+      if (element.id?.startsWith(pendingPrefix) ?? false) {
+        kept.add(element);
+        continue;
+      }
       if (!touches(element, board.cache, at, radius)) {
         kept.add(element);
         continue;
@@ -435,7 +440,7 @@ class BoardSurfaceState extends State<BoardSurface> {
         );
         // A local name, so the next pass cuts the piece again.
         final local = BridgeElement(
-          id: 'local ${_localIds++}',
+          id: '$localPrefix${_localIds++}',
           kind: made.kind,
           x: made.x,
           y: made.y,
@@ -465,8 +470,8 @@ class BoardSurfaceState extends State<BoardSurface> {
 
   void _taken(BridgeElement element) {
     final id = element.id;
-    if (id == null) return;
-    if (id.startsWith('local ')) {
+    if (id == null || id.startsWith(pendingPrefix)) return;
+    if (id.startsWith(localPrefix)) {
       _pieces['']?.removeWhere((piece) => piece.id == id);
     } else {
       _erased.add(id);
@@ -500,7 +505,7 @@ class BoardSurfaceState extends State<BoardSurface> {
     // The board as it was, so the edit removes and adds from what is stored.
     board.elements = [
       for (final element in board.elements)
-        if (!(element.id?.startsWith('local ') ?? false)) element,
+        if (!(element.id?.startsWith(localPrefix) ?? false)) element,
     ];
     unawaited(board.edit(add: pieces, remove: removed));
   }
@@ -544,6 +549,7 @@ class BoardSurfaceState extends State<BoardSurface> {
           : board.elements.reversed
                 .where(
                   (element) =>
+                      isStored(element) &&
                       touches(element, board.cache, at, 4 / board.zoom),
                 )
                 .firstOrNull;
@@ -552,7 +558,9 @@ class BoardSurfaceState extends State<BoardSurface> {
     }
     board.select({
       for (final element in board.elements)
-        if (lassoSelects(loop, samplesOf(element, board.cache))) element.id!,
+        if (isStored(element) &&
+            lassoSelects(loop, samplesOf(element, board.cache)))
+          element.id!,
     });
   }
 
@@ -697,6 +705,7 @@ class BoardSurfaceState extends State<BoardSurface> {
     final hit = board.elements.reversed
         .where(
           (element) =>
+              isStored(element) &&
               element.kind == BridgeElementKind.text &&
               touches(element, board.cache, at, 2 / board.zoom),
         )
@@ -795,7 +804,10 @@ class BoardSurfaceState extends State<BoardSurface> {
         unawaited(board.edit(remove: [...board.selected]));
       case LogicalKeyboardKey.keyA when meta:
         tools.tool = BoardTool.lasso;
-        board.select({for (final element in board.elements) element.id!});
+        board.select({
+          for (final element in board.elements)
+            if (isStored(element)) element.id!,
+        });
       case LogicalKeyboardKey.digit0 when meta:
         board.zoomTo(1, _size);
       case LogicalKeyboardKey.digit1 when keys.isShiftPressed:

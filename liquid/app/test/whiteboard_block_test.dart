@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +10,7 @@ import 'package:liquid/src/whiteboard/board.dart';
 import 'package:liquid/src/whiteboard/board_controller.dart';
 import 'package:liquid/src/whiteboard/ink_geometry.dart';
 
+import 'fake_workspace.dart';
 import 'page_kit.dart';
 
 /// Whiteboard Blocks (approved Whiteboard Block mockups, ADR-0306).
@@ -306,6 +309,50 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('whiteboard full')), findsNothing);
     expect(board(), findsOneWidget);
+  });
+
+  testWidgets('strokes still on their way draw apart and select nothing', (
+    tester,
+  ) async {
+    await kit.show(tester, [const WhiteboardPart()]);
+    await focus(tester);
+    kit.fake.gate = Completer<void>();
+    await draw(tester, [const Offset(100, 100), const Offset(200, 100)]);
+    await draw(tester, [const Offset(100, 200), const Offset(100, 300)]);
+    final board = kit.boardOf(tester);
+    final pending = board.elements;
+    expect(pending, hasLength(2));
+    expect(
+      board.cache.points(pending[0]).first.offset,
+      isNot(board.cache.points(pending[1]).first.offset),
+    );
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(board.selected, isEmpty, reason: 'only stored elements select');
+    kit.fake.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(stored(), hasLength(2));
+  });
+
+  test('a line\'s arrowhead redraws once it changes', () {
+    final cache = BoardCache();
+    BridgeElement line({required bool arrowhead}) => withId(
+      newElement(
+        BridgeElementKind.shape,
+        frame: const Rect.fromLTWH(0, 0, 100, 0),
+        color: BridgeInkColor.text,
+        width: 1,
+        shape: BridgeShape.line,
+        arrowhead: arrowhead,
+      ),
+      'line',
+    );
+    final plain = cache.shape(line(arrowhead: false), false).getBounds();
+    final headed = cache.shape(line(arrowhead: true), false).getBounds();
+    expect(headed.height, greaterThan(plain.height));
   });
 
   testWidgets('⋯ › Delete removes the Whiteboard', (tester) async {

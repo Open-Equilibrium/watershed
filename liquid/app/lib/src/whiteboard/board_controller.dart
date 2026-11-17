@@ -145,7 +145,22 @@ class BoardController extends ChangeNotifier {
             _applied(element, changed)
           else
             element,
-      ...add,
+      // Each with a name of its own until the read brings the core's.
+      for (final element in add)
+        _applied(
+          element,
+          BridgeElementChange(
+            id: '$pendingPrefix${_pending++}',
+            x: element.x,
+            y: element.y,
+            w: element.w,
+            h: element.h,
+            rotation: element.rotation,
+            color: element.color,
+            width: element.width,
+          ),
+          id: true,
+        ),
     ];
     selected = selected.difference(removed);
     notifyListeners();
@@ -172,25 +187,31 @@ class BoardController extends ChangeNotifier {
     }
   }
 
-  static BridgeElement _applied(BridgeElement element, BridgeElementChange c) =>
-      BridgeElement(
-        id: element.id,
-        kind: element.kind,
-        x: c.x,
-        y: c.y,
-        w: c.w,
-        h: c.h,
-        rotation: c.rotation,
-        color: c.color,
-        width: c.width,
-        pen: element.pen,
-        points: element.points,
-        shape: element.shape,
-        seed: element.seed,
-        arrowhead: c.arrowhead ?? element.arrowhead,
-        corners: element.corners,
-        text: c.text ?? element.text,
-      );
+  int _pending = 0;
+
+  /// `element` after `c`; with `id`, under the change's name too.
+  static BridgeElement _applied(
+    BridgeElement element,
+    BridgeElementChange c, {
+    bool id = false,
+  }) => BridgeElement(
+    id: id ? c.id : element.id,
+    kind: element.kind,
+    x: c.x,
+    y: c.y,
+    w: c.w,
+    h: c.h,
+    rotation: c.rotation,
+    color: c.color,
+    width: c.width,
+    pen: element.pen,
+    points: element.points,
+    shape: element.shape,
+    seed: element.seed,
+    arrowhead: c.arrowhead ?? element.arrowhead,
+    corners: element.corners,
+    text: c.text ?? element.text,
+  );
 
   /// Switches the whole board between hand-drawn and clean.
   Future<void> toggleStyle() async {

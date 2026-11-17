@@ -11,9 +11,11 @@ import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/shortcuts/shortcut_store.dart';
 import 'package:liquid/src/theme/theme.dart';
+import 'package:liquid/src/whiteboard/board_controller.dart';
 import 'package:liquid/src/workspace/media_block.dart';
 import 'package:liquid/src/workspace/table_block.dart';
 import 'package:liquid/src/workspace/text_block.dart';
+import 'package:liquid/src/workspace/whiteboard_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'fake_workspace.dart';
@@ -303,6 +305,12 @@ class PageKit {
 
   Finder inTable(Finder finder) =>
       find.descendant(of: find.byType(TableBlock), matching: finder);
+
+  /// The board of the Page's only Whiteboard.
+  BoardController boardOf(WidgetTester tester) {
+    final block = tester.widget<WhiteboardBlock>(find.byType(WhiteboardBlock));
+    return block.views.boardFor(block.view);
+  }
 
   Iterable<BridgeMutation> applied(BridgeMutationKind kind) =>
       fake.applied.where((applied) => applied.kind == kind);
