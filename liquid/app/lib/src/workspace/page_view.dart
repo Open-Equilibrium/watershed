@@ -9,6 +9,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'code_block.dart';
 import 'explorer.dart';
+import 'media_block.dart';
 import 'page_views.dart';
 import 'page_editor.dart';
 import 'stored_name.dart';
@@ -207,6 +208,36 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     ),
   );
 
+  /// `block` in the column, with the files going in after its View below it, and those
+  /// going in at the Page's start above the first. Keys keep the Block's state as they
+  /// come and go.
+  Widget _withUploads(BridgeView view, int index, Widget block) => _column(
+    ValueListenableBuilder(
+      valueListenable: _views.uploads,
+      builder: (context, uploads, child) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final upload in uploads)
+            if (index == 0 && upload.after == null)
+              UploadRow(upload, key: ObjectKey(upload)),
+          child!,
+          for (final upload in uploads)
+            if (upload.after == view.id)
+              UploadRow(upload, key: ObjectKey(upload)),
+        ],
+      ),
+      child: KeyedSubtree(
+        key: const ValueKey('block'),
+        child: MediaDropZone(
+          views: _views,
+          view: view,
+          index: index,
+          child: block,
+        ),
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
@@ -343,7 +374,9 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                           if (view.kind == BridgeBlockKind.text) {
                             return KeyedSubtree(
                               key: ValueKey(view.id),
-                              child: _column(
+                              child: _withUploads(
+                                view,
+                                index,
                                 TextBlock(
                                   key: _views.keyFor(view.id),
                                   views: _views,
@@ -355,7 +388,9 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                           }
                           return KeyedSubtree(
                             key: ValueKey(view.id),
-                            child: _column(
+                            child: _withUploads(
+                              view,
+                              index,
                               Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
@@ -370,6 +405,10 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                                       views: _views,
                                       view: view,
                                       index: index,
+                                    ),
+                                    BridgeBlockKind.media => MediaBlock(
+                                      views: _views,
+                                      view: view,
                                     ),
                                     _ => const _Placeholder(),
                                   },

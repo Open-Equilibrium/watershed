@@ -5,7 +5,7 @@ Observational evidence for `liquid-core`'s mutation pipeline and `liquid-storage
 ## Environment
 
 - Apple M6, 24 GB, macOS 27.0 (26A428), internal SSD; Rust 1.99.0, release build; `automerge` 0.12.0, `rusqlite` 0.41.1 with SQLCipher 4.19.0.
-- Observed on 2026-11-02 at commit `e095071`, three rounds. The Database workload was observed on 2026-11-03 at `6aa3f03`, three rounds, and after its workload change on 2026-11-06 at `e4193e5`, three rounds, with rows added last (ADR-0247).
+- Observed on 2026-11-02 at commit `e095071`, three rounds. The Database workload was observed on 2026-11-03 at `6aa3f03`, three rounds, and after its workload change on 2026-11-06 at `e4193e5`, three rounds, with rows added last (ADR-0247). The attachment workload was observed on 2026-11-17 at `1557b2a3`, three rounds, with `rusqlite` 0.42.0.
 
 ## Workloads
 
@@ -16,6 +16,7 @@ Observational evidence for `liquid-core`'s mutation pipeline and `liquid-storage
 | Database | the same run | A Database Block of 5,000 rows with a text, number, date and checkbox field, each field and row added last (ADR-0247; at `6aa3f03` after the last one) and each cell set as its own request; then one window of 100 rows, filtered by the checkbox and sorted by the number | the same |
 | Durable typing | `/usr/bin/time -l target/release/examples/replica_observe` after `cargo build --release -p liquid-storage --example replica_observe` | 2,000 keystrokes appended to one Text Block in an encrypted replica, each its own Action and durable commit; then 1,000 Text Blocks on that Page | Bridge and UI |
 | Reopening a long Page | `/usr/bin/time -l target/release/examples/replica_observe <path>` with the path that run printed | A new process opens the replica, finds the Page through its area and reads all its 1,001 Views in order | the same |
+| Attachment | `/usr/bin/time -l target/release/examples/replica_observe --attachment` | A 256 MiB file added to a new encrypted replica in 1 MiB parts, each its own durable commit, with its SHA-256; then read back part by part (ADR-0305) | Reading the file from disk, bridge and UI |
 
 ## Observations
 
@@ -35,6 +36,10 @@ Observational evidence for `liquid-core`'s mutation pipeline and `liquid-storage
 | Replica on disk with its write-ahead log | 2.1 MiB | 2.1 MiB | 2.1 MiB |
 | A new process reopening the long Page and reading its Views | 25.7 ms | 23.6 ms | 23.4 ms |
 | Peak memory footprint of the reopening process | 19.1 MB | 19.1 MB | 19.1 MB |
+| Adding the 256 MiB file, per 1 MiB part | median 11.0 ms, p99 70.1 ms, max 90.0 ms | median 11.3 ms, p99 61.2 ms, max 75.0 ms | median 11.8 ms, p99 69.0 ms, max 76.2 ms |
+| Adding it whole | 4.47 s, 57 MiB/s | 4.53 s, 56 MiB/s | 4.77 s, 54 MiB/s |
+| Reading it back part by part | 0.27 s, 942 MiB/s | 0.26 s, 971 MiB/s | 0.27 s, 945 MiB/s |
+| Peak memory footprint of the attachment process | 9.7 MB | 9.7 MB | 11.8 MB |
 
 Each loaded Database Block keeps its rows with their cells as an index beside the Page's document, as the View order is kept, so adding a row does not read every row and a window is filtered and sorted from memory (client architecture rule 13). The maximum while adding rows is the snapshot written after every 1,000 chunks, which grows with the Database. With the Database, the pipeline process holds 25,000 more Actions with their changes in the in-memory store, which accounts for most of its larger footprint.
 
@@ -43,6 +48,8 @@ Each loaded Page keeps its View order as an index, so adding a Text Block at the
 A keystroke through the pipeline with the in-memory store costs about 10 µs. The 3.7 ms maximum is the snapshot the pipeline writes after every 1,000 chunks of a document. The pipeline checks a text position against the elements beside it rather than reading the whole text, which took about 40 µs per keystroke in a 5,000-character Text Block.
 
 A durable commit is almost entirely the flush to the storage medium: F_FULLFSYNC, which macOS needs for a commit to survive a power loss (ADR-0237). The editor may group consecutive keystrokes into one commit (client architecture rule 9; the approved History mockup shows one entry per pause), and typing is designed not to wait for a commit (rule 7).
+
+Adding an attachment costs about 11 ms per 1 MiB part, so a 5 GiB file takes about a minute and a half; memory stays flat, as each part is written and dropped. Bridge calls take the Workspace's lock for one part at a time, so other writes wait at most one part's commit. A probe at `7fe7ed84` that put 16 parts into each commit reached only about 85 MiB/s while holding the lock for up to 0.7 s, so most of the cost is SQLCipher's encryption and the write-ahead log rather than the flush, and each part stays its own commit.
 
 Reopening is mostly Automerge loading the Page's snapshot. Earlier records reopened inside the process that had written the replica and measured 14.4 to 16.0 ms; a first load's time there depends on that process's earlier work, so only new-process runs are comparable (probe below).
 

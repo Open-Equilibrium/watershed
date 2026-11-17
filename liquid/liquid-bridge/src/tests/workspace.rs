@@ -115,6 +115,8 @@ pub(super) fn mutation(kind: BridgeMutationKind) -> BridgeMutation {
         field_kind: None,
         color: 0,
         cell: None,
+        media_type: None,
+        attachment: None,
     }
 }
 

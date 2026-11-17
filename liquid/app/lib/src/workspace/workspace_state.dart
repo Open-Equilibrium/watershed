@@ -30,6 +30,8 @@ BridgeMutation mutation(
   BridgeFieldKind? fieldKind,
   int color = 0,
   BridgeCell? cell,
+  String? mediaType,
+  String? attachment,
 }) => BridgeMutation(
   kind: kind,
   area: area,
@@ -49,6 +51,8 @@ BridgeMutation mutation(
   fieldKind: fieldKind,
   color: color,
   cell: cell,
+  mediaType: mediaType,
+  attachment: attachment,
 );
 
 /// A query with the parts its kind does not use left out.
@@ -187,21 +191,25 @@ class WorkspaceState {
   /// Applies mutations in the order asked: the bridge may run two calls at once. A change in
   /// a `chain` an earlier change broke is refused unapplied.
   Future<BridgeApplied> apply(BridgeMutation change, {EditChain? chain}) {
-    final applied = _applied.then((_) => _applyIn(chain, change));
-    _applied = applied.then<void>((_) {}, onError: (_) {});
-    return applied.then(
-      (applied) {
-        _show(change: null, read: null);
-        return applied;
-      },
-      onError: (Object error) {
-        _show(
-          change: 'Liquid did not save this change: $error',
-          read: _readFailed,
+    final shown = _applied
+        .then((_) => _applyIn(chain, change))
+        .then(
+          (applied) {
+            _show(change: null, read: null);
+            return applied;
+          },
+          onError: (Object error) {
+            _show(
+              change: 'Liquid did not save this change: $error',
+              read: _readFailed,
+            );
+            throw error;
+          },
         );
-        throw error;
-      },
-    );
+    // Settled once the problem shown follows the change, so a problem reported after it
+    // stays.
+    _applied = shown.then<void>((_) {}, onError: (_) {});
+    return shown;
   }
 
   Future<BridgeApplied> _applyIn(

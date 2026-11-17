@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -12,8 +13,10 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'anchored_menu.dart';
 import 'follow.dart';
+import 'media_block.dart';
 import 'page_editor.dart';
 import 'page_views.dart';
+import 'paste.dart';
 import 'slash_commands.dart';
 import 'workspace_state.dart';
 
@@ -208,6 +211,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       return;
     }
     if (choice.block == BridgeBlockKind.code) return _turnIntoCode();
+    if (choice.block == BridgeBlockKind.media) return _addMedia(_pickFiles);
     final views = widget.views;
     final view = widget.view;
     final last = widget.index == (views.count ?? 0) - 1;
@@ -568,6 +572,146 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         .then<void>((_) {}, onError: (Object _) {}),
   );
 
+  Future<List<MediaSource>> _pickFiles() async {
+    try {
+      return await MediaPlatform.pickFiles();
+    } on Object catch (error) {
+      _state.report('Liquid could not open the file dialog: $error');
+      return const [];
+    }
+  }
+
+  /// Adds the files `sources` gives as Media Blocks below this line, or in its place if it
+  /// is empty; an empty line that ends the Page stays below them, so the Page goes on
+  /// (ADR-0305).
+  Future<void> _addMedia(Future<List<MediaSource>> Function() sources) async {
+    final views = widget.views;
+    final view = widget.view;
+    final index = widget.index;
+    final empty = _text.text.isEmpty;
+    final last = index == (views.count ?? 0) - 1;
+    final added = await sources();
+    if (added.isEmpty) return;
+    String? after = view.id;
+    if (empty && last) {
+      final above = index > 0 ? await views.viewAt(index - 1) : null;
+      if (index > 0 && above == null) {
+        _state.report(
+          'Liquid did not add the files, as the Page changed; choose Media again.',
+        );
+        return;
+      }
+      after = above?.id;
+    }
+    await addMedia(
+      views,
+      added,
+      after: after,
+      replacing: empty && !last ? view : null,
+    );
+  }
+
+  /// Pastes what the clipboard holds: copied files and images as Media Blocks, code an
+  /// editor marked as a Code Block in its language, below this line or in its place if it is
+  /// empty, and anything else as text (ADR-0305).
+  Future<void> _paste() async {
+    final Pasted pasted;
+    try {
+      pasted = await readClipboard();
+    } on Object catch (error) {
+      _state.report('Liquid could not read the clipboard: $error');
+      return;
+    }
+    if (!mounted) return;
+    if (pasted.files.isNotEmpty) {
+      return _addMedia(() async {
+        final sources = <MediaSource>[];
+        for (final path in pasted.files) {
+          try {
+            sources.add(
+              MediaSource.file(
+                path.split(Platform.pathSeparator).last,
+                path,
+                await MediaPlatform.fileSize(path),
+              ),
+            );
+          } on Object catch (error) {
+            _state.report('Liquid could not read “$path”: $error');
+          }
+        }
+        return sources;
+      });
+    }
+    if (pasted.image case final image?) {
+      return _addMedia(
+        () async => [MediaSource.bytes('Pasted image.png', image)],
+      );
+    }
+    if (pasted.code case final code?) return _pasteCode(code, pasted.language);
+    final text = pasted.text;
+    // Where the caret is now: the text may have changed while the clipboard was read.
+    final selection = _text.selection;
+    if (text == null ||
+        text.isEmpty ||
+        !selection.isValid ||
+        selection.end > _text.text.length) {
+      return;
+    }
+    final value = _text.value.replaced(selection, text);
+    _text.value = value.copyWith(
+      selection: TextSelection.collapsed(offset: selection.start + text.length),
+    );
+  }
+
+  /// Puts `code` into a Code Block in `language`: this line, if it is empty, or a new one
+  /// below it; the Code Block takes the caret at its end.
+  Future<void> _pasteCode(String code, String language) async {
+    final views = widget.views;
+    final view = widget.view;
+    var target = (view: view.id, block: block);
+    if (_text.text.isNotEmpty) {
+      final added = await views.write(
+        mutation(
+          BridgeMutationKind.addTextBlock,
+          page: _page,
+          after: view.id,
+          text: '',
+        ),
+        const [],
+      );
+      target = (view: added.view!, block: added.block!);
+    }
+    final writes = [
+      mutation(
+        BridgeMutationKind.turnIntoCode,
+        page: _page,
+        block: target.block,
+      ),
+      mutation(
+        BridgeMutationKind.editText,
+        page: _page,
+        block: target.block,
+        text: code,
+      ),
+      if (language.isNotEmpty)
+        mutation(
+          BridgeMutationKind.setCodeLanguage,
+          page: _page,
+          block: target.block,
+          text: language,
+        ),
+    ];
+    try {
+      for (final write in writes) {
+        await views.write(write, [target.block]);
+      }
+    } on Object {
+      // Shown on the Page.
+      return;
+    }
+    views.moveCaret(Caret(target.view, caretEnd, kind: BridgeBlockKind.code));
+  }
+
   /// Turns this Text Block into a Code Block, which takes the caret at its start once built
   /// (ADR-0302).
   void _turnIntoCode() {
@@ -600,6 +744,16 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     );
   }
 
+  /// Whether `event` is ⌘V, which Liquid's own paste takes (ADR-0305).
+  bool _pastes(KeyEvent event) {
+    final keys = HardwareKeyboard.instance;
+    return event.logicalKey == LogicalKeyboardKey.keyV &&
+        keys.isMetaPressed &&
+        !keys.isShiftPressed &&
+        !keys.isControlPressed &&
+        !keys.isAltPressed;
+  }
+
   KeyEventResult _key(KeyEvent event) {
     if (event is KeyUpEvent || _composing || _stored == null) {
       return KeyEventResult.ignored;
@@ -614,6 +768,13 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         !keys.isControlPressed &&
         !keys.isAltPressed &&
         !keys.logicalKeysPressed.contains(liquidKey);
+    if (_pastes(event) &&
+        !_editor.isSource(this) &&
+        !_adding &&
+        !_menu.isShowing) {
+      _state.track(_paste());
+      return KeyEventResult.handled;
+    }
     if (!plain) return KeyEventResult.ignored;
     if (_editor.isSource(this)) return _editor.queue(this, event);
     if (_menu.isShowing) return _menuKey(event.logicalKey);

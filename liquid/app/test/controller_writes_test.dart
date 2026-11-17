@@ -78,6 +78,11 @@ void main() {
         'Code Block ⏎, ⇥ and ⇧⇥: a person\'s own change, which stays undoable.',
       ),
       (
+        'lib/src/workspace/text_block.dart',
+        '_text.value = value.copyWith(',
+        'Text Block ⌘V: pasted text, a person\'s own change, which stays undoable.',
+      ),
+      (
         'lib/src/workspace/code_block.dart',
         '_search.clear();',
         'The language search, emptied as its picker opens; the field is built only while open.',

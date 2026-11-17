@@ -10,6 +10,7 @@ import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/shortcuts/shortcut_store.dart';
 import 'package:liquid/src/theme/theme.dart';
+import 'package:liquid/src/workspace/media_block.dart';
 import 'package:liquid/src/workspace/table_block.dart';
 import 'package:liquid/src/workspace/text_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
@@ -37,6 +38,12 @@ class CodePart extends Part {
   const CodePart(this.code, [this.language = '']);
   final String code;
   final String language;
+}
+
+class MediaPart extends Part {
+  const MediaPart(this.name, this.bytes);
+  final String name;
+  final List<int> bytes;
 }
 
 class UnknownPart extends Part {
@@ -231,6 +238,19 @@ class PageKit {
           );
           await workspace.apply(turn);
           if (language.isNotEmpty) fake.languages[added.block!] = language;
+        case MediaPart(:final name, :final bytes):
+          final attachment = await fake.addBytes(bytes: bytes);
+          final added = await workspace.apply(
+            mutation(
+              BridgeMutationKind.addMediaBlock,
+              page: page,
+              after: after,
+              text: name,
+              mediaType: mediaTypeOf(name),
+              attachment: attachment,
+            ),
+          );
+          after = added.view;
         case UnknownPart(:final boundary):
           final views = fake.views[page] ??= [];
           final at = after == null

@@ -3,18 +3,23 @@
 //! mutation, query, subscribe to a resource's changes and close a subscription (client
 //! architecture rule 2, ADR-0216).
 //!
+//! Attachments' bytes cross through the calls of [`super::media`], which a Media Block then
+//! names (ADR-0305).
+//!
 //! Messages are flat structs whose kind names the parts they fill, so Dart needs no code
 //! generation for enums with data. Identities cross as text. A change carries only its
 //! resource and that resource's sequence number; the reader then queries the bounded window
 //! it shows (rule 3).
 
 use liquid_core::{
-    AreaId, BlockId, Changed, Error, FieldId, Mutation, PageId, Place, RowId, TextStyle, ViewId,
+    AreaId, AttachmentId, BlockId, Changed, Error, FieldId, Mutation, PageId, Place, RowId,
+    TextStyle, ViewId,
 };
 
 use super::database::{
     BridgeCell, BridgeDatabase, BridgeFieldKind, BridgeFilter, BridgeRow, BridgeSort,
 };
+use super::media::BridgeMedia;
 
 /// The most items one query answers, so no answer carries an unbounded list.
 pub const MAX_WINDOW: i64 = 500;
@@ -51,6 +56,9 @@ pub enum BridgeMutationKind {
     /// Sets the Code Block `block`'s language on its home `page` to `text`; empty for plain
     /// text.
     SetCodeLanguage,
+    /// Adds a Media Block for the file `text` of `media_type`, kept as the finished
+    /// `attachment`, to `page`, after the View `after` or first.
+    AddMediaBlock,
     /// Adds a Database Block named `text`, with a text field "Name", to `page`, after the
     /// View `after` or first.
     AddDatabaseBlock,
@@ -168,6 +176,10 @@ pub struct BridgeMutation {
     pub color: i64,
     /// A cell's new value.
     pub cell: Option<BridgeCell>,
+    /// A file's media type, such as `image/png`; empty if unknown.
+    pub media_type: Option<String>,
+    /// A finished attachment's name.
+    pub attachment: Option<String>,
 }
 
 /// What an applied write recorded and created.
@@ -206,6 +218,9 @@ pub enum BridgeQueryKind {
     /// The Code `block`'s code and language on its home `page` into `text` and `language`;
     /// none once the Block is removed or if it is no Code Block.
     Code,
+    /// The Media `block`'s file and attachment on its home `page` into `media`; none once
+    /// the Block is removed or if it is no Media Block.
+    Media,
     /// The Database `block`'s name and fields on its home `page` into `database`; none
     /// once the Block is removed or if it is no Database.
     Database,
@@ -264,6 +279,8 @@ pub enum BridgeBlockKind {
     Database,
     /// A Code Block.
     Code,
+    /// A Media Block.
+    Media,
     /// A Block of a kind a later version adds, which shows as a placeholder (ADR-0245).
     Unknown,
 }
@@ -298,6 +315,8 @@ pub struct BridgeAnswer {
     pub style: Option<BridgeTextStyle>,
     /// A Code Block's language, with its code; empty for plain text.
     pub language: Option<String>,
+    /// A Media Block's file and attachment.
+    pub media: Option<BridgeMedia>,
     /// A Database's name and fields.
     pub database: Option<BridgeDatabase>,
     /// A Database's rows.
@@ -350,6 +369,8 @@ pub(crate) fn message(error: Error) -> String {
         Error::WrongKind => "the value is not of its field's kind".into(),
         Error::TooMany => "the Database holds the most fields or options it may".into(),
         Error::TooLong => "no more fit at this spot; move one of its neighbors first".into(),
+        Error::TooLarge => "a file can be at most 5 GiB".into(),
+        Error::Changed => "the file changed while it was added; add it again".into(),
         Error::Random => "the random source failed".into(),
         Error::Document(message) | Error::Storage(message) => message,
     }
@@ -460,6 +481,13 @@ impl BridgeMutation {
                 page: page()?,
                 block: block()?,
                 language: text()?,
+            },
+            BridgeMutationKind::AddMediaBlock => Mutation::AddMediaBlock {
+                page: page()?,
+                after: optional_id(&self.after, ViewId::parse, "after")?,
+                name: text()?,
+                media_type: self.media_type.clone().unwrap_or_default(),
+                attachment: id(&self.attachment, AttachmentId::parse, "attachment")?,
             },
             BridgeMutationKind::AddDatabaseBlock => Mutation::AddDatabaseBlock {
                 page: page()?,

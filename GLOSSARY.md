@@ -183,6 +183,8 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Text Block** — One paragraph, heading, list item, to-do or quote; ⏎ ends it and starts the next.
 - **Table** — The Block of typed fields and rows, kept in its home Page's document and shown through Views such as Table, Board and Calendar. The core calls it the Database Block (ADR-0244).
 - **Code Block** — A Block of code with syntax colors that Liquid never runs; a Text Block turns into one with ``` or the slash command Code (ADR-0302).
+- **Media Block** — A Block that shows an image or a file, kept as an attachment (ADR-0305).
+- **Attachment** — A file's bytes in a Workspace, kept in the encrypted replica in parts and named by the SHA-256 of its bytes, so a file added twice is kept once (ADR-0305).
 - **Calculation Block** — A Block of lines that each pair a label with a value or formula, laid out as labels left and values right, for reports in Excel's layout (ADR-0244).
 - **Section** — Consecutive Text Blocks up to `---`, a Block of another type or the Page's edge; Arrange mode places it as one tile, inside which its Text Blocks can be arranged in columns. It is layout only and owns no content, rights or Views (ADR-0235).
 - **Chat** — Liquid's one kind of conversation, as in WhatsApp: one-to-one or a group, whose participants are people or agents alike; a Block that Pages can show. A planned replacement for separate agent sessions and projects (ADR-0239, ADR-0241).

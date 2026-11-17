@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 
 import '../rust/api/workspace.dart';
 import 'follow.dart';
+import 'media_block.dart';
 import 'page_editor.dart';
 import 'windowed_list.dart';
 import 'workspace_state.dart';
@@ -79,6 +80,22 @@ class PageViews extends ChangeNotifier {
   /// What a line that a Table took the place of holds, by the Table's View: its name,
   /// read when the Table takes the caret, and whether it was written already.
   final naming = <String, (String, bool) Function()>{};
+
+  /// Files going in, each shown after the View it follows until its Media Block is in.
+  final uploads = ValueNotifier<List<PendingUpload>>(const []);
+
+  void addUpload(PendingUpload upload) {
+    if (!_disposed) uploads.value = [...uploads.value, upload];
+  }
+
+  void removeUpload(PendingUpload upload) {
+    if (!_disposed) {
+      uploads.value = [
+        for (final shown in uploads.value)
+          if (shown != upload) shown,
+      ];
+    }
+  }
 
   /// The styles Text Blocks read, by Block.
   final styles = ValueNotifier<Map<String, BridgeTextStyle>>(const {});
@@ -237,6 +254,7 @@ class PageViews extends ChangeNotifier {
     _views.dispose();
     caret.dispose();
     styles.dispose();
+    uploads.dispose();
     editor.lingering.dispose();
     ready.dispose();
     unawaited(_settled.close());

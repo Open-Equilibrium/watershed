@@ -11,15 +11,16 @@ use crate::database;
 use crate::history::Header;
 use crate::id::random_bytes;
 use crate::model::{
-    self, AREAS, BLOCK, BLOCKS, BOUNDARY, KIND, LANGUAGE, NAME, OWNER, PAGES, PARENT, SORT, STYLE,
-    TEXT, TITLE, VIEWS,
+    self, AREAS, ATTACHMENT, BLOCK, BLOCKS, BOUNDARY, KIND, LANGUAGE, NAME, OWNER, PAGES, PARENT,
+    SIZE, SORT, STYLE, TEXT, TITLE, TYPE, VIEWS,
 };
 use crate::order::Order;
 use crate::store::{Commit, Store, Write};
 use crate::{
-    Action, ActionId, Actor, Applied, Area, AreaId, BlockId, BlockKind, Cell, Changed, Code,
-    Created, Document, Error, FieldId, FieldKind, Mutation, Operation, Origin, PageEntry, PageId,
-    Permission, PersonId, Place, Request, RowId, TextStyle, View, ViewId,
+    Action, ActionId, Actor, Applied, Area, AreaId, AttachmentId, BlockId, BlockKind, Cell,
+    Changed, Code, Created, Document, Error, FieldId, FieldKind, Media, Mutation, Operation,
+    Origin, PageEntry, PageId, Permission, PersonId, Place, Request, RowId, TextStyle, View,
+    ViewId,
 };
 
 /// A document is stored again as one snapshot once it has this many chunks, so loading it
@@ -30,7 +31,7 @@ const COMPACT_AFTER: usize = 1_000;
 /// and every write is durable in the store before it is acknowledged.
 pub struct Workspace<S: Store> {
     pub(crate) store: S,
-    device: ActorId,
+    pub(crate) device: ActorId,
     /// The Workspace document's owner, which never changes after its first change.
     owner: PersonId,
     pub(crate) docs: HashMap<Document, Loaded>,
@@ -203,6 +204,14 @@ impl<S: Store> Workspace<S> {
         ))
     }
 
+    /// A live Media Block's file and attachment, from the document of its home `page`.
+    pub fn media(&mut self, page: &PageId, block: &BlockId) -> Result<Option<Media>, Error> {
+        Ok(model::media(
+            self.doc(&Document::Page(page.clone()))?,
+            block.as_str(),
+        ))
+    }
+
     /// A live Database Block's name and fields, from the document of its home `page`; none
     /// if `block` is no live Database Block.
     pub fn database(
@@ -289,7 +298,7 @@ impl<S: Store> Workspace<S> {
         Ok(&mut self.docs.get_mut(document).expect("loaded above").doc)
     }
 
-    fn permit(&self, actor: &Actor) -> Result<Permission, Error> {
+    pub(crate) fn permit(&self, actor: &Actor) -> Result<Permission, Error> {
         let Actor::Person(person) = actor;
         if *person == self.owner {
             Ok(Permission::Owner)
@@ -346,6 +355,13 @@ impl<S: Store> Workspace<S> {
                 block,
                 language,
             } => self.write_set_code_language(page, block, language),
+            Mutation::AddMediaBlock {
+                page,
+                after,
+                name,
+                media_type,
+                attachment,
+            } => self.write_add_media_block(page, after.as_ref(), name, media_type, attachment),
             Mutation::AddDatabaseBlock { page, after, name } => {
                 self.write_add_database_block(page, after.as_ref(), name)
             }
@@ -641,6 +657,39 @@ impl<S: Store> Workspace<S> {
             Document::Page(page.clone()),
             Changed::Block(page.clone(), block.clone()),
         ))
+    }
+
+    fn write_add_media_block(
+        &mut self,
+        page: &PageId,
+        after: Option<&ViewId>,
+        name: &str,
+        media_type: &str,
+        attachment: &AttachmentId,
+    ) -> Result<Written, Error> {
+        let size = self
+            .store
+            .attachment_size(attachment)?
+            .ok_or(Error::NotFound)?;
+        let (doc, order) = self.page(page)?;
+        let block = BlockId::new()?;
+        let entry = model::insert(
+            doc,
+            BLOCKS,
+            block.as_str(),
+            &[
+                (KIND, "media"),
+                (NAME, name),
+                (TYPE, media_type),
+                (ATTACHMENT, attachment.as_str()),
+            ],
+        )?;
+        doc.put(&entry, SIZE, size)?;
+        let sort = order.key_after(after)?;
+        let view = add_view(doc, order, sort, &block, BlockKind::Media)?;
+        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+        written.created = Some(Created::Block { block, view });
+        Ok(written)
     }
 
     fn write_add_database_block(
