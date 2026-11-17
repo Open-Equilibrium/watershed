@@ -22,7 +22,7 @@ use crate::api::{
     RemoteStatus, Reply, ThreadCall,
 };
 use crate::config::{Change, Current, LogEntry, Proposal};
-use crate::hosts::{Access, HostList, Kind};
+use crate::hosts::{Access, ClientKind, HostList};
 use crate::{
     Automation, Context, GitActionRequest, GitProgress, GitStatus, Lineage, LineageChanges,
     LocalServer, ModelChoice, Permissions, Provider, PullRequestDetail, Refs, RequestId,
@@ -383,7 +383,7 @@ impl Host {
     }
 
     /// A pairing code for a new client of `kind`, valid for five minutes (`meta invite`).
-    pub async fn invite(&self, kind: Kind) -> Result<String, String> {
+    pub async fn invite(&self, kind: ClientKind) -> Result<String, String> {
         self.call(Call::Invite(kind)).await
     }
 

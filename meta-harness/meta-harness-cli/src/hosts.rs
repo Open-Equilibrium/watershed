@@ -1,7 +1,7 @@
 //! The commands that link this Meta-Harness to other hosts and devices (ADR-0285, ADR-0299,
 //! ADR-0300): remote access, pairing codes, and the hosts this one links to.
 
-use meta_harness_core::{Access, DEFAULT_REMOTE_PORT, Kind, remote};
+use meta_harness_core::{Access, ClientKind, DEFAULT_REMOTE_PORT, remote};
 
 /// `meta remote on [--port N] | off | status`.
 pub async fn remote(host: &remote::Host, args: &[&str]) -> Result<(), String> {
@@ -30,8 +30,8 @@ pub async fn remote(host: &remote::Host, args: &[&str]) -> Result<(), String> {
 /// `meta invite --device | --host`: a pairing code, with the addresses to pair with.
 pub async fn invite(host: &remote::Host, args: &[&str]) -> Result<(), String> {
     let kind = match args {
-        ["--device"] => Kind::Device,
-        ["--host"] => Kind::Host,
+        ["--device"] => ClientKind::Device,
+        ["--host"] => ClientKind::Host,
         _ => return Err("meta invite needs --device or --host".to_owned()),
     };
     let status = host

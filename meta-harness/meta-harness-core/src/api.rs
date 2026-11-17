@@ -10,7 +10,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::config::Change;
-use crate::hosts::{Access, Kind};
+use crate::hosts::{Access, ClientKind};
 use crate::{GitActionRequest, ModelChoice, Permissions, StartThread, ThreadSummary};
 
 /// The header a client names itself with; the configuration log records it (ADR-0298).
@@ -39,7 +39,7 @@ pub(crate) enum Call {
     /// Remote access to this service; answered only on this computer (ADR-0299).
     Remote(RemoteCall),
     /// A pairing code for a new host or device; answered only on this computer (ADR-0299).
-    Invite(Kind),
+    Invite(ClientKind),
     /// The other hosts this one links to and the clients paired with it (ADR-0285).
     Hosts(HostsCall),
     /// A project, by its folder.

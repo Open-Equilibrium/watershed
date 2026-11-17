@@ -11,7 +11,7 @@ use futures_util::FutureExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use meta_harness_core::{
-    Access, CONNECTION_FILE, Change, Kind, Service, ServiceConfig, remote, t3_version,
+    Access, CONNECTION_FILE, Change, ClientKind, Service, ServiceConfig, remote, t3_version,
 };
 use meta_harness_core::{
     AcpAgent, AgentEvent, GitAction, GitActionRequest, GitProgress, Group, Host, HostConfig,
@@ -973,7 +973,7 @@ async fn a_device_pairs_once_and_keeps_its_access_across_a_restart_while_a_host_
     let url = format!("ws://127.0.0.1:{port}");
     assert_eq!(status.addresses, [url.as_str()]);
 
-    let code = local.invite(Kind::Device).await.unwrap();
+    let code = local.invite(ClientKind::Device).await.unwrap();
     let (_, token) = remote::pair(&url, &code, "phone").await.unwrap();
     let used = remote::pair(&url, &code, "tablet").await.unwrap_err();
     assert_eq!(used, "That pairing code is wrong, already used or expired.");
@@ -987,7 +987,7 @@ async fn a_device_pairs_once_and_keeps_its_access_across_a_restart_while_a_host_
     device.config().await.unwrap();
     // Remote access, invitations, the host list and host agents stay with this computer.
     assert!(device.remote_status().await.is_err());
-    assert!(device.invite(Kind::Device).await.is_err());
+    assert!(device.invite(ClientKind::Device).await.is_err());
     assert!(device.hosts().await.is_err());
     assert!(device.host_agents(true).await.is_err());
     assert!(!may_tunnel(&url, &token).await, "a device is no tunnel");
@@ -1002,7 +1002,7 @@ async fn a_device_pairs_once_and_keeps_its_access_across_a_restart_while_a_host_
     local.revoke_client("phone").await.unwrap();
     assert!(!connects(&url, &token, "phone").await);
 
-    let host_code = local.invite(Kind::Host).await.unwrap();
+    let host_code = local.invite(ClientKind::Host).await.unwrap();
     let (name, host_token) = remote::pair(&url, &host_code, "other").await.unwrap();
     assert_eq!(name, local.environment_name().await.unwrap().to_lowercase());
     let host = remote::Host::connect_to(&url, &host_token, "other")
@@ -1062,7 +1062,7 @@ async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_re
     a.remote_on(port_a).await.unwrap();
     b.remote_on(port_b).await.unwrap();
     let address = format!("ws://127.0.0.1:{port_b}");
-    let waiting = b.invite(Kind::Host).await.unwrap();
+    let waiting = b.invite(ClientKind::Host).await.unwrap();
     let refused = a
         .host_add(&address, &waiting, Access::Auto)
         .await
@@ -1072,13 +1072,13 @@ async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_re
     b.host_agents(true).await.unwrap();
     assert!(linked_environments_setting(&home_a));
 
-    let code = b.invite(Kind::Host).await.unwrap();
+    let code = b.invite(ClientKind::Host).await.unwrap();
     let name = a.host_add(&address, &code, Access::Auto).await.unwrap();
     assert_eq!(name, b.environment_name().await.unwrap().to_lowercase());
     let listed = a.hosts().await.unwrap();
-    assert_eq!(listed.peers.len(), 1);
-    assert!(listed.peers[0].reachable);
-    assert_eq!(listed.peers[0].access, Access::Auto);
+    assert_eq!(listed.hosts.len(), 1);
+    assert!(listed.hosts[0].reachable);
+    assert_eq!(listed.hosts[0].access, Access::Auto);
     // T3 itself lists the link to B's environment, which answers.
     let linked = t3_environments(&home_a);
     let environment = std::fs::read_to_string(home_b.join("t3/userdata/environment-id")).unwrap();
@@ -1087,7 +1087,7 @@ async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_re
     assert_eq!(linked[0]["status"], "reachable");
 
     // The name is already linked, so the add fails after B has paired with A, and B keeps a pairing.
-    let again = b.invite(Kind::Host).await.unwrap();
+    let again = b.invite(ClientKind::Host).await.unwrap();
     let error = a
         .host_add(&address, &again, Access::Auto)
         .await
@@ -1098,7 +1098,7 @@ async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_re
     let (tunnel, _) = peer_row(&home_a, &name);
     a.host_remove(&name).await.unwrap();
     assert!(t3_environments(&home_a).is_empty(), "T3 forgets the link");
-    assert!(a.hosts().await.unwrap().peers.is_empty());
+    assert!(a.hosts().await.unwrap().hosts.is_empty());
     assert!(std::net::TcpStream::connect(("127.0.0.1", tunnel)).is_err());
     a.host_agents(false).await.unwrap();
     assert!(!linked_environments_setting(&home_a));
@@ -1114,7 +1114,7 @@ async fn a_host_link_older_than_25_days_is_made_again_when_the_service_starts() 
     b.remote_on(port_b).await.unwrap();
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
-    let code = b.invite(Kind::Host).await.unwrap();
+    let code = b.invite(ClientKind::Host).await.unwrap();
     let name = a
         .host_add(&format!("ws://127.0.0.1:{port_b}"), &code, Access::ReadOnly)
         .await
@@ -1131,7 +1131,7 @@ async fn a_host_link_older_than_25_days_is_made_again_when_the_service_starts() 
     let (_service, a) = start_service(&home_a).await;
     let relinked = tokio::time::timeout(Duration::from_secs(60), async {
         loop {
-            let linked = a.hosts().await.unwrap().peers[0].linked_ms.unwrap_or(0);
+            let linked = a.hosts().await.unwrap().hosts[0].linked_ms.unwrap_or(0);
             if linked > aged as u64 {
                 return linked;
             }
@@ -1174,7 +1174,7 @@ async fn linked(dir: &Path) -> Linked {
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     let url_b = format!("ws://127.0.0.1:{port_b}");
-    let code = b.invite(Kind::Host).await.unwrap();
+    let code = b.invite(ClientKind::Host).await.unwrap();
     let name = a.host_add(&url_b, &code, Access::Auto).await.unwrap();
     Linked {
         a: (a_service, a),
@@ -1325,7 +1325,7 @@ async fn a_pairing_code_from_a_host_token_redeems_only_orchestration_scopes() {
     let (_b, b) = start_service(&home_b).await;
     b.remote_on(port_b).await.unwrap();
     let url = format!("ws://127.0.0.1:{port_b}");
-    let code = b.invite(Kind::Host).await.unwrap();
+    let code = b.invite(ClientKind::Host).await.unwrap();
     let (_, token) = remote::pair(&url, &code, "other").await.unwrap();
     let host = remote::Host::connect_to(&url, &token, "other")
         .await
@@ -1352,7 +1352,7 @@ async fn revoking_a_client_closes_the_connections_it_has_open() {
     let link = linked(dir.path()).await;
     let (_a, a) = &link.a;
     let (_b, b) = &link.b;
-    let code = b.invite(Kind::Device).await.unwrap();
+    let code = b.invite(ClientKind::Device).await.unwrap();
     let (_, token) = remote::pair(&link.url_b, &code, "phone").await.unwrap();
     let device = remote::Host::connect_to(&link.url_b, &token, "phone")
         .await
@@ -1398,7 +1398,7 @@ async fn a_linked_agents_mcp_request_reaches_t3_through_the_tunnel() {
     let redirect = "http://127.0.0.1/t3code-peer-link";
     // The sign-in a link makes, run over the tunnel: register, approve with a pairing code, then
     // exchange the code for a token that the linked agents' MCP requests carry.
-    let code = b.invite(Kind::Host).await.unwrap();
+    let code = b.invite(ClientKind::Host).await.unwrap();
     let (_, host_token) = remote::pair(&link.url_b, &code, "tester").await.unwrap();
     let host = remote::Host::connect_to(&link.url_b, &host_token, "tester")
         .await

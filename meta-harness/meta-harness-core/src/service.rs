@@ -17,18 +17,20 @@ use tokio::sync::{Mutex, mpsc};
 use tokio::task::{AbortHandle, JoinHandle};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
-use tokio_tungstenite::tungstenite::http::StatusCode;
 
-mod remote;
+mod admit;
+mod listener;
 
 use crate::api::{
     self, Call, Checkout, ConfigCall, GitCall, HostCall, HostsCall, ProjectCall, Reply, Stream,
     ThreadCall,
 };
 use crate::config::{Homes, Proposed, Store, now_ms, provider_instances};
-use crate::hosts::{self, Kind, Links};
+use crate::hosts::{self, Links};
 use crate::t3::pairing_code;
+
 use crate::{AcpAgent, Host, HostConfig, Project, Thread, tunnel};
+use admit::{Admission, Caller, Listener, admit, header, revoked};
 
 /// The file that tells clients where the service listens and which token it accepts.
 pub const CONNECTION_FILE: &str = "connection.json";
@@ -113,7 +115,7 @@ struct Shared {
     t3: PathBuf,
     t3_home: PathBuf,
     /// The remote listener while remote access is on.
-    remote: std::sync::Mutex<Option<remote::Listening>>,
+    remote: std::sync::Mutex<Option<listener::Listening>>,
     /// The hosts this one links to and their tunnels.
     links: Links,
 }
@@ -195,7 +197,7 @@ impl Service {
         // Remote access stays on across restarts (ADR-0299); a port it cannot take is reported.
         let remembered = hosts::remote_port(&shared.store.db())?;
         if let Some(port) = remembered
-            && let Err(error) = remote::start(&shared, port).await
+            && let Err(error) = listener::start(&shared, port).await
         {
             eprintln!("meta: remote access is off: {error}");
         }
@@ -284,163 +286,11 @@ fn write_private(path: &Path, text: &str) -> Result<(), String> {
         .map_err(|e| format!("Could not write {}: {e}", path.display()))
 }
 
-/// Which listener a connection came in on.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Listener {
-    /// This computer's loopback, which admits the local token only.
-    Local,
-    /// The remote addresses, which admit paired clients only (ADR-0299).
-    Remote,
-}
-
-/// Who a session serves (ADR-0299): this computer's own Meta-Harness, or a client that paired.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Caller {
-    Local,
-    Device,
-    Host,
-}
-
-impl Caller {
-    /// Whether this caller may make `call`. A device makes the calls that reach its own computer's
-    /// projects, threads, Git and configuration, but not the ones only this computer makes; a host
-    /// asks only for a T3 pairing code (ADR-0288).
-    fn answers(self, call: &Call) -> bool {
-        match self {
-            Self::Local => true,
-            Self::Device => matches!(
-                call,
-                Call::Host(_)
-                    | Call::Project { .. }
-                    | Call::Thread { .. }
-                    | Call::Git { .. }
-                    | Call::Config(_)
-            ),
-            Self::Host => matches!(call, Call::Hosts(HostsCall::T3Pairing)),
-        }
-    }
-
-    /// Whether this caller may open streams; a host opens none.
-    fn streams(self) -> bool {
-        self != Self::Host
-    }
-}
-
-/// What a handshake admits a connection to.
-enum Admission {
-    /// Calls and streams, as this caller, for the client named if it is one.
-    Session(Caller, Option<String>),
-    /// A host's tunnel to its T3 server (ADR-0288), for the host named.
-    Tunnel(String),
-    /// A new client, which receives its token once before the connection closes.
-    Paired(String),
-}
-
-fn refuse(status: StatusCode, reason: impl Into<String>) -> ErrorResponse {
-    let mut refused = ErrorResponse::new(Some(reason.into()));
-    *refused.status_mut() = status;
-    refused
-}
-
-fn header<'a>(request: &'a Request, name: &str) -> Option<&'a str> {
-    request.headers().get(name).and_then(|v| v.to_str().ok())
-}
-
-/// Refuses a request that names no API version, or another, since it would misread the frames.
-// tungstenite's handshake callback returns its own large error response.
-#[allow(clippy::result_large_err)]
-fn check_version(request: &Request) -> Result<(), ErrorResponse> {
-    let version = header(request, api::API_HEADER).and_then(|v| v.parse::<u32>().ok());
-    if version == Some(api::API_VERSION) {
-        return Ok(());
-    }
-    let mut refused = refuse(
-        StatusCode::UPGRADE_REQUIRED,
-        format!("Meta-Harness speaks API version {}.", api::API_VERSION),
-    );
-    refused
-        .headers_mut()
-        .insert(api::API_HEADER, api::API_VERSION.into());
-    Err(refused)
-}
-
-/// Decides what a handshake admits (ADR-0299). The local listener admits the local token. The
-/// remote listener admits a paired client's token, or a pairing code, which pays with a new token.
-// tungstenite's handshake callback returns its own large error response.
-#[allow(clippy::result_large_err)]
-fn admit(
-    shared: &Shared,
-    listener: Listener,
-    request: &Request,
-) -> Result<Admission, ErrorResponse> {
-    let bearer = header(request, "authorization").and_then(|v| v.strip_prefix("Bearer "));
-    match listener {
-        Listener::Local => {
-            if !bearer.is_some_and(|b| hosts::same(b.as_bytes(), shared.token.as_bytes())) {
-                return Err(refuse(
-                    StatusCode::UNAUTHORIZED,
-                    "Meta-Harness needs its token.",
-                ));
-            }
-            check_version(request)?;
-            Ok(Admission::Session(Caller::Local, None))
-        }
-        Listener::Remote => {
-            check_version(request)?;
-            let db = shared.store.db();
-            if let Some(code) = header(request, api::PAIRING_HEADER) {
-                let name = header(request, api::CLIENT_HEADER).unwrap_or("unnamed");
-                let token = hosts::pair(&db, code, name, now_ms())
-                    .map_err(|reason| refuse(StatusCode::FORBIDDEN, reason))?;
-                return Ok(Admission::Paired(token));
-            }
-            let client = match bearer {
-                Some(token) => hosts::client(&db, token)
-                    .map_err(|error| refuse(StatusCode::INTERNAL_SERVER_ERROR, error))?,
-                None => None,
-            };
-            let tunnel = header(request, api::TUNNEL_HEADER).is_some();
-            match client {
-                Some((Kind::Device, _)) if tunnel => Err(refuse(
-                    StatusCode::FORBIDDEN,
-                    "Only another host may tunnel to this computer's T3 Code.",
-                )),
-                Some((Kind::Host, name)) if tunnel => Ok(Admission::Tunnel(name)),
-                Some((Kind::Device, name)) => Ok(Admission::Session(Caller::Device, Some(name))),
-                Some((Kind::Host, name)) => Ok(Admission::Session(Caller::Host, Some(name))),
-                None => Err(refuse(
-                    StatusCode::UNAUTHORIZED,
-                    "Meta-Harness needs a token of a paired client.",
-                )),
-            }
-        }
-    }
-}
-
 /// Makes the links that are due, now and every hour, until the service stops (ADR-0288).
 async fn relink(shared: Arc<Shared>) {
     loop {
         shared.links.relink_due(&shared.store).await;
         tokio::time::sleep(RELINK_EVERY).await;
-    }
-}
-
-/// Resolves when the client named `owner` is revoked, and never for a connection with no client.
-/// A connection that fell more than [`REVOKED`] revocations behind ends, so that it cannot miss
-/// one; a client still paired comes back with its token.
-async fn revoked(events: &mut tokio::sync::broadcast::Receiver<String>, owner: Option<&str>) {
-    let Some(owner) = owner else {
-        return std::future::pending::<()>().await;
-    };
-    loop {
-        match events.recv().await {
-            Ok(name) if name == owner => return,
-            Ok(_) => {}
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => return,
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                return std::future::pending::<()>().await;
-            }
-        }
     }
 }
 
@@ -683,7 +533,7 @@ impl Session {
             }
             Call::Git { checkout, call } => git_call(&self.git(&checkout).await?, call).await,
             Call::Config(call) => self.config_call(call),
-            Call::Remote(call) => remote::call(&self.shared, call).await,
+            Call::Remote(call) => listener::call(&self.shared, call).await,
             Call::Invite(kind) => to(hosts::invite(&self.shared.store.db(), kind, now_ms())?),
             Call::Hosts(call) => self.hosts_call(call).await,
         }
