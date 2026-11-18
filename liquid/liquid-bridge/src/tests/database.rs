@@ -11,7 +11,7 @@ use crate::api::database::{
 use crate::api::replica::LiquidWorkspace;
 use crate::api::workspace::{
     BridgeAnswer, BridgeBlockKind, BridgeMutation, BridgeMutationKind, BridgeQuery,
-    BridgeQueryKind, BridgeResource, BridgeResourceKind, MAX_WINDOW,
+    BridgeQueryKind, BridgeResource, BridgeResourceKind, BridgeView, MAX_WINDOW,
 };
 
 fn cell(kind: BridgeCellKind) -> BridgeCell {
@@ -492,7 +492,10 @@ fn a_rows_window_never_exceeds_its_cap() {
 #[test]
 fn a_view_s_sort_and_filter_cross_the_bridge() {
     let expenses = Expenses::new("database-view-query");
-    let view = |answer: BridgeAnswer| answer.views.into_iter().next().unwrap();
+    let view = |answer: BridgeAnswer| {
+        let table = |view: &BridgeView| view.kind == BridgeBlockKind::Database;
+        answer.views.into_iter().find(table).unwrap()
+    };
     let read = || {
         expenses
             .workspace
